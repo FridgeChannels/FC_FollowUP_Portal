@@ -18,6 +18,9 @@ export type CurrentCp = (typeof CURRENT_CPS)[number];
 export type CurrentCpOption = {
   id: string;
   name: string;
+  fullName?: string | null;
+  definition?: string | null;
+  criteria?: string | null;
 };
 
 export type BrandListItem = {

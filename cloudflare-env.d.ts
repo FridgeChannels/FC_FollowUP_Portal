@@ -9,6 +9,9 @@ declare namespace Cloudflare {
     NOTION_FOLLOWUP_CONTACT_DB_ID?: string;
     NOTION_FOLLOWUP_CONVERSATION_DB_ID?: string;
     NOTION_FOLLOWUP_TASK_DB_ID?: string;
+    NOTION_FOLLOWUP_BOMB_DB_ID?: string;
+    NOTION_FOLLOWUP_SCENARIO_DB_ID?: string;
+    NOTION_FOLLOWUP_TEMPLATE_DB_ID?: string;
     ADMIN_EMAILS?: string;
     NOTION_ADMIN_EMAILS?: string;
   }

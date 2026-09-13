@@ -2,6 +2,7 @@ import type { CurrentCpOption } from "../brand-list";
 import {
   firstRelationId,
   notionFetch,
+  propertyText,
   queryFollowupClientPages,
   retrievePage,
   titleFromProperties,
@@ -32,8 +33,16 @@ function isMissingObject(error: unknown) {
 }
 
 function mapCpPage(page: NotionPage): CurrentCpOption | null {
-  const name = titleFromProperties(page.properties);
-  return name ? { id: page.id, name } : null;
+  const properties = page.properties || {};
+  const name = titleFromProperties(properties);
+  if (!name) return null;
+  return {
+    id: page.id,
+    name,
+    fullName: propertyText(properties["Full Name"]) || null,
+    definition: propertyText(properties["Chinese Definition"]) || null,
+    criteria: propertyText(properties["Completion Criteria"]) || null,
+  };
 }
 
 async function queryCpDictionary() {

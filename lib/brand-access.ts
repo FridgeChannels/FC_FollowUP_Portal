@@ -46,9 +46,21 @@ export function canViewBrand(viewer: BrandViewer, brand: BrandListItem) {
   return false;
 }
 
+export function canWriteBrand(viewer: BrandViewer, brand: BrandListItem) {
+  return canViewBrand(viewer, brand);
+}
+
+export function canAssignBrandOwner(viewer: BrandViewer) {
+  return viewer.isAdmin;
+}
+
 export function canViewTask(viewer: BrandViewer, task: BrandTask) {
   if (viewer.isAdmin) return true;
   if (viewer.ownerId && task.ownerId === viewer.ownerId) return true;
   if (viewer.ownerId && task.brandOwnerId === viewer.ownerId) return true;
   return false;
+}
+
+export function canWriteTask(viewer: BrandViewer, task: BrandTask) {
+  return canViewTask(viewer, task);
 }

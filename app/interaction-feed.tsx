@@ -23,11 +23,11 @@ const initials = (name: string) => name.split(/\s+/).map(part => part[0]).join("
 
 const cpCodes: CPCode[] = ["CP1", "CP2", "CP3"];
 
-export function InteractionFeed({ interactions, contacts, customerId: customerIdProp, maxHeight = "max-h-[520px]" }: { interactions: Interaction[]; contacts: Contact[]; customerId?: string; maxHeight?: string }) {
+export function InteractionFeed({ interactions, contacts, customerId: customerIdProp, currentCp: currentCpProp, cpGoals, maxHeight = "max-h-[520px]" }: { interactions: Interaction[]; contacts: Contact[]; customerId?: string; currentCp?: CPCode; cpGoals?: Partial<Record<CPCode, string>>; maxHeight?: string }) {
   const { state } = useWorkspace();
   const customerId = customerIdProp || interactions[0]?.customerId;
   const customer = state.customers.find(item=>item.id===customerId);
-  const currentCp = customer?.cp || "CP1";
+  const currentCp = currentCpProp || customer?.cp || "CP1";
   const [selectedCp,setSelectedCp]=useState<CPCode>(currentCp);
   const instanceFor = (interaction:Interaction) => {
     if(interaction.bombInstanceId)return state.bombInstances.find(item=>item.id===interaction.bombInstanceId);
@@ -53,7 +53,7 @@ export function InteractionFeed({ interactions, contacts, customerId: customerId
 
   return <div>
     <div className="px-5 py-4">
-      <div className="flex items-center">{cpCodes.map((cp,index)=>{const current=cp===currentCp;const completed=index<currentIndex;const selected=cp===selectedCp;const selectable=index<=currentIndex;const reached=index<currentIndex;const goal=state.cps.find(item=>item.code===cp)?.goal;return <Fragment key={cp}><button type="button" disabled={!selectable} aria-pressed={selected} onClick={()=>selectable&&setSelectedCp(cp)} className={`min-w-0 flex-1 rounded-xl px-3 py-2 text-left transition ${selected?"bg-violet-50":selectable?"hover:bg-slate-50":"cursor-not-allowed opacity-55"}`}><div className="flex min-w-0 items-baseline gap-2"><span className={`shrink-0 text-xs font-bold ${selected?"text-violet-700":completed?"text-emerald-700":"text-slate-400"}`}>{cp}</span>{goal&&<span className={`truncate text-xs font-semibold ${selected?"text-slate-950":"text-slate-500"}`}>{goal}</span>}</div><div className="mt-0.5 truncate text-[10px] text-slate-500">{current?"Current":completed?"Completed":"Upcoming"}</div></button>{index<cpCodes.length-1&&<span className="grid w-6 shrink-0 place-items-center" aria-hidden><ChevronRight className={`size-4 ${reached?"text-emerald-500":current?"text-violet-400":"text-slate-300"}`}/></span>}</Fragment>})}</div>
+      <div className="flex items-center">{cpCodes.map((cp,index)=>{const current=cp===currentCp;const completed=index<currentIndex;const selected=cp===selectedCp;const selectable=index<=currentIndex;const reached=index<currentIndex;const goal=cpGoals?.[cp]||state.cps.find(item=>item.code===cp)?.goal;return <Fragment key={cp}><button type="button" disabled={!selectable} aria-pressed={selected} onClick={()=>selectable&&setSelectedCp(cp)} className={`min-w-0 flex-1 rounded-xl px-3 py-2 text-left transition ${selected?"bg-violet-50":selectable?"hover:bg-slate-50":"cursor-not-allowed opacity-55"}`}><div className="flex min-w-0 items-baseline gap-2"><span className={`shrink-0 text-xs font-bold ${selected?"text-violet-700":completed?"text-emerald-700":"text-slate-400"}`}>{cp}</span>{goal&&<span className={`truncate text-xs font-semibold ${selected?"text-slate-950":"text-slate-500"}`}>{goal}</span>}</div><div className="mt-0.5 truncate text-[10px] text-slate-500">{current?"Current":completed?"Completed":"Upcoming"}</div></button>{index<cpCodes.length-1&&<span className="grid w-6 shrink-0 place-items-center" aria-hidden><ChevronRight className={`size-4 ${reached?"text-emerald-500":current?"text-violet-400":"text-slate-300"}`}/></span>}</Fragment>})}</div>
     </div>
     {selectedInstances.length>0&&<section className="border-y border-slate-200 px-5 py-4">
       <div className="space-y-4">{selectedInstances.map(instance=><div key={instance.id}><div className="mb-3 flex flex-wrap items-center justify-between gap-2"><div><div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Bomb</div><div className="mt-1 text-sm font-bold">{instance.templateName} · V{instance.version}</div></div><Badge className={instance.status==="Running"?"bg-violet-100 text-violet-800":"bg-slate-100 text-slate-700"}>{instance.status}</Badge></div><BombExecutionPlan state={state} instanceId={instance.id} contacts={contacts}/></div>)}</div>

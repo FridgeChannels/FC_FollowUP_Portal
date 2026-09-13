@@ -505,7 +505,7 @@ export function BrandsPage() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    fetch(`/api/brands?role=${encodeURIComponent(state.currentRole)}`)
+    fetch("/api/brands")
       .then(async (response) => {
         const payload = (await response.json()) as {
           brands?: BrandListItem[];

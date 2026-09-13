@@ -111,6 +111,31 @@ export function rollupDate(property?: NotionProperty) {
   return nested || null;
 }
 
+export async function queryDatabasePages(
+  databaseId: string,
+  filter?: Record<string, unknown>,
+) {
+  const pages: NotionPage[] = [];
+  let cursor: string | undefined;
+  do {
+    const data = await notionFetch<{
+      results: NotionPage[];
+      has_more?: boolean;
+      next_cursor?: string | null;
+    }>(`/databases/${databaseId}/query`, {
+      method: "POST",
+      body: JSON.stringify({
+        page_size: 100,
+        start_cursor: cursor,
+        ...(filter ? { filter } : {}),
+      }),
+    });
+    pages.push(...data.results);
+    cursor = data.has_more && data.next_cursor ? data.next_cursor : undefined;
+  } while (cursor);
+  return pages;
+}
+
 export async function queryFollowupClientPages(ownerPageId?: string) {
   const pages: NotionPage[] = [];
   let cursor: string | undefined;
@@ -142,4 +167,31 @@ export async function queryFollowupClientPages(ownerPageId?: string) {
 
 export async function retrievePage(pageId: string) {
   return notionFetch<NotionPage>(`/pages/${pageId}`);
+}
+
+export async function updatePage(
+  pageId: string,
+  properties: Record<string, unknown>,
+) {
+  return notionFetch<NotionPage>(`/pages/${pageId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ properties }),
+  });
+}
+
+export async function createPage(
+  databaseId: string,
+  properties: Record<string, unknown>,
+) {
+  return notionFetch<NotionPage>("/pages", {
+    method: "POST",
+    body: JSON.stringify({
+      parent: { database_id: databaseId },
+      properties,
+    }),
+  });
+}
+
+export function richText(value: string) {
+  return [{ type: "text", text: { content: value.slice(0, 2000) } }];
 }

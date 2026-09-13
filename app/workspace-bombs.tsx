@@ -1,31 +1,21 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  ArrowDown,
-  ArrowLeft,
-  ArrowUp,
-  Bomb,
-  Braces,
-  MoreHorizontal,
-  Plus,
-  Save,
-  Search,
-  Trash2,
-  X,
-} from "lucide-react";
+import { ArrowLeft, Bomb, CircleAlert, MoreHorizontal, Plus } from "lucide-react";
 import { toast } from "sonner";
-import { useWorkspace } from "./workspace-store";
+import type { CurrentCpOption } from "@/lib/brand-list";
 import {
-  BombStep,
-  BombTemplate,
-  BombCustomVariable,
-  Channel,
-  CPCode,
-  uid,
-} from "@/lib/outreach-domain";
-import { templateVariables, variableToken } from "@/lib/template-variables";
+  BOMB_CHANNELS,
+  BOMB_PRIORITIES,
+  BOMB_TARGET_ROLES,
+  isBombChannel,
+  type BombDetail,
+  type BombListItem,
+  type BombScenario,
+  type BombTemplateItem,
+} from "@/lib/bomb-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -36,6 +26,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -49,14 +48,6 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
-import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -65,228 +56,142 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import { ChannelIcon } from "./channel-icon";
+import { usePageMetadata } from "./use-page-metadata";
+import { useWorkspace } from "./workspace-store";
+import { CP, PageHeader, Status } from "./workspace-pages";
 
-const show = (r: { ok: boolean; message: string }) =>
-  r.ok ? toast.success(r.message) : toast.error(r.message);
+function bombStatusClass(status: string) {
+  if (status === "Active") return "bg-emerald-100 text-emerald-700";
+  if (status === "Draft") return "bg-amber-100 text-amber-700";
+  return "bg-slate-100 text-slate-600";
+}
 
-type VariableCategory = "All" | "Contact" | "Brand" | "Sender" | "Custom";
+function bombPath(id: string) {
+  return `/bombs/${id}`;
+}
 
-function TemplateVariableField({
-  value,
-  onChange,
-  placeholder,
-  customVariables = [],
-  onCreateCustom,
-  singleLine = false,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-  placeholder: string;
-  customVariables?: BombCustomVariable[];
-  onCreateCustom: () => void;
-  singleLine?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const [category, setCategory] = useState<VariableCategory>("All");
-  const [query, setQuery] = useState("");
-  const [selection, setSelection] = useState({ start: value.length, end: value.length });
-  const variables = [
-    ...templateVariables,
-    ...customVariables.map((item) => ({
-      key: `variable.${item.key}`,
-      label: item.label,
-      category: "Custom" as const,
-      description: item.defaultValue || "Custom template value",
-    })),
-  ].filter(
-    (item) =>
-      (category === "All" || item.category === category) &&
-      `${item.label} ${item.key} ${item.description}`
-        .toLowerCase()
-        .includes(query.toLowerCase()),
-  );
-  const insertVariable = (key: string) => {
-    const { start, end } = selection;
-    const token = variableToken(key);
-    onChange(`${value.slice(0, start)}${token}${value.slice(end)}`);
-    setSelection({ start: start + token.length, end: start + token.length });
-    setOpen(false);
-  };
+function formatWhen(value: string | null) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-CA", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "UTC",
+  }).format(date);
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="relative">
-      <Textarea
-        value={value}
-        onChange={(event) => {
-          onChange(event.target.value);
-          setSelection({ start: event.currentTarget.selectionStart, end: event.currentTarget.selectionEnd });
-        }}
-        onSelect={(event) => setSelection({ start: event.currentTarget.selectionStart, end: event.currentTarget.selectionEnd })}
-        onKeyDown={(event) => {
-          if (event.key === "/" && !event.metaKey && !event.ctrlKey && !event.altKey) {
-            event.preventDefault();
-            setOpen(true);
-          }
-        }}
-        placeholder={placeholder}
-        rows={singleLine ? 1 : undefined}
-        className={singleLine ? "min-h-10 resize-none" : undefined}
-      />
-      <div className="mt-2 flex items-center justify-between gap-2 text-xs text-slate-500">
-        <span>Type / to add a variable</span>
-        <Popover open={open} onOpenChange={setOpen}>
-          <PopoverTrigger asChild>
-            <Button type="button" size="xs" variant="ghost" className="text-violet-700">
-              <Braces className="size-3.5" />
-              Add variable
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent align="end" className="w-[min(22rem,calc(100vw-2rem))] p-0">
-            <div className="border-b p-3">
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
-                <Input
-                  autoFocus
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search variables"
-                  className="pl-9"
-                />
-              </div>
-              <div className="mt-3 flex gap-1 overflow-x-auto pb-1">
-                {(["All", "Contact", "Brand", "Sender", "Custom"] as VariableCategory[]).map((item) => (
-                  <button
-                    type="button"
-                    key={item}
-                    onClick={() => setCategory(item)}
-                    className={`shrink-0 rounded-md px-2 py-1.5 text-xs font-medium ${category === item ? "bg-violet-100 text-violet-800" : "text-slate-500 hover:bg-slate-100"}`}
-                  >
-                    {item}
-                  </button>
-                ))}
-              </div>
+    <div>
+      <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</div>
+      <div className="mt-1.5 text-sm text-slate-800">{children}</div>
+    </div>
+  );
+}
+
+function TemplateCard({ template, index }: { template: BombTemplateItem; index: number }) {
+  return (
+    <div className="rounded-xl bg-slate-50 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-white font-bold text-violet-600">
+            {index + 1}
+          </span>
+          {isBombChannel(template.channel) ? (
+            <ChannelIcon channel={template.channel} className="size-6" />
+          ) : null}
+          <div className="min-w-0">
+            <div className="truncate font-semibold">{template.name || "Untitled template"}</div>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {template.channel ? <Badge variant="outline">{template.channel}</Badge> : null}
+              {template.templateType ? <Badge variant="outline">{template.templateType}</Badge> : null}
+              {template.status ? (
+                <Badge className={bombStatusClass(template.status)}>{template.status}</Badge>
+              ) : null}
             </div>
-            <div className="max-h-60 overflow-y-auto p-1.5">
-              {variables.length ? variables.map((item) => (
-                <button
-                  type="button"
-                  key={item.key}
-                  onClick={() => insertVariable(item.key)}
-                  className="flex w-full flex-col rounded-md px-3 py-2.5 text-left hover:bg-slate-50"
-                >
-                  <span className="text-sm font-medium text-slate-800">{item.label}</span>
-                  <span className="mt-0.5 text-xs text-slate-500">{variableToken(item.key)} · {item.description}</span>
-                </button>
-              )) : (
-                <p className="px-3 py-6 text-center text-sm text-slate-500">No variables match this search.</p>
-              )}
-            </div>
-            <div className="border-t p-1.5">
-              <button
-                type="button"
-                onClick={() => {
-                  setOpen(false);
-                  onCreateCustom();
-                }}
-                className="flex w-full items-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium text-violet-700 hover:bg-violet-50"
-              >
-                <Plus className="size-4" />
-                Create custom variable
-              </button>
-            </div>
-          </PopoverContent>
-        </Popover>
+          </div>
+        </div>
+      </div>
+      <div className="mt-4 space-y-3">
+        {template.subject ? (
+          <div>
+            <div className="text-xs font-medium text-slate-500">Subject</div>
+            <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-800">{template.subject}</p>
+          </div>
+        ) : null}
+        <div>
+          <div className="text-xs font-medium text-slate-500">
+            {template.templateType === "Call Script" ? "Call script" : "Content"}
+          </div>
+          <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-800">
+            {template.content || "—"}
+          </p>
+        </div>
       </div>
     </div>
   );
 }
 
-function CustomVariableDialog({
-  open,
-  onOpenChange,
-  onCreate,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onCreate: (variable: BombCustomVariable) => void;
-}) {
-  const [label, setLabel] = useState("");
-  const [defaultValue, setDefaultValue] = useState("");
-  const key = label.trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "_").replace(/^_+|_+$/g, "");
-  const create = () => {
-    if (!key) return;
-    onCreate({ id: uid("variable"), key, label: label.trim(), defaultValue });
-    setLabel("");
-    setDefaultValue("");
-    onOpenChange(false);
-  };
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[calc(100%-2rem)] sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Create custom variable</DialogTitle>
-          <DialogDescription>
-            Add a reusable value for this Bomb template. Its default is used whenever the Bomb is launched.
-          </DialogDescription>
-        </DialogHeader>
-        <label className="text-sm font-medium">
-          Variable name
-          <Input value={label} onChange={(event) => setLabel(event.target.value)} placeholder="For example: offer name" className="mt-2" />
-        </label>
-        {key && <p className="text-xs text-slate-500">Used as {variableToken(`variable.${key}`)}</p>}
-        <label className="text-sm font-medium">
-          Default value
-          <Input value={defaultValue} onChange={(event) => setDefaultValue(event.target.value)} placeholder="For example: FC Magnet" className="mt-2" />
-        </label>
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button type="button" disabled={!key} onClick={create}>Create variable</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 export function BombsPage() {
-  const { state, can, setBombStatus, createBomb } = useWorkspace();
   const router = useRouter();
+  const { can } = useWorkspace();
   const [tab, setTab] = useState("Active");
   const [create, setCreate] = useState(false);
-  const bombs = state.bombs.filter((b) => tab === "All" || b.status === tab);
-  const duplicate = (b: BombTemplate) => {
-    const r = createBomb({
-      ...b,
-      name: `${b.name} copy`,
-      status: "Draft",
-      steps: b.steps.map((s) => ({ ...s, id: uid("step") })),
-    });
-    show(r);
-    if (r.ok && r.id) router.push(`/bombs/${r.id}/edit`);
-  };
+  const [bombs, setBombs] = useState<BombListItem[]>([]);
+  const [scenarios, setScenarios] = useState<BombScenario[]>([]);
+  const [cps, setCps] = useState<CurrentCpOption[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string>();
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetch("/api/bombs")
+      .then(async (response) => {
+        const payload = (await response.json()) as {
+          bombs?: BombListItem[];
+          scenarios?: BombScenario[];
+          cps?: CurrentCpOption[];
+          error?: string;
+        };
+        if (!response.ok) throw new Error(payload.error || "Failed to load bombs");
+        return payload;
+      })
+      .then((payload) => {
+        if (cancelled) return;
+        setBombs(payload.bombs || []);
+        setScenarios(payload.scenarios || []);
+        setCps(payload.cps || []);
+        setError(undefined);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : "Failed to load bombs");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const visible = bombs.filter((bomb) => tab === "All" || bomb.status === tab);
   return (
     <div className="mx-auto max-w-[1480px]">
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <div className="text-xs font-semibold uppercase tracking-[.14em] text-violet-600">
-            Automation templates
-          </div>
-          <h1 className="mt-1 text-2xl font-bold">Bombs</h1>
-        </div>
+      <PageHeader
+        eyebrow={loading ? "Loading" : `${bombs.length} records`}
+        title="Bombs"
+      >
         {can("editBomb") && (
           <Button onClick={() => setCreate(true)}>
             <Plus className="mr-2 size-4" />
             New Bomb
           </Button>
         )}
-      </div>
+      </PageHeader>
       <div className="mb-4 flex gap-1">
-        {["Active", "Draft", "Inactive", "All"].map((x) => (
+        {["Active", "Draft", "Archived", "All"].map((x) => (
           <button
             key={x}
             onClick={() => setTab(x)}
@@ -297,7 +202,19 @@ export function BombsPage() {
         ))}
       </div>
       <div className="overflow-hidden rounded-2xl bg-white">
-        {bombs.length ? (
+        {error ? (
+          <Empty className="py-24">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <CircleAlert />
+              </EmptyMedia>
+              <EmptyTitle>Unable to load Bombs</EmptyTitle>
+              <EmptyDescription>{error}</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        ) : loading ? (
+          <div className="px-5 py-16 text-sm text-slate-500">Loading bombs…</div>
+        ) : visible.length ? (
           <Table>
             <TableHeader>
               <TableRow className="bg-slate-50">
@@ -306,59 +223,55 @@ export function BombsPage() {
                 <TableHead>Scenario</TableHead>
                 <TableHead>Target</TableHead>
                 <TableHead>Flow</TableHead>
-                <TableHead>Version</TableHead>
-                <TableHead>Launches</TableHead>
+                <TableHead>Priority</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead />
               </TableRow>
             </TableHeader>
             <TableBody>
-              {bombs.map((b) => (
+              {visible.map((b) => (
                 <TableRow
                   key={b.id}
                   className="cursor-pointer"
-                  onClick={() => router.push(`/bombs/${b.id}/edit`)}
+                  onClick={() => router.push(bombPath(b.id))}
                 >
                   <TableCell className="pl-5">
                     <div className="font-semibold">{b.name}</div>
                     <div className="mt-1 max-w-sm truncate text-xs text-slate-500">
-                      {b.goal}
+                      {b.goal || "—"}
                     </div>
                   </TableCell>
                   <TableCell>
-                    <Badge variant="outline">{b.cp}</Badge>
+                    {b.cp ? <Badge variant="outline">{b.cp}</Badge> : "—"}
                   </TableCell>
-                  <TableCell className="text-xs">
-                    {state.scenarios.find((item) => item.id === b.scenarioId)?.name || "—"}
-                  </TableCell>
-                  <TableCell className="text-xs">{b.targetRole}</TableCell>
+                  <TableCell className="text-xs">{b.scenarioName || "—"}</TableCell>
+                  <TableCell className="text-xs">{b.targetRole || "—"}</TableCell>
                   <TableCell>
-                    <div className="flex items-center gap-1.5">
-                      {b.steps.slice(0, 5).map((s) => (
-                        <span
-                          key={s.id}
-                          title={s.channel}
-                          className="grid size-7 place-items-center"
-                        >
-                          <ChannelIcon channel={s.channel} className="size-6" />
-                        </span>
-                      ))}
-                    </div>
+                    {b.channels.length ? (
+                      <div className="flex items-center gap-1.5">
+                        {b.channels.map((channel) =>
+                          isBombChannel(channel) ? (
+                            <span
+                              key={channel}
+                              title={channel}
+                              className="grid size-7 place-items-center"
+                            >
+                              <ChannelIcon channel={channel} className="size-6" />
+                            </span>
+                          ) : (
+                            <span key={channel} className="text-xs text-slate-500">
+                              {channel}
+                            </span>
+                          ),
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-slate-400">No templates</span>
+                    )}
                   </TableCell>
-                  <TableCell className="text-xs">V{b.version}</TableCell>
-                  <TableCell className="text-xs">{b.launches}</TableCell>
+                  <TableCell className="text-xs">{b.priority || "—"}</TableCell>
                   <TableCell>
-                    <Badge
-                      className={
-                        b.status === "Active"
-                          ? "bg-emerald-100 text-emerald-700"
-                          : b.status === "Draft"
-                            ? "bg-amber-100 text-amber-700"
-                            : "bg-slate-100 text-slate-600"
-                      }
-                    >
-                      {b.status}
-                    </Badge>
+                    <Badge className={bombStatusClass(b.status)}>{b.status}</Badge>
                   </TableCell>
                   <TableCell onClick={(e) => e.stopPropagation()}>
                     <DropdownMenu>
@@ -368,29 +281,9 @@ export function BombsPage() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          onClick={() => router.push(`/bombs/${b.id}/edit`)}
-                        >
-                          Edit
+                        <DropdownMenuItem onClick={() => router.push(bombPath(b.id))}>
+                          Open
                         </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => duplicate(b)}>
-                          Duplicate
-                        </DropdownMenuItem>
-                        {b.status === "Active" ? (
-                          <DropdownMenuItem
-                            onClick={() =>
-                              show(setBombStatus(b.id, "Inactive"))
-                            }
-                          >
-                            Deactivate
-                          </DropdownMenuItem>
-                        ) : (
-                          <DropdownMenuItem
-                            onClick={() => show(setBombStatus(b.id, "Active"))}
-                          >
-                            Activate
-                          </DropdownMenuItem>
-                        )}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </TableCell>
@@ -406,7 +299,7 @@ export function BombsPage() {
               </EmptyMedia>
               <EmptyTitle>No Bombs here</EmptyTitle>
               <EmptyDescription>
-                Create a simple multi-channel outreach flow.
+                No matching records in Follow-up BombDB.
               </EmptyDescription>
             </EmptyHeader>
           </Empty>
@@ -415,7 +308,9 @@ export function BombsPage() {
       <NewBombDialog
         open={create}
         onOpenChange={setCreate}
-        onCreated={(id) => router.push(`/bombs/${id}/edit`)}
+        scenarios={scenarios}
+        cps={cps.filter((item) => item.name.toUpperCase() !== "NONE")}
+        onCreated={(id) => router.push(bombPath(id))}
       />
     </div>
   );
@@ -424,77 +319,99 @@ export function BombsPage() {
 function NewBombDialog({
   open,
   onOpenChange,
+  scenarios,
+  cps,
   onCreated,
 }: {
   open: boolean;
-  onOpenChange: (v: boolean) => void;
+  onOpenChange: (open: boolean) => void;
+  scenarios: BombScenario[];
+  cps: CurrentCpOption[];
   onCreated: (id: string) => void;
 }) {
-  const { state, createBomb } = useWorkspace();
   const [name, setName] = useState("");
-  const [cp, setCP] = useState<CPCode>("CP1");
+  const [goal, setGoal] = useState("");
   const [scenarioId, setScenarioId] = useState("");
-  const scenarios = state.scenarios.filter((item) => item.cp === cp);
-  const scenario = scenarios.find((item) => item.id === scenarioId) || scenarios[0];
-  const submit = () => {
-    if (!scenario) return;
-    const r = createBomb({
-      name,
-      cp,
-      scenarioId: scenario.id,
-      goal: scenario.description,
-      targetRole: "Connector",
-      priority: "Normal",
-      status: "Draft",
-      customVariables: [],
-      steps: [
-        {
-          id: uid("step"),
-          channel: "Email",
-          delayDays: 0,
-          subject: "",
-          content: "",
-        },
-      ],
-    });
-    show(r);
-    if (r.ok && r.id) {
+  const [cpId, setCpId] = useState("");
+  const [targetRole, setTargetRole] = useState<(typeof BOMB_TARGET_ROLES)[number]>("Connector");
+  const [priority, setPriority] = useState<(typeof BOMB_PRIORITIES)[number]>("P1");
+  const [notes, setNotes] = useState("");
+  const [channel, setChannel] = useState<(typeof BOMB_CHANNELS)[number]>("Email");
+  const [subject, setSubject] = useState("");
+  const [content, setContent] = useState("");
+  const [saving, setSaving] = useState(false);
+  const scenario = scenarios.find((item) => item.id === scenarioId);
+  const reset = () => {
+    setName("");
+    setGoal("");
+    setScenarioId("");
+    setCpId("");
+    setTargetRole("Connector");
+    setPriority("P1");
+    setNotes("");
+    setChannel("Email");
+    setSubject("");
+    setContent("");
+  };
+  const submit = async () => {
+    if (!name.trim() || !scenarioId || !cpId || saving) return;
+    setSaving(true);
+    try {
+      const response = await fetch("/api/bombs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          goal,
+          scenarioId,
+          cpIds: [cpId],
+          targetRole,
+          priority,
+          notes,
+          template: content.trim()
+            ? { channel, subject, content }
+            : null,
+        }),
+      });
+      const payload = (await response.json()) as { bomb?: BombDetail; error?: string };
+      if (!response.ok) throw new Error(payload.error || "Failed to create bomb");
+      if (!payload.bomb) throw new Error("Bomb was not created");
+      toast.success("Bomb draft created");
       onOpenChange(false);
-      setName("");
-      setCP("CP1");
-      setScenarioId("");
-      onCreated(r.id);
+      reset();
+      onCreated(payload.bomb.id);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to create bomb");
+    } finally {
+      setSaving(false);
     }
   };
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) reset();
+        onOpenChange(next);
+      }}
+    >
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>New Bomb</DialogTitle>
           <DialogDescription>
-            Start with one action, then build a simple vertical flow.
+            Create a Draft in Follow-up BombDB. You can add more templates later.
           </DialogDescription>
         </DialogHeader>
-        <Input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Bomb name"
-        />
-        <Select value={cp} onValueChange={(v) => { setCP(v as CPCode); setScenarioId(""); }}>
-          <SelectTrigger className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {["CP1", "CP2", "CP3"].map((x) => (
-              <SelectItem key={x} value={x}>
-                {x}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <label className="grid gap-2 text-sm font-medium">
+          Name
+          <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Bomb name" />
+        </label>
+        <label className="grid gap-2 text-sm font-medium">
+          Goal
+          <Input value={goal} onChange={(event) => setGoal(event.target.value)} placeholder="What this Bomb should achieve" />
+        </label>
         <label className="grid gap-2 text-sm font-medium">
           Scenario
-          <Select value={scenario?.id || ""} onValueChange={setScenarioId}>
+          <Select value={scenarioId} onValueChange={setScenarioId}>
             <SelectTrigger className="w-full">
               <SelectValue placeholder="Select a scenario" />
             </SelectTrigger>
@@ -507,13 +424,93 @@ function NewBombDialog({
             </SelectContent>
           </Select>
         </label>
-        {scenario && <p className="text-xs text-slate-500">{scenario.description}</p>}
+        {scenario?.description ? <p className="text-xs text-slate-500">{scenario.description}</p> : null}
+        {!scenarios.length ? (
+          <p className="text-xs text-amber-700">No Scenarios in Notion yet. Create one in Follow-up ScenarioDB first.</p>
+        ) : null}
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="grid gap-2 text-sm font-medium">
+            Applicable CP
+            <Select value={cpId} onValueChange={setCpId}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select a CP" />
+              </SelectTrigger>
+              <SelectContent>
+                {cps.map((item) => (
+                  <SelectItem key={item.id} value={item.id}>
+                    {item.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </label>
+          <label className="grid gap-2 text-sm font-medium">
+            Priority
+            <Select value={priority} onValueChange={(value) => setPriority(value as (typeof BOMB_PRIORITIES)[number])}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {BOMB_PRIORITIES.map((item) => (
+                  <SelectItem key={item} value={item}>
+                    {item}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </label>
+        </div>
+        <label className="grid gap-2 text-sm font-medium">
+          Target role
+          <Select value={targetRole} onValueChange={(value) => setTargetRole(value as (typeof BOMB_TARGET_ROLES)[number])}>
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {BOMB_TARGET_ROLES.map((item) => (
+                <SelectItem key={item} value={item}>
+                  {item}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </label>
+        <label className="grid gap-2 text-sm font-medium">
+          Notes
+          <Textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="中文备注，可选" />
+        </label>
+        <div className="rounded-xl bg-slate-50 p-3">
+          <div className="text-sm font-medium">First template</div>
+          <p className="mt-1 text-xs text-slate-500">Optional. Leave content empty to create the Bomb without templates.</p>
+          <div className="mt-3 grid gap-3">
+            <Select value={channel} onValueChange={(value) => setChannel(value as (typeof BOMB_CHANNELS)[number])}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {BOMB_CHANNELS.map((item) => (
+                  <SelectItem key={item} value={item}>
+                    {item}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {channel === "Email" ? (
+              <Input value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="Email subject" />
+            ) : null}
+            <Textarea
+              value={content}
+              onChange={(event) => setContent(event.target.value)}
+              placeholder={channel === "Phone" ? "Call script" : `${channel} content`}
+            />
+          </div>
+        </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button disabled={!name.trim() || !scenario} onClick={submit}>
-            Create draft
+          <Button disabled={!name.trim() || !scenarioId || !cpId || saving} onClick={submit}>
+            {saving ? "Creating…" : "Create draft"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -521,61 +518,73 @@ function NewBombDialog({
   );
 }
 
-export function BombEditor({ bombId }: { bombId: string }) {
-  const { state, saveBomb, setBombStatus } = useWorkspace();
+export function BombDetailPage({ bombId }: { bombId: string }) {
   const router = useRouter();
-  const original = state.bombs.find((b) => b.id === bombId);
-  const [draft, setDraft] = useState<BombTemplate | undefined>(
-    original ? JSON.parse(JSON.stringify(original)) : undefined,
+  const [bomb, setBomb] = useState<BombDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string>();
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetch(`/api/bombs/${bombId}`)
+      .then(async (response) => {
+        const payload = (await response.json()) as {
+          bomb?: BombDetail;
+          error?: string;
+        };
+        if (!response.ok) throw new Error(payload.error || "Failed to load bomb");
+        if (!payload.bomb) throw new Error("Bomb not found");
+        return payload.bomb;
+      })
+      .then((item) => {
+        if (cancelled) return;
+        setBomb(item);
+        setError(undefined);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setBomb(null);
+        setError(err instanceof Error ? err.message : "Failed to load bomb");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [bombId]);
+  usePageMetadata(
+    bomb
+      ? {
+          title: [bomb.name, bomb.cp, bomb.status].filter(Boolean).join(" · "),
+          description: bomb.goal || "Follow-up Bomb details from Notion.",
+        }
+      : {
+          title: error ? "Bomb not found" : "Bomb",
+          description: error || "Loading Follow-up Bomb details.",
+        },
   );
-  const [customVariableOpen, setCustomVariableOpen] = useState(false);
-  if (!draft || !original)
+  if (loading) {
+    return (
+      <div className="grid min-h-[60vh] place-items-center text-sm text-slate-500">
+        Loading bomb…
+      </div>
+    );
+  }
+  if (!bomb || error) {
     return (
       <div className="grid min-h-[60vh] place-items-center">
         <div className="text-center">
           <Bomb className="mx-auto size-9 text-slate-300" />
           <h1 className="mt-3 font-bold">Bomb not found</h1>
+          {error && <p className="mt-2 text-sm text-slate-500">{error}</p>}
           <Button variant="link" onClick={() => router.push("/bombs")}>
             Back to Bombs
           </Button>
         </div>
       </div>
     );
-  const updateStep = (id: string, patch: Partial<BombStep>) =>
-    setDraft({
-      ...draft,
-      steps: draft.steps.map((s) => (s.id === id ? { ...s, ...patch } : s)),
-    });
-  const move = (index: number, direction: -1 | 1) => {
-    const steps = [...draft.steps];
-    const target = index + direction;
-    if (target < 0 || target >= steps.length) return;
-    [steps[index], steps[target]] = [steps[target], steps[index]];
-    setDraft({ ...draft, steps });
-  };
-  const customVariables = draft.customVariables || [];
-  const addCustomVariable = (variable: BombCustomVariable) => {
-    if (customVariables.some((item) => item.key === variable.key)) {
-      toast.error("A variable with this name already exists");
-      return;
-    }
-    setDraft({ ...draft, customVariables: [...customVariables, variable] });
-  };
-  const errors = [
-    !draft.name && "Name",
-    !draft.goal && "Goal",
-    !draft.targetRole && "Target role",
-    !draft.steps.length && "At least one action",
-    draft.steps.some(
-      (s) => s.channel === "Email" && (!s.subject || !s.content),
-    ) && "Email subject/body",
-    draft.steps.some(
-      (s) => s.channel === "Phone" && (!s.callGoal || !s.script),
-    ) && "Phone goal/script",
-    draft.steps.some(
-      (s) => !["Email", "Phone"].includes(s.channel) && !s.content,
-    ) && "Message content",
-  ].filter(Boolean);
+  }
   return (
     <div className="mx-auto max-w-[1480px]">
       <button
@@ -585,346 +594,122 @@ export function BombEditor({ bombId }: { bombId: string }) {
         <ArrowLeft className="size-4" />
         Bombs
       </button>
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <div className="text-xs font-semibold uppercase tracking-wide text-violet-600">
-            {draft.status} · Version {draft.version}
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <Status value={bomb.status} />
+            {bomb.priority ? <Status value={bomb.priority} /> : null}
+            {bomb.targetRole ? <Badge variant="outline">{bomb.targetRole}</Badge> : null}
           </div>
-          <h1 className="mt-1 text-2xl font-bold">Edit Bomb</h1>
-        </div>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            onClick={() => {
-              const r = setBombStatus(
-                draft.id,
-                draft.status === "Active" ? "Inactive" : "Active",
-              );
-              show(r);
-              setDraft({
-                ...draft,
-                status: draft.status === "Active" ? "Inactive" : "Active",
-              });
-            }}
-          >
-            {draft.status === "Active" ? "Deactivate" : "Activate"}
-          </Button>
-          <Button
-            disabled={!!errors.length}
-            onClick={() => show(saveBomb(draft))}
-          >
-            <Save className="mr-2 size-4" />
-            {draft.status === "Active" ? "Save as new version" : "Save draft"}
-          </Button>
+          <h1 className="mt-3 text-2xl font-bold tracking-tight">{bomb.name}</h1>
+          {bomb.goal ? <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">{bomb.goal}</p> : null}
         </div>
       </div>
       <div className="grid gap-6 xl:grid-cols-[1fr_340px]">
         <main className="space-y-6">
           <section className="rounded-2xl bg-white p-5">
             <h2 className="font-bold">Basic settings</h2>
-            <div className="mt-5 grid gap-4 md:grid-cols-2">
-              <label className="text-sm font-medium">
-                Name
-                <Input
-                  className="mt-2"
-                  value={draft.name}
-                  onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                />
-              </label>
-              <label className="text-sm font-medium">
-                Applicable CP
-                <Select
-                  value={draft.cp}
-                  onValueChange={(v) => setDraft({ ...draft, cp: v as CPCode })}
-                >
-                  <SelectTrigger className="mt-2 w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {["CP1", "CP2", "CP3"].map((x) => (
-                      <SelectItem key={x} value={x}>
-                        {x}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </label>
-              <label className="text-sm font-medium md:col-span-2">
-                Goal
-                <Input
-                  className="mt-2"
-                  value={draft.goal}
-                  onChange={(e) => setDraft({ ...draft, goal: e.target.value })}
-                />
-              </label>
-              <label className="text-sm font-medium">
-                Target role
-                <Select
-                  value={draft.targetRole}
-                  onValueChange={(v) =>
-                    setDraft({
-                      ...draft,
-                      targetRole: v as BombTemplate["targetRole"],
-                    })
-                  }
-                >
-                  <SelectTrigger className="mt-2 w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {["Connector", "Owner", "Other"].map((x) => (
-                      <SelectItem key={x} value={x}>
-                        {x}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </label>
-              <label className="text-sm font-medium">
-                Priority
-                <Select
-                  value={draft.priority}
-                  onValueChange={(v) =>
-                    setDraft({
-                      ...draft,
-                      priority: v as BombTemplate["priority"],
-                    })
-                  }
-                >
-                  <SelectTrigger className="mt-2 w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {["Urgent", "High", "Normal", "Low"].map((x) => (
-                      <SelectItem key={x} value={x}>
-                        {x}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </label>
-              <div className="md:col-span-2">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-medium">Custom variables</div>
-                    <p className="mt-1 text-xs text-slate-500">Saved defaults that can be inserted into any message or call script.</p>
-                  </div>
-                  <Button type="button" variant="outline" size="sm" onClick={() => setCustomVariableOpen(true)}>
-                    <Plus className="size-3.5" />
-                    Add variable
-                  </Button>
-                </div>
-                {customVariables.length > 0 && (
-                  <div className="mt-3 space-y-2">
-                    {customVariables.map((item) => (
-                      <div key={item.id} className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2">
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-medium">{item.label}</div>
-                          <div className="truncate text-xs text-slate-500">{variableToken(`variable.${item.key}`)} · {item.defaultValue || "No default value"}</div>
-                        </div>
-                        <Button
-                          type="button"
-                          size="icon-xs"
-                          variant="ghost"
-                          aria-label={`Remove ${item.label}`}
-                          className="text-slate-500 hover:text-rose-600"
-                          onClick={() => setDraft({ ...draft, customVariables: customVariables.filter((variable) => variable.id !== item.id) })}
-                        >
-                          <X className="size-3.5" />
-                        </Button>
+            <div className="mt-5 grid gap-5 md:grid-cols-2">
+              <Field label="Applicable CP">
+                {bomb.cps.length ? (
+                  <div className="space-y-2">
+                    {bomb.cps.map((cp) => (
+                      <div key={cp.id}>
+                        <CP value={cp.name} />
+                        {cp.fullName ? (
+                          <p className="mt-1 text-xs text-slate-500">{cp.fullName}</p>
+                        ) : null}
                       </div>
                     ))}
                   </div>
+                ) : (
+                  "—"
                 )}
-              </div>
+              </Field>
+              <Field label="Priority">{bomb.priority || "—"}</Field>
+              <Field label="Scenario">
+                <div>{bomb.scenarioName || "—"}</div>
+                {bomb.scenarioDescription ? (
+                  <p className="mt-1 text-xs leading-5 text-slate-500">{bomb.scenarioDescription}</p>
+                ) : null}
+              </Field>
+              <Field label="Target role">{bomb.targetRole || "—"}</Field>
+              {bomb.notes ? (
+                <div className="md:col-span-2">
+                  <Field label="Notes">
+                    <p className="whitespace-pre-wrap leading-6">{bomb.notes}</p>
+                  </Field>
+                </div>
+              ) : null}
             </div>
           </section>
           <section className="rounded-2xl bg-white p-5">
-            <div className="flex justify-between">
-              <div>
-                <h2 className="font-bold">Action flow</h2>
-                <p className="text-xs text-slate-500">
-                  Sequence is assigned automatically when the Bomb is launched.
-                </p>
-              </div>
-              <Select
-                onValueChange={(v) =>
-                  setDraft({
-                    ...draft,
-                    steps: [
-                      ...draft.steps,
-                      {
-                        id: uid("step"),
-                        channel: v as Channel,
-                        delayDays: draft.steps.length ? 1 : 0,
-                        subject: v === "Email" ? "" : "",
-                        content: "",
-                        callGoal: v === "Phone" ? "" : "",
-                        script: v === "Phone" ? "" : "",
-                      },
-                    ],
-                  })
-                }
-              >
-                <SelectTrigger size="sm" className="w-40">
-                  <SelectValue placeholder="+ Add action" />
-                </SelectTrigger>
-                <SelectContent>
-                  {["Email", "SMS", "WhatsApp", "LinkedIn", "Phone"].map(
-                    (x) => (
-                      <SelectItem key={x} value={x}>
-                        {x}
-                      </SelectItem>
-                    ),
-                  )}
-                </SelectContent>
-              </Select>
+            <div>
+              <h2 className="font-bold">Templates</h2>
+              <p className="mt-1 text-xs text-slate-500">
+                Content comes from Follow-up TemplateDB. Sequence is assigned when tasks are created.
+              </p>
             </div>
             <div className="mt-5 space-y-4">
-              {draft.steps.map((s, index) => (
-                <div key={s.id} className="rounded-xl bg-slate-50 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <span className="grid size-8 place-items-center rounded-lg bg-white font-bold text-violet-600">
-                        {index + 1}
-                      </span>
-                      <Select
-                        value={s.channel}
-                        onValueChange={(v) =>
-                          updateStep(s.id, { channel: v as Channel })
-                        }
-                      >
-                        <SelectTrigger size="sm" className="w-36">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {[
-                            "Email",
-                            "SMS",
-                            "WhatsApp",
-                            "LinkedIn",
-                            "Phone",
-                          ].map((x) => (
-                            <SelectItem key={x} value={x}>
-                              {x}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Button
-                        size="icon-sm"
-                        variant="ghost"
-                        onClick={() => move(index, -1)}
-                      >
-                        <ArrowUp className="size-3.5" />
-                      </Button>
-                      <Button
-                        size="icon-sm"
-                        variant="ghost"
-                        onClick={() => move(index, 1)}
-                      >
-                        <ArrowDown className="size-3.5" />
-                      </Button>
-                      <Button
-                        size="icon-sm"
-                        variant="ghost"
-                        className="text-rose-600"
-                        onClick={() =>
-                          setDraft({
-                            ...draft,
-                            steps: draft.steps.filter((x) => x.id !== s.id),
-                          })
-                        }
-                      >
-                        <Trash2 className="size-3.5" />
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="mt-4 grid gap-3">
-                    {s.channel === "Email" && (
-                      <TemplateVariableField
-                        value={s.subject || ""}
-                        onChange={(value) => updateStep(s.id, { subject: value })}
-                        placeholder="Email subject"
-                        customVariables={customVariables}
-                        onCreateCustom={() => setCustomVariableOpen(true)}
-                        singleLine
-                      />
-                    )}
-                    {s.channel === "Phone" ? (
-                      <>
-                        <Input
-                          value={s.callGoal || ""}
-                          onChange={(e) =>
-                            updateStep(s.id, { callGoal: e.target.value })
-                          }
-                          placeholder="Call goal"
-                        />
-                        <TemplateVariableField
-                          value={s.script || ""}
-                          onChange={(value) => updateStep(s.id, { script: value })}
-                          placeholder="Suggested script"
-                          customVariables={customVariables}
-                          onCreateCustom={() => setCustomVariableOpen(true)}
-                        />
-                      </>
-                    ) : (
-                      <TemplateVariableField
-                        value={s.content}
-                        onChange={(value) => updateStep(s.id, { content: value })}
-                        placeholder={`${s.channel} content`}
-                        customVariables={customVariables}
-                        onCreateCustom={() => setCustomVariableOpen(true)}
-                      />
-                    )}
-                  </div>
-                </div>
-              ))}
+              {bomb.templates.length ? (
+                bomb.templates.map((template, index) => (
+                  <TemplateCard key={template.id} template={template} index={index} />
+                ))
+              ) : (
+                <Empty className="py-12">
+                  <EmptyHeader>
+                    <EmptyMedia variant="icon">
+                      <Bomb />
+                    </EmptyMedia>
+                    <EmptyTitle>No templates</EmptyTitle>
+                    <EmptyDescription>
+                      This Bomb has no related templates in Notion yet.
+                    </EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
+              )}
             </div>
           </section>
         </main>
         <aside className="space-y-5">
           <section className="sticky top-24 rounded-2xl bg-slate-950 p-5 text-white">
             <div className="text-xs font-semibold uppercase tracking-wide text-violet-300">
-              Estimated flow
+              Channel flow
             </div>
-            <h2 className="mt-1 font-bold">{draft.name || "Untitled Bomb"}</h2>
+            <h2 className="mt-1 font-bold">{bomb.name}</h2>
             <div className="mt-6 space-y-5">
-              {draft.steps.map((s, i) => {
-                return (
-                  <div key={s.id} className="flex gap-3">
+              {bomb.templates.length ? (
+                bomb.templates.map((template, index) => (
+                  <div key={template.id} className="flex gap-3">
                     <span className="grid size-8 shrink-0 place-items-center">
-                      <ChannelIcon channel={s.channel} className="size-6" />
+                      {isBombChannel(template.channel) ? (
+                        <ChannelIcon channel={template.channel} className="size-6" />
+                      ) : (
+                        <span className="text-xs text-slate-400">{index + 1}</span>
+                      )}
                     </span>
-                    <div>
+                    <div className="min-w-0">
                       <div className="text-[10px] font-semibold uppercase text-slate-500">
-                        Step {i + 1}
+                        Template {index + 1}
                       </div>
-                      <div className="text-sm font-semibold">{s.channel}</div>
+                      <div className="text-sm font-semibold">{template.channel || "Unknown channel"}</div>
+                      <div className="truncate text-xs text-slate-400">{template.name}</div>
                     </div>
                   </div>
-                );
-              })}
+                ))
+              ) : (
+                <p className="text-sm text-slate-400">No related templates.</p>
+              )}
             </div>
-            <div className="mt-6 rounded-xl bg-white/5 p-4 text-xs leading-5 text-slate-400">
-              Phone timing may shift with Caller capacity. Any meaningful reply
-              stops all future actions.
+            <div className="mt-6 space-y-1 rounded-xl bg-white/5 p-4 text-xs leading-5 text-slate-400">
+              <div>Created {formatWhen(bomb.createdAt)}</div>
+              <div>Updated {formatWhen(bomb.lastEditedAt)}</div>
             </div>
-            {errors.length > 0 && (
-              <div className="mt-4 rounded-xl bg-rose-500/10 p-4 text-xs text-rose-200">
-                Complete: {errors.join(", ")}
-              </div>
-            )}
           </section>
         </aside>
       </div>
-      <CustomVariableDialog
-        open={customVariableOpen}
-        onOpenChange={setCustomVariableOpen}
-        onCreate={addCustomVariable}
-      />
     </div>
   );
 }
+
+export const BombEditor = BombDetailPage;
