@@ -6,6 +6,7 @@ import { ArrowLeft, Bomb, CircleAlert, Plus, Send } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "./workspace-store";
 import { Channel, Contact, CPCode, dateOnly, uid } from "@/lib/outreach-domain";
+import { BombExecutionPlan } from "./bomb-plan";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,9 +30,10 @@ export function BrandDetail({customerId}:{customerId:string}){
   const c=state.customers.find(x=>x.id===customerId); if(!c||!manager&&c.ownerId!==state.currentUserId)return <div className="grid min-h-[60vh] place-items-center"><div className="text-center"><CircleAlert className="mx-auto mb-3 size-8 text-slate-300"/><h1 className="font-bold">Brand not found</h1><Button variant="link" onClick={()=>router.push("/customers")}>Back to Brands</Button></div></div>;
   const interactions=state.interactions.filter(i=>i.customerId===c.id).sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
   const last=interactions[0];
+  const partnershipContext=c.partnershipContext;
   return <div className="mx-auto max-w-[1480px]"><button onClick={()=>router.push("/customers")} className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900"><ArrowLeft className="size-4"/>Brands</button><div className="mb-6 flex flex-wrap items-start justify-between gap-4"><div className="flex items-center gap-4"><Avatar className="size-14"><AvatarFallback className="bg-violet-100 font-bold text-violet-700">{c.initials}</AvatarFallback></Avatar><div><h1 className="text-2xl font-bold tracking-tight">{c.name}</h1><div className="mt-2 flex gap-2"><CP value={c.cp}/><Status value={c.status}/></div><p className="mt-2 text-sm text-slate-500">{state.cps.find(x=>x.code===c.cp)?.goal||"—"} · {last?.title||"None"} · {c.source} · FC-Owner {state.users.find(u=>u.id===c.ownerId)?.name||"Unassigned"}</p>{can("assignOwner")&&<div className="mt-3 flex flex-wrap items-center gap-2"><Select value={ownerDraft??c.ownerId??"unassigned"} onValueChange={setOwnerDraft}><SelectTrigger size="sm" className="w-44"><SelectValue placeholder="Select owner"/></SelectTrigger><SelectContent><SelectItem value="unassigned">Unassigned</SelectItem>{state.users.filter(u=>["Admin","Human Responder"].includes(u.role)).map(u=><SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent></Select><Button size="sm" disabled={(ownerDraft??c.ownerId??"unassigned")===(c.ownerId||"unassigned")} onClick={()=>show(assignBrand(c.id,ownerDraft??c.ownerId??"unassigned"))}>Assign</Button></div>}</div></div><div className="flex flex-wrap gap-2">{can("reply")&&<Button variant="outline" onClick={()=>setReply(true)}><Send className="mr-2 size-4"/>Send message</Button>}{can("launch")&&<Button variant="outline" disabled={!!c.activeBombId||c.status==="Bomb Running"} onClick={()=>setLaunch(true)}><Bomb className="mr-2 size-4"/>Launch Bomb</Button>}{can("changeCP")&&<Button onClick={()=>setCP(true)}>Change CP</Button>}</div></div>
   <div className="grid gap-6 xl:grid-cols-[1fr_340px]"><section className="overflow-hidden rounded-2xl border bg-white"><div className="border-b p-5"><h2 className="font-bold">Brand timeline</h2><p className="text-xs text-slate-500">Every KeyPerson, channel and complete exchange</p></div><InteractionFeed interactions={interactions} contacts={c.contacts}/><BrandReplyBox customerId={c.id}/></section>
-  <aside className="space-y-5"><section className="rounded-2xl border bg-white p-5"><div className="flex items-center justify-between"><h2 className="font-bold">KeyPerson</h2>{can("editBrand")&&<Button variant="ghost" size="icon-sm" onClick={()=>setContact(true)}><Plus className="size-4"/></Button>}</div><div className="mt-3 space-y-3">{c.contacts.map(x=><div key={x.id} className="rounded-xl bg-slate-50 p-3"><div className="text-sm font-semibold">{x.name}</div><div className="mt-1 text-xs text-slate-500">{x.role}</div><div className="mt-3 space-y-1.5">{([["Email",x.email],["Phone",x.phone],["SMS",x.phone],["WhatsApp",x.whatsapp],["LinkedIn",x.linkedin?`linkedin.com/in/${x.linkedin}`:undefined]] as const).map(([ch,value])=><div key={ch} className="flex items-center gap-2 text-xs text-slate-600"><ChannelIcon channel={ch} className="size-4"/><span className={value?"":"text-slate-400"}>{value||"—"}</span></div>)}</div></div>)}</div></section></aside></div>
+  <aside className="space-y-5">{(c.cp==="CP3"||partnershipContext)&&partnershipContext&&<section className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5"><div className="text-xs font-semibold uppercase tracking-wide text-emerald-700">CP3 · Partnership context</div><h2 className="mt-2 font-bold text-emerald-950">{partnershipContext.headline}</h2><p className="mt-2 text-sm leading-6 text-emerald-900">{partnershipContext.summary}</p><div className="mt-4 space-y-2">{partnershipContext.signals.map(signal=><div key={signal} className="rounded-lg bg-white/80 px-3 py-2 text-xs leading-5 text-slate-700">{signal}</div>)}</div><div className="mt-3 text-[11px] text-emerald-700">Updated {dateOnly(partnershipContext.updatedAt)}</div></section>}<section className="rounded-2xl border bg-white p-5"><div className="flex items-center justify-between"><h2 className="font-bold">KeyPerson</h2>{can("editBrand")&&<Button variant="ghost" size="icon-sm" onClick={()=>setContact(true)}><Plus className="size-4"/></Button>}</div><div className="mt-3 space-y-3">{c.contacts.map(x=><div key={x.id} className="rounded-xl bg-slate-50 p-3"><div className="text-sm font-semibold">{x.name}</div><div className="mt-1 text-xs text-slate-500">{x.role}</div><div className="mt-3 space-y-1.5">{([["Email",x.email],["Phone",x.phone],["SMS",x.phone],["WhatsApp",x.whatsapp],["LinkedIn",x.linkedin?`linkedin.com/in/${x.linkedin}`:undefined]] as const).map(([ch,value])=><div key={ch} className="flex items-center gap-2 text-xs text-slate-600"><ChannelIcon channel={ch} className="size-4"/><span className={value?"":"text-slate-400"}>{value||"—"}</span></div>)}</div></div>)}</div></section></aside></div>
   <LaunchBombDialog customerId={c.id} open={launch} onOpenChange={setLaunch}/><ReplyDialog customerId={c.id} open={reply} onOpenChange={setReply}/><ChangeCPDialog customerId={c.id} open={cp} onOpenChange={setCP}/><ContactDialog customerId={c.id} open={contact} onOpenChange={setContact}/></div>;
 }
 
@@ -52,7 +54,6 @@ function BrandReplyBox({customerId}:{customerId:string}){
 }
 
 type LaunchStepCopy = { subject?: string; content?: string; callGoal?: string; script?: string };
-const delayLabel = (n: number) => n === 0 ? "Immediately" : `${n} day${n > 1 ? "s" : ""} later`;
 
 export function LaunchBombDialog({customerId,open,onOpenChange}:{customerId?:string;open:boolean;onOpenChange:(v:boolean)=>void}){
   const {state,launchBomb}=useWorkspace();
@@ -64,7 +65,7 @@ export function LaunchBombDialog({customerId,open,onOpenChange}:{customerId?:str
   const [launchedInstanceId,setLaunchedInstanceId]=useState("");
   const selected=bombs.find(b=>b.id===bombId);
   const targets=c?.contacts.filter(x=>x.role===selected?.targetRole)||[];
-  const person=targets.find(t=>t.id===target)||targets[0];
+  const person=targets.find(t=>t.id===target);
   useEffect(()=>{
     if(!selected){setCopies({});return;}
     const next:Record<string,LaunchStepCopy>={};
@@ -80,14 +81,14 @@ export function LaunchBombDialog({customerId,open,onOpenChange}:{customerId?:str
     if(s.channel==="Phone")return !copy.callGoal?.trim()||!copy.script?.trim();
     return !copy.content?.trim();
   });
-  const assignedActions=launchedInstanceId?state.actions.filter(a=>a.bombInstanceId===launchedInstanceId):[];
+  const launchedInstance=launchedInstanceId?state.bombInstances.find(item=>item.id===launchedInstanceId):undefined;
   return <Dialog open={open} onOpenChange={value=>{if(!value){setLaunchedInstanceId("");}onOpenChange(value)}}><DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-2xl"><DialogHeader><DialogTitle>{launchedInstanceId?"Bomb launched · execution plan":"Launch Bomb"}</DialogTitle><DialogDescription>{launchedInstanceId?"The system assigned this execution order and schedule. This plan is read-only.":"Review and edit each step’s copy for this launch only. The template is not changed. After confirmation, the system assigns timing and order based on channel availability and caller capacity. Any meaningful reply stops the run."}</DialogDescription></DialogHeader>
     <div className="min-h-0 space-y-4 overflow-y-auto pr-1">
-      {launchedInstanceId&&<div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4"><div className="text-sm font-semibold text-emerald-900">System assignment complete</div><p className="mt-1 text-xs text-emerald-800">The order and timing below are informational only and cannot be edited.</p><div className="mt-4 space-y-2">{assignedActions.map((action,index)=><div key={action.id} className="flex items-center gap-3 rounded-lg border border-emerald-100 bg-white px-3 py-3"><span className="grid size-7 place-items-center rounded-md bg-emerald-100 text-xs font-bold text-emerald-700">{index+1}</span><div className="min-w-0 flex-1"><div className="text-sm font-semibold">{action.channel}{action.status==="Skipped"?" · Skipped":""}</div><div className="text-xs text-slate-500">{action.status==="Skipped"?action.note||"Channel unavailable":`${dateOnly(action.actualDate)} · ${action.status}`}</div></div></div>)}</div></div>}
+      {launchedInstanceId&&<div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4"><div className="text-sm font-semibold text-emerald-900">System assignment complete</div><p className="mt-1 text-xs text-emerald-800">{launchedInstance?`${launchedInstance.templateName} · Version ${launchedInstance.version}`:"The order and timing below are informational only and cannot be edited."}</p><div className="mt-4"><BombExecutionPlan state={state} instanceId={launchedInstanceId} contacts={c?.contacts||[]} tone="success"/></div></div>}
       {!launchedInstanceId&&<>
       <label className="text-sm font-medium">Bomb<Select value={bombId} onValueChange={v=>{setBombId(v);setTarget("");}}><SelectTrigger className="mt-2 w-full"><SelectValue placeholder="Select a Bomb"/></SelectTrigger><SelectContent>{bombs.map(b=><SelectItem key={b.id} value={b.id}>{b.name} · V{b.version}</SelectItem>)}</SelectContent></Select></label>
       {selected&&<>
-        <label className="text-sm font-medium">Target KeyPerson<Select value={target||targets[0]?.id} onValueChange={setTarget}><SelectTrigger className="mt-2 w-full"><SelectValue placeholder={`Requires ${selected.targetRole}`}/></SelectTrigger><SelectContent>{targets.map(t=><SelectItem key={t.id} value={t.id}>{t.name} · {t.role}</SelectItem>)}</SelectContent></Select></label>
+        <label className="text-sm font-medium">Launch for<Select value={target} onValueChange={setTarget}><SelectTrigger className="mt-2 w-full"><SelectValue placeholder={`Select ${selected.targetRole}`}/></SelectTrigger><SelectContent>{targets.map(t=><SelectItem key={t.id} value={t.id}>{t.name} · {t.role}</SelectItem>)}</SelectContent></Select></label>
         <div className="rounded-xl bg-slate-50 p-4 text-sm"><b>{selected.goal}</b><p className="mt-1 text-xs text-slate-500">Edits apply only to this launch.</p>{unavailable.length>0&&<div className="mt-2 text-xs text-amber-700">Unavailable steps will be skipped: {[...new Set(unavailable)].join(", ")}</div>}</div>
         {selected.steps.map((s,index)=>{
           const copy=copies[s.id]||{};
@@ -102,7 +103,7 @@ export function LaunchBombDialog({customerId,open,onOpenChange}:{customerId?:str
       </>}
       </>}
     </div>
-    <DialogFooter>{launchedInstanceId?<Button onClick={()=>onOpenChange(false)}>Done</Button>:<><Button variant="outline" onClick={()=>onOpenChange(false)}>Cancel</Button><Button disabled={!selected||!targets.length||incomplete||!!c?.activeBombId||c?.status==="Bomb Running"} onClick={()=>{if(!c||!selected)return;const r=launchBomb(c.id,selected.id,target||targets[0]?.id,copies);show(r);if(r.ok&&r.id)setLaunchedInstanceId(r.id);}}>Launch Bomb</Button></>}</DialogFooter>
+    <DialogFooter>{launchedInstanceId?<Button onClick={()=>onOpenChange(false)}>Done</Button>:<><Button variant="outline" onClick={()=>onOpenChange(false)}>Cancel</Button><Button disabled={!selected||!person||incomplete||!!c?.activeBombId||c?.status==="Bomb Running"} onClick={()=>{if(!c||!selected||!person)return;const r=launchBomb(c.id,selected.id,person.id,copies);show(r);if(r.ok&&r.id)setLaunchedInstanceId(r.id);}}>Launch Bomb</Button></>}</DialogFooter>
   </DialogContent></Dialog>;
 }
 

@@ -3,28 +3,13 @@
 import { useState } from "react";
 import { Bomb, CheckCircle2, Clock3, MessageCircle, Phone, UserRound } from "lucide-react";
 import { Channel, Contact, Interaction } from "@/lib/outreach-domain";
+import { CurrentBombPlan, findBombInstance, formatUtcTime, pinnedBombInstanceId } from "./bomb-plan";
 import { ChannelIcon, ChannelOption } from "./channel-icon";
+import { useWorkspace } from "./workspace-store";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-
-const exactTime = (iso: string) => {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "UTC",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(date);
-  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find(part => part.type === type)?.value || "";
-  return `${value("year")}-${value("month")}-${value("day")} ${value("hour")}:${value("minute")}:${value("second")} UTC`;
-};
 
 const contactPoint = (contact: Contact, channel?: Channel) => {
   if (channel === "Email") return contact.email;
@@ -38,13 +23,22 @@ const initials = (name: string) => name.split(/\s+/).map(part => part[0]).join("
 const allChannels: Channel[] = ["Email", "SMS", "WhatsApp", "LinkedIn", "Phone"];
 
 export function InteractionFeed({ interactions, contacts, maxHeight = "max-h-[520px]" }: { interactions: Interaction[]; contacts: Contact[]; maxHeight?: string }) {
+  const { state } = useWorkspace();
   const [contactId, setContactId] = useState("all");
   const [channel, setChannel] = useState("all");
   const activeContactId = contactId === "all" || contacts.some(contact => contact.id === contactId) ? contactId : "all";
   const activeChannel = channel === "all" || allChannels.includes(channel as Channel) ? channel : "all";
-  const visible = interactions.filter(interaction => (activeContactId === "all" || interaction.contactId === activeContactId) && (activeChannel === "all" || interaction.channel === activeChannel));
+  const customerId = interactions[0]?.customerId;
+  const pinnedId = pinnedBombInstanceId(state, customerId);
+  const visible = interactions.filter(interaction => {
+    const instance = interaction.type === "Bomb" ? findBombInstance(state, interaction) : undefined;
+    if (interaction.type === "Bomb" && interaction.title === "Bomb started" && (interaction.bombInstanceId === pinnedId || instance?.id === pinnedId)) return false;
+    const targetId = interaction.contactId || instance?.targetContactId;
+    return (activeContactId === "all" || targetId === activeContactId) && (activeChannel === "all" || interaction.channel === activeChannel);
+  });
 
   return <div>
+    <CurrentBombPlan state={state} customerId={customerId} contacts={contacts}/>
     <div className="flex flex-col gap-2 border-b bg-slate-50/70 px-5 py-3 sm:flex-row sm:items-center">
       <div className="mr-auto text-xs text-slate-500"><b className="text-slate-900">{visible.length}</b> complete records</div>
       <Select value={activeContactId} onValueChange={setContactId}><SelectTrigger size="sm" className="w-full bg-white sm:w-48"><SelectValue placeholder="All Contacts"/></SelectTrigger><SelectContent><SelectItem value="all">All Contacts</SelectItem>{contacts.map(contact => <SelectItem key={contact.id} value={contact.id}>{contact.name} · {contact.role}</SelectItem>)}</SelectContent></Select>
@@ -67,7 +61,7 @@ export function InteractionFeed({ interactions, contacts, maxHeight = "max-h-[52
                 <div className="flex flex-wrap items-center gap-2"><h4 className="text-sm font-bold text-slate-950">{interaction.channel || interaction.type}</h4>{interaction.direction && <Badge variant="outline" className="text-[10px]">{interaction.direction}</Badge>}{interaction.outcome && <Badge variant="secondary" className="text-[10px]">{interaction.outcome}</Badge>}</div>
                 <div className="mt-1 text-xs font-medium text-slate-600">{route}</div>
               </div>
-              <time dateTime={interaction.createdAt} className="shrink-0 font-mono text-xs text-slate-500">{exactTime(interaction.createdAt)}</time>
+              <time dateTime={interaction.createdAt} className="shrink-0 font-mono text-xs text-slate-500">{formatUtcTime(interaction.createdAt)}</time>
             </div>
 
             {contact ? <div className="mt-3 flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5"><Avatar className="size-8"><AvatarFallback className="bg-white text-[10px] font-bold text-slate-700">{initials(contact.name)}</AvatarFallback></Avatar><div className="min-w-0"><div className="text-xs font-semibold text-slate-900">{contact.name} <span className="font-normal text-slate-500">· {contact.role}</span></div><div className="mt-0.5 truncate text-xs text-slate-500">{interaction.channel}{endpoint ? ` · ${endpoint}` : ""}</div></div></div> : communication ? <div className="mt-3 flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800"><UserRound className="size-3.5"/>Contact not linked</div> : null}
