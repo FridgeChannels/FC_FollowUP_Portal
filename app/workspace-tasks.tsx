@@ -7,7 +7,7 @@ import {
   ArrowLeft, Bomb, Check, CheckCircle2, MessageCircle, Phone, Search, Send, UserRound,
 } from "lucide-react";
 import { toast } from "sonner";
-import { CallOutcome, canSeeTask, Channel, dateOnly, isClosedTaskStatus } from "@/lib/outreach-domain";
+import { CallOutcome, canSeeTask, dateOnly, isClosedTaskStatus } from "@/lib/outreach-domain";
 import { useWorkspace } from "./workspace-store";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -17,8 +17,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { ChangeCPDialog, LaunchBombDialog } from "./workspace-customer";
-import { ChannelOption } from "./channel-icon";
+import { ChangeCPDialog, LaunchBombDialog, ReplyDialog } from "./workspace-customer";
 import { InteractionFeed } from "./interaction-feed";
 import { Status } from "./workspace-pages";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -122,14 +121,14 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
       <h1 className="text-2xl font-bold tracking-tight">ReplyTask</h1>
     </div>
 
-    <div className="mb-4 flex flex-col gap-3 rounded-2xl border bg-white p-3 lg:flex-row lg:items-center">
+    <div className="mb-4 flex flex-col gap-3 rounded-2xl bg-white p-3 lg:flex-row lg:items-center">
       <div className="relative min-w-56 flex-1 lg:max-w-sm"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400"/><Input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search brand or task…" className="pl-9"/></div>
       <Select value={type} onValueChange={value => setType(value as TaskType | "All")}><SelectTrigger className="w-full lg:w-40"><SelectValue/></SelectTrigger><SelectContent>{["All", "Call", "Reply"].map(value => <SelectItem key={value} value={value}>{value === "All" ? "All types" : value}</SelectItem>)}</SelectContent></Select>
       {manager && <Select value={assignee} onValueChange={setAssignee}><SelectTrigger className="w-full lg:w-44"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">All FC-Owners</SelectItem><SelectItem value="unassigned">Unassigned</SelectItem>{state.users.map(user => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}</SelectContent></Select>}
       <Select value={status} onValueChange={value => setStatus(value as typeof status)}><SelectTrigger className="w-full lg:w-36"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="Open">Open</SelectItem><SelectItem value="Completed">Completed</SelectItem><SelectItem value="All">All statuses</SelectItem></SelectContent></Select>
     </div>
 
-    <div className="overflow-hidden rounded-2xl border bg-white">
+    <div className="overflow-hidden rounded-2xl bg-white">
       {tasks.length ? <div className="overflow-x-auto"><Table><TableHeader><TableRow className="bg-slate-50"><TableHead className="min-w-56 pl-5">Brand</TableHead><TableHead>Type</TableHead><TableHead>Status</TableHead><TableHead>Due</TableHead></TableRow></TableHeader><TableBody>{tasks.map(task => {
         const customer = state.customers.find(c => c.id === task.customerId);
         const overdue = isDue(task, state.simulatedDate);
@@ -146,47 +145,43 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
 }
 
 function TaskDetail({ task }: { task: UnifiedTask }) {
-  const { state, can, sendHumanReply, resolveInbox, assignBrand, reassignCall } = useWorkspace();
+  const { state, can, resolveInbox, assignBrand, reassignCall } = useWorkspace();
   const router = useRouter();
-  const [channel, setChannel] = useState<Channel>("Email");
-  const [replyContactId, setReplyContactId] = useState(task.contactId || "");
-  const [message, setMessage] = useState("");
   const [callResult, setCallResult] = useState(false);
   const [launch, setLaunch] = useState(false);
+  const [sendMessage, setSendMessage] = useState(false);
   const [changeCP, setChangeCP] = useState(false);
   const customer = state.customers.find(c => c.id === task.customerId);
   const partnershipContext=customer?.partnershipContext;
   const contact = customer?.contacts.find(c => c.id === task.contactId) || customer?.contacts[0];
-  const replyContact = customer?.contacts.find(c => c.id === replyContactId) || contact;
   const callTask = task.source === "call" ? state.callTasks.find(call => call.id === task.id) : undefined;
   const timeline = state.interactions.filter(item => item.customerId === task.customerId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   if (!customer || !contact) return <main className="grid place-items-center bg-slate-50 text-sm text-slate-500">Brand context unavailable.</main>;
-  const available = (["Email", "SMS", "WhatsApp", "LinkedIn"] as Channel[]).filter(value => value === "Email" ? replyContact?.email && replyContact.emailValid : value === "SMS" ? replyContact?.phone && replyContact.phoneValid : value === "WhatsApp" ? replyContact?.whatsapp : replyContact?.linkedin);
-  const effectiveChannel = available.includes(channel) ? channel : available[0];
-  const humanAssignees = state.users.filter(user => user.role === "Human Responder" || user.role === "Admin");
+  const humanAssignees = state.users.filter(user => user.role === "FC_Owner" || user.role === "Admin");
   const callers = state.users.filter(user => user.role === "Caller");
 
   return <div className="mx-auto max-w-[1540px]">
     <button onClick={() => router.push("/tasks")} className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900"><ArrowLeft className="size-4"/>ReplyTask</button>
-    <main className="min-w-0 overflow-hidden rounded-2xl border bg-slate-50">
-    <header className="flex flex-wrap items-start justify-between gap-4 border-b bg-white px-5 py-4 lg:px-7">
+    <main className="min-w-0 overflow-hidden rounded-2xl bg-slate-50">
+    <header className="flex flex-wrap items-start justify-between gap-4 bg-white px-5 py-4 lg:px-7">
       <div><div className="flex flex-wrap items-center gap-2"><Badge variant="outline">{task.type}</Badge>{isDue(task, state.simulatedDate) ? <Status value="Due"/> : <Badge variant="secondary">{task.status}</Badge>}<span className="text-xs text-slate-400">{dateOnly(task.dueAt)}</span></div><h2 className="mt-2 text-xl font-bold">{customer.name}</h2><p className="mt-1 text-xs text-slate-500">{contact.name} · {contact.role} · {customer.cp} · {customer.status}</p></div>
       <Button variant="outline" size="sm" onClick={() => router.push(`/customers/${customer.id}`)}>Brand profile</Button>
     </header>
 
     <div className="grid lg:grid-cols-[minmax(0,1fr)_290px]">
       <div className="min-w-0 p-5 lg:p-7">
-        <section className="overflow-hidden rounded-xl border bg-white">
-          <div className="border-b px-5 py-4"><h3 className="font-bold">Conversation & activity</h3><p className="mt-1 text-xs text-slate-500">Every Contact, channel and complete exchange in one timeline.</p></div>
-          <InteractionFeed interactions={timeline} contacts={customer.contacts} maxHeight="max-h-[480px]"/>
+        <section>
+          <h3 className="mb-3 font-bold">Brand activity</h3>
+          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+          <InteractionFeed key={`${customer.id}-${customer.cp}`} customerId={customer.id} interactions={timeline} contacts={customer.contacts} maxHeight="max-h-[480px]"/>
+          </div>
         </section>
 
-        {task.source === "inbox" && can("reply") && task.status !== "Resolved" && <section className="mt-4 rounded-xl border bg-white p-4"><div className="mb-2 flex items-center justify-between gap-3"><div className="flex gap-2"><Select value={replyContact?.id} onValueChange={value => setReplyContactId(value)}><SelectTrigger size="sm" className="w-44"><SelectValue placeholder="Contact"/></SelectTrigger><SelectContent>{customer.contacts.map(item => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectContent></Select><Select value={effectiveChannel} onValueChange={value => setChannel(value as Channel)}><SelectTrigger size="sm" className="w-44"><SelectValue placeholder="Channel"/></SelectTrigger><SelectContent>{available.map(value => <SelectItem key={value} value={value}><ChannelOption channel={value}/></SelectItem>)}</SelectContent></Select></div><span className="text-xs text-slate-400">Reply needed</span></div><div className="flex gap-2"><Textarea value={message} onChange={event => setMessage(event.target.value)} className="min-h-20 resize-none" placeholder="Write a reply…"/><Button className="h-20 px-5" disabled={!message.trim() || !effectiveChannel} onClick={() => { if (!replyContact) return; const result = sendHumanReply(customer.id, replyContact.id, effectiveChannel, message); show(result); if (result.ok) setMessage(""); }}><Send className="size-4"/></Button></div></section>}
       </div>
 
-      <aside className="border-t bg-white p-5 lg:border-l lg:border-t-0">
+      <aside className="bg-white p-5 lg:pl-0">
         <div className="flex items-center gap-3"><Avatar><AvatarFallback className="bg-violet-100 font-bold text-violet-700">{customer.initials}</AvatarFallback></Avatar><div><b className="text-sm">{customer.name}</b><div className="text-xs text-slate-500">{state.cps.find(cp => cp.code === customer.cp)?.goal}</div></div></div>
-        {state.currentRole === "Admin" && (customer.cp === "CP3" || partnershipContext) && partnershipContext && <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4"><div className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">CP3 · Partnership context</div><div className="mt-2 text-sm font-bold text-emerald-950">{partnershipContext.headline}</div><p className="mt-2 text-xs leading-5 text-emerald-900">{partnershipContext.summary}</p><div className="mt-3 space-y-2">{partnershipContext.signals.map(signal=><div key={signal} className="rounded-lg bg-white/80 px-2.5 py-2 text-xs leading-5 text-slate-700">{signal}</div>)}</div></div>}
+        {(customer.cp === "CP3" || partnershipContext) && partnershipContext && <section className="mt-5 rounded-xl bg-emerald-50 p-4"><div className="text-[11px] font-semibold tracking-wide text-emerald-700">CP3 · Partnership context</div><div className="mt-2 text-sm font-bold text-emerald-950">{partnershipContext.headline}</div><p className="mt-2 text-xs leading-5 text-emerald-900">{partnershipContext.summary}</p><div className="mt-3 space-y-2">{partnershipContext.signals.map(signal=><div key={signal} className="rounded-lg bg-white/70 px-2.5 py-2 text-xs leading-5 text-slate-700">{signal}</div>)}</div></section>}
         <div className="mt-5 rounded-xl bg-slate-50 p-4"><div className="text-xs font-semibold uppercase tracking-wide text-slate-400">FC-Owner</div><div className="mt-2 flex items-center gap-2 text-sm font-semibold"><UserRound className="size-4"/>{state.users.find(user => user.id === task.assigneeId)?.name || "Unassigned"}</div></div>
 
         {callTask && can("submitCall") && callTask.status === "Scheduled" && <Button className="mt-4 w-full" onClick={() => setCallResult(true)}><Phone className="mr-2 size-4"/>Complete call</Button>}
@@ -194,6 +189,7 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
         {task.source === "inbox" && can("assignOwner") && <div className="mt-4"><label className="text-xs font-semibold text-slate-500">Assign FC-Owner</label><Select value={task.assigneeId || "unassigned"} onValueChange={value => show(assignBrand(customer.id, value))}><SelectTrigger className="mt-2 w-full"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="unassigned">Unassigned</SelectItem>{humanAssignees.map(user => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}</SelectContent></Select></div>}
 
         {task.source === "inbox" && <div className="mt-5 grid gap-2">
+          {can("reply") && <Button variant="outline" className="justify-start" onClick={() => setSendMessage(true)}><Send className="mr-2 size-4"/>Send message</Button>}
           {can("launch") && <Button variant="outline" className="justify-start" disabled={!!customer.activeBombId || customer.status === "Bomb Running"} onClick={() => setLaunch(true)}><Bomb className="mr-2 size-4"/>Launch Bomb</Button>}
           {can("changeCP") && <Button variant="outline" className="justify-start" onClick={() => setChangeCP(true)}><Check className="mr-2 size-4"/>Change CP</Button>}
           {can("reply") && task.status !== "Resolved" && <Button variant="outline" className="justify-start" onClick={() => show(resolveInbox(task.id))}><CheckCircle2 className="mr-2 size-4"/>End task</Button>}
@@ -203,6 +199,7 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
 
     {callTask && <CallResultDialog taskId={callTask.id} open={callResult} onOpenChange={setCallResult}/>} 
     <LaunchBombDialog customerId={customer.id} open={launch} onOpenChange={setLaunch}/>
+    <ReplyDialog customerId={customer.id} open={sendMessage} onOpenChange={setSendMessage}/>
     <ChangeCPDialog customerId={customer.id} open={changeCP} onOpenChange={setChangeCP}/>
   </main>
   </div>;
@@ -215,5 +212,5 @@ function CallResultDialog({ taskId, open, onOpenChange }: { taskId: string; open
   const [recording, setRecording] = useState<"Attached" | "Upload manually" | "Unavailable">("Attached");
   const [callback, setCallback] = useState("");
   const requiresSummary = outcome === "Contact Responded" || outcome === "Connected — No Useful Response" || outcome === "Call Back Requested";
-  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent><DialogHeader><DialogTitle>Complete call task</DialogTitle><DialogDescription>The call record is saved before the workflow moves forward.</DialogDescription></DialogHeader><Select value={outcome} onValueChange={value => setOutcome(value as CallOutcome)}><SelectTrigger className="w-full"><SelectValue/></SelectTrigger><SelectContent>{["Contact Responded", "Connected — No Useful Response", "No Answer", "Voicemail", "Call Back Requested", "Wrong Number", "Wrong Contact", "Other"].map(value => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select>{requiresSummary && <Textarea value={summary} onChange={event => setSummary(event.target.value)} placeholder="Full call notes or transcript (required)"/>}{outcome === "Call Back Requested" && <Input type="date" value={callback} onChange={event => setCallback(event.target.value)}/>}<Select value={recording} onValueChange={value => setRecording(value as typeof recording)}><SelectTrigger className="w-full"><SelectValue/></SelectTrigger><SelectContent>{["Attached", "Upload manually", "Unavailable"].map(value => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select><div className="rounded-xl bg-slate-50 p-4 text-xs leading-5 text-slate-600">If the correct contact answers, the call is recorded, the Bomb stops, and a Reply Task is created for a Human Responder. No Answer and Voicemail let the Bomb continue.</div><DialogFooter><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button disabled={requiresSummary && !summary.trim()} onClick={() => { const result = submitCallResult(taskId, outcome, summary, callback ? `${callback}T09:00:00.000Z` : undefined, recording); show(result); if (result.ok) onOpenChange(false); }}>Submit result</Button></DialogFooter></DialogContent></Dialog>;
+  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent><DialogHeader><DialogTitle>Complete call task</DialogTitle><DialogDescription>The call record is saved before the workflow moves forward.</DialogDescription></DialogHeader><Select value={outcome} onValueChange={value => setOutcome(value as CallOutcome)}><SelectTrigger className="w-full"><SelectValue/></SelectTrigger><SelectContent>{["Contact Responded", "Connected — No Useful Response", "No Answer", "Voicemail", "Call Back Requested", "Wrong Number", "Wrong Contact", "Other"].map(value => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select>{requiresSummary && <Textarea value={summary} onChange={event => setSummary(event.target.value)} placeholder="Full call notes or transcript (required)"/>}{outcome === "Call Back Requested" && <Input type="date" value={callback} onChange={event => setCallback(event.target.value)}/>}<Select value={recording} onValueChange={value => setRecording(value as typeof recording)}><SelectTrigger className="w-full"><SelectValue/></SelectTrigger><SelectContent>{["Attached", "Upload manually", "Unavailable"].map(value => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select><div className="rounded-xl bg-slate-50 p-4 text-xs leading-5 text-slate-600">If the correct contact answers, the call is recorded, the Bomb stops, and a Reply Task is created for a FC_Owner. No Answer and Voicemail let the Bomb continue.</div><DialogFooter><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button disabled={requiresSummary && !summary.trim()} onClick={() => { const result = submitCallResult(taskId, outcome, summary, callback ? `${callback}T09:00:00.000Z` : undefined, recording); show(result); if (result.ok) onOpenChange(false); }}>Submit result</Button></DialogFooter></DialogContent></Dialog>;
 }

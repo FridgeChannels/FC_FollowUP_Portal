@@ -1,6 +1,9 @@
 "use client";
 
+import { useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { Channel, Contact, Interaction, ScheduledAction, User, WorkspaceState, dateOnly } from "@/lib/outreach-domain";
+import { BrandReplyBox } from "./brand-reply-box";
 import { ChannelIcon } from "./channel-icon";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -67,9 +70,10 @@ export function BombExecutionPlan({
   contacts: Contact[];
   tone?: "default" | "success";
 }) {
+  const [expandedId, setExpandedId] = useState<string>();
   const instance = state.bombInstances.find(item => item.id === instanceId);
   const contact = contacts.find(item => item.id === instance?.targetContactId) || contacts[0];
-  const actions = state.actions.filter(item => item.bombInstanceId === instanceId);
+  const actions = state.actions.filter(item => item.bombInstanceId === instanceId).sort((a,b)=>a.actualDate.localeCompare(b.actualDate));
   if (!actions.length) return null;
   const current = currentActionIndex(actions);
   const running = instance?.status === "Running" || instance?.status === "Paused";
@@ -83,19 +87,26 @@ export function BombExecutionPlan({
       const isPast = index < current || doneStatuses.has(action.status) || skipped;
       const numberClass = isCurrent ? "bg-violet-600 text-white" : tone === "success" ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-700";
       const lineClass = isCurrent ? "bg-violet-300" : tone === "success" ? "bg-emerald-200" : "bg-slate-200";
+      const expanded = expandedId === action.id;
+      const related = state.interactions.filter(interaction => interaction.customerId === action.customerId && interaction.channel === action.channel && interaction.contactId === contact?.id && (interaction.bombInstanceId === instanceId || !interaction.bombInstanceId && !!instance && interaction.createdAt >= instance.startedAt));
+      const hasInbound = related.some(interaction => interaction.direction === "Inbound");
       return <li key={action.id} className="flex gap-3">
         <div className="flex w-7 shrink-0 flex-col items-center">
           <span className={`grid size-7 place-items-center rounded-full text-[11px] font-bold ${numberClass}`}>{index + 1}</span>
           {index < actions.length - 1 && <span className={`mt-1 w-px flex-1 min-h-6 ${lineClass}`}/>}
         </div>
-        <div className={`mb-3 min-w-0 flex-1 rounded-xl border px-3 py-3 ${isCurrent ? "border-violet-300 bg-violet-50/70 ring-1 ring-violet-200" : skipped ? "border-slate-200 bg-white opacity-55" : isPast ? "border-slate-200 bg-white" : "border-slate-200 bg-white"}`}>
+        <div className={`mb-3 min-w-0 flex-1 rounded-xl px-3 py-3 ${isCurrent ? "bg-violet-50" : skipped ? "bg-slate-50/70 opacity-55" : "bg-slate-50/80"}`}>
+          <button type="button" className="w-full text-left" onClick={()=>setExpandedId(expanded?undefined:action.id)} aria-expanded={expanded}>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2"><ChannelIcon channel={action.channel} className="size-6"/><span className="text-sm font-semibold text-slate-950">{action.channel}</span>{isCurrent && <Badge className="bg-violet-600 text-[10px] text-white">Current</Badge>}</div>
-            <Badge variant={skipped ? "secondary" : isCurrent ? "default" : "outline"} className="text-[10px]">{isCurrent ? "In progress" : action.status}</Badge>
+            <div className="flex items-center gap-2"><Badge variant={skipped ? "secondary" : isCurrent ? "default" : "outline"} className="text-[10px]">{hasInbound?"Replied":isCurrent ? "In progress" : action.status}</Badge><ChevronDown className={`size-4 text-slate-400 transition-transform ${expanded?"rotate-180":""}`}/></div>
           </div>
           <time dateTime={action.actualDate} className="mt-1.5 block font-mono text-xs text-slate-500">{formatUtcTime(action.actualDate)}</time>
           <PlanPeople contact={contact} channel={action.channel} caller={skipped ? undefined : caller} action={action}/>
           {skipped && <p className="mt-2 text-xs text-amber-800">{action.note || "Channel unavailable"}</p>}
+          </button>
+          {expanded&&<div className="mt-3 pt-3"><div className="text-[11px] font-semibold uppercase tracking-[.12em] text-slate-400">Sent content</div><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{action.content||"No written content for this step."}</p></div>}
+          {related.filter(item=>item.direction==="Inbound").map(item=><div key={item.id} className="mt-3"><div className="rounded-xl bg-rose-50 p-3"><div className="text-[11px] font-semibold uppercase tracking-wide text-rose-700">This is a reply</div><div className="mt-0.5 text-[11px] font-medium text-rose-600">from {contact?.name}</div><p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-700">{item.content}</p></div><BrandReplyBox customerId={action.customerId} interaction={item} bombInstanceId={instanceId}/></div>)}
         </div>
       </li>;
     })}
@@ -114,7 +125,7 @@ export function CurrentBombPlan({
   const instanceId = pinnedBombInstanceId(state, customerId);
   if (!instanceId) return null;
   const instance = state.bombInstances.find(item => item.id === instanceId);
-  const actions = state.actions.filter(item => item.bombInstanceId === instanceId);
+  const actions = state.actions.filter(item => item.bombInstanceId === instanceId).sort((a,b)=>a.actualDate.localeCompare(b.actualDate));
   if (!instance || !actions.length) return null;
   const current = currentActionIndex(actions);
   const currentAction = current >= 0 ? actions[current] : undefined;
@@ -122,7 +133,7 @@ export function CurrentBombPlan({
     ? `Current stage · Step ${current + 1} · ${currentAction.channel}`
     : instance.status === "Paused" ? "Bomb paused" : "All scheduled steps are complete";
 
-  return <div className="border-b bg-slate-50/80 px-5 py-4">
+  return <div className="bg-slate-50/80 px-5 py-4">
     <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
       <div>
         <div className="text-[11px] font-semibold uppercase tracking-[.12em] text-slate-400">This bomb · execution plan</div>

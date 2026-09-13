@@ -3,7 +3,10 @@ import "./globals.css";
 import { WorkspaceProvider } from "./workspace-store";
 
 export const metadata: Metadata = {
-  title: "Outreach Control",
+  title: {
+    default: "Outreach Control",
+    template: "%s · Outreach Control",
+  },
   description: "CP-driven multi-channel outreach operations workspace.",
   icons: {
     icon: "/favicon.svg",
