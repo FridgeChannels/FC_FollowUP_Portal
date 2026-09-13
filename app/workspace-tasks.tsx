@@ -125,12 +125,12 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
     <div className="mb-4 flex flex-col gap-3 rounded-2xl border bg-white p-3 lg:flex-row lg:items-center">
       <div className="relative min-w-56 flex-1 lg:max-w-sm"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400"/><Input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search brand or task…" className="pl-9"/></div>
       <Select value={type} onValueChange={value => setType(value as TaskType | "All")}><SelectTrigger className="w-full lg:w-40"><SelectValue/></SelectTrigger><SelectContent>{["All", "Call", "Reply"].map(value => <SelectItem key={value} value={value}>{value === "All" ? "All types" : value}</SelectItem>)}</SelectContent></Select>
-      {manager && <Select value={assignee} onValueChange={setAssignee}><SelectTrigger className="w-full lg:w-44"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">All assignees</SelectItem><SelectItem value="unassigned">Unassigned</SelectItem>{state.users.map(user => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}</SelectContent></Select>}
+      {manager && <Select value={assignee} onValueChange={setAssignee}><SelectTrigger className="w-full lg:w-44"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">All FC-Owners</SelectItem><SelectItem value="unassigned">Unassigned</SelectItem>{state.users.map(user => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}</SelectContent></Select>}
       <Select value={status} onValueChange={value => setStatus(value as typeof status)}><SelectTrigger className="w-full lg:w-36"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="Open">Open</SelectItem><SelectItem value="Completed">Completed</SelectItem><SelectItem value="All">All statuses</SelectItem></SelectContent></Select>
     </div>
 
     <div className="overflow-hidden rounded-2xl border bg-white">
-      {tasks.length ? <div className="overflow-x-auto"><Table><TableHeader><TableRow className="bg-slate-50"><TableHead className="min-w-56 pl-5">Brand</TableHead><TableHead>Type</TableHead><TableHead>Status</TableHead><TableHead className="min-w-64">Summary</TableHead><TableHead>Due</TableHead><TableHead>Assignee</TableHead></TableRow></TableHeader><TableBody>{tasks.map(task => {
+      {tasks.length ? <div className="overflow-x-auto"><Table><TableHeader><TableRow className="bg-slate-50"><TableHead className="min-w-56 pl-5">Brand</TableHead><TableHead>Type</TableHead><TableHead>Status</TableHead><TableHead className="min-w-64">Summary</TableHead><TableHead>Due</TableHead><TableHead>FC-Owner</TableHead></TableRow></TableHeader><TableBody>{tasks.map(task => {
         const customer = state.customers.find(c => c.id === task.customerId);
         const assigneeName = state.users.find(user => user.id === task.assigneeId)?.name || "Unassigned";
         const overdue = isDue(task, state.simulatedDate);
@@ -152,16 +152,18 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
   const { state, can, sendHumanReply, resolveInbox, assignBrand, reassignCall } = useWorkspace();
   const router = useRouter();
   const [channel, setChannel] = useState<Channel>("Email");
+  const [replyContactId, setReplyContactId] = useState(task.contactId || "");
   const [message, setMessage] = useState("");
   const [callResult, setCallResult] = useState(false);
   const [launch, setLaunch] = useState(false);
   const [changeCP, setChangeCP] = useState(false);
   const customer = state.customers.find(c => c.id === task.customerId);
   const contact = customer?.contacts.find(c => c.id === task.contactId) || customer?.contacts[0];
+  const replyContact = customer?.contacts.find(c => c.id === replyContactId) || contact;
   const callTask = task.source === "call" ? state.callTasks.find(call => call.id === task.id) : undefined;
   const timeline = state.interactions.filter(item => item.customerId === task.customerId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   if (!customer || !contact) return <main className="grid place-items-center bg-slate-50 text-sm text-slate-500">Brand context unavailable.</main>;
-  const available = (["Email", "SMS", "WhatsApp", "LinkedIn"] as Channel[]).filter(value => value === "Email" ? contact.email && contact.emailValid : value === "SMS" ? contact.phone && contact.phoneValid : value === "WhatsApp" ? contact.whatsapp : contact.linkedin);
+  const available = (["Email", "SMS", "WhatsApp", "LinkedIn"] as Channel[]).filter(value => value === "Email" ? replyContact?.email && replyContact.emailValid : value === "SMS" ? replyContact?.phone && replyContact.phoneValid : value === "WhatsApp" ? replyContact?.whatsapp : replyContact?.linkedin);
   const effectiveChannel = available.includes(channel) ? channel : available[0];
   const humanAssignees = state.users.filter(user => user.role === "Human Responder" || user.role === "Admin");
   const callers = state.users.filter(user => user.role === "Caller");
@@ -181,16 +183,16 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
           <InteractionFeed interactions={timeline} contacts={customer.contacts} maxHeight="max-h-[480px]"/>
         </section>
 
-        {task.source === "inbox" && can("reply") && task.status !== "Resolved" && <section className="mt-4 rounded-xl border bg-white p-4"><div className="mb-2 flex items-center justify-between gap-3"><Select value={effectiveChannel} onValueChange={value => setChannel(value as Channel)}><SelectTrigger size="sm" className="w-44"><SelectValue placeholder="Channel"/></SelectTrigger><SelectContent>{available.map(value => <SelectItem key={value} value={value}><ChannelOption channel={value}/></SelectItem>)}</SelectContent></Select><span className="text-xs text-slate-400">Reply to {contact.name}</span></div><div className="flex gap-2"><Textarea value={message} onChange={event => setMessage(event.target.value)} className="min-h-20 resize-none" placeholder="Write a reply…"/><Button className="h-20 px-5" disabled={!message.trim() || !effectiveChannel} onClick={() => { const result = sendHumanReply(customer.id, contact.id, effectiveChannel, message); show(result); if (result.ok) setMessage(""); }}><Send className="size-4"/></Button></div></section>}
+        {task.source === "inbox" && can("reply") && task.status !== "Resolved" && <section className="mt-4 rounded-xl border bg-white p-4"><div className="mb-2 flex items-center justify-between gap-3"><div className="flex gap-2"><Select value={replyContact?.id} onValueChange={value => setReplyContactId(value)}><SelectTrigger size="sm" className="w-44"><SelectValue placeholder="Contact"/></SelectTrigger><SelectContent>{customer.contacts.map(item => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectContent></Select><Select value={effectiveChannel} onValueChange={value => setChannel(value as Channel)}><SelectTrigger size="sm" className="w-44"><SelectValue placeholder="Channel"/></SelectTrigger><SelectContent>{available.map(value => <SelectItem key={value} value={value}><ChannelOption channel={value}/></SelectItem>)}</SelectContent></Select></div><span className="text-xs text-slate-400">Reply needed</span></div><div className="flex gap-2"><Textarea value={message} onChange={event => setMessage(event.target.value)} className="min-h-20 resize-none" placeholder="Write a reply…"/><Button className="h-20 px-5" disabled={!message.trim() || !effectiveChannel} onClick={() => { if (!replyContact) return; const result = sendHumanReply(customer.id, replyContact.id, effectiveChannel, message); show(result); if (result.ok) setMessage(""); }}><Send className="size-4"/></Button></div></section>}
       </div>
 
       <aside className="border-t bg-white p-5 lg:border-l lg:border-t-0">
         <div className="flex items-center gap-3"><Avatar><AvatarFallback className="bg-violet-100 font-bold text-violet-700">{customer.initials}</AvatarFallback></Avatar><div><b className="text-sm">{customer.name}</b><div className="text-xs text-slate-500">{state.cps.find(cp => cp.code === customer.cp)?.goal}</div></div></div>
-        <div className="mt-5 rounded-xl bg-slate-50 p-4"><div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Task owner</div><div className="mt-2 flex items-center gap-2 text-sm font-semibold"><UserRound className="size-4"/>{state.users.find(user => user.id === task.assigneeId)?.name || "Unassigned"}</div></div>
+        <div className="mt-5 rounded-xl bg-slate-50 p-4"><div className="text-xs font-semibold uppercase tracking-wide text-slate-400">FC-Owner</div><div className="mt-2 flex items-center gap-2 text-sm font-semibold"><UserRound className="size-4"/>{state.users.find(user => user.id === task.assigneeId)?.name || "Unassigned"}</div></div>
 
         {callTask && can("submitCall") && callTask.status === "Scheduled" && <Button className="mt-4 w-full" onClick={() => setCallResult(true)}><Phone className="mr-2 size-4"/>Complete call</Button>}
         {callTask && can("manageCalls") && <div className="mt-4"><label className="text-xs font-semibold text-slate-500">Assign caller</label><Select value={callTask.callerId} onValueChange={value => show(reassignCall(callTask.id, value))}><SelectTrigger className="mt-2 w-full"><SelectValue/></SelectTrigger><SelectContent>{callers.map(user => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}</SelectContent></Select></div>}
-        {task.source === "inbox" && can("assignOwner") && <div className="mt-4"><label className="text-xs font-semibold text-slate-500">Assign responder</label><Select value={task.assigneeId || "unassigned"} onValueChange={value => show(assignBrand(customer.id, value))}><SelectTrigger className="mt-2 w-full"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="unassigned">Unassigned</SelectItem>{humanAssignees.map(user => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}</SelectContent></Select></div>}
+        {task.source === "inbox" && can("assignOwner") && <div className="mt-4"><label className="text-xs font-semibold text-slate-500">Assign FC-Owner</label><Select value={task.assigneeId || "unassigned"} onValueChange={value => show(assignBrand(customer.id, value))}><SelectTrigger className="mt-2 w-full"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="unassigned">Unassigned</SelectItem>{humanAssignees.map(user => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}</SelectContent></Select></div>}
 
         {task.source === "inbox" && <div className="mt-5 grid gap-2">
           {can("launch") && <Button variant="outline" className="justify-start" disabled={!!customer.activeBombId || customer.status === "Bomb Running"} onClick={() => setLaunch(true)}><Bomb className="mr-2 size-4"/>Launch Bomb</Button>}
