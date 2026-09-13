@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Bomb, CheckCircle2, Clock3, MessageCircle, Phone, UserRound } from "lucide-react";
 import { Channel, Contact, Interaction } from "@/lib/outreach-domain";
+import { ChannelIcon, ChannelOption } from "./channel-icon";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -34,20 +35,20 @@ const contactPoint = (contact: Contact, channel?: Channel) => {
 };
 
 const initials = (name: string) => name.split(/\s+/).map(part => part[0]).join("").slice(0, 2).toUpperCase();
+const allChannels: Channel[] = ["Email", "SMS", "WhatsApp", "LinkedIn", "Phone"];
 
 export function InteractionFeed({ interactions, contacts, maxHeight = "max-h-[520px]" }: { interactions: Interaction[]; contacts: Contact[]; maxHeight?: string }) {
   const [contactId, setContactId] = useState("all");
   const [channel, setChannel] = useState("all");
-  const channels = useMemo(() => [...new Set(interactions.flatMap(interaction => interaction.channel ? [interaction.channel] : []))], [interactions]);
   const activeContactId = contactId === "all" || contacts.some(contact => contact.id === contactId) ? contactId : "all";
-  const activeChannel = channel === "all" || channels.includes(channel as Channel) ? channel : "all";
+  const activeChannel = channel === "all" || allChannels.includes(channel as Channel) ? channel : "all";
   const visible = interactions.filter(interaction => (activeContactId === "all" || interaction.contactId === activeContactId) && (activeChannel === "all" || interaction.channel === activeChannel));
 
   return <div>
     <div className="flex flex-col gap-2 border-b bg-slate-50/70 px-5 py-3 sm:flex-row sm:items-center">
       <div className="mr-auto text-xs text-slate-500"><b className="text-slate-900">{visible.length}</b> complete records</div>
       <Select value={activeContactId} onValueChange={setContactId}><SelectTrigger size="sm" className="w-full bg-white sm:w-48"><SelectValue placeholder="All Contacts"/></SelectTrigger><SelectContent><SelectItem value="all">All Contacts</SelectItem>{contacts.map(contact => <SelectItem key={contact.id} value={contact.id}>{contact.name} · {contact.role}</SelectItem>)}</SelectContent></Select>
-      <Select value={activeChannel} onValueChange={setChannel}><SelectTrigger size="sm" className="w-full bg-white sm:w-40"><SelectValue placeholder="All channels"/></SelectTrigger><SelectContent><SelectItem value="all">All channels</SelectItem>{channels.map(value => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select>
+      <Select value={activeChannel} onValueChange={setChannel}><SelectTrigger size="sm" className="w-full bg-white sm:w-44"><SelectValue placeholder="All channels"/></SelectTrigger><SelectContent><SelectItem value="all">All channels</SelectItem>{allChannels.map(value => <SelectItem key={value} value={value}><ChannelOption channel={value}/></SelectItem>)}</SelectContent></Select>
     </div>
     <div className={`${maxHeight} divide-y overflow-y-auto`}>
     {visible.length ? visible.map(interaction => {
@@ -59,7 +60,7 @@ export function InteractionFeed({ interactions, contacts, maxHeight = "max-h-[52
       const Icon = interaction.type === "Phone" ? Phone : interaction.type === "Message" ? MessageCircle : interaction.type === "CP" ? CheckCircle2 : interaction.type === "Bomb" ? Bomb : Clock3;
       return <article key={interaction.id} className="p-5 sm:p-6">
         <div className="flex items-start gap-4">
-          <span className={`grid size-10 shrink-0 place-items-center rounded-xl ${interaction.type === "Phone" ? "bg-blue-100 text-blue-700" : interaction.type === "Message" ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-600"}`}><Icon className="size-4"/></span>
+          <span className={`grid size-10 shrink-0 place-items-center rounded-xl ${interaction.channel ? "bg-white" : interaction.type === "Phone" ? "bg-blue-100 text-blue-700" : interaction.type === "Message" ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-600"}`}>{interaction.channel ? <ChannelIcon channel={interaction.channel} className="size-7"/> : <Icon className="size-4"/>}</span>
           <div className="min-w-0 flex-1">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <div>

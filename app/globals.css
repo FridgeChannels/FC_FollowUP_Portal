@@ -19,24 +19,24 @@
 }
 
 :root {
-  --background: #f4f6fa;
+  --background: #f7f8fc;
   --foreground: #111827;
   --card: #ffffff;
   --card-foreground: #171717;
   --popover: #ffffff;
   --popover-foreground: #171717;
-  --primary: #635bff;
+  --primary: #5146e5;
   --primary-foreground: #fafafa;
   --secondary: #eef1f7;
   --secondary-foreground: #171717;
   --muted: #eef1f7;
   --muted-foreground: #667085;
-  --accent: #eef1ff;
+  --accent: #eef2ff;
   --accent-foreground: #171717;
   --destructive: #e7000b;
-  --border: #dfe3eb;
+  --border: #e3e7ef;
   --input: #d7dce6;
-  --ring: #8c85ff;
+  --ring: #818cf8;
   --chart-1: #f54900;
   --chart-2: #009689;
   --chart-3: #104e64;
@@ -45,7 +45,7 @@
   --radius: 0.75rem;
   --sidebar: #11131a;
   --sidebar-foreground: #d9dde7;
-  --sidebar-primary: #716aff;
+  --sidebar-primary: #818cf8;
   --sidebar-primary-foreground: #fafafa;
   --sidebar-accent: #22252e;
   --sidebar-accent-foreground: #ffffff;
@@ -139,3 +139,12 @@ body {
 
 * { scrollbar-width: thin; scrollbar-color: #c7ccd6 transparent; }
 button, a, input, textarea { outline-offset: 2px; }
+
+/* Semantic UI tokens: use color to explain state, never as decoration. */
+.ui-surface { background: var(--card); border-color: var(--border); }
+.ui-eyebrow { color: #5146e5; }
+.ui-focus-ring:focus-visible { outline: 2px solid #818cf8; outline-offset: 2px; }
+.ui-cp-0 { border-color: #cbd5e1; background: #f8fafc; color: #475569; }
+.ui-cp-1 { border-color: #ddd6fe; background: #f5f3ff; color: #6d28d9; }
+.ui-cp-2 { border-color: #bfdbfe; background: #eff6ff; color: #1d4ed8; }
+.ui-cp-3 { border-color: #a7f3d0; background: #ecfdf5; color: #047857; }

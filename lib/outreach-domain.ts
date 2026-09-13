@@ -1,7 +1,7 @@
-export type Role = "Admin" | "Outreach Manager" | "Human Responder" | "Caller" | "Viewer";
+export type Role = "Admin" | "Human Responder" | "Caller" | "Viewer";
 export type Channel = "Email" | "SMS" | "WhatsApp" | "LinkedIn" | "Phone";
 export type CPCode = "CP0" | "CP1" | "CP2" | "CP3";
-export type CustomerStatus = "Ready" | "Bomb Running" | "Waiting for Reply" | "Human Handling" | "Follow-up Due" | "Paused" | "Closed";
+export type CustomerStatus = "Ready" | "Bomb Running" | "Waiting for Reply" | "Human Handling" | "Paused" | "Closed";
 export type ActionStatus = "Scheduled" | "Sending" | "Sent" | "Delivered" | "Failed" | "Cancelled" | "Skipped" | "Completed";
 export type CallOutcome = "Contact Responded" | "Connected — No Useful Response" | "No Answer" | "Voicemail" | "Call Back Requested" | "Wrong Number" | "Wrong Contact" | "Other";
 
@@ -32,7 +32,7 @@ export type Interaction = {
 };
 export type InboxItem = {
   id: string; customerId: string; contactId?: string; type: "Reply";
-  status: "Needs Reply" | "Waiting for Contact" | "Follow-up Scheduled" | "Resolved"; ownerId?: string; createdAt: string; updatedAt: string; preview: string;
+  status: "Needs Reply" | "Waiting for Reply" | "Follow-up Scheduled" | "Resolved"; ownerId?: string; createdAt: string; updatedAt: string; preview: string;
 };
 export type FollowUp = { id: string; customerId: string; inboxItemId?: string; dueAt: string; reason: string; note?: string; suggestedAction?: string; status: "Scheduled" | "Due" | "Completed" | "Cancelled" };
 export type CallTask = {
@@ -52,12 +52,23 @@ export type WorkspaceState = {
   callTasks: CallTask[]; audit: AuditEntry[]; cps: CPStage[]; integrations: ChannelIntegration[];
 };
 
+export const isClosedTaskStatus = (status: string) => ["Completed", "Resolved", "Cancelled"].includes(status);
+export const canSeeTask = (state: WorkspaceState, customerId: string, assigneeId?: string) => {
+  if (state.currentRole === "Admin") return true;
+  const customer = state.customers.find(item => item.id === customerId);
+  return assigneeId === state.currentUserId || customer?.ownerId === state.currentUserId;
+};
+export const visibleOpenTaskCount = (state: WorkspaceState) => {
+  const calls = state.callTasks.filter(task => !isClosedTaskStatus(task.status) && canSeeTask(state, task.customerId, task.callerId)).length;
+  const replies = state.inbox.filter(item => !isClosedTaskStatus(item.status) && canSeeTask(state, item.customerId, item.ownerId)).length;
+  return calls + replies;
+};
+
 export const roleCapabilities: Record<Role, string[]> = {
-  Admin: ["dashboard","customers","tasks","inbox","calls","bombs","workflow","analytics","settings","reply","launch","changeCP","editBrand","manageCalls","editBomb","editWorkflow","audit"],
-  "Outreach Manager": ["dashboard","customers","tasks","inbox","calls","bombs","workflow","analytics","reply","launch","changeCP","editBrand","manageCalls","editBomb","editWorkflow","audit"],
-  "Human Responder": ["dashboard","customers","tasks","inbox","reply","launch","changeCP","editBrand","createCall"],
-  Caller: ["tasks","calls","submitCall"],
-  Viewer: ["dashboard","customers","analytics"],
+  Admin: ["dashboard","customers","tasks","inbox","calls","bombs","workflow","analytics","settings","reply","launch","changeCP","editBrand","assignOwner","manageCalls","editBomb","editWorkflow","audit","importBrands"],
+  "Human Responder": ["dashboard","customers","tasks","inbox","bombs","reply","launch","changeCP","editBrand","createCall","editBomb"],
+  Caller: ["tasks","calls","bombs","submitCall","editBomb"],
+  Viewer: ["dashboard","customers","bombs","analytics","editBomb"],
 };
 
 const at = (day: string, time = "09:00:00") => `${day}T${time.length === 5 ? `${time}:00` : time}.000Z`;
@@ -79,7 +90,7 @@ const contacts: Record<string, Contact[]> = {
 export function createSeedState(): WorkspaceState {
   const today = at("2026-09-11");
   const users: User[] = [
-    {id:"u_sarah",name:"Sarah Chen",initials:"SC",role:"Outreach Manager"},
+    {id:"u_sarah",name:"Sarah Chen",initials:"SC",role:"Admin"},
     {id:"u_mike",name:"Mike Ross",initials:"MR",role:"Human Responder"},
     {id:"u_alex",name:"Alex Morgan",initials:"AM",role:"Caller",dailyCapacity:6,workingDays:[1,2,3,4,5]},
     {id:"u_priya",name:"Priya Shah",initials:"PS",role:"Caller",dailyCapacity:6,workingDays:[1,2,3,4,5]},
@@ -88,7 +99,7 @@ export function createSeedState(): WorkspaceState {
   const customers: Customer[] = [
     {id:"c_acme",name:"Acme Foods",initials:"AF",cp:"CP1",status:"Human Handling",source:"Expo West 2026",ownerId:"u_sarah",contacts:contacts.acme,createdAt:addDays(today,-12),updatedAt:addDays(today,-0.02)},
     {id:"c_northstar",name:"Northstar Coffee",initials:"NC",cp:"CP2",status:"Bomb Running",source:"Natural Products Expo",ownerId:"u_sarah",contacts:contacts.northstar,activeBombId:"bi_north",createdAt:addDays(today,-18),updatedAt:addDays(today,-0.08)},
-    {id:"c_brightland",name:"Brightland Labs",initials:"BL",cp:"CP1",status:"Follow-up Due",source:"Inbound",ownerId:"u_mike",contacts:contacts.brightland,createdAt:addDays(today,-21),updatedAt:addDays(today,-3)},
+    {id:"c_brightland",name:"Brightland Labs",initials:"BL",cp:"CP1",status:"Human Handling",source:"Inbound",ownerId:"u_mike",contacts:contacts.brightland,createdAt:addDays(today,-21),updatedAt:addDays(today,-3)},
     {id:"c_goodkind",name:"Goodkind Market",initials:"GM",cp:"CP0",status:"Ready",source:"Expo West 2026",contacts:contacts.goodkind,createdAt:addDays(today,-1),updatedAt:addDays(today,-0.15)},
     {id:"c_olive",name:"Olive & Oak",initials:"OO",cp:"CP2",status:"Waiting for Reply",source:"Referral",ownerId:"u_mike",contacts:contacts.olive,activeBombId:"bi_olive",createdAt:addDays(today,-30),updatedAt:addDays(today,-0.25)},
     {id:"c_harbor",name:"Harbor House",initials:"HH",cp:"CP1",status:"Paused",source:"Expo West 2026",ownerId:"u_sarah",contacts:contacts.harbor,activeBombId:"bi_harbor",createdAt:addDays(today,-16),updatedAt:addDays(today,-1)},
@@ -127,7 +138,7 @@ export function createSeedState(): WorkspaceState {
     {id:"in_acme",customerId:"c_acme",contactId:"ct_acme_john",type:"Reply",status:"Needs Reply",ownerId:"u_sarah",createdAt:at("2026-09-11","08:41"),updatedAt:at("2026-09-11","08:41"),preview:"Yes, I gave it to Mike yesterday."},
     {id:"in_bright",customerId:"c_brightland",contactId:"ct_bright_neil",type:"Reply",status:"Follow-up Scheduled",ownerId:"u_mike",createdAt:addDays(today,-3),updatedAt:addDays(today,-0.1),preview:"Follow-up overdue by 2 hours"},
     {id:"in_kite",customerId:"c_kite",contactId:"ct_kite_emma",type:"Reply",status:"Needs Reply",ownerId:"u_sarah",createdAt:at("2026-09-11","05:00"),updatedAt:at("2026-09-11","05:00"),preview:"Could you send me more details?"},
-    {id:"in_field",customerId:"c_field",contactId:"ct_field_sam",type:"Reply",status:"Waiting for Contact",ownerId:"u_mike",createdAt:addDays(today,-2),updatedAt:addDays(today,-1),preview:"Tuesday afternoon works for me."},
+    {id:"in_field",customerId:"c_field",contactId:"ct_field_sam",type:"Reply",status:"Waiting for Reply",ownerId:"u_mike",createdAt:addDays(today,-2),updatedAt:addDays(today,-1),preview:"Tuesday afternoon works for me."},
   ];
   const followUps: FollowUp[] = [{id:"fu_bright",customerId:"c_brightland",inboxItemId:"in_bright",dueAt:at("2026-09-11","07:00"),reason:"No response after SMS",note:"Try Email or create a Call Task",suggestedAction:"Reply",status:"Due"}];
   const callTasks: CallTask[] = [
@@ -151,5 +162,5 @@ export function createSeedState(): WorkspaceState {
     {id:"au2",actorId:"u_sarah",customerId:"c_northstar",action:"Bomb launched",newValue:"Owner Meeting V4",createdAt:addDays(today,-1)},
     {id:"au3",actorId:"u_mike",customerId:"c_brightland",action:"Follow-up created",newValue:"Sep 11, 7:00 AM",createdAt:addDays(today,-3)},
   ];
-  return {version:3,simulatedDate:today,currentRole:"Outreach Manager",currentUserId:"u_sarah",users,customers,bombs,bombInstances,actions,interactions,inbox,followUps,callTasks,audit,cps,integrations};
+  return {version:4,simulatedDate:today,currentRole:"Admin",currentUserId:"u_sarah",users,customers,bombs,bombInstances,actions,interactions,inbox,followUps,callTasks,audit,cps,integrations};
 }
