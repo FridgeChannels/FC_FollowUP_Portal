@@ -1,5 +1,5 @@
 import vinext from "vinext";
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 import hostingConfig from "./.openai/hosting.json";
 import { readExecutionProfile } from "./scripts/execution-profile.mjs";
 import { sites } from "./build/sites-vite-plugin";
@@ -13,29 +13,54 @@ const { d1, r2 } = hostingConfig;
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 const managedLinux = readExecutionProfile() === "managed-linux";
 
-const localBindingConfig = {
-  main: "vinext/server/fetch-handler",
-  compatibility_flags: ["nodejs_compat"],
-  d1_databases: d1
-    ? [
-        {
-          binding: d1,
-          database_name: "site-creator-d1",
-          database_id: SITE_CREATOR_PLACEHOLDER_DATABASE_ID,
-        },
-      ]
-    : [],
-  r2_buckets: r2
-    ? [
-        {
-          binding: r2,
-          bucket_name: "site-creator-r2",
-        },
-      ]
-    : [],
-};
+export default defineConfig(async ({ mode }) => {
+  const loadedEnv = loadEnv(mode, process.cwd(), "");
+  const notionApiKey = process.env.NOTION_API_KEY || loadedEnv.NOTION_API_KEY;
+  const followupClientDbId =
+    process.env.NOTION_FOLLOWUP_CLIENT_DB_ID || loadedEnv.NOTION_FOLLOWUP_CLIENT_DB_ID;
+  const followupOwnerDbId =
+    process.env.NOTION_FOLLOWUP_OWNER_DB_ID || loadedEnv.NOTION_FOLLOWUP_OWNER_DB_ID;
+  const followupCpDbId =
+    process.env.NOTION_FOLLOWUP_CP_DB_ID || loadedEnv.NOTION_FOLLOWUP_CP_DB_ID;
+  const followupContactDbId =
+    process.env.NOTION_FOLLOWUP_CONTACT_DB_ID || loadedEnv.NOTION_FOLLOWUP_CONTACT_DB_ID;
+  const adminEmails = process.env.ADMIN_EMAILS || loadedEnv.ADMIN_EMAILS;
+  const localBindingConfig = {
+    main: "vinext/server/fetch-handler",
+    compatibility_flags: ["nodejs_compat"],
+    vars: {
+      ...(notionApiKey ? { NOTION_API_KEY: notionApiKey } : {}),
+      ...(followupClientDbId
+        ? { NOTION_FOLLOWUP_CLIENT_DB_ID: followupClientDbId }
+        : {}),
+      ...(followupOwnerDbId
+        ? { NOTION_FOLLOWUP_OWNER_DB_ID: followupOwnerDbId }
+        : {}),
+      ...(followupCpDbId ? { NOTION_FOLLOWUP_CP_DB_ID: followupCpDbId } : {}),
+      ...(followupContactDbId
+        ? { NOTION_FOLLOWUP_CONTACT_DB_ID: followupContactDbId }
+        : {}),
+      ...(adminEmails ? { ADMIN_EMAILS: adminEmails } : {}),
+    },
+    d1_databases: d1
+      ? [
+          {
+            binding: d1,
+            database_name: "site-creator-d1",
+            database_id: SITE_CREATOR_PLACEHOLDER_DATABASE_ID,
+          },
+        ]
+      : [],
+    r2_buckets: r2
+      ? [
+          {
+            binding: r2,
+            bucket_name: "site-creator-r2",
+          },
+        ]
+      : [],
+  };
 
-export default defineConfig(async () => {
   // Use Miniflare's local Request.cf placeholder unless fetching is requested.
   process.env.CLOUDFLARE_CF_FETCH_ENABLED ??= "false";
   process.env.WRANGLER_SEND_METRICS ??= "false";

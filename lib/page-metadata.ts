@@ -20,14 +20,13 @@ export type BrandListFilters = {
 };
 
 const STATUS_LABELS: Record<string, string> = {
-  action: "Action needed",
   all: "All statuses",
+  Unassigned: "Unassigned",
   Ready: "Ready",
-  "Bomb Running": "Bomb Running",
-  "Waiting for Reply": "Waiting for Reply",
-  "Human Handling": "Human Handling",
+  "In Progress": "In Progress",
   Paused: "Paused",
-  Closed: "Closed",
+  Completed: "Completed",
+  Terminated: "Terminated",
 };
 
 const first = (value: string | string[] | undefined) =>

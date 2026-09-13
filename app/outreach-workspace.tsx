@@ -3,13 +3,12 @@
 import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  Bomb, Check, ChevronDown, ClipboardCheck,
+  Bomb, ChevronDown, ClipboardCheck, LogOut,
   Settings, Users, Zap,
 } from "lucide-react";
-import { toast } from "sonner";
 import { Role, visibleOpenTaskCount } from "@/lib/outreach-domain";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent,
   SidebarGroupLabel, SidebarHeader, SidebarInset, SidebarMenu, SidebarMenuButton,
@@ -23,6 +22,7 @@ import { BrandDetail } from "./workspace-customer";
 import { TasksPage } from "./workspace-tasks";
 import { BombEditor, BombsPage } from "./workspace-bombs";
 import { SettingsPage } from "./workspace-admin";
+import { useSession } from "./use-session";
 
 type Screen = "Brands" | "ReplyTask" | "Bombs" | "Settings";
 const nav: { label: Screen; path: string; icon: typeof Users; cap: string; badge?: boolean }[] = [
@@ -36,16 +36,36 @@ const roleHome: Record<Role, string> = {
   Caller: "/tasks",
 };
 const routeScreen = (path: string): Screen => path.startsWith("/customers") ? "Brands" : path.startsWith("/bombs") ? "Bombs" : path.startsWith("/settings") ? "Settings" : "ReplyTask";
+const accountInitials = (name?: string | null, email?: string | null) => {
+  const source = name?.trim() || email?.split("@")[0] || "?";
+  const parts = source.split(/[\s._-]+/).filter(Boolean);
+  if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+  return source.slice(0, 2).toUpperCase();
+};
 
 export default function OutreachWorkspace() {
   const router = useRouter();
   const pathname = usePathname();
   const { state, hydrated, can, setRole } = useWorkspace();
+  const { user, loading: sessionLoading, signOut } = useSession();
   const screen = routeScreen(pathname);
   const taskCount = visibleOpenTaskCount(state);
   const replyCount = state.inbox.filter(item => item.status === "Needs Reply" && (state.currentRole === "Admin" || state.customers.find(customer => customer.id === item.customerId)?.ownerId === state.currentUserId)).length;
 
   useEffect(() => {
+    if (sessionLoading) return;
+    if (!user) {
+      const returnTo = pathname === "/" ? "/login" : `/login?return_to=${encodeURIComponent(pathname)}`;
+      router.replace(returnTo);
+    }
+  }, [sessionLoading, user, pathname, router]);
+
+  useEffect(() => {
+    if (user && state.currentRole !== user.role) setRole(user.role);
+  }, [user, state.currentRole, setRole]);
+
+  useEffect(() => {
+    if (sessionLoading || !user) return;
     if (pathname === "/") {
       router.replace(roleHome[state.currentRole]);
       return;
@@ -64,7 +84,7 @@ export default function OutreachWorkspace() {
     }
     const capability = screen === "Brands" ? "customers" : screen === "ReplyTask" ? "tasks" : screen.toLowerCase();
     if (!can(capability)) router.replace(roleHome[state.currentRole]);
-  }, [pathname, screen, state.currentRole, can, router]);
+  }, [sessionLoading, user, pathname, screen, state.currentRole, can, router]);
 
   useEffect(() => {
     const context = (document as Document & { modelContext?: { registerTool: (tool: object, options?: { signal?: AbortSignal }) => void | Promise<void> } }).modelContext;
@@ -88,8 +108,8 @@ export default function OutreachWorkspace() {
     return () => lifecycle.abort();
   }, [router]);
 
-  if (!hydrated) return <div className="grid min-h-screen grid-cols-[250px_1fr]"><div className="bg-slate-950"/><div className="space-y-5 p-8"><Skeleton className="h-10 w-64"/><div className="grid grid-cols-4 gap-4">{[1, 2, 3, 4].map(value => <Skeleton key={value} className="h-32 rounded-2xl"/>)}</div><Skeleton className="h-96 rounded-2xl"/></div></div>;
-  const current = state.users.find(user => user.id === state.currentUserId);
+  if (!hydrated || sessionLoading || !user) return <div className="grid min-h-screen grid-cols-[250px_1fr]"><div className="bg-slate-950"/><div className="space-y-5 p-8"><Skeleton className="h-10 w-64"/><div className="grid grid-cols-4 gap-4">{[1, 2, 3, 4].map(value => <Skeleton key={value} className="h-32 rounded-2xl"/>)}</div><Skeleton className="h-96 rounded-2xl"/></div></div>;
+  const displayName = user.name || user.email;
 
   return <SidebarProvider defaultOpen>
     <Sidebar collapsible="icon" className="border-r-0">
@@ -97,7 +117,7 @@ export default function OutreachWorkspace() {
       <SidebarContent className="px-2 py-3"><SidebarGroup><SidebarGroupLabel className="text-[10px] uppercase tracking-[.16em] text-slate-500">Workspace</SidebarGroupLabel><SidebarGroupContent><SidebarMenu>{nav.filter(item => can(item.cap) && !(state.currentRole === "FC_Owner" && item.label === "ReplyTask")).map(item => { const count = item.label === "Brands" && state.currentRole === "FC_Owner" ? replyCount : item.badge ? taskCount : 0; return <SidebarMenuItem key={item.path}><SidebarMenuButton tooltip={item.label} isActive={screen === item.label} onClick={() => router.push(item.path)} className={`h-10 rounded-lg px-3 text-[13px] font-medium ${item.label === "Brands" ? "data-[active=true]:bg-blue-500" : item.label === "ReplyTask" ? "data-[active=true]:bg-violet-500" : "data-[active=true]:bg-amber-500"} data-[active=true]:text-white`}><item.icon/><span>{item.label}</span>{count>0 && <span className={`ml-auto rounded-md px-1.5 py-0.5 text-[10px] group-data-[collapsible=icon]:hidden ${item.label === "Brands" ? "bg-rose-500/20 text-rose-200" : "bg-amber-400/20 text-amber-200"}`}>{count}</span>}</SidebarMenuButton></SidebarMenuItem>})}</SidebarMenu></SidebarGroupContent></SidebarGroup></SidebarContent>
       <SidebarFooter className="border-t border-white/8 p-3">
         {can("settings") && <SidebarMenu><SidebarMenuItem><SidebarMenuButton tooltip="Settings" isActive={screen === "Settings"} onClick={() => router.push("/settings")}><Settings/><span>Settings</span></SidebarMenuButton></SidebarMenuItem></SidebarMenu>}
-        <DropdownMenu><DropdownMenuTrigger asChild><button className="mt-2 flex w-full items-center gap-3 rounded-xl bg-white/[.04] p-2 text-left"><Avatar className="size-8"><AvatarFallback className="bg-violet-200 text-xs font-bold text-violet-800">{current?.initials || "SC"}</AvatarFallback></Avatar><span className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden"><span className="block truncate text-xs font-semibold text-white">{current?.name || "Sarah Chen"}</span><span className="block truncate text-[10px] text-slate-400">{state.currentRole}</span></span><ChevronDown className="size-3 text-slate-500 group-data-[collapsible=icon]:hidden"/></button></DropdownMenuTrigger><DropdownMenuContent side="right" align="end" className="w-56"><DropdownMenuLabel>Switch role</DropdownMenuLabel>{(["Admin", "FC_Owner", "Caller"] as Role[]).map(role => <DropdownMenuItem key={role} onClick={() => { setRole(role); router.push(roleHome[role]); toast.success(`Switched to ${role}`); }}>{state.currentRole === role && <Check className="mr-2 size-4"/>}<span className={state.currentRole === role ? "font-semibold" : "ml-6"}>{role}</span></DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu>
+        <DropdownMenu><DropdownMenuTrigger asChild><button className="mt-2 flex w-full items-center gap-3 rounded-xl bg-white/[.04] p-2 text-left"><Avatar className="size-8"><AvatarFallback className="bg-violet-200 text-xs font-bold text-violet-800">{accountInitials(user.name, user.email)}</AvatarFallback></Avatar><span className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden"><span className="block truncate text-xs font-semibold text-white">{displayName}</span><span className="block truncate text-[10px] text-slate-400">{user.role}</span></span><ChevronDown className="size-3 text-slate-500 group-data-[collapsible=icon]:hidden"/></button></DropdownMenuTrigger><DropdownMenuContent side="right" align="end" className="w-64"><DropdownMenuLabel className="space-y-0.5 font-normal"><span className="block truncate text-sm font-semibold">{displayName}</span><span className="block truncate text-xs text-muted-foreground">{user.email}</span></DropdownMenuLabel><DropdownMenuSeparator/><DropdownMenuItem onClick={async () => { await signOut(); router.replace("/login"); }}> <LogOut className="size-4"/>Sign out</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
       </SidebarFooter>
       <SidebarRail/>
     </Sidebar>

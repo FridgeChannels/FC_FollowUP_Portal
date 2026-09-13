@@ -7,7 +7,8 @@ import {
   ArrowLeft, Bomb, Check, CheckCircle2, MessageCircle, Phone, Search, Send, UserRound,
 } from "lucide-react";
 import { toast } from "sonner";
-import { CallOutcome, canSeeTask, dateOnly, isClosedTaskStatus } from "@/lib/outreach-domain";
+import type { BrandActivity, BrandTask } from "@/lib/brand-list";
+import { CallOutcome, canSeeTask, dateOnly, isClosedTaskStatus, type Contact, type Customer, type Interaction } from "@/lib/outreach-domain";
 import { useWorkspace } from "./workspace-store";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -34,7 +35,33 @@ type UnifiedTask = {
   status: string;
   priority: "Urgent" | "High" | "Normal" | "Low";
   summary: string;
+  brandName?: string;
+  remote?: boolean;
 };
+
+function asPriority(value?: string | null): UnifiedTask["priority"] {
+  if (value === "P0" || value === "Urgent") return "Urgent";
+  if (value === "P1" || value === "High") return "High";
+  if (value === "P2" || value === "Low") return "Low";
+  return "Normal";
+}
+
+function fromNotionTask(task: BrandTask): UnifiedTask {
+  return {
+    id: task.id,
+    source: task.channel === "Phone" ? "call" : "inbox",
+    type: task.channel === "Phone" ? "Call" : "Reply",
+    customerId: task.brandId || "",
+    contactId: task.contactId || undefined,
+    assigneeId: task.ownerId || undefined,
+    dueAt: task.scheduledAt || "",
+    status: task.status || "Pending",
+    priority: asPriority(task.priority),
+    summary: task.title,
+    brandName: task.brandName || undefined,
+    remote: true,
+  };
+}
 
 const show = (result: { ok: boolean; message: string }) => result.ok ? toast.success(result.message) : toast.error(result.message);
 const priorityRank: Record<UnifiedTask["priority"], number> = { Urgent: 0, High: 1, Normal: 2, Low: 3 };
@@ -53,13 +80,31 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
   const [assignee, setAssignee] = useState("all");
   const [status, setStatus] = useState<"Open" | "Completed" | "All">("Open");
   const [query, setQuery] = useState("");
+  const [remoteTasks, setRemoteTasks] = useState<UnifiedTask[] | null>(null);
+  const [remoteLoading, setRemoteLoading] = useState(true);
 
   useEffect(() => {
     setType(state.currentRole === "Caller" ? "Call" : "All");
     setAssignee("all");
   }, [state.currentRole]);
 
+  useEffect(() => {
+    let cancelled = false;
+    setRemoteLoading(true);
+    fetch("/api/tasks")
+      .then(async response => {
+        const payload = await response.json() as { tasks?: BrandTask[]; error?: string };
+        if (!response.ok) throw new Error(payload.error || "Failed to load tasks");
+        return (payload.tasks || []).map(fromNotionTask);
+      })
+      .then(items => { if (!cancelled) setRemoteTasks(items); })
+      .catch(() => { if (!cancelled) setRemoteTasks([]); })
+      .finally(() => { if (!cancelled) setRemoteLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
   const allTasks = useMemo<UnifiedTask[]>(() => {
+    if (remoteTasks) return remoteTasks;
     const calls: UnifiedTask[] = state.callTasks.map(task => ({
       id: task.id,
       source: "call",
@@ -88,13 +133,13 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
       };
     });
     return [...calls, ...human];
-  }, [state.callTasks, state.inbox, state.followUps]);
+  }, [remoteTasks, state.callTasks, state.inbox, state.followUps]);
 
   const tasks = useMemo(() => {
     return allTasks.filter(task => {
       const customer = state.customers.find(c => c.id === task.customerId);
-      const matchesQuery = !query || customer?.name.toLowerCase().includes(query.toLowerCase()) || task.summary.toLowerCase().includes(query.toLowerCase());
-      const matchesScope = canSeeTask(state, task.customerId, task.assigneeId);
+      const matchesQuery = !query || customer?.name.toLowerCase().includes(query.toLowerCase()) || (task.brandName || "").toLowerCase().includes(query.toLowerCase()) || task.summary.toLowerCase().includes(query.toLowerCase());
+      const matchesScope = task.remote || canSeeTask(state, task.customerId, task.assigneeId);
       const matchesType = type === "All" || task.type === type;
       const matchesAssignee = assignee === "all" || assignee === "unassigned" && !task.assigneeId || task.assigneeId === assignee;
       const matchesStatus = status === "All" || status === "Open" && !isDone(task) || status === "Completed" && isDone(task);
@@ -112,6 +157,7 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
   const selectedTask = selectedId ? allTasks.find(task => task.id === selectedId) : undefined;
 
   if (selectedId) {
+    if (remoteLoading && !selectedTask) return <div className="grid min-h-[60vh] place-items-center text-sm text-slate-500">Loading task…</div>;
     if (!selectedTask) return <div className="grid min-h-[60vh] place-items-center"><div className="text-center"><CheckCircle2 className="mx-auto mb-3 size-8 text-slate-300"/><h1 className="font-bold">Task not found</h1><Button variant="link" onClick={() => router.push("/tasks")}>Back to ReplyTask</Button></div></div>;
     return <TaskDetail task={selectedTask}/>;
   }
@@ -134,7 +180,7 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
         const overdue = isDue(task, state.simulatedDate);
         const Icon = task.type === "Call" ? Phone : MessageCircle;
         return <TableRow key={task.id} className={`cursor-pointer ${overdue ? "bg-amber-50/80 hover:bg-amber-50" : "hover:bg-violet-50/30"}`} onClick={() => router.push(`/tasks/${task.id}`)}>
-          <TableCell className="pl-5"><div className="flex items-center gap-3"><span className={`grid size-9 shrink-0 place-items-center rounded-xl ${task.type === "Call" ? "bg-blue-100 text-blue-700" : "bg-violet-100 text-violet-700"}`}><Icon className="size-4"/></span><div className="text-sm font-semibold">{customer?.name || "Unknown brand"}</div></div></TableCell>
+          <TableCell className="pl-5"><div className="flex items-center gap-3"><span className={`grid size-9 shrink-0 place-items-center rounded-xl ${task.type === "Call" ? "bg-blue-100 text-blue-700" : "bg-violet-100 text-violet-700"}`}><Icon className="size-4"/></span><div className="text-sm font-semibold">{customer?.name || task.brandName || "Unknown brand"}</div></div></TableCell>
           <TableCell><Badge variant="secondary" className="text-[10px]">{task.type}</Badge></TableCell>
           <TableCell>{overdue ? <Status value="Due"/> : <Status value={task.status}/>}</TableCell>
           <TableCell className="whitespace-nowrap text-xs text-slate-500">{dateOnly(task.dueAt)}</TableCell>
@@ -151,11 +197,63 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
   const [launch, setLaunch] = useState(false);
   const [sendMessage, setSendMessage] = useState(false);
   const [changeCP, setChangeCP] = useState(false);
-  const customer = state.customers.find(c => c.id === task.customerId);
+  const [remote, setRemote] = useState<{ customer: Customer; contact: Contact; timeline: Interaction[]; ownerName?: string } | null>(null);
+  useEffect(() => {
+    if (!task.remote) { setRemote(null); return; }
+    let cancelled = false;
+    fetch(`/api/tasks/${task.id}`)
+      .then(async response => {
+        const payload = await response.json() as { task?: BrandTask; activities?: BrandActivity[]; error?: string };
+        if (!response.ok) throw new Error(payload.error || "Task not found");
+        return payload;
+      })
+      .then(payload => {
+        if (cancelled || !payload.task) return;
+        const item = payload.task;
+        const contact: Contact = {
+          id: item.contactId || "unknown",
+          name: item.contactName || "KeyPerson",
+          role: "Other",
+          preferredChannel: item.channel === "Phone" || item.channel === "Email" || item.channel === "SMS" || item.channel === "WhatsApp" || item.channel === "LinkedIn" ? item.channel : "Email",
+          emailValid: false,
+          phoneValid: false,
+        };
+        const customer: Customer = {
+          id: item.brandId || task.customerId,
+          name: item.brandName || task.brandName || "Untitled brand",
+          initials: (item.brandName || "BR").slice(0, 2).toUpperCase(),
+          cp: "CP1",
+          status: "Ready",
+          source: "Follow-up ClientDB",
+          ownerId: item.brandOwnerId || undefined,
+          contacts: [contact],
+          createdAt: "",
+          updatedAt: "",
+        };
+        const timeline: Interaction[] = (payload.activities || []).map(activity => ({
+          id: activity.id,
+          customerId: customer.id,
+          contactId: activity.contactId || undefined,
+          type: activity.channel === "Phone" ? "Phone" : "Message",
+          channel: activity.channel === "Phone" || activity.channel === "Email" || activity.channel === "SMS" || activity.channel === "WhatsApp" || activity.channel === "LinkedIn" ? activity.channel : undefined,
+          direction: activity.direction || undefined,
+          title: activity.subject || activity.channel || "Conversation",
+          content: activity.content,
+          createdAt: activity.createdAt || "",
+          outcome: activity.callResult as Interaction["outcome"],
+        }));
+        setRemote({ customer, contact, timeline, ownerName: item.ownerName || undefined });
+      })
+      .catch(() => { if (!cancelled) setRemote(null); });
+    return () => { cancelled = true; };
+  }, [task.id, task.remote, task.customerId, task.brandName]);
+  const localCustomer = state.customers.find(c => c.id === task.customerId);
+  const customer = localCustomer || remote?.customer;
   const partnershipContext=customer?.partnershipContext;
-  const contact = customer?.contacts.find(c => c.id === task.contactId) || customer?.contacts[0];
+  const contact = localCustomer?.contacts.find(c => c.id === task.contactId) || localCustomer?.contacts[0] || remote?.contact;
   const callTask = task.source === "call" ? state.callTasks.find(call => call.id === task.id) : undefined;
-  const timeline = state.interactions.filter(item => item.customerId === task.customerId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const timeline = (remote?.timeline || state.interactions.filter(item => item.customerId === task.customerId)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  if (task.remote && !customer) return <main className="grid place-items-center bg-slate-50 text-sm text-slate-500">Loading task…</main>;
   if (!customer || !contact) return <main className="grid place-items-center bg-slate-50 text-sm text-slate-500">Brand context unavailable.</main>;
   const humanAssignees = state.users.filter(user => user.role === "FC_Owner" || user.role === "Admin");
   const callers = state.users.filter(user => user.role === "Caller");
@@ -182,7 +280,7 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
       <aside className="bg-white p-5 lg:pl-0">
         <div className="flex items-center gap-3"><Avatar><AvatarFallback className="bg-violet-100 font-bold text-violet-700">{customer.initials}</AvatarFallback></Avatar><div><b className="text-sm">{customer.name}</b><div className="text-xs text-slate-500">{state.cps.find(cp => cp.code === customer.cp)?.goal}</div></div></div>
         {(customer.cp === "CP3" || partnershipContext) && partnershipContext && <section className="mt-5 rounded-xl bg-emerald-50 p-4"><div className="text-[11px] font-semibold tracking-wide text-emerald-700">CP3 · Partnership context</div><div className="mt-2 text-sm font-bold text-emerald-950">{partnershipContext.headline}</div><p className="mt-2 text-xs leading-5 text-emerald-900">{partnershipContext.summary}</p><div className="mt-3 space-y-2">{partnershipContext.signals.map(signal=><div key={signal} className="rounded-lg bg-white/70 px-2.5 py-2 text-xs leading-5 text-slate-700">{signal}</div>)}</div></section>}
-        <div className="mt-5 rounded-xl bg-slate-50 p-4"><div className="text-xs font-semibold uppercase tracking-wide text-slate-400">FC-Owner</div><div className="mt-2 flex items-center gap-2 text-sm font-semibold"><UserRound className="size-4"/>{state.users.find(user => user.id === task.assigneeId)?.name || "Unassigned"}</div></div>
+        <div className="mt-5 rounded-xl bg-slate-50 p-4"><div className="text-xs font-semibold uppercase tracking-wide text-slate-400">FC-Owner</div><div className="mt-2 flex items-center gap-2 text-sm font-semibold"><UserRound className="size-4"/>{remote?.ownerName || state.users.find(user => user.id === task.assigneeId)?.name || "Unassigned"}</div></div>
 
         {callTask && can("submitCall") && callTask.status === "Scheduled" && <Button className="mt-4 w-full" onClick={() => setCallResult(true)}><Phone className="mr-2 size-4"/>Complete call</Button>}
         {callTask && can("manageCalls") && <div className="mt-4"><label className="text-xs font-semibold text-slate-500">Assign caller</label><Select value={callTask.callerId} onValueChange={value => show(reassignCall(callTask.id, value))}><SelectTrigger className="mt-2 w-full"><SelectValue/></SelectTrigger><SelectContent>{callers.map(user => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}</SelectContent></Select></div>}

@@ -58,7 +58,7 @@ export type WorkspaceState = {
   scenarios: Scenario[];
 };
 
-export const isClosedTaskStatus = (status: string) => ["Completed", "Resolved", "Cancelled"].includes(status);
+export const isClosedTaskStatus = (status: string) => ["Completed", "Resolved", "Cancelled", "Failed"].includes(status);
 export const canSeeTask = (state: WorkspaceState, customerId: string, assigneeId?: string) => {
   if (state.currentRole === "Admin") return true;
   const customer = state.customers.find(item => item.id === customerId);

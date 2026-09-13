@@ -9,7 +9,6 @@ import {
   BarChart3,
   CalendarClock,
   CheckCircle2,
-  ChevronDown,
   ChevronRight,
   CircleAlert,
   MessageCircle,
@@ -20,13 +19,19 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "./workspace-store";
+import { cacheBrandList } from "@/lib/brand-list-cache";
+import {
+  CURRENT_CPS,
+  FOLLOW_UP_STATUSES,
+  type BrandListItem,
+  type CurrentCpOption,
+} from "@/lib/brand-list";
 import { Contact, dateOnly } from "@/lib/outreach-domain";
 import { brandListMetadata } from "@/lib/page-metadata";
 import { usePageMetadata } from "./use-page-metadata";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ButtonGroup } from "@/components/ui/button-group";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -65,18 +70,16 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { LaunchBombDialog } from "./workspace-customer";
 import { BrandContactsEditor, emptyContactDraft, validContactDrafts } from "./brand-contacts-editor";
 
 const cx = (...v: (string | false | undefined | null)[]) =>
   v.filter(Boolean).join(" ");
 const show = (r: { ok: boolean; message: string }) =>
   r.ok ? toast.success(r.message) : toast.error(r.message);
-const nameOf = (users: { id: string; name: string }[], id?: string) =>
-  users.find((u) => u.id === id)?.name || "Unassigned";
 export function CP({ value }: { value: string }) {
   const tone =
-    { CP1: "ui-cp-1", CP2: "ui-cp-2", CP3: "ui-cp-3" }[value] || "ui-cp-1";
+    { NONE: "bg-slate-50 text-slate-600", CP1: "ui-cp-1", CP2: "ui-cp-2", CP3: "ui-cp-3" }[value] ||
+    "ui-cp-1";
   return (
     <Badge
       variant="outline"
@@ -100,12 +103,17 @@ export function Status({ value }: { value: string }) {
             value === "Failed" ||
             value === "Needs Attention"
           ? "bg-amber-50 text-amber-800 ring-amber-200"
+          : value === "In Progress"
+            ? "bg-blue-50 text-blue-700 ring-blue-200"
+            : value === "Terminated"
+              ? "bg-rose-50 text-rose-700 ring-rose-200"
           : value === "Ready" ||
               value === "Connected" ||
               value === "Completed" ||
               value === "Delivered"
             ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
             : value === "Paused" ||
+                value === "Unassigned" ||
                 value === "Inactive" ||
                 value === "Cancelled" ||
                 value === "Closed" ||
@@ -422,115 +430,141 @@ export function Dashboard() {
   );
 }
 
+function HandlingMode({ value }: { value: BrandListItem["handlingMode"] }) {
+  if (!value) return <span className="text-xs text-slate-400">—</span>;
+  return (
+    <span
+      className={cx(
+        "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset",
+        value === "Human"
+          ? "bg-orange-50 text-orange-700 ring-orange-200"
+          : "bg-blue-50 text-blue-700 ring-blue-200",
+      )}
+    >
+      {value}
+    </span>
+  );
+}
+
+type BrandListFilters = {
+  q: string;
+  status: string;
+  cp: string;
+  owner: string;
+};
+
+function brandListFiltersFromSearch(search: URLSearchParams): BrandListFilters {
+  return {
+    q: search.get("q") ?? "",
+    status: search.get("status") ?? "all",
+    cp: search.get("cp") ?? "all",
+    owner: search.get("owner") ?? "all",
+  };
+}
+
+function brandListPath(filters: BrandListFilters) {
+  const params = new URLSearchParams();
+  if (filters.q.trim()) params.set("q", filters.q);
+  if (filters.cp !== "all") params.set("cp", filters.cp);
+  if (filters.status !== "all") params.set("status", filters.status);
+  if (filters.owner !== "all") params.set("owner", filters.owner);
+  const qs = params.toString();
+  return qs ? `/customers?${qs}` : "/customers";
+}
+
 export function BrandsPage() {
-  const { state, can, assignBrand, pauseBrand } = useWorkspace();
+  const { state } = useWorkspace();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const manager = state.currentRole === "Admin" || state.currentRole === "FC_Owner";
-  const defaultStatus = "all";
-  const query = searchParams.get("q") ?? "";
-  const status = searchParams.get("status") ?? defaultStatus;
-  const cp = searchParams.get("cp") ?? "all";
-  const owner = searchParams.get("owner") ?? "all";
-  const [selected, setSelected] = useState<string[]>([]);
-  const [importOpen, setImportOpen] = useState(false);
-  const [addBrandOpen, setAddBrandOpen] = useState(false);
-  const [launchBrand, setLaunchBrand] = useState<string>();
-  const setListParam = (key: "q" | "status" | "cp" | "owner", value: string) => {
-    const params = new URLSearchParams(searchParams.toString());
-    const isDefault =
-      (key === "q" && !value.trim()) ||
-      (key === "cp" && value === "all") ||
-      (key === "status" && value === defaultStatus) ||
-      (key === "owner" && value === "all");
-    if (isDefault) params.delete(key);
-    else params.set(key, value);
-    const qs = params.toString();
-    router.replace(qs ? `/customers?${qs}` : "/customers", { scroll: false });
+  const isAdmin = state.currentRole === "Admin";
+  const manager = isAdmin || state.currentRole === "FC_Owner";
+  const [filters, setFilters] = useState<BrandListFilters>(() =>
+    brandListFiltersFromSearch(searchParams),
+  );
+  const { q: query, status, cp, owner } = filters;
+  const [brands, setBrands] = useState<BrandListItem[]>([]);
+  const [cps, setCps] = useState<CurrentCpOption[]>(
+    CURRENT_CPS.map((name) => ({ id: name, name })),
+  );
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string>();
+  const setListParam = (key: keyof BrandListFilters, value: string) => {
+    setFilters((prev) => {
+      const next = { ...prev, [key]: value };
+      window.history.replaceState(window.history.state, "", brandListPath(next));
+      return next;
+    });
   };
-  const scoped = useMemo(
-    () =>
-      manager
-        ? state.customers
-        : state.customers.filter((c) => c.ownerId === state.currentUserId),
-    [manager, state.customers, state.currentUserId],
-  );
-  const replyByCustomer = useMemo(() => {
-    const replies = new Map<string, (typeof state.inbox)[number]>();
-    state.inbox
-      .filter((item) => item.status === "Needs Reply")
-      .forEach((item) => {
-        const existing = replies.get(item.customerId);
-        if (!existing || existing.updatedAt < item.updatedAt)
-          replies.set(item.customerId, item);
+  useEffect(() => {
+    const onPopState = () => {
+      setFilters(brandListFiltersFromSearch(new URLSearchParams(window.location.search)));
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetch(`/api/brands?role=${encodeURIComponent(state.currentRole)}`)
+      .then(async (response) => {
+        const payload = (await response.json()) as {
+          brands?: BrandListItem[];
+          cps?: CurrentCpOption[];
+          error?: string;
+        };
+        if (!response.ok) throw new Error(payload.error || "Failed to load brands");
+        return {
+          brands: payload.brands || [],
+          cps: payload.cps || [],
+        };
+      })
+      .then((payload) => {
+        if (cancelled) return;
+        cacheBrandList(payload.brands);
+        setBrands(payload.brands);
+        if (payload.cps.length) setCps(payload.cps);
+        setError(undefined);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : "Failed to load brands");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
       });
-    return replies;
-  }, [state.inbox]);
-  const dueCustomerIds = useMemo(
-    () =>
-      new Set(
-        state.followUps
-          .filter((followUp) => followUp.status === "Due")
-          .map((followUp) => followUp.customerId),
-      ),
-    [state.followUps],
-  );
-  const actionCustomerIds = useMemo(
-    () => new Set([...replyByCustomer.keys(), ...dueCustomerIds]),
-    [replyByCustomer, dueCustomerIds],
-  );
-  useEffect(
-    () =>
-      setSelected((ids) => ids.filter((id) => scoped.some((c) => c.id === id))),
-    [scoped],
-  );
+    return () => {
+      cancelled = true;
+    };
+  }, [state.currentRole]);
   const filtered = useMemo(
     () =>
-      scoped
+      brands
         .filter(
           (c) =>
-            (status === "all" || status === "action"
-              ? status !== "action" || actionCustomerIds.has(c.id)
-              : c.status === status) &&
-            (cp === "all" || c.cp === cp) &&
-            (manager
+            (status === "all" || c.status === status) &&
+            (cp === "all" || c.currentCp === cp) &&
+            (isAdmin
               ? owner === "all" ||
                 (owner === "unassigned" ? !c.ownerId : c.ownerId === owner)
               : true) &&
-            (c.name.toLowerCase().includes(query.toLowerCase()) ||
-              c.contacts.some(
-                (x) =>
-                  x.name.toLowerCase().includes(query.toLowerCase()) ||
-                  x.email?.toLowerCase().includes(query.toLowerCase()),
-              )),
+            c.name.toLowerCase().includes(query.toLowerCase()),
         )
         .sort((a, b) => {
-          const priority = (customerId: string) =>
-            replyByCustomer.has(customerId)
-              ? 2
-              : dueCustomerIds.has(customerId)
-                ? 1
-                : 0;
-          return (
-            priority(b.id) - priority(a.id) ||
-            b.updatedAt.localeCompare(a.updatedAt)
-          );
+          const aTime = a.lastInteractionAt || "";
+          const bTime = b.lastInteractionAt || "";
+          return bTime.localeCompare(aTime) || a.name.localeCompare(b.name);
         }),
-    [
-      scoped,
-      status,
-      cp,
-      owner,
-      query,
-      manager,
-      actionCustomerIds,
-      replyByCustomer,
-      dueCustomerIds,
-    ],
+    [brands, status, cp, owner, query, isAdmin],
   );
-  const humans = state.users.filter(
-    (u) => u.role === "FC_Owner" || u.role === "Admin",
-  );
+  const owners = useMemo(() => {
+    const seen = new Map<string, string>();
+    brands.forEach((brand) => {
+      if (brand.ownerId && brand.ownerName && !seen.has(brand.ownerId)) {
+        seen.set(brand.ownerId, brand.ownerName);
+      }
+    });
+    return [...seen.entries()].map(([id, name]) => ({ id, name }));
+  }, [brands]);
   usePageMetadata(
     brandListMetadata({
       q: query || undefined,
@@ -539,85 +573,17 @@ export function BrandsPage() {
       owner,
       ownerName:
         owner !== "all" && owner !== "unassigned"
-          ? nameOf(state.users, owner)
+          ? owners.find((item) => item.id === owner)?.name
           : undefined,
-      empty: filtered.length === 0,
+      empty: !loading && filtered.length === 0,
     }),
   );
   return (
     <div className="mx-auto max-w-[1480px]">
       <PageHeader
-        eyebrow={`${scoped.length} records`}
+        eyebrow={`${loading ? "Loading" : `${brands.length} records`}`}
         title="Brands"
-      >
-        {can("importBrands") && (
-          <ButtonGroup>
-            <Button
-              variant="outline"
-              className="bg-white"
-              onClick={() => setImportOpen(true)}
-            >
-              <Upload className="size-4" />
-              Import CSV
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="outline"
-                  className="bg-white px-2"
-                  aria-label="More brand actions"
-                >
-                  <ChevronDown className="size-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => setAddBrandOpen(true)}>
-                  Add a Brand
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </ButtonGroup>
-        )}
-      </PageHeader>
-      {manager && selected.length > 0 && (
-        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl bg-violet-50 px-4 py-3">
-          <b className="text-sm text-violet-900">{selected.length} selected</b>
-          {can("assignOwner") && (
-          <Select
-            onValueChange={(owner) => {
-              selected.forEach((id) => assignBrand(id, owner));
-              toast.success("FC-Owner assigned");
-              setSelected([]);
-            }}
-          >
-            <SelectTrigger size="sm" className="bg-white">
-              <SelectValue placeholder="Assign FC-Owner" />
-            </SelectTrigger>
-            <SelectContent>
-              {humans.map((u) => (
-                <SelectItem key={u.id} value={u.id}>
-                  {u.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              selected.forEach((id) => pauseBrand(id));
-              toast.success("Outreach status updated");
-              setSelected([]);
-            }}
-          >
-            Pause outreach
-          </Button>
-          <Button variant="ghost" size="sm" onClick={() => setSelected([])}>
-            Clear
-          </Button>
-        </div>
-      )}
+      />
       <div className="overflow-hidden rounded-2xl bg-white">
         <div className="flex flex-col gap-3 p-4 sm:flex-row">
           <div className="relative flex-1 sm:max-w-sm">
@@ -625,7 +591,7 @@ export function BrandsPage() {
             <Input
               value={query}
               onChange={(e) => setListParam("q", e.target.value)}
-              placeholder="Search brand, contact, email…"
+              placeholder="Search brand…"
               className="pl-9"
             />
           </div>
@@ -635,9 +601,9 @@ export function BrandsPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All CPs</SelectItem>
-              {state.cps.map((x) => (
-                <SelectItem key={x.code} value={x.code}>
-                  {x.code}
+              {cps.map((item) => (
+                <SelectItem key={item.id} value={item.name}>
+                  {item.name}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -647,23 +613,15 @@ export function BrandsPage() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="action">Action needed</SelectItem>
               <SelectItem value="all">All statuses</SelectItem>
-              {[
-                "Ready",
-                "Bomb Running",
-                "Waiting for Reply",
-                "Human Handling",
-                "Paused",
-                "Closed",
-              ].map((x) => (
-                <SelectItem key={x} value={x}>
-                  {x}
+              {FOLLOW_UP_STATUSES.map((item) => (
+                <SelectItem key={item} value={item}>
+                  {item}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
-          {manager && (
+          {isAdmin && (
             <Select value={owner} onValueChange={(value) => setListParam("owner", value)}>
               <SelectTrigger className="w-full sm:w-44">
                 <SelectValue />
@@ -671,72 +629,49 @@ export function BrandsPage() {
               <SelectContent>
                 <SelectItem value="all">All FC-Owners</SelectItem>
                 <SelectItem value="unassigned">Unassigned</SelectItem>
-                {state.users.map((u) => (
-                  <SelectItem key={u.id} value={u.id}>
-                    {u.name}
+                {owners.map((item) => (
+                  <SelectItem key={item.id} value={item.id}>
+                    {item.name}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           )}
         </div>
-        {filtered.length ? (
+        {error ? (
+          <Empty className="py-20">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <CircleAlert />
+              </EmptyMedia>
+              <EmptyTitle>Unable to load brands</EmptyTitle>
+              <EmptyDescription>{error}</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        ) : loading ? (
+          <div className="px-5 py-16 text-sm text-slate-500">Loading brands…</div>
+        ) : filtered.length ? (
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow className="bg-slate-50">
-                  {manager && (
-                    <TableHead className="w-10 pl-5">
-                      <Checkbox
-                        checked={
-                          selected.length === filtered.length &&
-                          filtered.length > 0
-                        }
-                        onCheckedChange={(v) =>
-                          setSelected(v ? filtered.map((c) => c.id) : [])
-                        }
-                      />
-                    </TableHead>
-                  )}
-                  <TableHead className="min-w-56">Brand</TableHead>
+                  <TableHead className="min-w-56 pl-5">Brand</TableHead>
                   <TableHead>CP</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Handling Mode</TableHead>
                   <TableHead>Last interaction</TableHead>
-                  {manager && <TableHead>FC-Owner</TableHead>}
+                  {isAdmin && <TableHead>FC-Owner</TableHead>}
                   {manager && <TableHead />}
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.map((c) => {
-                  const last = state.interactions
-                    .filter((i) => i.customerId === c.id)
-                    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
-                  const reply = replyByCustomer.get(c.id);
-                  const due = dueCustomerIds.has(c.id);
-                  return (
+                {filtered.map((c) => (
                     <TableRow
                       key={c.id}
-                      className={`cursor-pointer hover:bg-violet-50/30 ${reply ? "bg-rose-50/40" : ""}`}
+                      className="cursor-pointer hover:bg-violet-50/30"
                       onClick={() => router.push(`/customers/${c.id}`)}
                     >
-                      {manager && (
-                        <TableCell
-                          className="pl-5"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <Checkbox
-                            checked={selected.includes(c.id)}
-                            onCheckedChange={(v) =>
-                              setSelected(
-                                v
-                                  ? [...selected, c.id]
-                                  : selected.filter((id) => id !== c.id),
-                              )
-                            }
-                          />
-                        </TableCell>
-                      )}
-                      <TableCell>
+                      <TableCell className="pl-5">
                         <div className="flex items-center gap-3">
                           <Avatar className="size-9">
                             <AvatarFallback className="bg-violet-100 text-xs font-bold text-violet-700">
@@ -744,41 +679,25 @@ export function BrandsPage() {
                             </AvatarFallback>
                           </Avatar>
                           <div className="min-w-0">
-                            <div className="flex items-center gap-2 text-sm font-semibold">
-                              {(reply || due) && (
-                                <span
-                                  className={`size-2 shrink-0 rounded-full ${reply ? "bg-rose-500" : "bg-amber-500"}`}
-                                  aria-label={
-                                    reply ? "Reply needed" : "Follow-up due"
-                                  }
-                                />
-                              )}
-                              <span className="truncate">{c.name}</span>
-                            </div>
-                            <div
-                              className={`mt-0.5 truncate text-xs ${reply ? "font-medium text-rose-700" : due ? "font-medium text-amber-700" : "text-slate-500"}`}
-                            >
-                              {reply
-                                ? `Reply needed · ${dateOnly(reply.updatedAt)}`
-                                : due
-                                  ? "Follow-up due"
-                                  : `${c.contacts[0]?.name} · ${c.contacts[0]?.role}`}
-                            </div>
+                            <div className="truncate text-sm font-semibold">{c.name}</div>
                           </div>
                         </div>
                       </TableCell>
                       <TableCell>
-                        <CP value={c.cp} />
+                        <CP value={c.currentCp} />
                       </TableCell>
                       <TableCell>
-                        <Status value={c.status} />
+                        {c.status ? <Status value={c.status} /> : <span className="text-xs text-slate-400">—</span>}
                       </TableCell>
-                      <TableCell className={`max-w-52 truncate text-xs ${last?.direction === "Inbound" ? "font-medium text-rose-700" : "text-slate-500"}`}>
-                        {last?.direction === "Inbound" ? `Reply · ${last.channel || last.type}` : last?.title || "No interaction"}
+                      <TableCell>
+                        <HandlingMode value={c.handlingMode} />
                       </TableCell>
-                      {manager && (
+                      <TableCell className="max-w-52 truncate text-xs text-slate-500">
+                        {c.lastInteractionAt ? dateOnly(c.lastInteractionAt) : "No interaction"}
+                      </TableCell>
+                      {isAdmin && (
                         <TableCell className="whitespace-nowrap text-xs">
-                          {nameOf(state.users, c.ownerId)}
+                          {c.ownerName || "Unassigned"}
                         </TableCell>
                       )}
                       {manager && (
@@ -797,32 +716,12 @@ export function BrandsPage() {
                               >
                                 Open Brand
                               </DropdownMenuItem>
-                              {can("launch") && (
-                                <DropdownMenuItem
-                                  disabled={
-                                    !!c.activeBombId ||
-                                    c.status === "Bomb Running"
-                                  }
-                                  onClick={() => setLaunchBrand(c.id)}
-                                >
-                                  Launch Bomb
-                                </DropdownMenuItem>
-                              )}
-                              {can("editBrand") && (
-                                <DropdownMenuItem
-                                  onClick={() => show(pauseBrand(c.id))}
-                                >
-                                  {c.status === "Paused" ? "Resume" : "Pause"}{" "}
-                                  outreach
-                                </DropdownMenuItem>
-                              )}
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </TableCell>
                       )}
                     </TableRow>
-                  );
-                })}
+                  ))}
               </TableBody>
             </Table>
           </div>
@@ -841,17 +740,10 @@ export function BrandsPage() {
         )}
         <div className="flex items-center justify-between px-5 py-4 text-xs text-slate-500">
           <span>
-            Showing {filtered.length} of {scoped.length}
+            Showing {filtered.length} of {brands.length}
           </span>
         </div>
       </div>
-      <ImportCsvDialog open={importOpen} onOpenChange={setImportOpen} />
-      <AddBrandDialog open={addBrandOpen} onOpenChange={setAddBrandOpen} />
-      <LaunchBombDialog
-        customerId={launchBrand}
-        open={!!launchBrand}
-        onOpenChange={(o) => !o && setLaunchBrand(undefined)}
-      />
     </div>
   );
 }
