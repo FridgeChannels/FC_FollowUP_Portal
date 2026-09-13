@@ -43,7 +43,7 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
   const { state } = useWorkspace();
   const router = useRouter();
   const manager = state.currentRole === "Admin" || state.currentRole === "Outreach Manager";
-  const [view, setView] = useState<"Mine" | "Due" | "All">(manager ? "All" : "Mine");
+  const [view, setView] = useState<"Mine" | "All">(manager ? "All" : "Mine");
   const [type, setType] = useState<TaskType | "All">(state.currentRole === "Caller" ? "Call" : "All");
   const [assignee, setAssignee] = useState("all");
   const [status, setStatus] = useState<"Open" | "Completed" | "All">("Open");
@@ -90,11 +90,10 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
   }, [state.callTasks, state.inbox, state.followUps]);
 
   const tasks = useMemo(() => {
-    const today = dateOnly(state.simulatedDate);
     return allTasks.filter(task => {
       const customer = state.customers.find(c => c.id === task.customerId);
       const matchesQuery = !query || customer?.name.toLowerCase().includes(query.toLowerCase()) || task.summary.toLowerCase().includes(query.toLowerCase());
-      const matchesView = view === "All" || view === "Mine" && task.assigneeId === state.currentUserId || view === "Due" && dateOnly(task.dueAt) <= today && !isDone(task);
+      const matchesView = view === "All" || task.assigneeId === state.currentUserId;
       const matchesType = type === "All" || task.type === type;
       const matchesAssignee = assignee === "all" || assignee === "unassigned" && !task.assigneeId || task.assigneeId === assignee;
       const matchesStatus = status === "All" || status === "Open" && !isDone(task) || status === "Completed" && isDone(task);
@@ -104,7 +103,7 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
       if (priorityRank[a.priority] !== priorityRank[b.priority]) return priorityRank[a.priority] - priorityRank[b.priority];
       return a.dueAt.localeCompare(b.dueAt);
     });
-  }, [allTasks, state.customers, state.currentUserId, state.simulatedDate, query, view, type, assignee, status]);
+  }, [allTasks, state.customers, state.currentUserId, query, view, type, assignee, status]);
 
   useEffect(() => {
     if (selectedId) setActive(selectedId);
@@ -112,25 +111,17 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
   }, [selectedId, active, tasks]);
 
   const selectedTask = allTasks.find(task => task.id === active);
-  const openCount = allTasks.filter(task => !isDone(task)).length;
-  const dueCount = allTasks.filter(task => !isDone(task) && dateOnly(task.dueAt) <= dateOnly(state.simulatedDate)).length;
   const mineCount = allTasks.filter(task => !isDone(task) && task.assigneeId === state.currentUserId).length;
 
   return <div className="mx-auto max-w-[1540px]">
-    <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
-      <div>
-        <div className="text-xs font-semibold uppercase tracking-[.14em] text-violet-600">One queue for every human action</div>
-        <h1 className="mt-1 text-2xl font-bold tracking-tight">Tasks</h1>
-      </div>
-      <div className="flex gap-2 text-xs text-slate-500">
-        <span className="rounded-full border bg-white px-3 py-1.5"><b className="text-slate-900">{openCount}</b> open</span>
-        <span className="rounded-full border bg-white px-3 py-1.5"><b className="text-amber-700">{dueCount}</b> due</span>
-      </div>
+    <div className="mb-5">
+      <div className="text-xs font-semibold uppercase tracking-[.14em] text-violet-600">One queue for every human action</div>
+      <h1 className="mt-1 text-2xl font-bold tracking-tight">Tasks</h1>
     </div>
 
     <div className="mb-4 flex flex-col gap-3 rounded-2xl border bg-white p-3 lg:flex-row lg:items-center">
       <div className="flex gap-1 rounded-xl bg-slate-100 p-1">
-        {(["Mine", "Due", "All"] as const).map(option => <button key={option} onClick={() => setView(option)} className={`rounded-lg px-4 py-2 text-xs font-semibold transition ${view === option ? "bg-slate-950 text-white shadow-sm" : "text-slate-600 hover:bg-white"}`}>{option === "Mine" ? `My Tasks (${mineCount})` : option === "Due" ? `Due Today (${dueCount})` : "All Tasks"}</button>)}
+        {(["Mine", "All"] as const).map(option => <button key={option} onClick={() => setView(option)} className={`rounded-lg px-4 py-2 text-xs font-semibold transition ${view === option ? "bg-slate-950 text-white shadow-sm" : "text-slate-600 hover:bg-white"}`}>{option === "Mine" ? `My Tasks (${mineCount})` : "All Tasks"}</button>)}
       </div>
       <div className="relative min-w-56 flex-1 lg:max-w-sm"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400"/><Input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search brand or task…" className="pl-9"/></div>
       <Select value={type} onValueChange={value => setType(value as TaskType | "All")}><SelectTrigger className="w-full lg:w-40"><SelectValue/></SelectTrigger><SelectContent>{["All", "Call", "Reply"].map(value => <SelectItem key={value} value={value}>{value === "All" ? "All types" : value}</SelectItem>)}</SelectContent></Select>

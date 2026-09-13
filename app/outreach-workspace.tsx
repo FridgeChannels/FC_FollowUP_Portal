@@ -1,17 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  Bell, Bomb, CalendarClock, Check, ChevronDown, CircleAlert, ClipboardCheck,
-  MessageCircle, PhoneCall, RefreshCw, Settings, Sparkles, Users, Zap,
+  Bell, Bomb, Check, ChevronDown, ClipboardCheck,
+  Settings, Users, Zap,
 } from "lucide-react";
 import { toast } from "sonner";
 import { dateOnly, Role } from "@/lib/outreach-domain";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent,
   SidebarGroupLabel, SidebarHeader, SidebarInset, SidebarMenu, SidebarMenuButton,
@@ -40,7 +39,6 @@ const roleHome: Record<Role, string> = {
   Viewer: "/customers",
 };
 const routeScreen = (path: string): Screen => path.startsWith("/customers") ? "Brands" : path.startsWith("/bombs") ? "Bombs" : path.startsWith("/settings") ? "Settings" : "Tasks";
-const show = (result: { ok: boolean; message: string }) => result.ok ? toast.success(result.message) : toast.error(result.message);
 
 export default function OutreachWorkspace() {
   const router = useRouter();
@@ -105,7 +103,7 @@ export default function OutreachWorkspace() {
       <SidebarRail/>
     </Sidebar>
     <SidebarInset className="min-w-0 bg-[#f4f6fa]">
-      <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-slate-200/80 bg-white/90 px-4 backdrop-blur-xl sm:px-6"><SidebarTrigger className="-ml-1"/><div className="h-5 w-px bg-slate-200"/><span className="text-sm font-semibold text-slate-900">{screen}</span><span className="hidden text-xs text-slate-400 sm:inline">Demo date · {dateOnly(state.simulatedDate)}</span><div className="ml-auto flex items-center gap-2"><DemoControls/><Button variant="ghost" size="icon" aria-label="Notifications"><Bell className="size-4"/></Button></div></header>
+      <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-slate-200/80 bg-white/90 px-4 backdrop-blur-xl sm:px-6"><SidebarTrigger className="-ml-1"/><div className="h-5 w-px bg-slate-200"/><span className="text-sm font-semibold text-slate-900">{screen}</span><span className="hidden text-xs text-slate-400 sm:inline">Demo date · {dateOnly(state.simulatedDate)}</span><div className="ml-auto flex items-center gap-2"><Button variant="ghost" size="icon" aria-label="Notifications"><Bell className="size-4"/></Button></div></header>
       <main className="min-h-[calc(100vh-4rem)] p-4 sm:p-6 lg:p-8"><RouteContent/></main>
     </SidebarInset>
     <Toaster richColors position="bottom-right"/>
@@ -122,15 +120,4 @@ function RouteContent() {
   if (parts[0] === "customers") return <BrandsPage/>;
   if (parts[0] === "settings") return <SettingsPage section={parts[1]}/>;
   return <TasksPage/>;
-}
-
-function DemoControls() {
-  const { state, reset, advanceDay, receiveReply, fillTodayCapacity, simulateFailure } = useWorkspace();
-  const [open, setOpen] = useState(false);
-  const simulate = () => {
-    const customer = state.customers.find(item => item.status === "Bomb Running");
-    if (!customer) return toast.error("No Brand has a running Bomb");
-    show(receiveReply(customer.id, "WhatsApp", "Demo reply: Yes, the Magnet reached the Owner."));
-  };
-  return <Sheet open={open} onOpenChange={setOpen}><SheetTrigger asChild><Button variant="outline" size="sm" className="bg-white"><Sparkles className="mr-2 size-3.5"/>Demo</Button></SheetTrigger><SheetContent><SheetHeader><SheetTitle>Demo controls</SheetTitle><SheetDescription>Create deterministic scenarios without real channel integrations.</SheetDescription></SheetHeader><div className="mt-7 space-y-3"><Button variant="outline" className="w-full justify-start" onClick={() => { advanceDay(1); toast.success("Demo date advanced one day"); }}><CalendarClock className="mr-3 size-4"/>Advance one day</Button><Button variant="outline" className="w-full justify-start" onClick={simulate}><MessageCircle className="mr-3 size-4"/>Simulate Contact reply</Button><Button variant="outline" className="w-full justify-start" onClick={() => { fillTodayCapacity(); toast.success("Today’s call capacity filled"); }}><PhoneCall className="mr-3 size-4"/>Fill today&apos;s call capacity</Button><Button variant="outline" className="w-full justify-start" onClick={() => { simulateFailure(); toast.warning("A channel action was marked failed"); }}><CircleAlert className="mr-3 size-4"/>Simulate failed action</Button><Button variant="outline" className="w-full justify-start text-rose-600" onClick={() => { reset(); toast.success("Demo data reset"); }}><RefreshCw className="mr-3 size-4"/>Reset demo data</Button></div><div className="mt-8 rounded-xl bg-slate-50 p-4 text-xs leading-5 text-slate-600">Current role: <b>{state.currentRole}</b><br/>Demo date: <b>{dateOnly(state.simulatedDate)}</b><br/>Changes persist in this browser until reset.</div></SheetContent></Sheet>;
 }
