@@ -2,13 +2,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Activity,
   ArrowRight,
   BarChart3,
   CalendarClock,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   CircleAlert,
   MessageCircle,
@@ -20,9 +21,12 @@ import {
 import { toast } from "sonner";
 import { useWorkspace } from "./workspace-store";
 import { Contact, dateOnly } from "@/lib/outreach-domain";
+import { brandListMetadata } from "@/lib/page-metadata";
+import { usePageMetadata } from "./use-page-metadata";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ButtonGroup } from "@/components/ui/button-group";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -62,6 +66,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { LaunchBombDialog } from "./workspace-customer";
+import { BrandContactsEditor, emptyContactDraft, validContactDrafts } from "./brand-contacts-editor";
 
 const cx = (...v: (string | false | undefined | null)[]) =>
   v.filter(Boolean).join(" ");
@@ -420,23 +425,29 @@ export function Dashboard() {
 export function BrandsPage() {
   const { state, can, assignBrand, pauseBrand } = useWorkspace();
   const router = useRouter();
-  const manager = state.currentRole === "Admin";
-  const humanResponder = state.currentRole === "Human Responder";
-  const [query, setQuery] = useState("");
-  const [status, setStatus] = useState(humanResponder ? "action" : "all");
-  const [cp, setCP] = useState("all");
-  const [owner, setOwner] = useState("all");
+  const searchParams = useSearchParams();
+  const manager = state.currentRole === "Admin" || state.currentRole === "FC_Owner";
+  const defaultStatus = "all";
+  const query = searchParams.get("q") ?? "";
+  const status = searchParams.get("status") ?? defaultStatus;
+  const cp = searchParams.get("cp") ?? "all";
+  const owner = searchParams.get("owner") ?? "all";
   const [selected, setSelected] = useState<string[]>([]);
   const [importOpen, setImportOpen] = useState(false);
+  const [addBrandOpen, setAddBrandOpen] = useState(false);
   const [launchBrand, setLaunchBrand] = useState<string>();
-  useEffect(() => {
-    const p = new URLSearchParams(window.location.search).get("cp");
-    if (p) setCP(p);
-  }, []);
-  useEffect(
-    () => setStatus(humanResponder ? "action" : "all"),
-    [humanResponder],
-  );
+  const setListParam = (key: "q" | "status" | "cp" | "owner", value: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    const isDefault =
+      (key === "q" && !value.trim()) ||
+      (key === "cp" && value === "all") ||
+      (key === "status" && value === defaultStatus) ||
+      (key === "owner" && value === "all");
+    if (isDefault) params.delete(key);
+    else params.set(key, value);
+    const qs = params.toString();
+    router.replace(qs ? `/customers?${qs}` : "/customers", { scroll: false });
+  };
   const scoped = useMemo(
     () =>
       manager
@@ -518,35 +529,60 @@ export function BrandsPage() {
     ],
   );
   const humans = state.users.filter(
-    (u) => u.role === "Human Responder" || u.role === "Admin",
+    (u) => u.role === "FC_Owner" || u.role === "Admin",
   );
-  const actionCount = [...actionCustomerIds].filter((id) =>
-    scoped.some((customer) => customer.id === id),
-  ).length;
+  usePageMetadata(
+    brandListMetadata({
+      q: query || undefined,
+      cp,
+      status,
+      owner,
+      ownerName:
+        owner !== "all" && owner !== "unassigned"
+          ? nameOf(state.users, owner)
+          : undefined,
+      empty: filtered.length === 0,
+    }),
+  );
   return (
     <div className="mx-auto max-w-[1480px]">
       <PageHeader
-        eyebrow={
-          humanResponder
-            ? `${actionCount} actions needed`
-            : `${scoped.length} records`
-        }
+        eyebrow={`${scoped.length} records`}
         title="Brands"
       >
         {can("importBrands") && (
-          <Button
-            variant="outline"
-            className="bg-white"
-            onClick={() => setImportOpen(true)}
-          >
-            <Upload className="mr-2 size-4" />
-            Import CSV
-          </Button>
+          <ButtonGroup>
+            <Button
+              variant="outline"
+              className="bg-white"
+              onClick={() => setImportOpen(true)}
+            >
+              <Upload className="size-4" />
+              Import CSV
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  className="bg-white px-2"
+                  aria-label="More brand actions"
+                >
+                  <ChevronDown className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => setAddBrandOpen(true)}>
+                  Add a Brand
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </ButtonGroup>
         )}
       </PageHeader>
       {manager && selected.length > 0 && (
         <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3">
           <b className="text-sm text-violet-900">{selected.length} selected</b>
+          {can("assignOwner") && (
           <Select
             onValueChange={(owner) => {
               selected.forEach((id) => assignBrand(id, owner));
@@ -565,6 +601,7 @@ export function BrandsPage() {
               ))}
             </SelectContent>
           </Select>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -587,12 +624,12 @@ export function BrandsPage() {
             <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
             <Input
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => setListParam("q", e.target.value)}
               placeholder="Search brand, contact, email…"
               className="pl-9"
             />
           </div>
-          <Select value={cp} onValueChange={setCP}>
+          <Select value={cp} onValueChange={(value) => setListParam("cp", value)}>
             <SelectTrigger className="w-full sm:w-32">
               <SelectValue />
             </SelectTrigger>
@@ -605,7 +642,7 @@ export function BrandsPage() {
               ))}
             </SelectContent>
           </Select>
-          <Select value={status} onValueChange={setStatus}>
+          <Select value={status} onValueChange={(value) => setListParam("status", value)}>
             <SelectTrigger className="w-full sm:w-48">
               <SelectValue />
             </SelectTrigger>
@@ -627,7 +664,7 @@ export function BrandsPage() {
             </SelectContent>
           </Select>
           {manager && (
-            <Select value={owner} onValueChange={setOwner}>
+            <Select value={owner} onValueChange={(value) => setListParam("owner", value)}>
               <SelectTrigger className="w-full sm:w-44">
                 <SelectValue />
               </SelectTrigger>
@@ -809,6 +846,7 @@ export function BrandsPage() {
         </div>
       </div>
       <ImportCsvDialog open={importOpen} onOpenChange={setImportOpen} />
+      <AddBrandDialog open={addBrandOpen} onOpenChange={setAddBrandOpen} />
       <LaunchBombDialog
         customerId={launchBrand}
         open={!!launchBrand}
@@ -936,6 +974,113 @@ function applyMapping(
       keep: true,
     };
   });
+}
+
+function AddBrandDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
+  const { state, createBrand } = useWorkspace();
+  const humans = state.users.filter(
+    (u) => u.role === "FC_Owner" || u.role === "Admin",
+  );
+  const [name, setName] = useState("");
+  const [source, setSource] = useState("Manual");
+  const [ownerId, setOwnerId] = useState("unassigned");
+  const [contacts, setContacts] = useState([emptyContactDraft()]);
+  const reset = () => {
+    setName("");
+    setSource("Manual");
+    setOwnerId("unassigned");
+    setContacts([emptyContactDraft()]);
+  };
+  const ready = name.trim() && validContactDrafts(contacts).length > 0;
+  const submit = () => {
+    const result = createBrand({
+      name,
+      source,
+      ownerId,
+      contacts: validContactDrafts(contacts),
+    });
+    show(result);
+    if (result.ok) {
+      reset();
+      onOpenChange(false);
+    }
+  };
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(value) => {
+        if (!value) reset();
+        onOpenChange(value);
+      }}
+    >
+      <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>Add a Brand</DialogTitle>
+          <DialogDescription>
+            Enter the brand, then add one or more contacts. The brand starts at
+            CP1 · Ready.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="min-h-0 space-y-5 overflow-y-auto pr-1">
+          <label className="grid gap-2 text-sm font-medium">
+            Brand
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Brand name"
+            />
+          </label>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="grid gap-2 text-sm font-medium">
+              Source
+              <Input
+                value={source}
+                onChange={(e) => setSource(e.target.value)}
+                placeholder="Manual"
+              />
+            </label>
+            <label className="grid gap-2 text-sm font-medium">
+              FC-Owner
+              <Select value={ownerId} onValueChange={setOwnerId}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Unassigned" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="unassigned">Unassigned</SelectItem>
+                  {humans.map((u) => (
+                    <SelectItem key={u.id} value={u.id}>
+                      {u.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+          </div>
+          <BrandContactsEditor contacts={contacts} onChange={setContacts} />
+        </div>
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => {
+              reset();
+              onOpenChange(false);
+            }}
+          >
+            Cancel
+          </Button>
+          <Button disabled={!ready} onClick={submit}>
+            Add Brand
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 function ImportCsvDialog({

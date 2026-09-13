@@ -1,4 +1,4 @@
-export type Role = "Admin" | "Human Responder" | "Caller";
+export type Role = "Admin" | "FC_Owner" | "Caller";
 export type Channel = "Email" | "SMS" | "WhatsApp" | "LinkedIn" | "Phone";
 export type CPCode = "CP1" | "CP2" | "CP3";
 export type CustomerStatus = "Ready" | "Bomb Running" | "Waiting for Reply" | "Human Handling" | "Paused" | "Closed";
@@ -67,7 +67,7 @@ export const visibleOpenTaskCount = (state: WorkspaceState) => {
 
 export const roleCapabilities: Record<Role, string[]> = {
   Admin: ["dashboard","customers","tasks","inbox","calls","bombs","workflow","analytics","settings","reply","launch","changeCP","editBrand","assignOwner","manageCalls","editBomb","editWorkflow","audit","importBrands"],
-  "Human Responder": ["dashboard","customers","bombs","reply","launch","changeCP","editBrand","createCall","editBomb"],
+  "FC_Owner": ["dashboard","customers","bombs","reply","launch","changeCP","editBrand","createCall","editBomb"],
   Caller: ["tasks","calls","bombs","submitCall","editBomb"],
 };
 
@@ -91,7 +91,7 @@ export function createSeedState(): WorkspaceState {
   const today = at("2026-09-11");
   const users: User[] = [
     {id:"u_sarah",name:"Sarah Chen",initials:"SC",role:"Admin"},
-    {id:"u_mike",name:"Mike Ross",initials:"MR",role:"Human Responder"},
+    {id:"u_mike",name:"Mike Ross",initials:"MR",role:"FC_Owner"},
     {id:"u_alex",name:"Alex Morgan",initials:"AM",role:"Caller",dailyCapacity:6,workingDays:[1,2,3,4,5]},
     {id:"u_priya",name:"Priya Shah",initials:"PS",role:"Caller",dailyCapacity:6,workingDays:[1,2,3,4,5]},
     {id:"u_jordan",name:"Jordan Lee",initials:"JL",role:"Caller",dailyCapacity:6,workingDays:[1,2,3,4,5]},
@@ -109,6 +109,8 @@ export function createSeedState(): WorkspaceState {
     {id:"c_moss",name:"Moss & Mill",initials:"MM",cp:"CP1",status:"Human Handling",source:"Inbound",ownerId:"u_mike",contacts:[{id:"ct_moss_daniel",name:"Daniel Reed",role:"Connector",email:"daniel@mossmill.co",phone:"+1 415 555 0191",preferredChannel:"Email",emailValid:true,phoneValid:true}],createdAt:addDays(today,-9),updatedAt:addDays(today,-0.12)},
     {id:"c_wildgrain",name:"Wildgrain Collective",initials:"WC",cp:"CP2",status:"Human Handling",source:"Referral",ownerId:"u_sarah",contacts:[{id:"ct_wildgrain_nora",name:"Nora Ellis",role:"Owner",email:"nora@wildgrain.co",phone:"+1 206 555 0164",whatsapp:"+1 206 555 0164",preferredChannel:"WhatsApp",emailValid:true,phoneValid:true}],createdAt:addDays(today,-11),updatedAt:addDays(today,-0.22)},
     {id:"c_cedar",name:"Cedar & Salt",initials:"CS",cp:"CP3",status:"Human Handling",source:"Website",ownerId:"u_mike",contacts:[{id:"ct_cedar_jamie",name:"Jamie Park",role:"Other",email:"jamie@cedarandsalt.com",phone:"+1 617 555 0186",linkedin:"jamie-park",preferredChannel:"LinkedIn",emailValid:true,phoneValid:true}],partnershipContext:{headline:"Cedar & Salt is ready for partnership handoff",summary:"The partnership is qualified for an FC handoff after the team aligned on pilot scope, decision makers, and timing.",signals:["Jamie confirmed the final Owner and operating sponsor.","The team completed the FC Magnet review and requested a pilot plan.","Pilot scope: retention workflow for the spring product launch."],updatedAt:today},createdAt:addDays(today,-4),updatedAt:addDays(today,-0.08)},
+    {id:"c_lumen",name:"Lumen Goods",initials:"LG",cp:"CP2",status:"Closed",source:"Inbound",ownerId:"u_sarah",closedReason:"Owner declined the pilot",contacts:[{id:"ct_lumen_ava",name:"Ava Cole",role:"Owner",email:"ava@lumengoods.co",phone:"+1 303 555 0144",preferredChannel:"Email",emailValid:true,phoneValid:true}],createdAt:addDays(today,-40),updatedAt:addDays(today,-8)},
+    {id:"c_pine",name:"Pine & Petal",initials:"PP",cp:"CP1",status:"Ready",source:"Website",contacts:[{id:"ct_pine_iris",name:"Iris Bell",role:"Other",email:"iris@pineandpetal.co",preferredChannel:"Email",emailValid:true,phoneValid:true}],createdAt:addDays(today,-2),updatedAt:addDays(today,-0.3)},
   ];
   const bombs: BombTemplate[] = [
     {id:"b_initial",name:"Initial Connector Outreach",cp:"CP1",goal:"Identify and reach the right Connector",targetRole:"Other",priority:"Normal",status:"Active",version:2,launches:63,updatedAt:addDays(today,-5),steps:[{id:"s_i1",channel:"Email",delayDays:0,subject:"Quick question about your team",content:"Hi {{first_name}}, who owns retention and lifecycle at {{brand.name}}?"},{id:"s_i2",channel:"LinkedIn",delayDays:1,content:"Hi {{first_name}} — quick question about the right owner at {{brand.name}}."},{id:"s_i3",channel:"Phone",delayDays:1,content:"",callGoal:"Identify the Owner",script:"Ask who owns lifecycle and retention."}]},

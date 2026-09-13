@@ -3,10 +3,12 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Bomb, CircleAlert, Plus, Send } from "lucide-react";
+import { ArrowLeft, Bomb, ChevronRight, CircleAlert, Plus, Send } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "./workspace-store";
 import { Channel, Contact, CPCode, dateOnly, uid } from "@/lib/outreach-domain";
+import { brandDetailMetadata } from "@/lib/page-metadata";
+import { usePageMetadata } from "./use-page-metadata";
 import { BombExecutionPlan } from "./bomb-plan";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -27,8 +29,11 @@ export function BrandDetail({customerId}:{customerId:string}){
   const {state,can,assignBrand}=useWorkspace();
   const router=useRouter(); const [launch,setLaunch]=useState(false); const [reply,setReply]=useState(false); const [cp,setCP]=useState(false); const [contact,setContact]=useState(false); const [ownerDraft,setOwnerDraft]=useState<string>();
   useEffect(()=>{setOwnerDraft(undefined)},[customerId]);
-  const manager=state.currentRole==="Admin";
-  const c=state.customers.find(x=>x.id===customerId); if(!c||!manager&&c.ownerId!==state.currentUserId)return <div className="grid min-h-[60vh] place-items-center"><div className="text-center"><CircleAlert className="mx-auto mb-3 size-8 text-slate-300"/><h1 className="font-bold">Brand not found</h1><Button variant="link" onClick={()=>router.push("/customers")}>Back to Brands</Button></div></div>;
+  const manager=state.currentRole==="Admin"||state.currentRole==="FC_Owner";
+  const c=state.customers.find(x=>x.id===customerId);
+  const visible=!!c&&(manager||c.ownerId===state.currentUserId);
+  usePageMetadata(brandDetailMetadata(visible&&c?{name:c.name,cp:c.cp,status:c.status,source:c.source}:null));
+  if(!visible||!c)return <div className="grid min-h-[60vh] place-items-center"><div className="text-center"><CircleAlert className="mx-auto mb-3 size-8 text-slate-300"/><h1 className="font-bold">Brand not found</h1><Button variant="link" onClick={()=>router.push("/customers")}>Back to Brands</Button></div></div>;
   const interactions=state.interactions.filter(i=>i.customerId===c.id).sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
   const last=interactions[0];
   const partnershipContext=c.partnershipContext;
@@ -36,34 +41,34 @@ export function BrandDetail({customerId}:{customerId:string}){
     <button onClick={()=>router.push("/customers")} className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900"><ArrowLeft className="size-4"/>Brands</button>
     <section className="mb-8 grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(260px,.8fr)_176px] xl:items-start">
       <div className="min-w-0">
-        <div className="flex items-start gap-4"><Avatar className="size-14"><AvatarFallback className="bg-violet-100 font-bold text-violet-700">{c.initials}</AvatarFallback></Avatar><div className="min-w-0"><h1 className="text-2xl font-bold tracking-tight">{c.name}</h1><div className="mt-2 flex gap-2"><CP value={c.cp}/><Status value={c.status}/></div><p className="mt-3 text-sm font-medium text-slate-700">{state.cps.find(x=>x.code===c.cp)?.goal||"—"}</p><div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500"><span>Latest: {last?.title||"No activity"}</span><span>Source: {c.source}</span><span>FC-Owner: {state.users.find(u=>u.id===c.ownerId)?.name||"Unassigned"}</span></div>{can("assignOwner")&&<div className="mt-3 flex flex-wrap items-center gap-2"><Select value={ownerDraft??c.ownerId??"unassigned"} onValueChange={setOwnerDraft}><SelectTrigger size="sm" className="w-44"><SelectValue placeholder="Select owner"/></SelectTrigger><SelectContent><SelectItem value="unassigned">Unassigned</SelectItem>{state.users.filter(u=>["Admin","Human Responder"].includes(u.role)).map(u=><SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent></Select><Button size="sm" disabled={(ownerDraft??c.ownerId??"unassigned")===(c.ownerId||"unassigned")} onClick={()=>show(assignBrand(c.id,ownerDraft??c.ownerId??"unassigned"))}>Assign</Button></div>}</div></div>
+        <div className="flex items-start gap-4"><Avatar className="size-14"><AvatarFallback className="bg-violet-100 font-bold text-violet-700">{c.initials}</AvatarFallback></Avatar><div className="min-w-0"><h1 className="text-2xl font-bold tracking-tight">{c.name}</h1><div className="mt-2 flex gap-2"><CP value={c.cp}/><Status value={c.status}/></div><p className="mt-3 text-sm font-medium text-slate-700">{state.cps.find(x=>x.code===c.cp)?.goal||"—"}</p><div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500"><span>Latest: {last?.title||"No activity"}</span><span>Source: {c.source}</span><span>FC-Owner: {state.users.find(u=>u.id===c.ownerId)?.name||"Unassigned"}</span></div>{can("assignOwner")&&<div className="mt-3 flex flex-wrap items-center gap-2"><Select value={ownerDraft??c.ownerId??"unassigned"} onValueChange={setOwnerDraft}><SelectTrigger size="sm" className="w-44"><SelectValue placeholder="Select owner"/></SelectTrigger><SelectContent><SelectItem value="unassigned">Unassigned</SelectItem>{state.users.filter(u=>["Admin","FC_Owner"].includes(u.role)).map(u=><SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent></Select><Button size="sm" disabled={(ownerDraft??c.ownerId??"unassigned")===(c.ownerId||"unassigned")} onClick={()=>show(assignBrand(c.id,ownerDraft??c.ownerId??"unassigned"))}>Assign</Button></div>}</div></div>
       </div>
       <BrandContactList contacts={c.contacts} canEdit={can("editBrand")} onAdd={()=>setContact(true)}/>
       <div className="flex flex-wrap gap-2 xl:flex-col xl:items-stretch">{can("reply")&&<Button variant="outline" onClick={()=>setReply(true)}><Send className="mr-2 size-4"/>Send message</Button>}{can("launch")&&<Button variant="outline" disabled={!!c.activeBombId||c.status==="Bomb Running"} onClick={()=>setLaunch(true)}><Bomb className="mr-2 size-4"/>Launch Bomb</Button>}{can("changeCP")&&<Button onClick={()=>setCP(true)}>Change CP</Button>}</div>
     </section>
-    <div className={`grid gap-6 ${partnershipContext?"xl:grid-cols-[1fr_340px]":""}`}><section className="overflow-hidden rounded-2xl border bg-white"><div className="border-b p-5"><h2 className="font-bold">Brand activity</h2><p className="text-xs text-slate-500">Bomb execution and independent conversations, organized by CP stage</p></div><InteractionFeed key={`${c.id}-${c.cp}`} customerId={c.id} interactions={interactions} contacts={c.contacts}/><BrandReplyBox customerId={c.id}/></section>
+    <div className={`grid gap-6 ${partnershipContext?"xl:grid-cols-[1fr_340px]":""}`}><section className="overflow-hidden rounded-2xl border bg-white"><div className="border-b p-5"><h2 className="font-bold">Brand activity</h2><p className="text-xs text-slate-500">Bomb execution and independent conversations, organized by CP stage</p></div><InteractionFeed key={`${c.id}-${c.cp}`} customerId={c.id} interactions={interactions} contacts={c.contacts}/></section>
     {(c.cp==="CP3"||partnershipContext)&&partnershipContext&&<aside><section className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5"><div className="text-xs font-semibold tracking-wide text-emerald-700">CP3 · Partnership context</div><h2 className="mt-2 font-bold text-emerald-950">{partnershipContext.headline}</h2><p className="mt-2 text-sm leading-6 text-emerald-900">{partnershipContext.summary}</p><div className="mt-4 space-y-2">{partnershipContext.signals.map(signal=><div key={signal} className="rounded-lg bg-white/80 px-3 py-2 text-xs leading-5 text-slate-700">{signal}</div>)}</div><div className="mt-3 text-[11px] text-emerald-700">Updated {dateOnly(partnershipContext.updatedAt)}</div></section></aside>}</div>
   <LaunchBombDialog customerId={c.id} open={launch} onOpenChange={setLaunch}/><ReplyDialog customerId={c.id} open={reply} onOpenChange={setReply}/><ChangeCPDialog customerId={c.id} open={cp} onOpenChange={setCP}/><ContactDialog customerId={c.id} open={contact} onOpenChange={setContact}/></div>;
 }
 
 function BrandContactList({contacts,canEdit,onAdd}:{contacts:Contact[];canEdit:boolean;onAdd:()=>void}){
-  return <section className="min-w-0"><div className="flex items-center justify-between"><h2 className="text-sm font-bold">KeyPerson</h2>{canEdit&&<Button variant="ghost" size="icon-sm" onClick={onAdd}><Plus className="size-4"/></Button>}</div><div className="mt-3 grid gap-y-4">{contacts.map(contact=><div key={contact.id} className="min-w-0"><div className="flex flex-wrap items-baseline gap-x-2"><span className="text-sm font-semibold">{contact.name}</span><span className="text-xs text-slate-500">{contact.role}</span></div><div className="mt-2 grid gap-1.5">{([["Email",contact.email],["Phone",contact.phone],["SMS",contact.phone],["WhatsApp",contact.whatsapp],["LinkedIn",contact.linkedin?`linkedin.com/in/${contact.linkedin}`:undefined]] as const).map(([channel,value])=><div key={channel} className="flex min-w-0 items-center gap-2 text-xs text-slate-600"><ChannelIcon channel={channel} className="size-4 shrink-0"/><span className={`truncate ${value?"":"text-slate-400"}`}>{value||"—"}</span></div>)}</div></div>)}</div></section>;
-}
-
-function BrandReplyBox({customerId}:{customerId:string}){
-  const {state,can,sendHumanReply}=useWorkspace();
-  const customer=state.customers.find(x=>x.id===customerId);
-  const lastInbound=state.interactions.filter(i=>i.customerId===customerId&&i.direction==="Inbound").sort((a,b)=>b.createdAt.localeCompare(a.createdAt))[0];
-  const inbox=state.inbox.find(i=>i.customerId===customerId&&i.status!=="Resolved");
-  const [contactId,setContactId]=useState(lastInbound?.contactId||customer?.contacts[0]?.id||"");
-  const [content,setContent]=useState("");
-  const contact=customer?.contacts.find(x=>x.id===contactId)||customer?.contacts[0];
-  const options=(["Email","SMS","WhatsApp","LinkedIn"] as Channel[]).filter(ch=>contact&&channelAvailable(contact,ch));
-  const defaultChannel=lastInbound?.channel&&options.includes(lastInbound.channel)?lastInbound.channel:contact?.preferredChannel&&options.includes(contact.preferredChannel)?contact.preferredChannel:options[0];
-  const [channel,setChannel]=useState<Channel>(defaultChannel||"Email");
-  if(!can("reply")||!customer||customer.status==="Closed"||!lastInbound&&inbox?.status!=="Needs Reply")return null;
-  const effective=options.includes(channel)?channel:options[0];
-  return <section className="border-t bg-white p-4">{lastInbound&&<div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 p-3"><div className="text-[11px] font-semibold uppercase tracking-wide text-rose-700">This is a reply</div><p className="mt-1 line-clamp-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">{lastInbound.content}</p></div>}<div className="mb-2 flex flex-wrap items-center justify-between gap-3"><div className="flex flex-wrap gap-2"><Select value={contact?.id} onValueChange={setContactId}><SelectTrigger size="sm" className="w-44"><SelectValue placeholder="KeyPerson"/></SelectTrigger><SelectContent>{customer.contacts.map(x=><SelectItem key={x.id} value={x.id}>{x.name}</SelectItem>)}</SelectContent></Select><Select value={effective} onValueChange={v=>setChannel(v as Channel)}><SelectTrigger size="sm" className="w-44"><SelectValue placeholder="Channel"/></SelectTrigger><SelectContent>{options.map(x=><SelectItem key={x} value={x}><ChannelOption channel={x}/></SelectItem>)}</SelectContent></Select></div><span className="text-xs text-slate-400">Reply needed</span></div><div className="flex gap-2"><Textarea value={content} onChange={e=>setContent(e.target.value)} className="min-h-20 resize-none" placeholder="Write a reply…"/><Button className="h-20 px-5" disabled={!contact||!content.trim()||!effective} onClick={()=>{if(!contact||!effective)return;const r=sendHumanReply(customer.id,contact.id,effective,content);show(r);if(r.ok)setContent("")}}><Send className="size-4"/></Button></div></section>;
+  const [open,setOpen]=useState<Set<string>>(new Set());
+  const toggle=(id:string)=>setOpen(prev=>{
+    const next=new Set(prev);
+    if(next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  return <section className="min-w-0"><div className="flex items-center justify-between"><h2 className="text-sm font-bold">KeyPerson</h2>{canEdit&&<Button variant="ghost" size="icon-sm" onClick={onAdd}><Plus className="size-4"/></Button>}</div><div className="mt-3 grid gap-y-4">{contacts.map(contact=>{
+    const expanded=open.has(contact.id);
+    return <div key={contact.id} className="min-w-0">
+      <button type="button" onClick={()=>toggle(contact.id)} className="flex w-full min-w-0 items-center gap-x-1.5 text-left">
+        <ChevronRight className={`size-3.5 shrink-0 text-slate-400 transition-transform ${expanded?"rotate-90":""}`}/>
+        <span className="truncate text-sm font-semibold">{contact.name}</span>
+        <span className="shrink-0 text-xs text-slate-500">{contact.role}</span>
+      </button>
+      {expanded&&<div className="mt-2 grid gap-1.5">{([["Email",contact.email],["Phone",contact.phone],["SMS",contact.phone],["WhatsApp",contact.whatsapp],["LinkedIn",contact.linkedin?`linkedin.com/in/${contact.linkedin}`:undefined]] as const).map(([channel,value])=><div key={channel} className="flex min-w-0 items-center gap-2 text-xs text-slate-600"><ChannelIcon channel={channel} className="size-4 shrink-0"/><span className={`truncate ${value?"":"text-slate-400"}`}>{value||"—"}</span></div>)}</div>}
+    </div>;
+  })}</div></section>;
 }
 
 type LaunchStepCopy = { subject?: string; content?: string; callGoal?: string; script?: string };
