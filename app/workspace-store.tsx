@@ -79,6 +79,22 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
       cps:canonicalCps,
     }));
   },[hydrated]);
+  useEffect(()=>{
+    if(!hydrated)return;
+    const seed=createSeedState();
+    const needsScenarios=!state.scenarios?.length;
+    const needsBombScenarios=state.bombs.some(bomb=>!bomb.scenarioId&&seed.bombs.some(item=>item.id===bomb.id&&item.scenarioId));
+    if(!needsScenarios&&!needsBombScenarios)return;
+    setState(prev=>({
+      ...prev,
+      scenarios:prev.scenarios?.length?prev.scenarios:seed.scenarios,
+      bombs:prev.bombs.map(bomb=>{
+        if(bomb.scenarioId)return bomb;
+        const match=seed.bombs.find(item=>item.id===bomb.id);
+        return match?.scenarioId?{...bomb,scenarioId:match.scenarioId}:bomb;
+      }),
+    }));
+  },[hydrated]);
   const mutate=useCallback((fn:(draft:WorkspaceState)=>void)=>setState(prev=>{const draft=clone(prev);fn(draft);return draft;}),[]);
   const can=useCallback((capability:string)=>roleCapabilities[state.currentRole].includes(capability),[state.currentRole]);
 

@@ -303,6 +303,7 @@ export function BombsPage() {
               <TableRow className="bg-slate-50">
                 <TableHead className="pl-5">Bomb</TableHead>
                 <TableHead>CP</TableHead>
+                <TableHead>Scenario</TableHead>
                 <TableHead>Target</TableHead>
                 <TableHead>Flow</TableHead>
                 <TableHead>Version</TableHead>
@@ -326,6 +327,9 @@ export function BombsPage() {
                   </TableCell>
                   <TableCell>
                     <Badge variant="outline">{b.cp}</Badge>
+                  </TableCell>
+                  <TableCell className="text-xs">
+                    {state.scenarios.find((item) => item.id === b.scenarioId)?.name || "—"}
                   </TableCell>
                   <TableCell className="text-xs">{b.targetRole}</TableCell>
                   <TableCell>
@@ -426,14 +430,19 @@ function NewBombDialog({
   onOpenChange: (v: boolean) => void;
   onCreated: (id: string) => void;
 }) {
-  const { createBomb } = useWorkspace();
+  const { state, createBomb } = useWorkspace();
   const [name, setName] = useState("");
   const [cp, setCP] = useState<CPCode>("CP1");
+  const [scenarioId, setScenarioId] = useState("");
+  const scenarios = state.scenarios.filter((item) => item.cp === cp);
+  const scenario = scenarios.find((item) => item.id === scenarioId) || scenarios[0];
   const submit = () => {
+    if (!scenario) return;
     const r = createBomb({
       name,
       cp,
-      goal: "Define the outreach goal",
+      scenarioId: scenario.id,
+      goal: scenario.description,
       targetRole: "Connector",
       priority: "Normal",
       status: "Draft",
@@ -451,6 +460,9 @@ function NewBombDialog({
     show(r);
     if (r.ok && r.id) {
       onOpenChange(false);
+      setName("");
+      setCP("CP1");
+      setScenarioId("");
       onCreated(r.id);
     }
   };
@@ -468,7 +480,7 @@ function NewBombDialog({
           onChange={(e) => setName(e.target.value)}
           placeholder="Bomb name"
         />
-        <Select value={cp} onValueChange={(v) => setCP(v as CPCode)}>
+        <Select value={cp} onValueChange={(v) => { setCP(v as CPCode); setScenarioId(""); }}>
           <SelectTrigger className="w-full">
             <SelectValue />
           </SelectTrigger>
@@ -480,11 +492,27 @@ function NewBombDialog({
             ))}
           </SelectContent>
         </Select>
+        <label className="grid gap-2 text-sm font-medium">
+          Scenario
+          <Select value={scenario?.id || ""} onValueChange={setScenarioId}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Select a scenario" />
+            </SelectTrigger>
+            <SelectContent>
+              {scenarios.map((item) => (
+                <SelectItem key={item.id} value={item.id}>
+                  {item.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </label>
+        {scenario && <p className="text-xs text-slate-500">{scenario.description}</p>}
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button disabled={!name.trim()} onClick={submit}>
+          <Button disabled={!name.trim() || !scenario} onClick={submit}>
             Create draft
           </Button>
         </DialogFooter>

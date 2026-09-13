@@ -48,15 +48,16 @@ export function BrandReplyBox({
   const [contactId, setContactId] = useState(interaction.contactId || customer?.contacts[0]?.id || "");
   const [content, setContent] = useState("");
   const contact = customer?.contacts.find(item => item.id === contactId) || customer?.contacts[0];
-  const options = (["Email", "SMS", "WhatsApp", "LinkedIn"] as Channel[]).filter(channel => contact && channelAvailable(contact, channel));
-  const defaultChannel = interaction.channel && options.includes(interaction.channel)
+  const channels: Channel[] = ["Email", "Phone", "SMS", "WhatsApp", "LinkedIn"];
+  const available = channels.filter(item => contact && channelAvailable(contact, item));
+  const defaultChannel = interaction.channel && available.includes(interaction.channel)
     ? interaction.channel
-    : contact?.preferredChannel && options.includes(contact.preferredChannel)
+    : contact?.preferredChannel && available.includes(contact.preferredChannel)
       ? contact.preferredChannel
-      : options[0];
+      : available[0];
   const [channel, setChannel] = useState<Channel>(defaultChannel || "Email");
   if (!can("reply") || !customer || customer.status === "Closed" || !inboundNeedsComposer(state, interaction)) return null;
-  const effective = options.includes(channel) ? channel : options[0];
+  const effective = available.includes(channel) ? channel : available[0];
   return (
     <div className="mt-3 rounded-xl bg-slate-50 p-3">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
@@ -67,7 +68,7 @@ export function BrandReplyBox({
           </Select>
           <Select value={effective} onValueChange={value => setChannel(value as Channel)}>
             <SelectTrigger size="sm" className="w-44"><SelectValue placeholder="Channel"/></SelectTrigger>
-            <SelectContent>{options.map(item => <SelectItem key={item} value={item}><ChannelOption channel={item}/></SelectItem>)}</SelectContent>
+            <SelectContent>{channels.map(item => <SelectItem key={item} value={item} disabled={!contact || !channelAvailable(contact, item)}><ChannelOption channel={item}/></SelectItem>)}</SelectContent>
           </Select>
         </div>
         <span className="text-xs text-slate-400">Reply needed</span>

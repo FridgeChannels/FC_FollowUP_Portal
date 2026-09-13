@@ -15,9 +15,13 @@ export type Customer = {
 };
 export type BombStep = { id: string; channel: Channel; delayDays: number; subject?: string; content: string; callGoal?: string; script?: string };
 export type BombCustomVariable = { id: string; key: string; label: string; defaultValue: string };
+export type Scenario = {
+  id: string; name: string; cp: CPCode; description: string;
+};
 export type BombTemplate = {
   id: string; name: string; cp: CPCode; goal: string; targetRole: Contact["role"]; priority: "Urgent" | "High" | "Normal" | "Low";
   status: "Active" | "Draft" | "Inactive" | "Archived"; version: number; steps: BombStep[]; customVariables?: BombCustomVariable[]; launches: number; updatedAt: string;
+  scenarioId?: string;
 };
 export type BombInstance = {
   id: string; customerId: string; templateId: string; templateName: string; version: number; goal: string;
@@ -51,6 +55,7 @@ export type WorkspaceState = {
   users: User[]; customers: Customer[]; bombs: BombTemplate[]; bombInstances: BombInstance[];
   actions: ScheduledAction[]; interactions: Interaction[]; inbox: InboxItem[]; followUps: FollowUp[];
   callTasks: CallTask[]; audit: AuditEntry[]; cps: CPStage[]; integrations: ChannelIntegration[];
+  scenarios: Scenario[];
 };
 
 export const isClosedTaskStatus = (status: string) => ["Completed", "Resolved", "Cancelled"].includes(status);
@@ -113,10 +118,10 @@ export function createSeedState(): WorkspaceState {
     {id:"c_pine",name:"Pine & Petal",initials:"PP",cp:"CP1",status:"Ready",source:"Website",contacts:[{id:"ct_pine_iris",name:"Iris Bell",role:"Other",email:"iris@pineandpetal.co",preferredChannel:"Email",emailValid:true,phoneValid:true}],createdAt:addDays(today,-2),updatedAt:addDays(today,-0.3)},
   ];
   const bombs: BombTemplate[] = [
-    {id:"b_initial",name:"Initial Connector Outreach",cp:"CP1",goal:"Identify and reach the right Connector",targetRole:"Other",priority:"Normal",status:"Active",version:2,launches:63,updatedAt:addDays(today,-5),steps:[{id:"s_i1",channel:"Email",delayDays:0,subject:"Quick question about your team",content:"Hi {{first_name}}, who owns retention and lifecycle at {{brand.name}}?"},{id:"s_i2",channel:"LinkedIn",delayDays:1,content:"Hi {{first_name}} — quick question about the right owner at {{brand.name}}."},{id:"s_i3",channel:"Phone",delayDays:1,content:"",callGoal:"Identify the Owner",script:"Ask who owns lifecycle and retention."}]},
-    {id:"b_delivery",name:"Confirm Magnet Delivery",cp:"CP1",goal:"Confirm the FC Magnet reached the Owner",targetRole:"Connector",priority:"High",status:"Active",version:3,launches:184,updatedAt:addDays(today,-2),steps:[{id:"s_d1",channel:"Email",delayDays:0,subject:"Did the Magnet make it to {{owner.first_name}}?",content:"Hi {{first_name}}, did the FC Magnet make it to {{owner.first_name}}?"},{id:"s_d2",channel:"Phone",delayDays:1,content:"",callGoal:"Confirm Magnet delivery",script:"Confirm whether the Magnet reached the Owner."},{id:"s_d3",channel:"SMS",delayDays:1,content:"Quick check — did the FC Magnet arrive?"},{id:"s_d4",channel:"WhatsApp",delayDays:2,content:"Hi {{first_name}}, just checking that the FC Magnet reached the right person."},{id:"s_d5",channel:"LinkedIn",delayDays:2,content:"Following up on the FC Magnet delivery."}]},
-    {id:"b_owner",name:"Owner Meeting",cp:"CP2",goal:"Complete the key form and book a review",targetRole:"Owner",priority:"High",status:"Active",version:4,launches:92,updatedAt:addDays(today,-1),steps:[{id:"s_o1",channel:"Email",delayDays:0,subject:"Your FC setup",content:"Hi {{first_name}}, here is the short setup form."},{id:"s_o2",channel:"Phone",delayDays:1,content:"",callGoal:"Book a product review",script:"Confirm receipt and offer review times."},{id:"s_o3",channel:"WhatsApp",delayDays:1,content:"Would one of these review times work?"},{id:"s_o4",channel:"Email",delayDays:2,subject:"Review times",content:"Following up with two review options."}]},
-    {id:"b_reengage",name:"Re-engage Owner",cp:"CP2",goal:"Restart a stalled Owner conversation",targetRole:"Owner",priority:"Normal",status:"Inactive",version:1,launches:37,updatedAt:addDays(today,-14),steps:[{id:"s_r1",channel:"Email",delayDays:0,subject:"Still useful?",content:"Should we keep this open?"},{id:"s_r2",channel:"Phone",delayDays:2,content:"",callGoal:"Confirm interest",script:"Ask whether timing has changed."}]},
+    {id:"b_initial",name:"Initial Connector Outreach",cp:"CP1",scenarioId:"sc_find_connector",goal:"Identify and reach the right Connector",targetRole:"Other",priority:"Normal",status:"Active",version:2,launches:63,updatedAt:addDays(today,-5),steps:[{id:"s_i1",channel:"Email",delayDays:0,subject:"Quick question about your team",content:"Hi {{first_name}}, who owns retention and lifecycle at {{brand.name}}?"},{id:"s_i2",channel:"LinkedIn",delayDays:1,content:"Hi {{first_name}} — quick question about the right owner at {{brand.name}}."},{id:"s_i3",channel:"Phone",delayDays:1,content:"",callGoal:"Identify the Owner",script:"Ask who owns lifecycle and retention."}]},
+    {id:"b_delivery",name:"Confirm Magnet Delivery",cp:"CP1",scenarioId:"sc_confirm_delivery",goal:"Confirm the FC Magnet reached the Owner",targetRole:"Connector",priority:"High",status:"Active",version:3,launches:184,updatedAt:addDays(today,-2),steps:[{id:"s_d1",channel:"Email",delayDays:0,subject:"Did the Magnet make it to {{owner.first_name}}?",content:"Hi {{first_name}}, did the FC Magnet make it to {{owner.first_name}}?"},{id:"s_d2",channel:"Phone",delayDays:1,content:"",callGoal:"Confirm Magnet delivery",script:"Confirm whether the Magnet reached the Owner."},{id:"s_d3",channel:"SMS",delayDays:1,content:"Quick check — did the FC Magnet arrive?"},{id:"s_d4",channel:"WhatsApp",delayDays:2,content:"Hi {{first_name}}, just checking that the FC Magnet reached the right person."},{id:"s_d5",channel:"LinkedIn",delayDays:2,content:"Following up on the FC Magnet delivery."}]},
+    {id:"b_owner",name:"Owner Meeting",cp:"CP2",scenarioId:"sc_setup_form",goal:"Complete the key form and book a review",targetRole:"Owner",priority:"High",status:"Active",version:4,launches:92,updatedAt:addDays(today,-1),steps:[{id:"s_o1",channel:"Email",delayDays:0,subject:"Your FC setup",content:"Hi {{first_name}}, here is the short setup form."},{id:"s_o2",channel:"Phone",delayDays:1,content:"",callGoal:"Book a product review",script:"Confirm receipt and offer review times."},{id:"s_o3",channel:"WhatsApp",delayDays:1,content:"Would one of these review times work?"},{id:"s_o4",channel:"Email",delayDays:2,subject:"Review times",content:"Following up with two review options."}]},
+    {id:"b_reengage",name:"Re-engage Owner",cp:"CP2",scenarioId:"sc_reengage_owner",goal:"Restart a stalled Owner conversation",targetRole:"Owner",priority:"Normal",status:"Inactive",version:1,launches:37,updatedAt:addDays(today,-14),steps:[{id:"s_r1",channel:"Email",delayDays:0,subject:"Still useful?",content:"Should we keep this open?"},{id:"s_r2",channel:"Phone",delayDays:2,content:"",callGoal:"Confirm interest",script:"Ask whether timing has changed."}]},
   ];
   const bombInstances: BombInstance[] = [
     {id:"bi_north",customerId:"c_northstar",templateId:"b_owner",templateName:"Owner Meeting",version:4,goal:"Complete the key form and book a review",targetContactId:"ct_north_maya",status:"Running",startedAt:addDays(today,-1)},
@@ -172,10 +177,19 @@ export function createSeedState(): WorkspaceState {
   const integrations: ChannelIntegration[] = [
     {channel:"Email",status:"Connected",account:"sales@fridgechannel.com"},{channel:"SMS",status:"Connected",account:"+1 415 555 0100"},{channel:"WhatsApp",status:"Needs Attention",account:"FC Outreach"},{channel:"LinkedIn",status:"Disconnected",account:"No account"},{channel:"Phone",status:"Connected",account:"Quo workspace"},
   ];
+  const scenarios: Scenario[] = [
+    {id:"sc_find_connector",name:"Find the Connector",cp:"CP1",description:"Identify who can route the FC Magnet inside the brand."},
+    {id:"sc_confirm_delivery",name:"Confirm Magnet delivery",cp:"CP1",description:"Confirm the Magnet reached the Owner."},
+    {id:"sc_sample_owner",name:"Sample with Owner",cp:"CP2",description:"The Owner has the sample and needs a review booked."},
+    {id:"sc_setup_form",name:"Complete setup form",cp:"CP2",description:"Get the Owner to finish the key setup form."},
+    {id:"sc_reengage_owner",name:"Re-engage stalled Owner",cp:"CP2",description:"Restart a quiet Owner conversation."},
+    {id:"sc_owner_input",name:"Collect Owner input",cp:"CP3",description:"Capture remaining Owner answers to close the loop."},
+    {id:"sc_partnership_review",name:"Partnership review",cp:"CP3",description:"Review partnership context and the next commercial step."},
+  ];
   const audit: AuditEntry[] = [
     {id:"au1",actorId:"system",customerId:"c_acme",action:"Bomb stopped on contact response",previousValue:"Bomb Running",newValue:"Human Handling",createdAt:at("2026-09-11","08:41:29")},
     {id:"au2",actorId:"u_sarah",customerId:"c_northstar",action:"Bomb launched",newValue:"Owner Meeting V4",createdAt:addDays(today,-1)},
     {id:"au3",actorId:"u_mike",customerId:"c_brightland",action:"Follow-up created",newValue:"Sep 11, 7:00 AM",createdAt:addDays(today,-3)},
   ];
-  return {version:4,simulatedDate:today,currentRole:"Admin",currentUserId:"u_sarah",users,customers,bombs,bombInstances,actions,interactions,inbox,followUps,callTasks,audit,cps,integrations};
+  return {version:4,simulatedDate:today,currentRole:"Admin",currentUserId:"u_sarah",users,customers,bombs,bombInstances,actions,interactions,inbox,followUps,callTasks,audit,cps,integrations,scenarios};
 }
