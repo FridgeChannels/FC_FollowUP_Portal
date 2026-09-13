@@ -1,6 +1,6 @@
-export type Role = "Admin" | "Human Responder" | "Caller" | "Viewer";
+export type Role = "Admin" | "Human Responder" | "Caller";
 export type Channel = "Email" | "SMS" | "WhatsApp" | "LinkedIn" | "Phone";
-export type CPCode = "CP0" | "CP1" | "CP2" | "CP3";
+export type CPCode = "CP1" | "CP2" | "CP3";
 export type CustomerStatus = "Ready" | "Bomb Running" | "Waiting for Reply" | "Human Handling" | "Paused" | "Closed";
 export type ActionStatus = "Scheduled" | "Sending" | "Sent" | "Delivered" | "Failed" | "Cancelled" | "Skipped" | "Completed";
 export type CallOutcome = "Contact Responded" | "Connected — No Useful Response" | "No Answer" | "Voicemail" | "Call Back Requested" | "Wrong Number" | "Wrong Contact" | "Other";
@@ -14,20 +14,21 @@ export type Customer = {
   ownerId?: string; contacts: Contact[]; activeBombId?: string; closedReason?: string; partnershipContext?: { headline: string; summary: string; signals: string[]; updatedAt: string }; createdAt: string; updatedAt: string;
 };
 export type BombStep = { id: string; channel: Channel; delayDays: number; subject?: string; content: string; callGoal?: string; script?: string };
+export type BombCustomVariable = { id: string; key: string; label: string; defaultValue: string };
 export type BombTemplate = {
   id: string; name: string; cp: CPCode; goal: string; targetRole: Contact["role"]; priority: "Urgent" | "High" | "Normal" | "Low";
-  status: "Active" | "Draft" | "Inactive" | "Archived"; version: number; steps: BombStep[]; launches: number; updatedAt: string;
+  status: "Active" | "Draft" | "Inactive" | "Archived"; version: number; steps: BombStep[]; customVariables?: BombCustomVariable[]; launches: number; updatedAt: string;
 };
 export type BombInstance = {
   id: string; customerId: string; templateId: string; templateName: string; version: number; goal: string;
-  targetContactId: string; status: "Running" | "Paused" | "Completed" | "Stopped" | "Cancelled"; startedAt: string; stoppedAt?: string; stopReason?: string;
+  targetContactId: string; cp?: CPCode; status: "Running" | "Paused" | "Completed" | "Stopped" | "Cancelled"; startedAt: string; stoppedAt?: string; stopReason?: string;
 };
 export type ScheduledAction = {
   id: string; bombInstanceId: string; customerId: string; stepId: string; channel: Channel; plannedDate: string;
   actualDate: string; status: ActionStatus; content: string; note?: string; callTaskId?: string;
 };
 export type Interaction = {
-  id: string; customerId: string; contactId?: string; bombInstanceId?: string; type: "Message" | "Phone" | "Bomb" | "CP" | "Follow-up" | "Human" | "System";
+  id: string; customerId: string; contactId?: string; bombInstanceId?: string; cp?: CPCode; type: "Message" | "Phone" | "Bomb" | "CP" | "Follow-up" | "Human" | "System";
   channel?: Channel; direction?: "Inbound" | "Outbound"; title: string; content: string; createdAt: string; outcome?: CallOutcome; recording?: string;
 };
 export type InboxItem = {
@@ -66,9 +67,8 @@ export const visibleOpenTaskCount = (state: WorkspaceState) => {
 
 export const roleCapabilities: Record<Role, string[]> = {
   Admin: ["dashboard","customers","tasks","inbox","calls","bombs","workflow","analytics","settings","reply","launch","changeCP","editBrand","assignOwner","manageCalls","editBomb","editWorkflow","audit","importBrands"],
-  "Human Responder": ["dashboard","customers","tasks","inbox","bombs","reply","launch","changeCP","editBrand","createCall","editBomb"],
+  "Human Responder": ["dashboard","customers","bombs","reply","launch","changeCP","editBrand","createCall","editBomb"],
   Caller: ["tasks","calls","bombs","submitCall","editBomb"],
-  Viewer: ["dashboard","customers","bombs","analytics","editBomb"],
 };
 
 const at = (day: string, time = "09:00:00") => `${day}T${time.length === 5 ? `${time}:00` : time}.000Z`;
@@ -100,10 +100,10 @@ export function createSeedState(): WorkspaceState {
     {id:"c_acme",name:"Acme Foods",initials:"AF",cp:"CP1",status:"Human Handling",source:"Expo West 2026",ownerId:"u_sarah",contacts:contacts.acme,createdAt:addDays(today,-12),updatedAt:addDays(today,-0.02)},
     {id:"c_northstar",name:"Northstar Coffee",initials:"NC",cp:"CP2",status:"Bomb Running",source:"Natural Products Expo",ownerId:"u_sarah",contacts:contacts.northstar,activeBombId:"bi_north",createdAt:addDays(today,-18),updatedAt:addDays(today,-0.08)},
     {id:"c_brightland",name:"Brightland Labs",initials:"BL",cp:"CP1",status:"Human Handling",source:"Inbound",ownerId:"u_mike",contacts:contacts.brightland,createdAt:addDays(today,-21),updatedAt:addDays(today,-3)},
-    {id:"c_goodkind",name:"Goodkind Market",initials:"GM",cp:"CP0",status:"Ready",source:"Expo West 2026",contacts:contacts.goodkind,createdAt:addDays(today,-1),updatedAt:addDays(today,-0.15)},
+    {id:"c_goodkind",name:"Goodkind Market",initials:"GM",cp:"CP1",status:"Ready",source:"Expo West 2026",contacts:contacts.goodkind,createdAt:addDays(today,-1),updatedAt:addDays(today,-0.15)},
     {id:"c_olive",name:"Olive & Oak",initials:"OO",cp:"CP2",status:"Waiting for Reply",source:"Referral",ownerId:"u_mike",contacts:contacts.olive,activeBombId:"bi_olive",createdAt:addDays(today,-30),updatedAt:addDays(today,-0.25)},
     {id:"c_harbor",name:"Harbor House",initials:"HH",cp:"CP1",status:"Paused",source:"Expo West 2026",ownerId:"u_sarah",contacts:contacts.harbor,activeBombId:"bi_harbor",createdAt:addDays(today,-16),updatedAt:addDays(today,-1)},
-    {id:"c_kite",name:"Kite & Key",initials:"KK",cp:"CP0",status:"Human Handling",source:"Inbound",ownerId:"u_sarah",contacts:contacts.kite,createdAt:addDays(today,-7),updatedAt:addDays(today,-0.18)},
+    {id:"c_kite",name:"Kite & Key",initials:"KK",cp:"CP1",status:"Human Handling",source:"Inbound",ownerId:"u_sarah",contacts:contacts.kite,createdAt:addDays(today,-7),updatedAt:addDays(today,-0.18)},
     {id:"c_field",name:"Field Theory",initials:"FT",cp:"CP2",status:"Waiting for Reply",source:"Referral",ownerId:"u_mike",contacts:contacts.field,createdAt:addDays(today,-25),updatedAt:addDays(today,-1)},
     {id:"c_sunridge",name:"Sunridge Pantry",initials:"SP",cp:"CP1",status:"Human Handling",source:"Trade show follow-up",ownerId:"u_sarah",contacts:[{id:"ct_sunridge_olivia",name:"Olivia Grant",role:"Owner",email:"olivia@sunridgepantry.com",phone:"+1 303 555 0118",whatsapp:"+1 303 555 0118",linkedin:"olivia-grant",preferredChannel:"Email",emailValid:true,phoneValid:true}],createdAt:addDays(today,-6),updatedAt:addDays(today,-0.04)},
     {id:"c_moss",name:"Moss & Mill",initials:"MM",cp:"CP1",status:"Human Handling",source:"Inbound",ownerId:"u_mike",contacts:[{id:"ct_moss_daniel",name:"Daniel Reed",role:"Connector",email:"daniel@mossmill.co",phone:"+1 415 555 0191",preferredChannel:"Email",emailValid:true,phoneValid:true}],createdAt:addDays(today,-9),updatedAt:addDays(today,-0.12)},
@@ -111,7 +111,7 @@ export function createSeedState(): WorkspaceState {
     {id:"c_cedar",name:"Cedar & Salt",initials:"CS",cp:"CP3",status:"Human Handling",source:"Website",ownerId:"u_mike",contacts:[{id:"ct_cedar_jamie",name:"Jamie Park",role:"Other",email:"jamie@cedarandsalt.com",phone:"+1 617 555 0186",linkedin:"jamie-park",preferredChannel:"LinkedIn",emailValid:true,phoneValid:true}],partnershipContext:{headline:"Cedar & Salt is ready for partnership handoff",summary:"The partnership is qualified for an FC handoff after the team aligned on pilot scope, decision makers, and timing.",signals:["Jamie confirmed the final Owner and operating sponsor.","The team completed the FC Magnet review and requested a pilot plan.","Pilot scope: retention workflow for the spring product launch."],updatedAt:today},createdAt:addDays(today,-4),updatedAt:addDays(today,-0.08)},
   ];
   const bombs: BombTemplate[] = [
-    {id:"b_initial",name:"Initial Connector Outreach",cp:"CP0",goal:"Identify and reach the right Connector",targetRole:"Other",priority:"Normal",status:"Active",version:2,launches:63,updatedAt:addDays(today,-5),steps:[{id:"s_i1",channel:"Email",delayDays:0,subject:"Quick question about your team",content:"Hi {{first_name}}, who owns retention and lifecycle at {{brand.name}}?"},{id:"s_i2",channel:"LinkedIn",delayDays:1,content:"Hi {{first_name}} — quick question about the right owner at {{brand.name}}."},{id:"s_i3",channel:"Phone",delayDays:1,content:"",callGoal:"Identify the Owner",script:"Ask who owns lifecycle and retention."}]},
+    {id:"b_initial",name:"Initial Connector Outreach",cp:"CP1",goal:"Identify and reach the right Connector",targetRole:"Other",priority:"Normal",status:"Active",version:2,launches:63,updatedAt:addDays(today,-5),steps:[{id:"s_i1",channel:"Email",delayDays:0,subject:"Quick question about your team",content:"Hi {{first_name}}, who owns retention and lifecycle at {{brand.name}}?"},{id:"s_i2",channel:"LinkedIn",delayDays:1,content:"Hi {{first_name}} — quick question about the right owner at {{brand.name}}."},{id:"s_i3",channel:"Phone",delayDays:1,content:"",callGoal:"Identify the Owner",script:"Ask who owns lifecycle and retention."}]},
     {id:"b_delivery",name:"Confirm Magnet Delivery",cp:"CP1",goal:"Confirm the FC Magnet reached the Owner",targetRole:"Connector",priority:"High",status:"Active",version:3,launches:184,updatedAt:addDays(today,-2),steps:[{id:"s_d1",channel:"Email",delayDays:0,subject:"Did the Magnet make it to {{owner.first_name}}?",content:"Hi {{first_name}}, did the FC Magnet make it to {{owner.first_name}}?"},{id:"s_d2",channel:"Phone",delayDays:1,content:"",callGoal:"Confirm Magnet delivery",script:"Confirm whether the Magnet reached the Owner."},{id:"s_d3",channel:"SMS",delayDays:1,content:"Quick check — did the FC Magnet arrive?"},{id:"s_d4",channel:"WhatsApp",delayDays:2,content:"Hi {{first_name}}, just checking that the FC Magnet reached the right person."},{id:"s_d5",channel:"LinkedIn",delayDays:2,content:"Following up on the FC Magnet delivery."}]},
     {id:"b_owner",name:"Owner Meeting",cp:"CP2",goal:"Complete the key form and book a review",targetRole:"Owner",priority:"High",status:"Active",version:4,launches:92,updatedAt:addDays(today,-1),steps:[{id:"s_o1",channel:"Email",delayDays:0,subject:"Your FC setup",content:"Hi {{first_name}}, here is the short setup form."},{id:"s_o2",channel:"Phone",delayDays:1,content:"",callGoal:"Book a product review",script:"Confirm receipt and offer review times."},{id:"s_o3",channel:"WhatsApp",delayDays:1,content:"Would one of these review times work?"},{id:"s_o4",channel:"Email",delayDays:2,subject:"Review times",content:"Following up with two review options."}]},
     {id:"b_reengage",name:"Re-engage Owner",cp:"CP2",goal:"Restart a stalled Owner conversation",targetRole:"Owner",priority:"Normal",status:"Inactive",version:1,launches:37,updatedAt:addDays(today,-14),steps:[{id:"s_r1",channel:"Email",delayDays:0,subject:"Still useful?",content:"Should we keep this open?"},{id:"s_r2",channel:"Phone",delayDays:2,content:"",callGoal:"Confirm interest",script:"Ask whether timing has changed."}]},
@@ -163,10 +163,9 @@ export function createSeedState(): WorkspaceState {
     {id:"call_olive",customerId:"c_olive",contactId:"ct_olive_liam",bombInstanceId:"bi_olive",scheduledActionId:"a_o2",callerId:"u_alex",scheduledDate:addDays(today,-1),priority:"Normal",goal:"Confirm interest",script:"Ask whether timing has changed.",status:"Completed",outcome:"No Answer",recordingStatus:"Unavailable"},
   ];
   const cps: CPStage[] = [
-    {code:"CP0",name:"New brand",goal:"Identify the right Connector and obtain the Owner contact",criteria:"A valid Owner contact is identified",color:"slate"},
-    {code:"CP1",name:"Owner identified",goal:"Deliver the FC Magnet to the Owner",criteria:"The Owner has received the Magnet",color:"violet"},
-    {code:"CP2",name:"Owner has Magnet",goal:"Complete the key form and book the meeting",criteria:"The meeting is booked",color:"blue"},
-    {code:"CP3",name:"Goal complete",goal:"Complete outreach and hand off the opportunity",criteria:"The outreach goal is complete",color:"emerald"},
+    {code:"CP1",name:"Post-Tap Brand Experience Delivered",goal:"Post-Tap Brand Experience Delivered",criteria:"The post-tap Brand experience has been delivered.",color:"violet"},
+    {code:"CP2",name:"Sample Delivered to Owner",goal:"Sample Delivered to Owner",criteria:"Sample delivery to the Owner is confirmed.",color:"blue"},
+    {code:"CP3",name:"Owner Input Completed",goal:"Owner Input Completed",criteria:"Required Owner input is completed.",color:"emerald"},
   ];
   const integrations: ChannelIntegration[] = [
     {channel:"Email",status:"Connected",account:"sales@fridgechannel.com"},{channel:"SMS",status:"Connected",account:"+1 415 555 0100"},{channel:"WhatsApp",status:"Needs Attention",account:"FC Outreach"},{channel:"LinkedIn",status:"Disconnected",account:"No account"},{channel:"Phone",status:"Connected",account:"Quo workspace"},

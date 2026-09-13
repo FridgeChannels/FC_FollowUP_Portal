@@ -1,9 +1,15 @@
 "use client";
 
+import { useState } from "react";
+import { ChevronDown, Send } from "lucide-react";
+import { toast } from "sonner";
 import { Channel, Contact, Interaction, ScheduledAction, User, WorkspaceState, dateOnly } from "@/lib/outreach-domain";
 import { ChannelIcon } from "./channel-icon";
+import { useWorkspace } from "./workspace-store";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 
 export const formatUtcTime = (iso: string) => {
   const date = new Date(iso);
@@ -67,9 +73,12 @@ export function BombExecutionPlan({
   contacts: Contact[];
   tone?: "default" | "success";
 }) {
+  const { sendHumanReply } = useWorkspace();
+  const [expandedId, setExpandedId] = useState<string>();
+  const [reply, setReply] = useState("");
   const instance = state.bombInstances.find(item => item.id === instanceId);
   const contact = contacts.find(item => item.id === instance?.targetContactId) || contacts[0];
-  const actions = state.actions.filter(item => item.bombInstanceId === instanceId);
+  const actions = state.actions.filter(item => item.bombInstanceId === instanceId).sort((a,b)=>a.actualDate.localeCompare(b.actualDate));
   if (!actions.length) return null;
   const current = currentActionIndex(actions);
   const running = instance?.status === "Running" || instance?.status === "Paused";
@@ -83,19 +92,25 @@ export function BombExecutionPlan({
       const isPast = index < current || doneStatuses.has(action.status) || skipped;
       const numberClass = isCurrent ? "bg-violet-600 text-white" : tone === "success" ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-700";
       const lineClass = isCurrent ? "bg-violet-300" : tone === "success" ? "bg-emerald-200" : "bg-slate-200";
+      const expanded = expandedId === action.id;
+      const related = state.interactions.filter(interaction => interaction.customerId === action.customerId && interaction.channel === action.channel && interaction.contactId === contact?.id && (interaction.bombInstanceId === instanceId || !interaction.bombInstanceId && !!instance && interaction.createdAt >= instance.startedAt));
+      const hasInbound = related.some(interaction => interaction.direction === "Inbound");
       return <li key={action.id} className="flex gap-3">
         <div className="flex w-7 shrink-0 flex-col items-center">
           <span className={`grid size-7 place-items-center rounded-full text-[11px] font-bold ${numberClass}`}>{index + 1}</span>
           {index < actions.length - 1 && <span className={`mt-1 w-px flex-1 min-h-6 ${lineClass}`}/>}
         </div>
         <div className={`mb-3 min-w-0 flex-1 rounded-xl border px-3 py-3 ${isCurrent ? "border-violet-300 bg-violet-50/70 ring-1 ring-violet-200" : skipped ? "border-slate-200 bg-white opacity-55" : isPast ? "border-slate-200 bg-white" : "border-slate-200 bg-white"}`}>
+          <button type="button" className="w-full text-left" onClick={()=>setExpandedId(expanded?undefined:action.id)} aria-expanded={expanded}>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2"><ChannelIcon channel={action.channel} className="size-6"/><span className="text-sm font-semibold text-slate-950">{action.channel}</span>{isCurrent && <Badge className="bg-violet-600 text-[10px] text-white">Current</Badge>}</div>
-            <Badge variant={skipped ? "secondary" : isCurrent ? "default" : "outline"} className="text-[10px]">{isCurrent ? "In progress" : action.status}</Badge>
+            <div className="flex items-center gap-2"><Badge variant={skipped ? "secondary" : isCurrent ? "default" : "outline"} className="text-[10px]">{hasInbound?"Replied":isCurrent ? "In progress" : action.status}</Badge><ChevronDown className={`size-4 text-slate-400 transition-transform ${expanded?"rotate-180":""}`}/></div>
           </div>
           <time dateTime={action.actualDate} className="mt-1.5 block font-mono text-xs text-slate-500">{formatUtcTime(action.actualDate)}</time>
           <PlanPeople contact={contact} channel={action.channel} caller={skipped ? undefined : caller} action={action}/>
           {skipped && <p className="mt-2 text-xs text-amber-800">{action.note || "Channel unavailable"}</p>}
+          </button>
+          {expanded&&<div className="mt-3 border-t border-slate-200 pt-3"><div className="text-[11px] font-semibold uppercase tracking-[.12em] text-slate-400">Sent content</div><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{action.content||"No written content for this step."}</p>{related.filter(item=>item.direction==="Inbound").map(item=><div key={item.id} className="mt-3 rounded-xl border border-rose-200 bg-rose-50 p-3"><div className="text-[11px] font-semibold uppercase tracking-wide text-rose-700">This is a reply</div><div className="mt-0.5 text-[11px] font-medium text-rose-600">from {contact?.name}</div><p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-700">{item.content}</p></div>)}{hasInbound&&contact&&action.channel!=="Phone"&&<div className="mt-3 flex gap-2"><Textarea value={reply} onChange={event=>setReply(event.target.value)} className="min-h-20 resize-none bg-white" placeholder={`Reply via ${action.channel}…`}/><Button className="h-20 px-4" disabled={!reply.trim()} onClick={()=>{const result=sendHumanReply(action.customerId,contact.id,action.channel,reply,instanceId);if(result.ok){toast.success(result.message);setReply("");}else toast.error(result.message);}}><Send className="size-4"/></Button></div>}</div>}
         </div>
       </li>;
     })}
@@ -114,7 +129,7 @@ export function CurrentBombPlan({
   const instanceId = pinnedBombInstanceId(state, customerId);
   if (!instanceId) return null;
   const instance = state.bombInstances.find(item => item.id === instanceId);
-  const actions = state.actions.filter(item => item.bombInstanceId === instanceId);
+  const actions = state.actions.filter(item => item.bombInstanceId === instanceId).sort((a,b)=>a.actualDate.localeCompare(b.actualDate));
   if (!instance || !actions.length) return null;
   const current = currentActionIndex(actions);
   const currentAction = current >= 0 ? actions[current] : undefined;

@@ -21,7 +21,6 @@ export function SettingsPage({ section }: { section?: string }) {
     ["Admin", "Brands, Tasks, Bombs, Settings", "All actions"],
     ["Human Responder", "Brands and assigned Tasks", "Reply, follow-up, CP and launch"],
     ["Caller", "Assigned Call Tasks", "Submit call outcomes"],
-    ["Viewer", "Brands", "Read-only"],
   ];
 
   return <div className="mx-auto max-w-[1300px]">
