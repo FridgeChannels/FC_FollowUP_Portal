@@ -296,7 +296,7 @@ export function BombsPage() {
           </button>
         ))}
       </div>
-      <div className="overflow-hidden rounded-2xl border bg-white">
+      <div className="overflow-hidden rounded-2xl bg-white">
         {bombs.length ? (
           <Table>
             <TableHeader>
@@ -592,7 +592,7 @@ export function BombEditor({ bombId }: { bombId: string }) {
       </div>
       <div className="grid gap-6 xl:grid-cols-[1fr_340px]">
         <main className="space-y-6">
-          <section className="rounded-2xl border bg-white p-5">
+          <section className="rounded-2xl bg-white p-5">
             <h2 className="font-bold">Basic settings</h2>
             <div className="mt-5 grid gap-4 md:grid-cols-2">
               <label className="text-sm font-medium">
@@ -711,7 +711,7 @@ export function BombEditor({ bombId }: { bombId: string }) {
               </div>
             </div>
           </section>
-          <section className="rounded-2xl border bg-white p-5">
+          <section className="rounded-2xl bg-white p-5">
             <div className="flex justify-between">
               <div>
                 <h2 className="font-bold">Action flow</h2>
@@ -754,7 +754,7 @@ export function BombEditor({ bombId }: { bombId: string }) {
             </div>
             <div className="mt-5 space-y-4">
               {draft.steps.map((s, index) => (
-                <div key={s.id} className="rounded-xl border bg-slate-50 p-4">
+                <div key={s.id} className="rounded-xl bg-slate-50 p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
                       <span className="grid size-8 place-items-center rounded-lg bg-white font-bold text-violet-600">

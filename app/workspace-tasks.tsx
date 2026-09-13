@@ -121,14 +121,14 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
       <h1 className="text-2xl font-bold tracking-tight">ReplyTask</h1>
     </div>
 
-    <div className="mb-4 flex flex-col gap-3 rounded-2xl border bg-white p-3 lg:flex-row lg:items-center">
+    <div className="mb-4 flex flex-col gap-3 rounded-2xl bg-white p-3 lg:flex-row lg:items-center">
       <div className="relative min-w-56 flex-1 lg:max-w-sm"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400"/><Input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search brand or task…" className="pl-9"/></div>
       <Select value={type} onValueChange={value => setType(value as TaskType | "All")}><SelectTrigger className="w-full lg:w-40"><SelectValue/></SelectTrigger><SelectContent>{["All", "Call", "Reply"].map(value => <SelectItem key={value} value={value}>{value === "All" ? "All types" : value}</SelectItem>)}</SelectContent></Select>
       {manager && <Select value={assignee} onValueChange={setAssignee}><SelectTrigger className="w-full lg:w-44"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">All FC-Owners</SelectItem><SelectItem value="unassigned">Unassigned</SelectItem>{state.users.map(user => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}</SelectContent></Select>}
       <Select value={status} onValueChange={value => setStatus(value as typeof status)}><SelectTrigger className="w-full lg:w-36"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="Open">Open</SelectItem><SelectItem value="Completed">Completed</SelectItem><SelectItem value="All">All statuses</SelectItem></SelectContent></Select>
     </div>
 
-    <div className="overflow-hidden rounded-2xl border bg-white">
+    <div className="overflow-hidden rounded-2xl bg-white">
       {tasks.length ? <div className="overflow-x-auto"><Table><TableHeader><TableRow className="bg-slate-50"><TableHead className="min-w-56 pl-5">Brand</TableHead><TableHead>Type</TableHead><TableHead>Status</TableHead><TableHead>Due</TableHead></TableRow></TableHeader><TableBody>{tasks.map(task => {
         const customer = state.customers.find(c => c.id === task.customerId);
         const overdue = isDue(task, state.simulatedDate);
@@ -162,24 +162,26 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
 
   return <div className="mx-auto max-w-[1540px]">
     <button onClick={() => router.push("/tasks")} className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900"><ArrowLeft className="size-4"/>ReplyTask</button>
-    <main className="min-w-0 overflow-hidden rounded-2xl border bg-slate-50">
-    <header className="flex flex-wrap items-start justify-between gap-4 border-b bg-white px-5 py-4 lg:px-7">
+    <main className="min-w-0 overflow-hidden rounded-2xl bg-slate-50">
+    <header className="flex flex-wrap items-start justify-between gap-4 bg-white px-5 py-4 lg:px-7">
       <div><div className="flex flex-wrap items-center gap-2"><Badge variant="outline">{task.type}</Badge>{isDue(task, state.simulatedDate) ? <Status value="Due"/> : <Badge variant="secondary">{task.status}</Badge>}<span className="text-xs text-slate-400">{dateOnly(task.dueAt)}</span></div><h2 className="mt-2 text-xl font-bold">{customer.name}</h2><p className="mt-1 text-xs text-slate-500">{contact.name} · {contact.role} · {customer.cp} · {customer.status}</p></div>
       <Button variant="outline" size="sm" onClick={() => router.push(`/customers/${customer.id}`)}>Brand profile</Button>
     </header>
 
     <div className="grid lg:grid-cols-[minmax(0,1fr)_290px]">
       <div className="min-w-0 p-5 lg:p-7">
-        <section className="overflow-hidden rounded-xl border bg-white">
-          <div className="border-b px-5 py-4"><h3 className="font-bold">Brand activity</h3><p className="mt-1 text-xs text-slate-500">Bomb execution and independent conversations, organized by CP stage.</p></div>
+        <section>
+          <h3 className="mb-3 font-bold">Brand activity</h3>
+          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
           <InteractionFeed key={`${customer.id}-${customer.cp}`} customerId={customer.id} interactions={timeline} contacts={customer.contacts} maxHeight="max-h-[480px]"/>
+          </div>
         </section>
 
       </div>
 
-      <aside className="border-t bg-white p-5 lg:border-l lg:border-t-0">
+      <aside className="bg-white p-5 lg:pl-0">
         <div className="flex items-center gap-3"><Avatar><AvatarFallback className="bg-violet-100 font-bold text-violet-700">{customer.initials}</AvatarFallback></Avatar><div><b className="text-sm">{customer.name}</b><div className="text-xs text-slate-500">{state.cps.find(cp => cp.code === customer.cp)?.goal}</div></div></div>
-        {(customer.cp === "CP3" || partnershipContext) && partnershipContext && <section className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4"><div className="text-[11px] font-semibold tracking-wide text-emerald-700">CP3 · Partnership context</div><div className="mt-2 text-sm font-bold text-emerald-950">{partnershipContext.headline}</div><p className="mt-2 text-xs leading-5 text-emerald-900">{partnershipContext.summary}</p><div className="mt-3 space-y-2">{partnershipContext.signals.map(signal=><div key={signal} className="rounded-lg bg-white/80 px-2.5 py-2 text-xs leading-5 text-slate-700">{signal}</div>)}</div></section>}
+        {(customer.cp === "CP3" || partnershipContext) && partnershipContext && <section className="mt-5 rounded-xl bg-emerald-50 p-4"><div className="text-[11px] font-semibold tracking-wide text-emerald-700">CP3 · Partnership context</div><div className="mt-2 text-sm font-bold text-emerald-950">{partnershipContext.headline}</div><p className="mt-2 text-xs leading-5 text-emerald-900">{partnershipContext.summary}</p><div className="mt-3 space-y-2">{partnershipContext.signals.map(signal=><div key={signal} className="rounded-lg bg-white/70 px-2.5 py-2 text-xs leading-5 text-slate-700">{signal}</div>)}</div></section>}
         <div className="mt-5 rounded-xl bg-slate-50 p-4"><div className="text-xs font-semibold uppercase tracking-wide text-slate-400">FC-Owner</div><div className="mt-2 flex items-center gap-2 text-sm font-semibold"><UserRound className="size-4"/>{state.users.find(user => user.id === task.assigneeId)?.name || "Unassigned"}</div></div>
 
         {callTask && can("submitCall") && callTask.status === "Scheduled" && <Button className="mt-4 w-full" onClick={() => setCallResult(true)}><Phone className="mr-2 size-4"/>Complete call</Button>}

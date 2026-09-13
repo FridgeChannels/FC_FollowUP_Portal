@@ -163,7 +163,7 @@ function Metric({
   color?: string;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5">
+    <div className="rounded-2xl bg-white p-5">
       <div className="mb-4 flex items-center justify-between text-sm font-medium text-slate-500">
         <span>{label}</span>
         <span className={cx("size-2 rounded-full", color)} />
@@ -269,8 +269,8 @@ export function Dashboard() {
         />
       </div>
       <div className="mt-6 grid gap-6 xl:grid-cols-[1.45fr_.75fr]">
-        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-          <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+        <section className="overflow-hidden rounded-2xl bg-white">
+          <div className="flex items-center justify-between px-5 py-4">
             <div>
               <h2 className="font-bold">Priority queue</h2>
               <p className="text-xs text-slate-500">
@@ -367,7 +367,7 @@ export function Dashboard() {
           </div>
         </section>
       </div>
-      <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5">
+      <section className="mt-6 rounded-2xl bg-white p-5">
         <div className="mb-5 flex justify-between">
           <div>
             <h2 className="font-bold">CP distribution</h2>
@@ -389,7 +389,7 @@ export function Dashboard() {
               <button
                 key={cp.code}
                 onClick={() => router.push(`/customers?cp=${cp.code}`)}
-                className="rounded-xl border border-slate-100 bg-slate-50/60 p-4 text-left hover:border-violet-200"
+                className="rounded-xl bg-slate-50/80 p-4 text-left hover:bg-violet-50"
               >
                 <div className="flex items-center justify-between">
                   <CP value={cp.code} />
@@ -580,7 +580,7 @@ export function BrandsPage() {
         )}
       </PageHeader>
       {manager && selected.length > 0 && (
-        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3">
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl bg-violet-50 px-4 py-3">
           <b className="text-sm text-violet-900">{selected.length} selected</b>
           {can("assignOwner") && (
           <Select
@@ -618,8 +618,8 @@ export function BrandsPage() {
           </Button>
         </div>
       )}
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-        <div className="flex flex-col gap-3 border-b p-4 sm:flex-row">
+      <div className="overflow-hidden rounded-2xl bg-white">
+        <div className="flex flex-col gap-3 p-4 sm:flex-row">
           <div className="relative flex-1 sm:max-w-sm">
             <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
             <Input
@@ -839,7 +839,7 @@ export function BrandsPage() {
             </EmptyHeader>
           </Empty>
         )}
-        <div className="flex items-center justify-between border-t px-5 py-4 text-xs text-slate-500">
+        <div className="flex items-center justify-between px-5 py-4 text-xs text-slate-500">
           <span>
             Showing {filtered.length} of {scoped.length}
           </span>

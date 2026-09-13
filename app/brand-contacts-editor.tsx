@@ -168,7 +168,7 @@ export function BrandContactsEditor({
       </div>
       <div className="grid gap-3">
         {contacts.map((contact, index) => (
-          <div key={contact.id} className="rounded-xl border bg-slate-50/80 p-3">
+          <div key={contact.id} className="rounded-xl bg-slate-50 p-3">
             <div className="mb-3 flex items-center justify-between gap-2">
               <div className="text-xs font-semibold text-slate-500">Contact {index + 1}</div>
               <Button

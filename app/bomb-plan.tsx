@@ -95,7 +95,7 @@ export function BombExecutionPlan({
           <span className={`grid size-7 place-items-center rounded-full text-[11px] font-bold ${numberClass}`}>{index + 1}</span>
           {index < actions.length - 1 && <span className={`mt-1 w-px flex-1 min-h-6 ${lineClass}`}/>}
         </div>
-        <div className={`mb-3 min-w-0 flex-1 rounded-xl border px-3 py-3 ${isCurrent ? "border-violet-300 bg-violet-50/70 ring-1 ring-violet-200" : skipped ? "border-slate-200 bg-white opacity-55" : isPast ? "border-slate-200 bg-white" : "border-slate-200 bg-white"}`}>
+        <div className={`mb-3 min-w-0 flex-1 rounded-xl px-3 py-3 ${isCurrent ? "bg-violet-50" : skipped ? "bg-slate-50/70 opacity-55" : "bg-slate-50/80"}`}>
           <button type="button" className="w-full text-left" onClick={()=>setExpandedId(expanded?undefined:action.id)} aria-expanded={expanded}>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2"><ChannelIcon channel={action.channel} className="size-6"/><span className="text-sm font-semibold text-slate-950">{action.channel}</span>{isCurrent && <Badge className="bg-violet-600 text-[10px] text-white">Current</Badge>}</div>
@@ -105,8 +105,8 @@ export function BombExecutionPlan({
           <PlanPeople contact={contact} channel={action.channel} caller={skipped ? undefined : caller} action={action}/>
           {skipped && <p className="mt-2 text-xs text-amber-800">{action.note || "Channel unavailable"}</p>}
           </button>
-          {expanded&&<div className="mt-3 border-t border-slate-200 pt-3"><div className="text-[11px] font-semibold uppercase tracking-[.12em] text-slate-400">Sent content</div><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{action.content||"No written content for this step."}</p></div>}
-          {related.filter(item=>item.direction==="Inbound").map(item=><div key={item.id} className="mt-3"><div className="rounded-xl border border-rose-200 bg-rose-50 p-3"><div className="text-[11px] font-semibold uppercase tracking-wide text-rose-700">This is a reply</div><div className="mt-0.5 text-[11px] font-medium text-rose-600">from {contact?.name}</div><p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-700">{item.content}</p></div><BrandReplyBox customerId={action.customerId} interaction={item} bombInstanceId={instanceId}/></div>)}
+          {expanded&&<div className="mt-3 pt-3"><div className="text-[11px] font-semibold uppercase tracking-[.12em] text-slate-400">Sent content</div><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{action.content||"No written content for this step."}</p></div>}
+          {related.filter(item=>item.direction==="Inbound").map(item=><div key={item.id} className="mt-3"><div className="rounded-xl bg-rose-50 p-3"><div className="text-[11px] font-semibold uppercase tracking-wide text-rose-700">This is a reply</div><div className="mt-0.5 text-[11px] font-medium text-rose-600">from {contact?.name}</div><p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-700">{item.content}</p></div><BrandReplyBox customerId={action.customerId} interaction={item} bombInstanceId={instanceId}/></div>)}
         </div>
       </li>;
     })}
@@ -133,7 +133,7 @@ export function CurrentBombPlan({
     ? `Current stage · Step ${current + 1} · ${currentAction.channel}`
     : instance.status === "Paused" ? "Bomb paused" : "All scheduled steps are complete";
 
-  return <div className="border-b bg-slate-50/80 px-5 py-4">
+  return <div className="bg-slate-50/80 px-5 py-4">
     <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
       <div>
         <div className="text-[11px] font-semibold uppercase tracking-[.12em] text-slate-400">This bomb · execution plan</div>

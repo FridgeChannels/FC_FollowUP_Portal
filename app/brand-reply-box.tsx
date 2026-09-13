@@ -58,7 +58,7 @@ export function BrandReplyBox({
   if (!can("reply") || !customer || customer.status === "Closed" || !inboundNeedsComposer(state, interaction)) return null;
   const effective = options.includes(channel) ? channel : options[0];
   return (
-    <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
+    <div className="mt-3 rounded-xl bg-slate-50 p-3">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap gap-2">
           <Select value={contact?.id} onValueChange={setContactId}>
