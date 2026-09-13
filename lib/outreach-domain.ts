@@ -1,0 +1,155 @@
+export type Role = "Admin" | "Outreach Manager" | "Human Responder" | "Caller" | "Viewer";
+export type Channel = "Email" | "SMS" | "WhatsApp" | "LinkedIn" | "Phone";
+export type CPCode = "CP0" | "CP1" | "CP2" | "CP3";
+export type CustomerStatus = "Ready" | "Bomb Running" | "Waiting for Reply" | "Human Handling" | "Follow-up Due" | "Paused" | "Closed";
+export type ActionStatus = "Scheduled" | "Sending" | "Sent" | "Delivered" | "Failed" | "Cancelled" | "Skipped" | "Completed";
+export type CallOutcome = "Contact Responded" | "Connected — No Useful Response" | "No Answer" | "Voicemail" | "Call Back Requested" | "Wrong Number" | "Wrong Contact" | "Other";
+
+export type Contact = {
+  id: string; name: string; role: "Connector" | "Owner" | "Other"; email?: string; phone?: string;
+  whatsapp?: string; linkedin?: string; preferredChannel: Channel; emailValid: boolean; phoneValid: boolean;
+};
+export type Customer = {
+  id: string; name: string; initials: string; cp: CPCode; status: CustomerStatus; source: string;
+  ownerId?: string; contacts: Contact[]; activeBombId?: string; closedReason?: string; createdAt: string; updatedAt: string;
+};
+export type BombStep = { id: string; channel: Channel; delayDays: number; subject?: string; content: string; callGoal?: string; script?: string };
+export type BombTemplate = {
+  id: string; name: string; cp: CPCode; goal: string; targetRole: Contact["role"]; priority: "Urgent" | "High" | "Normal" | "Low";
+  status: "Active" | "Draft" | "Inactive" | "Archived"; version: number; steps: BombStep[]; launches: number; updatedAt: string;
+};
+export type BombInstance = {
+  id: string; customerId: string; templateId: string; templateName: string; version: number; goal: string;
+  targetContactId: string; status: "Running" | "Paused" | "Completed" | "Stopped" | "Cancelled"; startedAt: string; stoppedAt?: string; stopReason?: string;
+};
+export type ScheduledAction = {
+  id: string; bombInstanceId: string; customerId: string; stepId: string; channel: Channel; plannedDate: string;
+  actualDate: string; status: ActionStatus; content: string; note?: string; callTaskId?: string;
+};
+export type Interaction = {
+  id: string; customerId: string; contactId?: string; type: "Message" | "Phone" | "Bomb" | "CP" | "Follow-up" | "Human" | "System";
+  channel?: Channel; direction?: "Inbound" | "Outbound"; title: string; content: string; createdAt: string; outcome?: CallOutcome; recording?: string;
+};
+export type InboxItem = {
+  id: string; customerId: string; contactId?: string; type: "Reply";
+  status: "Needs Reply" | "Waiting for Contact" | "Follow-up Scheduled" | "Resolved"; ownerId?: string; createdAt: string; updatedAt: string; preview: string;
+};
+export type FollowUp = { id: string; customerId: string; inboxItemId?: string; dueAt: string; reason: string; note?: string; suggestedAction?: string; status: "Scheduled" | "Due" | "Completed" | "Cancelled" };
+export type CallTask = {
+  id: string; customerId: string; contactId: string; bombInstanceId?: string; scheduledActionId?: string; callerId: string;
+  scheduledDate: string; priority: "Urgent" | "High" | "Normal" | "Low"; goal: string; script: string;
+  status: "Scheduled" | "In Progress" | "Completed" | "Cancelled"; outcome?: CallOutcome; responseSummary?: string; recordingStatus?: "Attached" | "Upload manually" | "Unavailable";
+};
+export type AuditEntry = { id: string; actorId: string; customerId?: string; action: string; previousValue?: string; newValue?: string; createdAt: string };
+export type User = { id: string; name: string; initials: string; role: Role; dailyCapacity?: number; workingDays?: number[] };
+export type CPStage = { code: CPCode; name: string; goal: string; criteria: string; color: string };
+export type ChannelIntegration = { channel: Channel; status: "Connected" | "Needs Attention" | "Disconnected"; account: string };
+
+export type WorkspaceState = {
+  version: number; simulatedDate: string; currentRole: Role; currentUserId: string;
+  users: User[]; customers: Customer[]; bombs: BombTemplate[]; bombInstances: BombInstance[];
+  actions: ScheduledAction[]; interactions: Interaction[]; inbox: InboxItem[]; followUps: FollowUp[];
+  callTasks: CallTask[]; audit: AuditEntry[]; cps: CPStage[]; integrations: ChannelIntegration[];
+};
+
+export const roleCapabilities: Record<Role, string[]> = {
+  Admin: ["dashboard","customers","tasks","inbox","calls","bombs","workflow","analytics","settings","reply","launch","changeCP","editBrand","manageCalls","editBomb","editWorkflow","audit"],
+  "Outreach Manager": ["dashboard","customers","tasks","inbox","calls","bombs","workflow","analytics","reply","launch","changeCP","editBrand","manageCalls","editBomb","editWorkflow","audit"],
+  "Human Responder": ["dashboard","customers","tasks","inbox","reply","launch","changeCP","editBrand","createCall"],
+  Caller: ["tasks","calls","submitCall"],
+  Viewer: ["dashboard","customers","analytics"],
+};
+
+const at = (day: string, time = "09:00:00") => `${day}T${time.length === 5 ? `${time}:00` : time}.000Z`;
+export const addDays = (iso: string, days: number) => { const d = new Date(iso); d.setUTCDate(d.getUTCDate()+days); return d.toISOString(); };
+export const dateOnly = (iso: string) => iso.slice(0,10);
+export const uid = (prefix: string) => `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,7)}`;
+
+const contacts: Record<string, Contact[]> = {
+  acme: [{id:"ct_acme_john",name:"John Smith",role:"Connector",email:"john@acme.co",phone:"+1 415 555 0182",whatsapp:"+1 415 555 0182",linkedin:"john-smith",preferredChannel:"WhatsApp",emailValid:true,phoneValid:true},{id:"ct_acme_mike",name:"Mike Evans",role:"Owner",email:"mike@acme.co",phone:"+1 415 555 0133",preferredChannel:"Email",emailValid:true,phoneValid:true}],
+  northstar: [{id:"ct_north_maya",name:"Maya Brooks",role:"Owner",email:"maya@northstar.co",phone:"+1 312 555 0174",whatsapp:"+1 312 555 0174",preferredChannel:"Email",emailValid:true,phoneValid:true}],
+  brightland: [{id:"ct_bright_neil",name:"Neil Patel",role:"Connector",email:"neil@brightland.io",phone:"+1 646 555 0198",preferredChannel:"SMS",emailValid:true,phoneValid:true}],
+  goodkind: [{id:"ct_good_ana",name:"Ana Torres",role:"Other",email:"ana@goodkind.com",phone:"+1 213 555 0122",preferredChannel:"Email",emailValid:true,phoneValid:true}],
+  olive: [{id:"ct_olive_liam",name:"Liam Carter",role:"Owner",email:"liam@oliveoak.co",phone:"+1 202 555 0166",linkedin:"liam-carter",preferredChannel:"LinkedIn",emailValid:true,phoneValid:true}],
+  harbor: [{id:"ct_harbor_rachel",name:"Rachel Kim",role:"Connector",email:"rachel@harbor.house",phone:"+1 617 555 0104",preferredChannel:"Phone",emailValid:true,phoneValid:true}],
+  kite: [{id:"ct_kite_emma",name:"Emma Wu",role:"Connector",email:"emma@kitekey.co",phone:"+1 206 555 0112",preferredChannel:"Email",emailValid:true,phoneValid:true}],
+  field: [{id:"ct_field_sam",name:"Sam Lewis",role:"Owner",email:"sam@fieldtheory.co",phone:"+1 512 555 0148",preferredChannel:"SMS",emailValid:true,phoneValid:true}],
+};
+
+export function createSeedState(): WorkspaceState {
+  const today = at("2026-09-11");
+  const users: User[] = [
+    {id:"u_sarah",name:"Sarah Chen",initials:"SC",role:"Outreach Manager"},
+    {id:"u_mike",name:"Mike Ross",initials:"MR",role:"Human Responder"},
+    {id:"u_alex",name:"Alex Morgan",initials:"AM",role:"Caller",dailyCapacity:6,workingDays:[1,2,3,4,5]},
+    {id:"u_priya",name:"Priya Shah",initials:"PS",role:"Caller",dailyCapacity:6,workingDays:[1,2,3,4,5]},
+    {id:"u_jordan",name:"Jordan Lee",initials:"JL",role:"Caller",dailyCapacity:6,workingDays:[1,2,3,4,5]},
+  ];
+  const customers: Customer[] = [
+    {id:"c_acme",name:"Acme Foods",initials:"AF",cp:"CP1",status:"Human Handling",source:"Expo West 2026",ownerId:"u_sarah",contacts:contacts.acme,createdAt:addDays(today,-12),updatedAt:addDays(today,-0.02)},
+    {id:"c_northstar",name:"Northstar Coffee",initials:"NC",cp:"CP2",status:"Bomb Running",source:"Natural Products Expo",ownerId:"u_sarah",contacts:contacts.northstar,activeBombId:"bi_north",createdAt:addDays(today,-18),updatedAt:addDays(today,-0.08)},
+    {id:"c_brightland",name:"Brightland Labs",initials:"BL",cp:"CP1",status:"Follow-up Due",source:"Inbound",ownerId:"u_mike",contacts:contacts.brightland,createdAt:addDays(today,-21),updatedAt:addDays(today,-3)},
+    {id:"c_goodkind",name:"Goodkind Market",initials:"GM",cp:"CP0",status:"Ready",source:"Expo West 2026",contacts:contacts.goodkind,createdAt:addDays(today,-1),updatedAt:addDays(today,-0.15)},
+    {id:"c_olive",name:"Olive & Oak",initials:"OO",cp:"CP2",status:"Waiting for Reply",source:"Referral",ownerId:"u_mike",contacts:contacts.olive,activeBombId:"bi_olive",createdAt:addDays(today,-30),updatedAt:addDays(today,-0.25)},
+    {id:"c_harbor",name:"Harbor House",initials:"HH",cp:"CP1",status:"Paused",source:"Expo West 2026",ownerId:"u_sarah",contacts:contacts.harbor,activeBombId:"bi_harbor",createdAt:addDays(today,-16),updatedAt:addDays(today,-1)},
+    {id:"c_kite",name:"Kite & Key",initials:"KK",cp:"CP0",status:"Human Handling",source:"Inbound",ownerId:"u_sarah",contacts:contacts.kite,createdAt:addDays(today,-7),updatedAt:addDays(today,-0.18)},
+    {id:"c_field",name:"Field Theory",initials:"FT",cp:"CP2",status:"Waiting for Reply",source:"Referral",ownerId:"u_mike",contacts:contacts.field,createdAt:addDays(today,-25),updatedAt:addDays(today,-1)},
+  ];
+  const bombs: BombTemplate[] = [
+    {id:"b_initial",name:"Initial Connector Outreach",cp:"CP0",goal:"Identify and reach the right Connector",targetRole:"Other",priority:"Normal",status:"Active",version:2,launches:63,updatedAt:addDays(today,-5),steps:[{id:"s_i1",channel:"Email",delayDays:0,subject:"Quick question about your team",content:"Hi {{first_name}}, who owns retention and lifecycle at {{brand.name}}?"},{id:"s_i2",channel:"LinkedIn",delayDays:1,content:"Hi {{first_name}} — quick question about the right owner at {{brand.name}}."},{id:"s_i3",channel:"Phone",delayDays:1,content:"",callGoal:"Identify the Owner",script:"Ask who owns lifecycle and retention."}]},
+    {id:"b_delivery",name:"Confirm Magnet Delivery",cp:"CP1",goal:"Confirm the FC Magnet reached the Owner",targetRole:"Connector",priority:"High",status:"Active",version:3,launches:184,updatedAt:addDays(today,-2),steps:[{id:"s_d1",channel:"Email",delayDays:0,subject:"Did the Magnet make it to {{owner.first_name}}?",content:"Hi {{first_name}}, did the FC Magnet make it to {{owner.first_name}}?"},{id:"s_d2",channel:"Phone",delayDays:1,content:"",callGoal:"Confirm Magnet delivery",script:"Confirm whether the Magnet reached the Owner."},{id:"s_d3",channel:"SMS",delayDays:1,content:"Quick check — did the FC Magnet arrive?"},{id:"s_d4",channel:"WhatsApp",delayDays:2,content:"Hi {{first_name}}, just checking that the FC Magnet reached the right person."},{id:"s_d5",channel:"LinkedIn",delayDays:2,content:"Following up on the FC Magnet delivery."}]},
+    {id:"b_owner",name:"Owner Meeting",cp:"CP2",goal:"Complete the key form and book a review",targetRole:"Owner",priority:"High",status:"Active",version:4,launches:92,updatedAt:addDays(today,-1),steps:[{id:"s_o1",channel:"Email",delayDays:0,subject:"Your FC setup",content:"Hi {{first_name}}, here is the short setup form."},{id:"s_o2",channel:"Phone",delayDays:1,content:"",callGoal:"Book a product review",script:"Confirm receipt and offer review times."},{id:"s_o3",channel:"WhatsApp",delayDays:1,content:"Would one of these review times work?"},{id:"s_o4",channel:"Email",delayDays:2,subject:"Review times",content:"Following up with two review options."}]},
+    {id:"b_reengage",name:"Re-engage Owner",cp:"CP2",goal:"Restart a stalled Owner conversation",targetRole:"Owner",priority:"Normal",status:"Inactive",version:1,launches:37,updatedAt:addDays(today,-14),steps:[{id:"s_r1",channel:"Email",delayDays:0,subject:"Still useful?",content:"Should we keep this open?"},{id:"s_r2",channel:"Phone",delayDays:2,content:"",callGoal:"Confirm interest",script:"Ask whether timing has changed."}]},
+  ];
+  const bombInstances: BombInstance[] = [
+    {id:"bi_north",customerId:"c_northstar",templateId:"b_owner",templateName:"Owner Meeting",version:4,goal:"Complete the key form and book a review",targetContactId:"ct_north_maya",status:"Running",startedAt:addDays(today,-1)},
+    {id:"bi_olive",customerId:"c_olive",templateId:"b_reengage",templateName:"Re-engage Owner",version:1,goal:"Restart a stalled Owner conversation",targetContactId:"ct_olive_liam",status:"Running",startedAt:addDays(today,-3)},
+    {id:"bi_harbor",customerId:"c_harbor",templateId:"b_delivery",templateName:"Confirm Magnet Delivery",version:3,goal:"Confirm the FC Magnet reached the Owner",targetContactId:"ct_harbor_rachel",status:"Paused",startedAt:addDays(today,-2)},
+  ];
+  const actions: ScheduledAction[] = [
+    {id:"a_n1",bombInstanceId:"bi_north",customerId:"c_northstar",stepId:"s_o1",channel:"Email",plannedDate:addDays(today,-1),actualDate:addDays(today,-1),status:"Delivered",content:"Hi Maya, here is the short setup form."},
+    {id:"a_n2",bombInstanceId:"bi_north",customerId:"c_northstar",stepId:"s_o2",channel:"Phone",plannedDate:today,actualDate:today,status:"Scheduled",content:"",callTaskId:"call_north"},
+    {id:"a_n3",bombInstanceId:"bi_north",customerId:"c_northstar",stepId:"s_o3",channel:"WhatsApp",plannedDate:addDays(today,1),actualDate:addDays(today,1),status:"Scheduled",content:"Would one of these review times work?"},
+    {id:"a_o1",bombInstanceId:"bi_olive",customerId:"c_olive",stepId:"s_r1",channel:"Email",plannedDate:addDays(today,-3),actualDate:addDays(today,-3),status:"Delivered",content:"Should we keep this open?"},
+    {id:"a_o2",bombInstanceId:"bi_olive",customerId:"c_olive",stepId:"s_r2",channel:"Phone",plannedDate:addDays(today,-1),actualDate:addDays(today,-1),status:"Completed",content:"",callTaskId:"call_olive"},
+  ];
+  const interactions: Interaction[] = [
+    {id:"int_acme_reply",customerId:"c_acme",contactId:"ct_acme_john",type:"Message",channel:"WhatsApp",direction:"Inbound",title:"WhatsApp · Contact → FC",content:"Yes, I handed the FC Magnet to Mike yesterday afternoon. He has it on his desk now. Mike asked me to send him the setup link as well, so please use mike@acme.co for anything that needs his direct response.",createdAt:at("2026-09-11","08:41:27")},
+    {id:"int_acme_stop",customerId:"c_acme",type:"Bomb",title:"Bomb stopped automatically",content:"John Smith replied via WhatsApp. Four future actions were cancelled and one reserved phone slot was released.",createdAt:at("2026-09-11","08:41:29")},
+    {id:"int_acme_owner_email",customerId:"c_acme",contactId:"ct_acme_mike",type:"Message",channel:"Email",direction:"Outbound",title:"Email · FC → Contact",content:"Subject: Your FC Magnet setup link\n\nHi Mike,\n\nJohn mentioned that the FC Magnet reached you yesterday. Here is the short setup link he requested: https://example.com/fc-setup\n\nIf anything is unclear, reply directly to this email and our team will help.\n\nBest,\nSarah",createdAt:at("2026-09-10","16:08:42")},
+    {id:"int_acme_call",customerId:"c_acme",contactId:"ct_acme_john",type:"Phone",channel:"Phone",direction:"Outbound",title:"Phone · No Answer",content:"Caller: Alex Morgan\nDialed: +1 415 555 0182\nDuration: 00:24\nResult: The call rang four times and then disconnected. No voicemail message was left.",outcome:"No Answer",createdAt:at("2026-09-10","15:16:09")},
+    {id:"int_acme_linkedin",customerId:"c_acme",contactId:"ct_acme_john",type:"Message",channel:"LinkedIn",direction:"Inbound",title:"LinkedIn · Contact → FC",content:"Hi Sarah — I saw your note. I am checking with Mike this afternoon and will confirm once the package is in his hands.",createdAt:at("2026-09-09","11:27:55")},
+    {id:"int_acme_email",customerId:"c_acme",contactId:"ct_acme_john",type:"Message",channel:"Email",direction:"Outbound",title:"Email · FC → Contact",content:"Subject: Did the FC Magnet make it to Mike?\n\nHi John,\n\nI wanted to check whether the FC Magnet reached Mike. If it has, could you confirm when it was handed over? If not, I can help arrange another delivery.\n\nThanks,\nSarah",createdAt:at("2026-09-09","09:00:12")},
+    {id:"int_n_email",customerId:"c_northstar",contactId:"ct_north_maya",type:"Message",channel:"Email",direction:"Outbound",title:"Email · FC → Contact",content:"Subject: Your FC setup\n\nHi Maya,\n\nHere is the short setup form we discussed: https://example.com/northstar-setup\n\nOnce it is complete, reply here and I will send two review times.\n\nBest,\nSarah",createdAt:at("2026-09-10","09:04:18")},
+    {id:"int_kite_reply",customerId:"c_kite",contactId:"ct_kite_emma",type:"Message",channel:"Email",direction:"Inbound",title:"Email · Contact → FC",content:"Hi Sarah,\n\nCould you send me more details about how this works, including the expected setup time and what information our team needs to provide? I can review it with our operations lead tomorrow morning.\n\nThanks,\nEmma",createdAt:at("2026-09-11","05:00:44")},
+  ];
+  const inbox: InboxItem[] = [
+    {id:"in_acme",customerId:"c_acme",contactId:"ct_acme_john",type:"Reply",status:"Needs Reply",ownerId:"u_sarah",createdAt:at("2026-09-11","08:41"),updatedAt:at("2026-09-11","08:41"),preview:"Yes, I gave it to Mike yesterday."},
+    {id:"in_bright",customerId:"c_brightland",contactId:"ct_bright_neil",type:"Reply",status:"Follow-up Scheduled",ownerId:"u_mike",createdAt:addDays(today,-3),updatedAt:addDays(today,-0.1),preview:"Follow-up overdue by 2 hours"},
+    {id:"in_kite",customerId:"c_kite",contactId:"ct_kite_emma",type:"Reply",status:"Needs Reply",ownerId:"u_sarah",createdAt:at("2026-09-11","05:00"),updatedAt:at("2026-09-11","05:00"),preview:"Could you send me more details?"},
+    {id:"in_field",customerId:"c_field",contactId:"ct_field_sam",type:"Reply",status:"Waiting for Contact",ownerId:"u_mike",createdAt:addDays(today,-2),updatedAt:addDays(today,-1),preview:"Tuesday afternoon works for me."},
+  ];
+  const followUps: FollowUp[] = [{id:"fu_bright",customerId:"c_brightland",inboxItemId:"in_bright",dueAt:at("2026-09-11","07:00"),reason:"No response after SMS",note:"Try Email or create a Call Task",suggestedAction:"Reply",status:"Due"}];
+  const callTasks: CallTask[] = [
+    {id:"call_north",customerId:"c_northstar",contactId:"ct_north_maya",bombInstanceId:"bi_north",scheduledActionId:"a_n2",callerId:"u_alex",scheduledDate:today,priority:"Urgent",goal:"Book a product review",script:"Confirm receipt and offer review times.",status:"Scheduled"},
+    {id:"call_morrow",customerId:"c_goodkind",contactId:"ct_good_ana",callerId:"u_alex",scheduledDate:today,priority:"High",goal:"Identify decision maker",script:"Ask who owns lifecycle and retention.",status:"Scheduled"},
+    {id:"call_juniper",customerId:"c_kite",contactId:"ct_kite_emma",callerId:"u_priya",scheduledDate:today,priority:"High",goal:"Confirm pilot interest",script:"Ask whether a short pilot is relevant.",status:"Scheduled"},
+    {id:"call_sunday",customerId:"c_harbor",contactId:"ct_harbor_rachel",callerId:"u_jordan",scheduledDate:today,priority:"Normal",goal:"Confirm sample received",script:"Confirm delivery.",status:"Scheduled"},
+    {id:"call_olive",customerId:"c_olive",contactId:"ct_olive_liam",bombInstanceId:"bi_olive",scheduledActionId:"a_o2",callerId:"u_alex",scheduledDate:addDays(today,-1),priority:"Normal",goal:"Confirm interest",script:"Ask whether timing has changed.",status:"Completed",outcome:"No Answer",recordingStatus:"Unavailable"},
+  ];
+  const cps: CPStage[] = [
+    {code:"CP0",name:"New brand",goal:"Identify the right Connector and obtain the Owner contact",criteria:"A valid Owner contact is identified",color:"slate"},
+    {code:"CP1",name:"Owner identified",goal:"Deliver the FC Magnet to the Owner",criteria:"The Owner has received the Magnet",color:"violet"},
+    {code:"CP2",name:"Owner has Magnet",goal:"Complete the key form and book the meeting",criteria:"The meeting is booked",color:"blue"},
+    {code:"CP3",name:"Goal complete",goal:"Complete outreach and hand off the opportunity",criteria:"The outreach goal is complete",color:"emerald"},
+  ];
+  const integrations: ChannelIntegration[] = [
+    {channel:"Email",status:"Connected",account:"sales@fridgechannel.com"},{channel:"SMS",status:"Connected",account:"+1 415 555 0100"},{channel:"WhatsApp",status:"Needs Attention",account:"FC Outreach"},{channel:"LinkedIn",status:"Disconnected",account:"No account"},{channel:"Phone",status:"Connected",account:"Quo workspace"},
+  ];
+  const audit: AuditEntry[] = [
+    {id:"au1",actorId:"system",customerId:"c_acme",action:"Bomb stopped on contact response",previousValue:"Bomb Running",newValue:"Human Handling",createdAt:at("2026-09-11","08:41:29")},
+    {id:"au2",actorId:"u_sarah",customerId:"c_northstar",action:"Bomb launched",newValue:"Owner Meeting V4",createdAt:addDays(today,-1)},
+    {id:"au3",actorId:"u_mike",customerId:"c_brightland",action:"Follow-up created",newValue:"Sep 11, 7:00 AM",createdAt:addDays(today,-3)},
+  ];
+  return {version:3,simulatedDate:today,currentRole:"Outreach Manager",currentUserId:"u_sarah",users,customers,bombs,bombInstances,actions,interactions,inbox,followUps,callTasks,audit,cps,integrations};
+}
