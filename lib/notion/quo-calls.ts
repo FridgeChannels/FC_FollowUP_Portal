@@ -4,6 +4,7 @@ import { createOutboundConversation } from "./followup-writes";
 import { richText, updatePage } from "./client";
 import { listFollowupTasksForViewer, retrieveFollowupTask } from "./tasks";
 import type { QuoCall, QuoCallData } from "../quo/types";
+import { mergeQuoCallData, recordingsForQuoCall } from "../quo/data";
 
 function normalizePhone(value?: string | null) {
   return (value || "").replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
@@ -41,21 +42,6 @@ function readableContent(data: QuoCallData) {
   return result ? `Quo call ${result}` : "Quo call activity received";
 }
 
-function mergeData(previous: QuoCallData | null | undefined, incoming: QuoCallData) {
-  return {
-    ...(previous || {}),
-    ...incoming,
-    callId: incoming.callId,
-    call: incoming.call || previous?.call || null,
-    recordings: incoming.recordings?.length ? incoming.recordings : previous?.recordings || [],
-    transcript: incoming.transcript || previous?.transcript || null,
-    summary: incoming.summary || previous?.summary || null,
-    voicemail: incoming.voicemail || previous?.voicemail || null,
-    eventTypes: [...new Set([...(previous?.eventTypes || []), ...(incoming.eventTypes || [])])],
-    lastEventAt: incoming.lastEventAt || previous?.lastEventAt || null,
-  } satisfies QuoCallData;
-}
-
 export async function findFollowupTaskForQuoCall(call: QuoCall) {
   const phones = new Set(callPhones(call));
   if (!phones.size) return null;
@@ -81,12 +67,13 @@ export async function upsertQuoCallActivity(input: {
   eventType: string;
 }) {
   if (!input.task.contactId) throw new Error("Quo call cannot be linked without a contact");
-  const data = mergeData(input.data, {
+  const existing = (await findQuoCallConversation(input.data.callId))[0];
+  const data = mergeQuoCallData(existing?.quo, {
     ...input.data,
     eventTypes: [input.eventType],
     lastEventAt: input.data.lastEventAt || new Date().toISOString(),
-  });
-  const existing = (await findQuoCallConversation(data.callId))[0];
+  }, input.eventType);
+  const recordings = recordingsForQuoCall(data);
   const content = readableContent(data);
   const result = callResult(data.call);
   const createdAt = eventTime(data);
@@ -96,7 +83,7 @@ export async function upsertQuoCallActivity(input: {
     "Message ID": { rich_text: richText(`QUO_CALL:${data.callId}`) },
     "Call Result": result ? { select: { name: result } } : { select: null },
     "Interaction At": { date: { start: createdAt } },
-    ...(data.recordings?.[0]?.url ? { "Source URL": { url: data.recordings[0].url } } : {}),
+    ...(recordings[0]?.url ? { "Source URL": { url: recordings[0].url } } : {}),
   } as Record<string, unknown>;
 
   if (existing) {

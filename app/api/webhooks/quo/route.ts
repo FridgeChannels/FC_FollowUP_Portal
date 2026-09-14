@@ -17,7 +17,9 @@ import type {
   QuoRecording,
   QuoSummary,
   QuoTranscript,
+  QuoWebhookEvent,
 } from "@/lib/quo/types";
+import { recordingsForQuoCall } from "@/lib/quo/data";
 
 type JsonObject = Record<string, unknown>;
 
@@ -42,19 +44,6 @@ function callIdFor(event: JsonObject, object: JsonObject) {
   const id = typeof object.id === "string" && object.id.startsWith("AC") ? object.id : null;
   const eventData = isObject(event.data) && isObject(event.data.object) ? event.data.object : null;
   return direct || id || (eventData && typeof eventData.callId === "string" ? eventData.callId : null);
-}
-
-function recordingFromCall(call: QuoCall | null): QuoRecording[] {
-  return (call?.media || [])
-    .filter((item) => !!item.url)
-    .map((item, index) => ({
-      id: `media-${index + 1}`,
-      duration: typeof item.duration === "number" ? item.duration : null,
-      startTime: call?.createdAt || null,
-      status: call?.status || null,
-      type: item.type || null,
-      url: item.url || null,
-    }));
 }
 
 function base64Bytes(value: string) {
@@ -96,8 +85,9 @@ function callDataFor(event: JsonObject, type: string): QuoCallData | null {
     callId,
     call,
     recordings: type === "call.recording.completed"
-      ? call ? recordingFromCall(call) : [object as QuoRecording]
+      ? recordingsForQuoCall({ call, recordings: call ? [] : [object as QuoRecording] })
       : [],
+    webhookEvents: [{ ...event, type } as QuoWebhookEvent],
     eventTypes: [type],
     lastEventAt: typeof event.createdAt === "string" ? event.createdAt : new Date().toISOString(),
   };
