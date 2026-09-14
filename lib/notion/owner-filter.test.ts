@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { ownerPageIdFromQueryParam, ownerRelationFilter } from "./owner-filter.ts";
+import { ownerPageIdFromQueryParam, ownerRelationFilter, taskListFilter, taskQueryForViewer } from "./owner-filter.ts";
 
 describe("ownerRelationFilter", () => {
   it("queries all owners when no owner is selected", () => {
@@ -34,5 +34,30 @@ describe("ownerPageIdFromQueryParam", () => {
   it("lets admin query all owners", () => {
     assert.equal(ownerPageIdFromQueryParam(true, "admin-1", "all"), undefined);
     assert.equal(ownerPageIdFromQueryParam(true, "admin-1", null), undefined);
+  });
+});
+
+describe("taskQueryForViewer", () => {
+  it("queries Phone tasks for Caller", () => {
+    assert.deepEqual(
+      taskQueryForViewer({ isAdmin: false, role: "Caller", ownerId: "caller-1" }),
+      { channel: "Phone" },
+    );
+  });
+
+  it("scopes FC_Owner to their Owner relation", () => {
+    assert.deepEqual(
+      taskQueryForViewer({ isAdmin: false, role: "FC_Owner", ownerId: "owner-1" }),
+      { ownerPageId: "owner-1" },
+    );
+  });
+});
+
+describe("taskListFilter", () => {
+  it("filters Caller lists by Channel Phone", () => {
+    assert.deepEqual(taskListFilter({ channel: "Phone" }), {
+      property: "Channel",
+      select: { equals: "Phone" },
+    });
   });
 });
