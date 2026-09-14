@@ -8,7 +8,7 @@ export type PortalSession = {
 export type SessionUser = {
   email: string;
   name: string | null;
-  role: "Admin" | "FC_Owner";
+  role: "Admin" | "FC_Owner" | "Caller";
 };
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

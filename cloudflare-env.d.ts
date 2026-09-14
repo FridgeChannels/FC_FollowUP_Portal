@@ -15,10 +15,14 @@ declare namespace Cloudflare {
     NOTION_FOLLOWUP_CHECKPOINT_DB_ID?: string;
     ADMIN_EMAILS?: string;
     NOTION_ADMIN_EMAILS?: string;
+    CALLER_EMAILS?: string;
+    NOTION_CALLER_EMAILS?: string;
+    MOCK_CALLER_TASK_EMAILS?: string;
     SKIP_UNAVAILABLE_CHANNELS?: string;
     REPLY_INGEST_TOKEN?: string;
     QUO_API_KEY?: string;
     QUO_FROM_NUMBER?: string;
     QUO_WEBHOOK_SIGNING_SECRET?: string;
+    QUO_WEBHOOK_SIGNING_SECRETS?: string;
   }
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { AudioLines, Bot, CalendarClock, Clock3, ExternalLink, FileAudio, PhoneCall, RefreshCw, UserRound } from "lucide-react";
+import { AudioLines, Bot, CalendarClock, CheckCircle2, Clock3, ExternalLink, FileAudio, PhoneCall, RefreshCw, ScrollText, UserRound } from "lucide-react";
 import type { QuoCallData, QuoTranscriptLine } from "@/lib/quo/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,7 +27,7 @@ function formatOffset(value?: number | null) {
 
 function Field({ label, value }: { label: string; value?: unknown }) {
   const text = value === null || value === undefined || value === "" ? "—" : String(value);
-  return <div className="min-w-0"><div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{label}</div><div className="mt-1 break-words text-sm text-slate-800">{text}</div></div>;
+  return <div className="min-w-0"><div className="text-[11px] font-semibold tracking-wide text-slate-400">{label}</div><div className="mt-1 break-words text-sm text-slate-800">{text}</div></div>;
 }
 
 function statusClass(status?: string | null) {
@@ -43,21 +43,37 @@ function SpeakerLine({ line }: { line: QuoTranscriptLine }) {
   </div>;
 }
 
-export function QuoCallPanel({ data, onRefresh, refreshing = false }: { data: QuoCallData; onRefresh?: () => void; refreshing?: boolean }) {
+function AwaitingQuoData() {
+  return <section className="mt-6 rounded-2xl bg-slate-50 p-4 sm:p-5">
+    <div className="flex items-start gap-3"><span className="grid size-9 shrink-0 place-items-center rounded-xl bg-blue-100 text-blue-700"><PhoneCall className="size-4"/></span><div><h3 className="font-bold text-slate-950">Quo call record</h3><p className="mt-1 text-sm leading-6 text-slate-600">Call status, recording, transcript, and AI summary will appear here automatically after Quo sends them back.</p></div></div>
+    <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm sm:grid-cols-4"><div><div className="text-slate-500">Call</div><div className="mt-1 font-medium text-slate-700">Waiting</div></div><div><div className="text-slate-500">Recording</div><div className="mt-1 font-medium text-slate-700">Waiting</div></div><div><div className="text-slate-500">Transcript</div><div className="mt-1 font-medium text-slate-700">Waiting</div></div><div><div className="text-slate-500">AI summary</div><div className="mt-1 font-medium text-slate-700">Waiting</div></div></div>
+  </section>;
+}
+
+export function QuoCallPanel({ data, onRefresh, refreshing = false }: { data: QuoCallData | null; onRefresh?: () => void; refreshing?: boolean }) {
+  const raw = useMemo(() => data ? JSON.stringify(data, null, 2) : "", [data]);
+  if (!data) return <AwaitingQuoData/>;
   const call = data.call;
   const recordings = data.recordings || [];
   const dialogue = data.transcript?.dialogue || [];
   const summary = data.summary?.summary || [];
   const nextSteps = data.summary?.nextSteps || [];
   const jobs = data.summary?.jobs || [];
-  const raw = useMemo(() => JSON.stringify(data, null, 2), [data]);
   const callStatus = call?.status || data.transcript?.status || data.summary?.status;
+  const eventTypes = new Set(data.eventTypes || []);
+  const received = [
+    { label: "Call", ready: eventTypes.has("call.ringing") || eventTypes.has("call.completed"), icon: PhoneCall },
+    { label: "Recording", ready: eventTypes.has("call.recording.completed") || recordings.length > 0, icon: FileAudio },
+    { label: "Transcript", ready: eventTypes.has("call.transcript.completed") || dialogue.length > 0, icon: ScrollText },
+    { label: "AI summary", ready: eventTypes.has("call.summary.completed") || summary.length > 0, icon: Bot },
+  ];
   return <section className="mt-6 rounded-2xl border border-slate-200 bg-white shadow-sm">
     <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">
       <div className="flex min-w-0 items-start gap-3"><span className="grid size-9 shrink-0 place-items-center rounded-xl bg-blue-100 text-blue-700"><PhoneCall className="size-4"/></span><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="font-bold text-slate-950">Quo call details</h3>{callStatus ? <Badge className={statusClass(callStatus)}>{callStatus}</Badge> : null}</div><p className="mt-1 text-xs text-slate-500">Call ID · {data.callId}</p></div></div>
       {onRefresh ? <Button size="sm" variant="outline" disabled={refreshing} onClick={onRefresh}><RefreshCw className={`mr-2 size-3.5 ${refreshing ? "animate-spin" : ""}`}/>Refresh Quo data</Button> : null}
     </div>
     <div className="space-y-5 p-5">
+      <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm sm:grid-cols-4">{received.map((item) => { const Icon = item.icon; return <div key={item.label} className="flex items-center gap-2"><span className={`grid size-7 place-items-center rounded-lg ${item.ready ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-400"}`}>{item.ready ? <CheckCircle2 className="size-4"/> : <Icon className="size-4"/>}</span><div><div className="text-slate-500">{item.label}</div><div className={`text-xs font-semibold ${item.ready ? "text-emerald-700" : "text-slate-500"}`}>{item.ready ? "Received" : "Waiting"}</div></div></div>; })}</div>
       <div className="grid gap-4 rounded-xl bg-slate-50 p-4 sm:grid-cols-2 lg:grid-cols-4">
         <Field label="Direction" value={call?.direction}/><Field label="Duration" value={formatDuration(call?.duration || data.transcript?.duration)}/><Field label="Created" value={formatDate(call?.createdAt)}/><Field label="Completed" value={formatDate(call?.completedAt)}/>
         <Field label="From" value={call?.from}/><Field label="To" value={call?.to}/><Field label="Answered at" value={formatDate(call?.answeredAt)}/><Field label="Updated" value={formatDate(call?.updatedAt)}/>

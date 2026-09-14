@@ -283,7 +283,7 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
     return () => { cancelled = true; };
   }, [task.remote, task.id]);
   useEffect(() => {
-    if (!task.remote || task.type !== "Call" || liveTask.status !== "In Progress") return;
+    if (!task.remote || task.type !== "Call" || isDone(liveTask)) return;
     let cancelled = false;
     const poll = async () => {
       try {
@@ -335,20 +335,22 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
 
     <div className="grid lg:grid-cols-[minmax(0,1fr)_290px]">
       <div className="min-w-0 p-5 lg:p-7">
-        {liveTask.type === "Call" ? <CallBrief task={liveTask} contact={contact} onCallStarted={() => {
-          setLiveTask(current => ({ ...current, status: "In Progress" }));
-          if (task.remote) {
-            void fetch(`/api/tasks/${task.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "In Progress" }) }).catch(() => undefined);
-          }
+        {liveTask.type === "Call" ? <CallBrief task={liveTask} contact={contact} onCallOpening={() => {
+          if (!task.remote) return;
+          void fetch(`/api/tasks/${task.id}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "quo-attempt" }),
+            keepalive: true,
+          }).catch(() => undefined);
         }} /> : null}
+        {liveTask.type === "Call" ? <QuoCallPanel data={quoData} onRefresh={task.remote && !task.id.startsWith("mock-") ? refreshQuo : undefined} refreshing={quoRefreshing}/> : null}
         <section>
           <h3 className="mb-3 font-bold">Brand activity</h3>
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
           <InteractionFeed key={`${customer.id}-${customer.cp}`} customerId={customer.id} currentCp={customer.cp} interactions={timeline} contacts={customer.contacts} maxHeight="max-h-[480px]"/>
           </div>
         </section>
-        {quoData ? <QuoCallPanel data={quoData} onRefresh={task.remote ? refreshQuo : undefined} refreshing={quoRefreshing}/> : null}
-
       </div>
 
       <aside className="bg-white p-5 lg:pl-0">
@@ -406,15 +408,19 @@ function CallResultDialog({ taskId, open, onOpenChange, onSubmit }: { taskId: st
   return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent><DialogHeader><DialogTitle>Complete call task</DialogTitle><DialogDescription>The call record is saved before the workflow moves forward.</DialogDescription></DialogHeader><Select value={outcome} onValueChange={value => setOutcome(value as CallOutcome)}><SelectTrigger className="w-full"><SelectValue/></SelectTrigger><SelectContent>{["Contact Responded", "Connected — No Useful Response", "No Answer", "Voicemail", "Call Back Requested", "Wrong Number", "Wrong Contact", "Other"].map(value => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select>{requiresSummary && <Textarea value={summary} onChange={event => setSummary(event.target.value)} placeholder="Full call notes or transcript (required)"/>}{outcome === "Call Back Requested" && <Input type="date" value={callback} onChange={event => setCallback(event.target.value)}/>}<Select value={recording} onValueChange={value => setRecording(value as typeof recording)}><SelectTrigger className="w-full"><SelectValue/></SelectTrigger><SelectContent>{["Attached", "Upload manually", "Unavailable"].map(value => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select><div className="rounded-xl bg-slate-50 p-4 text-xs leading-5 text-slate-600">If the correct contact answers, the call is recorded, the Bomb stops, and a Reply Task is created for a FC_Owner. No Answer and Voicemail let the Bomb continue.</div><DialogFooter><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button disabled={saving || (requiresSummary && !summary.trim())} onClick={() => { void (async () => { if (onSubmit) { setSaving(true); try { await onSubmit(outcome, summary); toast.success("Call result saved"); onOpenChange(false); } catch (error) { toast.error(error instanceof Error ? error.message : "Update failed"); } finally { setSaving(false); } return; } const result = submitCallResult(taskId, outcome, summary, callback ? `${callback}T09:00:00.000Z` : undefined, recording); show(result); if (result.ok) onOpenChange(false); })(); }}>Submit result</Button></DialogFooter></DialogContent></Dialog>;
 }
 
-function CallBrief({ task, contact, onCallStarted }: { task: UnifiedTask; contact: Contact; onCallStarted: () => void }) {
+function CallBrief({ task, contact, onCallOpening }: { task: UnifiedTask; contact: Contact; onCallOpening: () => void }) {
   const phone = contact.phone?.trim();
   if (!phone) return null;
-  const mobileDial = `openphone://dial?number=${encodeURIComponent(phone)}&action=call`;
+  const quoDial = `openphone://dial?number=${encodeURIComponent(phone)}&action=call`;
+  const briefNotes = task.notes?.split("\n")
+    .filter((line) => !line.startsWith("Quo Call ID:") && !line.startsWith("Call result:"))
+    .join("\n")
+    .trim();
   return <section className="mb-6 rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
     <div className="flex flex-wrap items-start justify-between gap-4">
-      <div className="min-w-0"><div className="text-[11px] font-semibold uppercase tracking-[.14em] text-blue-700">Caller brief</div><h3 className="mt-1 text-base font-bold text-blue-950">{task.summary || "Call this Contact"}</h3><p className="mt-1 text-sm text-blue-900">{contact.name} · {phone}</p>{task.notes ? <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-blue-950/80">{task.notes}</p> : null}</div>
-      <div className="flex shrink-0 flex-wrap gap-2"><Button asChild onClick={onCallStarted}><a href={`tel:${phone}`}><Phone className="mr-2 size-4"/>Call with Quo</a></Button><Button asChild variant="outline" className="border-blue-200 bg-white"><a href={mobileDial}><Phone className="mr-2 size-4"/>Mobile dialer</a></Button></div>
+      <div className="min-w-0"><div className="text-[11px] font-semibold tracking-[.14em] text-blue-700">Caller brief</div><h3 className="mt-1 text-base font-bold text-blue-950">{task.summary || "Call this Contact"}</h3><p className="mt-1 text-sm text-blue-900">{contact.name} · {phone}</p>{briefNotes ? <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-blue-950/80">{briefNotes}</p> : null}</div>
+      <div className="flex shrink-0 flex-wrap gap-2"><Button asChild><a href={quoDial} onClick={onCallOpening}><Phone className="mr-2 size-4"/>Call with Quo</a></Button></div>
     </div>
-    <p className="mt-3 text-xs leading-5 text-blue-900/70">Desktop opens Quo through your system phone handler. Mobile uses Quo’s official dial link. After the call, Quo sends the complete record back to this task.</p>
+    <p className="mt-3 text-xs leading-5 text-blue-900/70">This opens Quo directly. The task changes only after Quo reports the call status back to this task.</p>
   </section>;
 }

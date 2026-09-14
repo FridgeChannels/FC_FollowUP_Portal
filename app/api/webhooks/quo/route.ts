@@ -1,9 +1,15 @@
-import { getQuoWebhookSigningSecret } from "@/lib/quo/config";
+import { getQuoWebhookSigningSecrets } from "@/lib/quo/config";
 import { findQuoCallConversation } from "@/lib/notion/conversations";
 import {
   findFollowupTaskForQuoCall,
   upsertQuoCallActivity,
 } from "@/lib/notion/quo-calls";
+import {
+  findMockCallerTaskForQuoCall,
+  findMockCallerTaskForQuoCallId,
+  findMockCallerTaskForRecentQuoAttempt,
+  upsertMockQuoCallActivity,
+} from "@/lib/mock-caller-tasks";
 import { retrieveFollowupTask } from "@/lib/notion/tasks";
 import type {
   QuoCall,
@@ -57,26 +63,25 @@ function base64Bytes(value: string) {
 }
 
 async function verifySignature(payload: string, header: string | null) {
-  const secret = getQuoWebhookSigningSecret();
-  if (!secret) return process.env.NODE_ENV !== "production";
+  const secrets = getQuoWebhookSigningSecrets();
+  if (!secrets.length) return process.env.NODE_ENV !== "production";
   if (!header) return false;
   const [scheme, version, timestamp, signature] = header.split(";");
   if (scheme !== "hmac" || version !== "1" || !timestamp || !signature) return false;
   try {
-    const key = await crypto.subtle.importKey(
-      "raw",
-      base64Bytes(secret),
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["verify"],
-    );
     const canonicalPayload = payload.replace(/\s/g, "");
-    return crypto.subtle.verify(
-      "HMAC",
-      key,
-      base64Bytes(signature),
-      new TextEncoder().encode(`${timestamp}.${canonicalPayload}`),
-    );
+    const source = new TextEncoder().encode(`${timestamp}.${canonicalPayload}`);
+    for (const secret of secrets) {
+      const key = await crypto.subtle.importKey(
+        "raw",
+        base64Bytes(secret),
+        { name: "HMAC", hash: "SHA-256" },
+        false,
+        ["verify"],
+      );
+      if (await crypto.subtle.verify("HMAC", key, base64Bytes(signature), source)) return true;
+    }
+    return false;
   } catch {
     return false;
   }
@@ -90,7 +95,9 @@ function callDataFor(event: JsonObject, type: string): QuoCallData | null {
   const data: QuoCallData = {
     callId,
     call,
-    recordings: type === "call.recording.completed" ? recordingFromCall(call) : [],
+    recordings: type === "call.recording.completed"
+      ? call ? recordingFromCall(call) : [object as QuoRecording]
+      : [],
     eventTypes: [type],
     lastEventAt: typeof event.createdAt === "string" ? event.createdAt : new Date().toISOString(),
   };
@@ -101,7 +108,7 @@ function callDataFor(event: JsonObject, type: string): QuoCallData | null {
 }
 
 export async function GET() {
-  return Response.json({ ok: true, configured: !!getQuoWebhookSigningSecret() });
+  return Response.json({ ok: true, configured: getQuoWebhookSigningSecrets().length > 0 });
 }
 
 export async function POST(request: Request) {
@@ -122,6 +129,13 @@ export async function POST(request: Request) {
   }
 
   try {
+    const mockTask = findMockCallerTaskForQuoCallId(data.callId)
+      || (data.call ? findMockCallerTaskForQuoCall(data.call) : null)
+      || findMockCallerTaskForRecentQuoAttempt(data.lastEventAt);
+    if (mockTask) {
+      upsertMockQuoCallActivity({ record: mockTask, data, eventType: type });
+      return Response.json({ ok: true, linked: true, taskId: mockTask.task.id, callId: data.callId, mock: true });
+    }
     const existing = (await findQuoCallConversation(data.callId))[0];
     const task = existing?.taskId
       ? await retrieveFollowupTask(existing.taskId)
