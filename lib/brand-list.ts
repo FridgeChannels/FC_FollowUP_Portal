@@ -1,3 +1,5 @@
+import type { QuoCallData } from "./quo/types";
+
 export const FOLLOW_UP_STATUSES = [
   "Unassigned",
   "Ready",
@@ -189,6 +191,7 @@ export type BrandTask = {
   sourceBombId: string | null;
   sourceBombName?: string | null;
   sourceBombCp?: string | null;
+  contactPhone?: string | null;
   inboxStatus?: "Needs Reply" | null;
   preview?: string | null;
   lastInboundAt?: string | null;
@@ -213,6 +216,7 @@ export type BrandActivity = {
   cpAtInteraction: "CP1" | "CP2" | "CP3" | null;
   createdAt: string | null;
   recordedAt?: string | null;
+  quo?: QuoCallData | null;
 };
 
 export type BrandDetail = BrandListItem & {

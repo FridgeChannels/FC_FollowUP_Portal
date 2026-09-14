@@ -198,5 +198,6 @@ export async function createPage(
 }
 
 export function richText(value: string) {
-  return [{ type: "text", text: { content: value.slice(0, 2000) } }];
+  const chunks = value.match(/[\s\S]{1,2000}/g) || [];
+  return chunks.map((content) => ({ type: "text", text: { content } }));
 }

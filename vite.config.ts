@@ -27,6 +27,10 @@ export default defineConfig(async ({ mode }) => {
     process.env.SKIP_UNAVAILABLE_CHANNELS || loadedEnv.SKIP_UNAVAILABLE_CHANNELS;
   const replyIngestToken =
     process.env.REPLY_INGEST_TOKEN || loadedEnv.REPLY_INGEST_TOKEN || "local-reply-ingest";
+  const quoApiKey = process.env.QUO_API_KEY || loadedEnv.QUO_API_KEY;
+  const quoFromNumber = process.env.QUO_FROM_NUMBER || loadedEnv.QUO_FROM_NUMBER;
+  const quoWebhookSigningSecret =
+    process.env.QUO_WEBHOOK_SIGNING_SECRET || loadedEnv.QUO_WEBHOOK_SIGNING_SECRET;
   const localBindingConfig = {
     main: "vinext/server/fetch-handler",
     compatibility_flags: ["nodejs_compat"],
@@ -46,6 +50,11 @@ export default defineConfig(async ({ mode }) => {
         ? { SKIP_UNAVAILABLE_CHANNELS: skipUnavailableChannels }
         : {}),
       REPLY_INGEST_TOKEN: replyIngestToken,
+      ...(quoApiKey ? { QUO_API_KEY: quoApiKey } : {}),
+      ...(quoFromNumber ? { QUO_FROM_NUMBER: quoFromNumber } : {}),
+      ...(quoWebhookSigningSecret
+        ? { QUO_WEBHOOK_SIGNING_SECRET: quoWebhookSigningSecret }
+        : {}),
     },
     d1_databases: d1
       ? [

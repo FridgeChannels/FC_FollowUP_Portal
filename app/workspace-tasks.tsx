@@ -20,6 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { ChangeCPDialog, LaunchBombDialog, ReplyDialog } from "./workspace-customer";
 import { InteractionFeed } from "./interaction-feed";
+import { QuoCallPanel } from "./quo-call-panel";
 import { Status } from "./workspace-pages";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
@@ -35,8 +36,17 @@ type UnifiedTask = {
   status: string;
   priority: "Urgent" | "High" | "Normal" | "Low";
   summary: string;
+  notes?: string | null;
   brandName?: string;
   remote?: boolean;
+};
+
+type TaskPayload = {
+  task?: BrandTask;
+  activities?: BrandActivity[];
+  brand?: BrandDetail | null;
+  cps?: CurrentCpOption[];
+  error?: string;
 };
 
 function asPriority(value?: string | null): UnifiedTask["priority"] {
@@ -59,6 +69,7 @@ function fromNotionTask(task: BrandTask): UnifiedTask {
     status: task.inboxStatus || task.status || "Pending",
     priority: task.inboxStatus === "Needs Reply" && priority !== "Urgent" ? "High" : priority,
     summary: task.inboxStatus && task.preview ? task.preview : task.title,
+    notes: task.notes,
     brandName: task.brandName || undefined,
     remote: true,
   };
@@ -187,6 +198,8 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
   const [saving, setSaving] = useState(false);
   const [owners, setOwners] = useState<Array<{id:string;name:string}>>([]);
   const [liveTask, setLiveTask] = useState(task);
+  const [quoData, setQuoData] = useState<import("@/lib/quo/types").QuoCallData | null>(null);
+  const [quoRefreshing, setQuoRefreshing] = useState(false);
   const [remote, setRemote] = useState<{ customer: Customer; contact: Contact; timeline: Interaction[]; ownerName?: string; brand?: BrandDetail; cps?: CurrentCpOption[] } | null>(null);
   const applyTaskPayload = (payload: { task?: BrandTask; activities?: BrandActivity[]; brand?: BrandDetail | null; cps?: CurrentCpOption[] }) => {
     if (!payload.task) return;
@@ -213,6 +226,10 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
       updatedAt: payload.brand?.lastEditedAt || "",
     };
     const activities = payload.activities || [];
+    const latestQuo = activities
+      .filter((activity) => activity.quo)
+      .sort((left, right) => (right.createdAt || "").localeCompare(left.createdAt || ""))[0]?.quo || null;
+    setQuoData(latestQuo);
     const threadCp = new Map<string, NonNullable<BrandActivity["cpAtInteraction"]>>();
     const taskCp = new Map<string, NonNullable<BrandActivity["cpAtInteraction"]>>();
     for (const activity of activities) {
@@ -265,12 +282,44 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
       .catch(() => { if (!cancelled) setOwners([]); });
     return () => { cancelled = true; };
   }, [task.remote, task.id]);
+  useEffect(() => {
+    if (!task.remote || task.type !== "Call" || liveTask.status !== "In Progress") return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const response = await fetch(`/api/tasks/${task.id}`);
+        if (!response.ok) return;
+        const payload = await response.json() as TaskPayload;
+        if (!cancelled) applyTaskPayload(payload);
+      } catch {
+        // The Quo webhook may still be processing; the next poll retries safely.
+      }
+    };
+    const interval = window.setInterval(() => { void poll(); }, 10000);
+    return () => { cancelled = true; window.clearInterval(interval); };
+  }, [task.id, task.remote, task.type, liveTask.status]);
   const localCustomer = state.customers.find(c => c.id === task.customerId);
   const customer = localCustomer || remote?.customer;
   const partnershipContext=customer?.partnershipContext;
   const contact = localCustomer?.contacts.find(c => c.id === task.contactId) || localCustomer?.contacts[0] || remote?.contact;
   const callTask = liveTask.source === "call" ? state.callTasks.find(call => call.id === liveTask.id) : undefined;
   const timeline = (remote?.timeline || state.interactions.filter(item => item.customerId === task.customerId).map(item => ({ ...item, cp: item.cp || customer?.cp }))).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const refreshQuo = async () => {
+    if (!task.remote || quoRefreshing) return;
+    setQuoRefreshing(true);
+    try {
+      const response = await fetch(`/api/tasks/${task.id}/quo`);
+      const payload = await response.json() as { data?: import("@/lib/quo/types").QuoCallData | null; errors?: string[]; error?: string };
+      if (!response.ok) throw new Error(payload.error || "Unable to refresh Quo data");
+      setQuoData(payload.data || null);
+      if (payload.errors?.length) toast.warning(`Quo refresh completed with ${payload.errors.length} unavailable section${payload.errors.length === 1 ? "" : "s"}`);
+      else toast.success("Quo data refreshed");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to refresh Quo data");
+    } finally {
+      setQuoRefreshing(false);
+    }
+  };
   if (task.remote && !customer) return <main className="grid place-items-center bg-slate-50 text-sm text-slate-500">Loading task…</main>;
   if (!customer || !contact) return <main className="grid place-items-center bg-slate-50 text-sm text-slate-500">Brand context unavailable.</main>;
   const humanAssignees = state.users.filter(user => user.role === "FC_Owner" || user.role === "Admin");
@@ -286,12 +335,19 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
 
     <div className="grid lg:grid-cols-[minmax(0,1fr)_290px]">
       <div className="min-w-0 p-5 lg:p-7">
+        {liveTask.type === "Call" ? <CallBrief task={liveTask} contact={contact} onCallStarted={() => {
+          setLiveTask(current => ({ ...current, status: "In Progress" }));
+          if (task.remote) {
+            void fetch(`/api/tasks/${task.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "In Progress" }) }).catch(() => undefined);
+          }
+        }} /> : null}
         <section>
           <h3 className="mb-3 font-bold">Brand activity</h3>
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
           <InteractionFeed key={`${customer.id}-${customer.cp}`} customerId={customer.id} currentCp={customer.cp} interactions={timeline} contacts={customer.contacts} maxHeight="max-h-[480px]"/>
           </div>
         </section>
+        {quoData ? <QuoCallPanel data={quoData} onRefresh={task.remote ? refreshQuo : undefined} refreshing={quoRefreshing}/> : null}
 
       </div>
 
@@ -302,21 +358,21 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
 
         {((callTask && can("submitCall") && callTask.status === "Scheduled") || (liveTask.remote && liveTask.type === "Call" && !isDone(liveTask))) && <Button className="mt-4 w-full" disabled={saving} onClick={() => setCallResult(true)}><Phone className="mr-2 size-4"/>Complete call</Button>}
         {callTask && can("manageCalls") && <div className="mt-4"><label className="text-xs font-semibold text-slate-500">Assign caller</label><Select value={callTask.callerId} onValueChange={value => show(reassignCall(callTask.id, value))}><SelectTrigger className="mt-2 w-full"><SelectValue/></SelectTrigger><SelectContent>{callers.map(user => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}</SelectContent></Select></div>}
-        {task.remote && task.type === "Call" && can("assignOwner") && <div className="mt-4"><label className="text-xs font-semibold text-slate-500">Assign caller</label><Select value={task.assigneeId || "unassigned"} onValueChange={value => { void (async () => { setSaving(true); try { const response = await fetch(`/api/tasks/${task.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ownerId: value === "unassigned" ? null : value }) }); const payload = await response.json(); if (!response.ok) throw new Error(payload.error || "Assign failed"); applyTaskPayload(payload); toast.success("Owner assigned"); } catch (error) { toast.error(error instanceof Error ? error.message : "Assign failed"); } finally { setSaving(false); } })(); }}><SelectTrigger className="mt-2 w-full"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="unassigned">Unassigned</SelectItem>{owners.map(user => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}</SelectContent></Select></div>}
+        {task.remote && task.type === "Call" && can("assignOwner") && <div className="mt-4"><label className="text-xs font-semibold text-slate-500">Assign caller</label><Select value={task.assigneeId || "unassigned"} onValueChange={value => { void (async () => { setSaving(true); try { const response = await fetch(`/api/tasks/${task.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ownerId: value === "unassigned" ? null : value }) }); const payload = await response.json() as TaskPayload; if (!response.ok) throw new Error(payload.error || "Assign failed"); applyTaskPayload(payload); toast.success("Owner assigned"); } catch (error) { toast.error(error instanceof Error ? error.message : "Assign failed"); } finally { setSaving(false); } })(); }}><SelectTrigger className="mt-2 w-full"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="unassigned">Unassigned</SelectItem>{owners.map(user => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}</SelectContent></Select></div>}
         {task.source === "inbox" && can("assignOwner") && <div className="mt-4"><label className="text-xs font-semibold text-slate-500">Assign FC-Owner</label><Select value={task.assigneeId || customer.ownerId || "unassigned"} onValueChange={value => { if (!task.remote) { show(assignBrand(customer.id, value)); return; } void (async () => { setSaving(true); try { const response = await fetch(`/api/brands/${customer.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ownerId: value === "unassigned" ? null : value }) }); const payload = await response.json() as { error?: string }; if (!response.ok) throw new Error(payload.error || "Assign failed"); applyTaskPayload(await fetch(`/api/tasks/${task.id}`).then(item => item.json())); toast.success("Owner assigned"); } catch (error) { toast.error(error instanceof Error ? error.message : "Assign failed"); } finally { setSaving(false); } })(); }}><SelectTrigger className="mt-2 w-full"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="unassigned">Unassigned</SelectItem>{(task.remote ? owners : humanAssignees).map(user => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}</SelectContent></Select></div>}
 
         {task.source === "inbox" && <div className="mt-5 grid gap-2">
           {can("reply") && <Button variant="outline" className="justify-start" onClick={() => setSendMessage(true)}><Send className="mr-2 size-4"/>Send message</Button>}
           {can("launch") && <Button variant="outline" className="justify-start" disabled={!task.remote && (!!customer.activeBombId || customer.status === "Bomb Running")} onClick={() => setLaunch(true)}><Bomb className="mr-2 size-4"/>Launch OmniReach</Button>}
           {can("changeCP") && <Button variant="outline" className="justify-start" onClick={() => setChangeCP(true)}><Check className="mr-2 size-4"/>Change CP</Button>}
-          {can("reply") && !isDone(liveTask) && <Button variant="outline" className="justify-start" disabled={saving} onClick={() => { if (!task.remote) { show(resolveInbox(task.id)); return; } void (async () => { setSaving(true); try { const response = await fetch(`/api/tasks/${task.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "Completed" }) }); const payload = await response.json(); if (!response.ok) throw new Error(payload.error || "Update failed"); applyTaskPayload(payload); toast.success("Task completed"); } catch (error) { toast.error(error instanceof Error ? error.message : "Update failed"); } finally { setSaving(false); } })(); }}><CheckCircle2 className="mr-2 size-4"/>End task</Button>}
+          {can("reply") && !isDone(liveTask) && <Button variant="outline" className="justify-start" disabled={saving} onClick={() => { if (!task.remote) { show(resolveInbox(task.id)); return; } void (async () => { setSaving(true); try { const response = await fetch(`/api/tasks/${task.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "Completed" }) }); const payload = await response.json() as TaskPayload; if (!response.ok) throw new Error(payload.error || "Update failed"); applyTaskPayload(payload); toast.success("Task completed"); } catch (error) { toast.error(error instanceof Error ? error.message : "Update failed"); } finally { setSaving(false); } })(); }}><CheckCircle2 className="mr-2 size-4"/>End task</Button>}
         </div>}
       </aside>
     </div>
 
     {(callTask || (task.remote && task.type === "Call")) && <CallResultDialog taskId={task.id} open={callResult} onOpenChange={setCallResult} onSubmit={task.remote ? async (outcome, summary) => {
       const response = await fetch(`/api/tasks/${task.id}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "complete-call", outcome, summary }) });
-      const payload = await response.json();
+      const payload = await response.json() as TaskPayload;
       if (!response.ok) throw new Error(payload.error || "Complete call failed");
       applyTaskPayload(payload);
     } : undefined}/>} 
@@ -325,14 +381,15 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
       const response = await fetch(`/api/brands/${customer.id}/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contactId, channel, content, taskId: task.id }) });
       const payload = await response.json() as { brand?: BrandDetail; error?: string };
       if (!response.ok) throw new Error(payload.error || "Send failed");
-      const next = await fetch(`/api/tasks/${task.id}`).then(item => item.json());
-      applyTaskPayload(next);
+      const nextResponse = await fetch(`/api/tasks/${task.id}`);
+      applyTaskPayload(await nextResponse.json() as TaskPayload);
     } : undefined}/>
     <ChangeCPDialog customerId={customer.id} open={changeCP} onOpenChange={setChangeCP} currentCp={remote?.brand?.currentCp} cps={remote?.cps} onSave={task.remote ? async (currentCpId, evidence, note) => {
       const response = await fetch(`/api/brands/${customer.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ currentCpId, evidence, note }) });
       const payload = await response.json() as { error?: string };
       if (!response.ok) throw new Error(payload.error || "Update failed");
-      applyTaskPayload(await fetch(`/api/tasks/${task.id}`).then(item => item.json()));
+      const nextResponse = await fetch(`/api/tasks/${task.id}`);
+      applyTaskPayload(await nextResponse.json() as TaskPayload);
     } : undefined}/>
   </main>
   </div>;
@@ -347,4 +404,17 @@ function CallResultDialog({ taskId, open, onOpenChange, onSubmit }: { taskId: st
   const [saving, setSaving] = useState(false);
   const requiresSummary = outcome === "Contact Responded" || outcome === "Connected — No Useful Response" || outcome === "Call Back Requested";
   return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent><DialogHeader><DialogTitle>Complete call task</DialogTitle><DialogDescription>The call record is saved before the workflow moves forward.</DialogDescription></DialogHeader><Select value={outcome} onValueChange={value => setOutcome(value as CallOutcome)}><SelectTrigger className="w-full"><SelectValue/></SelectTrigger><SelectContent>{["Contact Responded", "Connected — No Useful Response", "No Answer", "Voicemail", "Call Back Requested", "Wrong Number", "Wrong Contact", "Other"].map(value => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select>{requiresSummary && <Textarea value={summary} onChange={event => setSummary(event.target.value)} placeholder="Full call notes or transcript (required)"/>}{outcome === "Call Back Requested" && <Input type="date" value={callback} onChange={event => setCallback(event.target.value)}/>}<Select value={recording} onValueChange={value => setRecording(value as typeof recording)}><SelectTrigger className="w-full"><SelectValue/></SelectTrigger><SelectContent>{["Attached", "Upload manually", "Unavailable"].map(value => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select><div className="rounded-xl bg-slate-50 p-4 text-xs leading-5 text-slate-600">If the correct contact answers, the call is recorded, the Bomb stops, and a Reply Task is created for a FC_Owner. No Answer and Voicemail let the Bomb continue.</div><DialogFooter><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button disabled={saving || (requiresSummary && !summary.trim())} onClick={() => { void (async () => { if (onSubmit) { setSaving(true); try { await onSubmit(outcome, summary); toast.success("Call result saved"); onOpenChange(false); } catch (error) { toast.error(error instanceof Error ? error.message : "Update failed"); } finally { setSaving(false); } return; } const result = submitCallResult(taskId, outcome, summary, callback ? `${callback}T09:00:00.000Z` : undefined, recording); show(result); if (result.ok) onOpenChange(false); })(); }}>Submit result</Button></DialogFooter></DialogContent></Dialog>;
+}
+
+function CallBrief({ task, contact, onCallStarted }: { task: UnifiedTask; contact: Contact; onCallStarted: () => void }) {
+  const phone = contact.phone?.trim();
+  if (!phone) return null;
+  const mobileDial = `openphone://dial?number=${encodeURIComponent(phone)}&action=call`;
+  return <section className="mb-6 rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
+    <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="min-w-0"><div className="text-[11px] font-semibold uppercase tracking-[.14em] text-blue-700">Caller brief</div><h3 className="mt-1 text-base font-bold text-blue-950">{task.summary || "Call this Contact"}</h3><p className="mt-1 text-sm text-blue-900">{contact.name} · {phone}</p>{task.notes ? <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-blue-950/80">{task.notes}</p> : null}</div>
+      <div className="flex shrink-0 flex-wrap gap-2"><Button asChild onClick={onCallStarted}><a href={`tel:${phone}`}><Phone className="mr-2 size-4"/>Call with Quo</a></Button><Button asChild variant="outline" className="border-blue-200 bg-white"><a href={mobileDial}><Phone className="mr-2 size-4"/>Mobile dialer</a></Button></div>
+    </div>
+    <p className="mt-3 text-xs leading-5 text-blue-900/70">Desktop opens Quo through your system phone handler. Mobile uses Quo’s official dial link. After the call, Quo sends the complete record back to this task.</p>
+  </section>;
 }

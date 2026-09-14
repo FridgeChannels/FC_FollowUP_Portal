@@ -181,6 +181,7 @@ async function mapTaskPage(page: NotionPage, caches: TaskCaches): Promise<BrandT
     brandOwnerId: brand?.ownerId || null,
     ownerId: owner?.id || ownerId,
     ownerName: owner?.name || null,
+    contactPhone: propertyText(contact?.properties?.Phone) || propertyText(contact?.properties?.["Phone Number"]) || null,
     channel: propertyText(properties.Channel) || null,
     status: propertyText(properties["Task Status"]) || null,
     priority: propertyText(properties.Priority) || null,
