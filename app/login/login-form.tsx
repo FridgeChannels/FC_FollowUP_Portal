@@ -15,6 +15,7 @@ export function LoginForm() {
   const searchParams = useSearchParams();
   const { user, loading, refresh } = useSession();
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const returnTo = safeReturnPath(searchParams.get("return_to"));
@@ -31,7 +32,7 @@ export function LoginForm() {
       const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, password }),
       });
       const payload = (await response.json()) as { user?: SessionUser; error?: string };
       if (!response.ok || !payload.user) {
@@ -71,7 +72,7 @@ export function LoginForm() {
             <CardHeader className="gap-1">
               <CardTitle className="text-xl">Sign in</CardTitle>
               <CardDescription>
-                Use the Account email from OwnerDB. Admins see every brand; other owners only see their own.
+                Sign in with your OwnerDB account email and password.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -81,11 +82,23 @@ export function LoginForm() {
                   <Input
                     id="email"
                     type="email"
-                    autoComplete="email"
+                    autoComplete="username"
                     autoFocus
                     placeholder="you@fridgeteam.com"
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="password">Password</Label>
+                  <Input
+                    id="password"
+                    type="password"
+                    autoComplete="current-password"
+                    placeholder="Enter your password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
                     required
                   />
                 </div>
@@ -96,7 +109,7 @@ export function LoginForm() {
                 ) : null}
                 <Button className="h-10 w-full" disabled={pending} type="submit">
                   {pending ? <Loader2 className="size-4 animate-spin" /> : null}
-                  {pending ? "Signing in…" : "Continue"}
+                  {pending ? "Signing in…" : "Sign in"}
                 </Button>
               </form>
             </CardContent>

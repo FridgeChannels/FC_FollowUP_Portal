@@ -179,6 +179,8 @@ function toTaskContact(item: BrandContact): Contact {
     id: item.id,
     name: item.name,
     role: item.role,
+    title: item.title || undefined,
+    contactRole: item.contactRole || undefined,
     email: item.email || undefined,
     phone: item.phone || undefined,
     whatsapp: item.phone || undefined,
@@ -390,7 +392,7 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
       if (!response.ok) throw new Error(payload.error || "Complete call failed");
       applyTaskPayload(payload);
     } : undefined}/>} 
-    <LaunchBombDialog customerId={customer.id} open={launch} onOpenChange={setLaunch} contacts={task.remote ? customer.contacts : undefined} currentCp={remote?.brand?.currentCp} previewOnly={task.remote}/>
+    <LaunchBombDialog customerId={customer.id} open={launch} onOpenChange={setLaunch} contacts={task.remote ? customer.contacts : undefined} currentCp={remote?.brand?.currentCp} companyName={remote?.brand?.name || customer.name} productDescription={remote?.brand?.productDescription} matchedCategory={remote?.brand?.matchedCategory} previewOnly={task.remote}/>
     <ReplyDialog customerId={customer.id} open={sendMessage} onOpenChange={setSendMessage} contacts={task.remote ? customer.contacts : undefined} onSend={task.remote ? async (contactId, channel, content) => {
       const response = await fetch(`/api/brands/${customer.id}/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contactId, channel, content, taskId: task.id }) });
       const payload = await response.json() as { brand?: BrandDetail; error?: string };

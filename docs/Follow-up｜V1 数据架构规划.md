@@ -618,6 +618,6 @@ Phone
 
 两者默认一致，但允许临时调整。
 
-Portal 读取规则：未登录会先进入登录页。使用 OwnerDB 的 Account（工作邮箱）登录，且 Owner Status 必须为 Active。权限以 OwnerDB 的 **Role** 为准：`Admin` 为管理员，`Owner` 为 FC_Owner，`Caller` 为 Caller。非 Admin 只读取 Owner 关系等于当前 Owner 记录的 Follow-up Client；未分配 Owner 的记录仅 Admin 可见。
+Portal 读取规则：未登录会先进入登录页。使用 OwnerDB 的 Account（工作邮箱）和 Password Hash 登录，且 Owner Status 必须为 Active。Password Hash 只保存加密哈希，禁止长期保存明文；若当前仍是明文，首次成功登录后会自动改写成哈希。权限以 OwnerDB 的 **Role** 为准：`Admin` 为管理员，`Owner` 为 FC_Owner，`Caller` 为 Caller。非 Admin 只读取 Owner 关系等于当前 Owner 记录的 Follow-up Client；未分配 Owner 的记录仅 Admin 可见。
 
 多渠道客户外联系统｜V1 排班引擎规划

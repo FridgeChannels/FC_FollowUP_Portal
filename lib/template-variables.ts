@@ -53,11 +53,25 @@ export function variableToken(key: string) {
 }
 
 export function buildTemplateVariableContext(source: TemplateVariableSource): TemplateVariableContext {
-  return {
+  const context: TemplateVariableContext = {
     company_name: source.companyName?.trim() || "",
     product_description: source.productDescription?.trim() || "",
     "Matched Category": source.matchedCategory?.trim() || "",
+  };
+  const hasContact = [
+    source.contactName,
+    source.contactTitle,
+    source.contactRole,
+    source.email,
+    source.phone,
+    source.ownerOrConnector,
+    source.linkedinUrl,
+  ].some((value) => value != null && String(value).trim() !== "");
+  if (!hasContact) return context;
+  return {
+    ...context,
     contact_name: source.contactName?.trim() || "",
+    first_name: source.contactName?.trim().split(/\s+/)[0] || "",
     contact_title: source.contactTitle?.trim() || "",
     contact_role: source.contactRole?.trim() || "",
     email: source.email?.trim() || "",
@@ -98,5 +112,18 @@ export function resolveOutboundFields(
   return {
     subject: "",
     content: resolve(input.content),
+  };
+}
+
+export function resolveLaunchStepCopy(
+  copy: { subject?: string; content?: string; callGoal?: string; script?: string },
+  context: TemplateVariableContext,
+) {
+  const resolve = (value?: string) => resolveTemplateVariables(value || "", context);
+  return {
+    subject: resolve(copy.subject),
+    content: resolve(copy.content),
+    callGoal: resolve(copy.callGoal),
+    script: resolve(copy.script),
   };
 }

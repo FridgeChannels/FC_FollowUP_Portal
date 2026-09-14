@@ -1,4 +1,4 @@
-import { currentCpOption, parseCurrentCp, type CurrentCpOption } from "../brand-list";
+import { currentCpOption, isApplicableCp, parseCurrentCp, type CurrentCpOption } from "../brand-list";
 import { interactionCpCode } from "../outreach-domain";
 import {
   propertyText,
@@ -62,7 +62,12 @@ export async function listCheckpoints(): Promise<CurrentCpOption[]> {
 }
 
 export async function listApplicableCheckpoints(): Promise<CurrentCpOption[]> {
-  return (await listCheckpoints()).filter((item) => item.name !== "NONE");
+  const seen = new Set<string>();
+  return (await listCheckpoints()).filter((item) => {
+    if (!isApplicableCp(item.name) || seen.has(item.name)) return false;
+    seen.add(item.name);
+    return true;
+  });
 }
 
 export async function resolveCheckpoint(value?: string | null) {

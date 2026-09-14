@@ -28,6 +28,22 @@ describe("template variable engine", () => {
     );
   });
 
+  it("derives first_name from the contact name", () => {
+    assert.equal(resolveTemplateVariables("Hi {{first_name}}", context), "Hi Melissa");
+  });
+
+  it("keeps contact tokens until a contact is provided", () => {
+    const companyOnly = buildTemplateVariableContext({
+      companyName: "Oxyfresh",
+      productDescription: "Oral care",
+      matchedCategory: "Pet",
+    });
+    assert.equal(
+      resolveTemplateVariables("{{company_name}} {{contact_role}} {{product_description}}", companyOnly),
+      "Oxyfresh {{contact_role}} Oral care",
+    );
+  });
+
   it("resolves spaced keys and empty fields", () => {
     const text = "{{Matched Category}} {{LinkedIn URL}} {{missing_optional}}";
     assert.equal(

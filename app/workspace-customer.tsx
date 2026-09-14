@@ -23,6 +23,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { InteractionFeed } from "./interaction-feed";
 import { ChannelIcon, ChannelOption } from "./channel-icon";
 import { skipUnavailableChannelsOnClient } from "@/lib/channel-availability";
+import { buildTemplateVariableContext, resolveLaunchStepCopy } from "@/lib/template-variables";
 
 const show=(r:{ok:boolean;message:string})=>r.ok?toast.success(r.message):toast.error(r.message);
 const hasCjk=(value?:string|null)=>/[\u4e00-\u9fff]/.test(value||"");
@@ -284,6 +285,8 @@ function toCustomerContacts(contacts: BrandContact[]): Contact[] {
     id: item.id,
     name: item.name,
     role: item.role,
+    title: item.title || undefined,
+    contactRole: item.contactRole || undefined,
     email: item.email || undefined,
     phone: item.phone || undefined,
     whatsapp: item.phone || undefined,
@@ -438,7 +441,7 @@ export function BrandDetail({customerId}:{customerId:string}){
     applyRemote(payload.brand,payload.cps||remoteCps);
   }:undefined}/></div></section>
     {(c.cp==="CP3"||partnershipContext)&&partnershipContext&&<aside><section className="rounded-2xl bg-emerald-50 p-5"><div className="text-xs font-semibold tracking-wide text-emerald-700">CP3 · Partnership context</div><h2 className="mt-2 font-bold text-emerald-950">{partnershipContext.headline}</h2><p className="mt-2 text-sm leading-6 text-emerald-900">{partnershipContext.summary}</p><div className="mt-4 space-y-2">{partnershipContext.signals.map(signal=><div key={signal} className="rounded-lg bg-white/70 px-3 py-2 text-xs leading-5 text-slate-700">{signal}</div>)}</div><div className="mt-3 text-[11px] text-emerald-700">Updated {dateOnly(partnershipContext.updatedAt)}</div></section></aside>}</div>
-  <LaunchBombDialog customerId={c.id} open={launch} onOpenChange={setLaunch} contacts={notionBacked?c.contacts:undefined} currentCp={notionBacked&&remote?remote.currentCp:undefined} previewOnly={notionBacked} onLaunched={notionBacked?()=>{void refreshRemote()}:undefined}/><ReplyDialog customerId={c.id} open={reply} onOpenChange={setReply} contacts={notionBacked?c.contacts:undefined} onSend={notionBacked?async (contactId,channel,content)=>{
+  <LaunchBombDialog customerId={c.id} open={launch} onOpenChange={setLaunch} contacts={notionBacked?c.contacts:undefined} currentCp={notionBacked&&remote?remote.currentCp:undefined} companyName={c.name} productDescription={notionBacked?remote?.productDescription:undefined} matchedCategory={notionBacked?remote?.matchedCategory:undefined} previewOnly={notionBacked} onLaunched={notionBacked?()=>{void refreshRemote()}:undefined}/><ReplyDialog customerId={c.id} open={reply} onOpenChange={setReply} contacts={notionBacked?c.contacts:undefined} onSend={notionBacked?async (contactId,channel,content)=>{
     const response=await fetch(`/api/brands/${c.id}/messages`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId,channel,content})});
     const payload=await response.json() as {brand?:BrandDetail;cps?:CurrentCpOption[];error?:string};
     if(!response.ok||!payload.brand)throw new Error(payload.error||"Send failed");
@@ -518,7 +521,7 @@ function bombDetailToLaunch(detail: BombDetail): LaunchBombOption {
   };
 }
 
-export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentCp,previewOnly,onLaunched}:{customerId?:string;open:boolean;onOpenChange:(v:boolean)=>void;contacts?:Contact[];currentCp?:string;previewOnly?:boolean;onLaunched?:()=>void}){
+export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentCp,companyName,productDescription,matchedCategory,previewOnly,onLaunched}:{customerId?:string;open:boolean;onOpenChange:(v:boolean)=>void;contacts?:Contact[];currentCp?:string;companyName?:string;productDescription?:string|null;matchedCategory?:string|null;previewOnly?:boolean;onLaunched?:()=>void}){
   const {state,launchBomb}=useWorkspace();
   const c=state.customers.find(x=>x.id===customerId);
   const [remoteBombs,setRemoteBombs]=useState<BombListItem[]>([]);
@@ -534,6 +537,18 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
   const selected=previewOnly?remoteDetail:localBombs.find(b=>b.id===bombId);
   const targets=contacts||c?.contacts||[];
   const person=targets.find(t=>t.id===target);
+  const templateContext=buildTemplateVariableContext({
+    companyName:companyName||c?.name,
+    productDescription,
+    matchedCategory,
+    contactName:person?.name,
+    contactTitle:person?.title,
+    contactRole:person?.contactRole,
+    email:person?.email,
+    phone:person?.phone,
+    ownerOrConnector:person?.role,
+    linkedinUrl:person?.linkedin,
+  });
   useEffect(()=>{
     if(!open||!previewOnly)return;
     let cancelled=false;
@@ -563,9 +578,11 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
   useEffect(()=>{
     if(!selected){setCopies({});return;}
     const next:Record<string,LaunchStepCopy>={};
-    selected.steps.forEach(s=>{next[s.id]={subject:s.subject,content:s.content,callGoal:s.callGoal,script:s.script};});
+    selected.steps.forEach(s=>{
+      next[s.id]=resolveLaunchStepCopy({subject:s.subject,content:s.content,callGoal:s.callGoal,script:s.script},templateContext);
+    });
     setCopies(next);
-  },[selected?.id]);
+  },[selected?.id,target,companyName,productDescription,matchedCategory]);
   const updateCopy=(id:string,patch:Partial<LaunchStepCopy>)=>setCopies(prev=>({...prev,[id]:{...prev[id],...patch}}));
   const enforceSkip=skipUnavailableChannelsOnClient();
   const unavailable=enforceSkip&&selected&&person?selected.steps.filter(s=>!channelAvailable(person,s.channel)).map(s=>s.channel):[];

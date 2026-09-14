@@ -22,9 +22,8 @@ import { useWorkspace } from "./workspace-store";
 import { cacheBrandItem, cacheBrandList } from "@/lib/brand-list-cache";
 import {
   FOLLOW_UP_STATUSES,
-  listCurrentCps,
+  listApplicableCps,
   type BrandListItem,
-  type CurrentCpOption,
 } from "@/lib/brand-list";
 import { Contact, dateOnly } from "@/lib/outreach-domain";
 import { brandListMetadata } from "@/lib/page-metadata";
@@ -510,11 +509,10 @@ export function BrandsPage() {
   );
   const { q: query, status, cp, owner } = filters;
   const [brands, setBrands] = useState<BrandListItem[]>([]);
-  const [remoteCps, setRemoteCps] = useState<CurrentCpOption[]>([]);
   const [ownerOptions, setOwnerOptions] = useState<Array<{ id: string; name: string }>>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
-  const cps = remoteCps.length ? remoteCps : listCurrentCps();
+  const cps = listApplicableCps();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
   const applyBrandUpdate = (brand: BrandListItem) => {
@@ -572,18 +570,16 @@ export function BrandsPage() {
       .then(async (response) => {
         const payload = (await response.json()) as {
           brands?: BrandListItem[];
-          cps?: CurrentCpOption[];
           error?: string;
         };
         if (!response.ok) throw new Error(payload.error || "Failed to load brands");
-        return { brands: payload.brands || [], cps: payload.cps || [] };
+        return { brands: payload.brands || [] };
       })
       .then((payload) => {
         if (cancelled) return;
         if (ownerQuery) payload.brands.forEach(cacheBrandItem);
         else cacheBrandList(payload.brands);
         setBrands(payload.brands);
-        setRemoteCps(payload.cps);
         setError(undefined);
       })
       .catch((err: unknown) => {

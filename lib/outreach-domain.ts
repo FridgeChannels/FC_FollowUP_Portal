@@ -14,8 +14,8 @@ export type ActionStatus = "Scheduled" | "Sending" | "Sent" | "Delivered" | "Fai
 export type CallOutcome = "Contact Responded" | "Connected — No Useful Response" | "No Answer" | "Voicemail" | "Call Back Requested" | "Wrong Number" | "Wrong Contact" | "Other";
 
 export type Contact = {
-  id: string; name: string; role: "Connector" | "Owner" | "Other"; email?: string; phone?: string;
-  whatsapp?: string; linkedin?: string; preferredChannel: Channel; emailValid: boolean; phoneValid: boolean;
+  id: string; name: string; role: "Connector" | "Owner" | "Other"; title?: string; contactRole?: string;
+  email?: string; phone?: string; whatsapp?: string; linkedin?: string; preferredChannel: Channel; emailValid: boolean; phoneValid: boolean;
 };
 export type Customer = {
   id: string; name: string; initials: string; cp: CPCode; status: CustomerStatus; source: string;

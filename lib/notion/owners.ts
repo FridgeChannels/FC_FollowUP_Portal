@@ -1,4 +1,4 @@
-import { notionFetch, propertyText, titleFromProperties, type NotionPage } from "./client";
+import { notionFetch, propertyText, richText, titleFromProperties, updatePage, type NotionPage } from "./client";
 import { getFollowupOwnerDbId } from "./config";
 import { isAdminRole, ownerRoleFromRecord, type PortalRole } from "./owner-role";
 
@@ -9,6 +9,10 @@ export type FollowupOwner = {
   role: PortalRole;
   isAdmin: boolean;
   status: string;
+};
+
+export type OwnerLogin = FollowupOwner & {
+  passwordHash: string | null;
 };
 
 function mapOwner(page: NotionPage): FollowupOwner {
@@ -24,7 +28,41 @@ function mapOwner(page: NotionPage): FollowupOwner {
   };
 }
 
-export async function queryOwnerPages() {
+function isMissingObject(error: unknown) {
+  return (
+    error instanceof Error &&
+    (error.message.includes("object_not_found") || error.message.includes("Could not find database"))
+  );
+}
+
+const OWNER_DB_SHARE_ERROR =
+  "Share FC3.0-Follow-up-OwnerDB with the Notion integration so Portal can match Owner Account emails.";
+
+async function findOwnerPageByAccount(email?: string | null) {
+  if (!email) return null;
+  const normalized = email.trim().toLowerCase();
+  const data = await notionFetch<{ results: NotionPage[] }>(
+    `/databases/${getFollowupOwnerDbId()}/query`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        page_size: 100,
+        filter: {
+          property: "Account",
+          rich_text: { equals: normalized },
+        },
+      }),
+    },
+  );
+  const matched = data.results.find(
+    (page) => mapOwner(page).account?.trim().toLowerCase() === normalized,
+  );
+  if (matched) return matched;
+  const pages = await queryOwnerPagesRaw();
+  return pages.find((page) => mapOwner(page).account?.trim().toLowerCase() === normalized) || null;
+}
+
+async function queryOwnerPagesRaw() {
   const pages: NotionPage[] = [];
   let cursor: string | undefined;
   do {
@@ -42,51 +80,41 @@ export async function queryOwnerPages() {
     pages.push(...data.results);
     cursor = data.has_more && data.next_cursor ? data.next_cursor : undefined;
   } while (cursor);
-  return pages.map(mapOwner);
+  return pages;
 }
 
-function isMissingObject(error: unknown) {
-  return (
-    error instanceof Error &&
-    (error.message.includes("object_not_found") || error.message.includes("Could not find database"))
-  );
+export async function queryOwnerPages() {
+  return (await queryOwnerPagesRaw()).map(mapOwner);
 }
-
-const OWNER_DB_SHARE_ERROR =
-  "Share FC3.0-Follow-up-OwnerDB with the Notion integration so Portal can match Owner Account emails.";
 
 export async function findOwnerByAccount(email?: string | null) {
-  if (!email) return null;
-  const normalized = email.trim().toLowerCase();
   try {
-    const data = await notionFetch<{ results: NotionPage[] }>(
-      `/databases/${getFollowupOwnerDbId()}/query`,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          page_size: 100,
-          filter: {
-            property: "Account",
-            rich_text: { equals: normalized },
-          },
-        }),
-      },
-    );
-
-    const matched = data.results
-      .map(mapOwner)
-      .find((owner) => owner.account?.trim().toLowerCase() === normalized);
-    if (matched) return matched;
-
-    return (
-      (await queryOwnerPages()).find(
-        (owner) => owner.account?.trim().toLowerCase() === normalized,
-      ) || null
-    );
+    const page = await findOwnerPageByAccount(email);
+    return page ? mapOwner(page) : null;
   } catch (error) {
     if (isMissingObject(error)) throw new Error(OWNER_DB_SHARE_ERROR);
     throw error;
   }
+}
+
+export async function findOwnerLoginByAccount(email?: string | null): Promise<OwnerLogin | null> {
+  try {
+    const page = await findOwnerPageByAccount(email);
+    if (!page) return null;
+    return {
+      ...mapOwner(page),
+      passwordHash: propertyText(page.properties?.["Password Hash"]) || null,
+    };
+  } catch (error) {
+    if (isMissingObject(error)) throw new Error(OWNER_DB_SHARE_ERROR);
+    throw error;
+  }
+}
+
+export async function updateOwnerPasswordHash(ownerId: string, passwordHash: string) {
+  await updatePage(ownerId, {
+    "Password Hash": { rich_text: richText(passwordHash) },
+  });
 }
 
 export async function retrieveOwner(pageId?: string | null) {
