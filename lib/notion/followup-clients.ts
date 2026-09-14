@@ -15,6 +15,7 @@ import {
 } from "./client";
 import { listFollowupContacts } from "./contacts";
 import { listFollowupConversations } from "./conversations";
+import { listFollowupTasks } from "./tasks";
 import { retrieveOwner, type FollowupOwner } from "./owners";
 
 const HANDLING_MODES = new Set(["Automated", "Human"]);
@@ -102,6 +103,29 @@ async function resolveCpMeta(pageId: string | undefined) {
   }
 }
 
+async function resolveBombMeta(pageId: string) {
+  try {
+    const page = await retrievePage(pageId);
+    const properties = page.properties || {};
+    const cpId = firstRelationId(properties["Applicable CP"]);
+    let cp: string | null = null;
+    if (cpId) {
+      try {
+        const cpPage = await retrievePage(cpId);
+        cp = titleFromProperties(cpPage.properties) || null;
+      } catch {
+        cp = null;
+      }
+    }
+    return {
+      name: titleFromProperties(properties) || "Untitled Bomb",
+      cp,
+    };
+  } catch {
+    return { name: "Untitled Bomb", cp: null };
+  }
+}
+
 export async function mapFollowupClientDetail(page: NotionPage): Promise<BrandDetail> {
   const properties = page.properties || {};
   const [brand, cpMeta, contacts] = await Promise.all([
@@ -109,7 +133,17 @@ export async function mapFollowupClientDetail(page: NotionPage): Promise<BrandDe
     resolveCpMeta(firstRelationId(properties["Current CP"])),
     listFollowupContacts(page.id, relationIds(properties["Follow-up Contacts"])),
   ]);
-  const activities = await listFollowupConversations(contacts.map((item) => item.id));
+  const contactIds = contacts.map((item) => item.id);
+  const [activities, tasks] = await Promise.all([
+    listFollowupConversations(contactIds),
+    listFollowupTasks(contactIds),
+  ]);
+  const bombIds = [...new Set(tasks.map((item) => item.sourceBombId).filter((id): id is string => !!id))];
+  const bombMeta = new Map(
+    await Promise.all(
+      bombIds.map(async (id) => [id, await resolveBombMeta(id)] as const),
+    ),
+  );
   return {
     ...brand,
     priority: propertyText(properties.Priority) || null,
@@ -119,6 +153,14 @@ export async function mapFollowupClientDetail(page: NotionPage): Promise<BrandDe
     currentCpFullName: cpMeta.fullName,
     currentCpDefinition: cpMeta.definition,
     contacts,
+    tasks: tasks.map((task) => {
+      const bomb = task.sourceBombId ? bombMeta.get(task.sourceBombId) : undefined;
+      return {
+        ...task,
+        sourceBombName: bomb?.name || null,
+        sourceBombCp: bomb?.cp || null,
+      };
+    }),
     activities,
   };
 }

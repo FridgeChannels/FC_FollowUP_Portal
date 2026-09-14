@@ -35,6 +35,14 @@ export type BombScenario = {
   description: string;
 };
 
+export type BombTemplateInput = {
+  id?: string;
+  channel: string;
+  name?: string | null;
+  subject?: string | null;
+  content: string;
+};
+
 export type CreateBombInput = {
   name: string;
   goal?: string | null;
@@ -43,12 +51,19 @@ export type CreateBombInput = {
   targetRole?: string | null;
   priority?: string | null;
   notes?: string | null;
-  template?: {
-    channel: string;
-    name?: string | null;
-    subject?: string | null;
-    content: string;
-  } | null;
+  template?: BombTemplateInput | null;
+};
+
+export type UpdateBombInput = {
+  name?: string;
+  goal?: string | null;
+  scenarioId?: string | null;
+  cpIds?: string[];
+  targetRole?: string | null;
+  priority?: string | null;
+  notes?: string | null;
+  status?: string | null;
+  templates?: BombTemplateInput[];
 };
 
 export type BombListItem = {

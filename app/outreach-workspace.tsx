@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Bomb, ChevronDown, ClipboardCheck, LogOut,
   Settings, Users, Zap,
 } from "lucide-react";
-import { Role, visibleOpenTaskCount } from "@/lib/outreach-domain";
+import type { BrandTask } from "@/lib/brand-list";
+import { isClosedTaskStatus, Role } from "@/lib/outreach-domain";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import {
@@ -20,7 +21,7 @@ import { useWorkspace } from "./workspace-store";
 import { BrandsPage } from "./workspace-pages";
 import { BrandDetail } from "./workspace-customer";
 import { TasksPage } from "./workspace-tasks";
-import { BombDetailPage, BombsPage } from "./workspace-bombs";
+import { BombEditor, BombsPage } from "./workspace-bombs";
 import { SettingsPage } from "./workspace-admin";
 import { useSession } from "./use-session";
 
@@ -49,8 +50,9 @@ export default function OutreachWorkspace() {
   const { state, hydrated, can, setRole } = useWorkspace();
   const { user, loading: sessionLoading, signOut } = useSession();
   const screen = routeScreen(pathname);
-  const taskCount = visibleOpenTaskCount(state);
-  const replyCount = state.inbox.filter(item => item.status === "Needs Reply" && (state.currentRole === "Admin" || state.customers.find(customer => customer.id === item.customerId)?.ownerId === state.currentUserId)).length;
+  const [remoteCounts, setRemoteCounts] = useState<{ open: number; needsReply: number } | null>(null);
+  const taskCount = remoteCounts?.open ?? 0;
+  const replyCount = remoteCounts?.needsReply ?? 0;
 
   useEffect(() => {
     if (sessionLoading) return;
@@ -63,6 +65,28 @@ export default function OutreachWorkspace() {
   useEffect(() => {
     if (user && state.currentRole !== user.role) setRole(user.role);
   }, [user, state.currentRole, setRole]);
+
+  useEffect(() => {
+    if (sessionLoading || !user) return;
+    let cancelled = false;
+    fetch("/api/tasks")
+      .then(async (response) => {
+        const payload = await response.json() as { tasks?: BrandTask[] };
+        if (!response.ok) throw new Error("Failed to load tasks");
+        return payload.tasks || [];
+      })
+      .then((tasks) => {
+        if (cancelled) return;
+        setRemoteCounts({
+          open: tasks.filter((item) => item.inboxStatus === "Needs Reply" || (item.channel === "Phone" && !isClosedTaskStatus(item.status || ""))).length,
+          needsReply: tasks.filter((item) => item.inboxStatus === "Needs Reply").length,
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setRemoteCounts({ open: 0, needsReply: 0 });
+      });
+    return () => { cancelled = true; };
+  }, [sessionLoading, user, pathname]);
 
   useEffect(() => {
     if (sessionLoading || !user) return;
@@ -129,7 +153,7 @@ function RouteContent() {
   const parts = path.split("/").filter(Boolean);
   if (parts[0] === "customers" && parts[1]) return <BrandDetail customerId={parts[1]}/>;
   if (parts[0] === "tasks" || parts[0] === "inbox" || parts[0] === "call-tasks") return <TasksPage selectedId={parts[1]}/>;
-  if (parts[0] === "bombs" && parts[1]) return <BombDetailPage bombId={parts[1]}/>;
+  if (parts[0] === "bombs" && parts[1]) return <BombEditor bombId={parts[1]}/>;
   if (parts[0] === "bombs") return <BombsPage/>;
   if (parts[0] === "customers") return <BrandsPage/>;
   if (parts[0] === "settings") return <SettingsPage section={parts[1]}/>;

@@ -1,8 +1,16 @@
-import { FOLLOW_UP_STATUSES, HANDLING_MODES } from "../brand-list";
-import { createPage, retrievePage, richText, updatePage } from "./client";
-import { getFollowupConversationDbId } from "./config";
+import { FOLLOW_UP_STATUSES, HANDLING_MODES, type BrandActivity, type BrandTask } from "../brand-list";
+import { createPage, propertyText, retrievePage, richText, updatePage } from "./client";
+import { getFollowupConversationDbId, getFollowupTaskDbId } from "./config";
+import { listFollowupConversations } from "./conversations";
 import { listCurrentCps } from "./cps";
 import { retrieveOwner } from "./owners";
+import {
+  annotateTasksWithReplyInbox,
+  groupConversationsByThread,
+  isOpenTaskStatus,
+} from "./reply-inbox";
+import { pickReplyTaskForChannel } from "./reply-target";
+import { listFollowupTasks, retrieveFollowupTask } from "./tasks";
 
 const TASK_STATUSES = new Set(["Pending", "In Progress", "Completed", "Failed", "Cancelled"]);
 const CALL_RESULTS = new Set(["Connected", "No Answer", "Voicemail", "Declined", "Invalid Number"]);
@@ -18,6 +26,36 @@ const CALL_OUTCOME_MAP: Record<string, string | null> = {
 };
 
 const CHANNELS = new Set(["Email", "LinkedIn", "SMS", "WhatsApp", "Phone"]);
+
+function uniqueRecordId(prefix: string, channel: string) {
+  const token =
+    globalThis.crypto?.randomUUID?.().replace(/-/g, "") ||
+    `${Date.now()}${Math.random().toString(16).slice(2)}`;
+  return `${prefix}-${token}-${channel}`;
+}
+
+export async function resolveConversationThread(
+  contactId: string,
+  channel: string,
+  taskId?: string,
+) {
+  if (taskId) {
+    const existing = await listFollowupConversations([contactId]);
+    const sameTask = existing.find(
+      (item) => item.taskId === taskId && item.channel === channel && item.threadId,
+    );
+    if (sameTask?.threadId) {
+      return {
+        threadId: sameTask.threadId,
+        messageId: uniqueRecordId("MSG", channel),
+      };
+    }
+  }
+  return {
+    threadId: uniqueRecordId("THR", channel),
+    messageId: uniqueRecordId("MSG", channel),
+  };
+}
 
 function asStatus(value?: string | null) {
   return FOLLOW_UP_STATUSES.includes(value as (typeof FOLLOW_UP_STATUSES)[number])
@@ -88,6 +126,41 @@ export async function updateFollowupClient(
   return updatePage(pageId, properties);
 }
 
+export async function markFollowupClientEngaged(
+  pageId: string,
+  options?: { handlingMode?: "Automated" | "Human"; note?: string },
+) {
+  const page = await retrievePage(pageId);
+  const properties = page.properties || {};
+  const currentStatus = propertyText(properties["Follow-up Status"]);
+  const currentMode = propertyText(properties["Handling Mode"]);
+  const extras: string[] = [];
+  const patch: {
+    status?: string | null;
+    handlingMode?: string | null;
+    notes?: string | null;
+  } = {};
+
+  if (currentStatus !== "In Progress") {
+    patch.status = "In Progress";
+    extras.push("状态更新为 In Progress。");
+  }
+  if (options?.handlingMode && currentMode !== options.handlingMode) {
+    patch.handlingMode = options.handlingMode;
+    extras.push(`跟进方式更新为 ${options.handlingMode}。`);
+  }
+  if (!extras.length) return page;
+
+  patch.notes = [
+    propertyText(properties.Notes) || null,
+    options?.note || null,
+    ...extras,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  return updateFollowupClient(pageId, patch);
+}
+
 export async function createOutboundConversation(input: {
   brandName: string;
   contactId: string;
@@ -96,6 +169,8 @@ export async function createOutboundConversation(input: {
   content: string;
   sender?: string | null;
   taskId?: string;
+  threadId?: string | null;
+  messageId?: string | null;
   messageStatus?: string | null;
   callResult?: string | null;
   interactionAt?: string | null;
@@ -110,6 +185,12 @@ export async function createOutboundConversation(input: {
   const suffix = input.titleSuffix || (input.messageStatus === null ? input.channel : "Pending");
   const title = `${input.brandName} — ${input.contactName} — ${input.channel} — ${suffix}`;
   const subject = input.channel === "Email" ? content.split("\n")[0].slice(0, 120) : "";
+  const thread = input.threadId?.trim()
+    ? {
+        threadId: input.threadId.trim(),
+        messageId: input.messageId?.trim() || uniqueRecordId("MSG", input.channel),
+      }
+    : await resolveConversationThread(contact.id, input.channel, input.taskId);
   const properties: Record<string, unknown> = {
     "Conversation Record": { title: richText(title) },
     "Conversation Record ID": { rich_text: richText(`PORTAL-${Date.now()}`) },
@@ -120,6 +201,8 @@ export async function createOutboundConversation(input: {
     Content: { rich_text: richText(content) },
     Sender: { rich_text: input.sender ? richText(input.sender) : [] },
     Notes: { rich_text: richText(input.notes || "人工消息，尚未实际发送。") },
+    "Thread ID": { rich_text: richText(thread.threadId) },
+    "Message ID": { rich_text: richText(thread.messageId) },
   };
   if (input.taskId) {
     properties["Follow-up Task"] = { relation: [{ id: input.taskId }] };
@@ -203,4 +286,176 @@ export async function completeFollowupCall(input: {
     endedAt: now,
     notes,
   });
+}
+
+export async function createFollowupTask(input: {
+  brandName: string;
+  contactId: string;
+  contactName: string;
+  ownerId: string;
+  channel: string;
+  scheduledAt: string;
+  priority: string;
+  creationMethod: string;
+  templateId?: string;
+  sourceBombId?: string;
+  notes?: string;
+}) {
+  const properties: Record<string, unknown> = {
+    "Follow-up Task": {
+      title: richText(`${input.brandName} — ${input.contactName} — ${input.channel} — ${input.scheduledAt}`),
+    },
+    "Follow-up Contact": { relation: [{ id: input.contactId }] },
+    Owner: { relation: [{ id: input.ownerId }] },
+    "Creation Method": { select: { name: input.creationMethod } },
+    "Scheduled At": { date: { start: input.scheduledAt } },
+    Priority: { select: { name: input.priority } },
+    Channel: { select: { name: input.channel } },
+    "Task Status": { status: { name: "Pending" } },
+    Notes: { rich_text: richText(input.notes || "") },
+  };
+  if (input.templateId) {
+    properties.Template = { relation: [{ id: input.templateId }] };
+  }
+  if (input.sourceBombId) {
+    properties["Source Bomb"] = { relation: [{ id: input.sourceBombId }] };
+  }
+  return createPage(getFollowupTaskDbId(), properties);
+}
+
+function todayDateOnly() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+function canReuseTask(status?: string | null) {
+  return status === "Pending" || status === "In Progress";
+}
+
+export async function createHumanOutbound(input: {
+  brandName: string;
+  brandOwnerId?: string | null;
+  contactId: string;
+  contactName: string;
+  channel: string;
+  content: string;
+  sender?: string | null;
+  existingTaskId?: string;
+}) {
+  let taskId = input.existingTaskId;
+  const existing = taskId ? await retrieveFollowupTask(taskId) : null;
+  if (!existing || !canReuseTask(existing.status)) {
+    const ownerId = input.brandOwnerId || existing?.ownerId;
+    if (!ownerId) throw new Error("Owner is required to create a follow-up task");
+    const created = await createFollowupTask({
+      brandName: input.brandName,
+      contactId: input.contactId,
+      contactName: input.contactName,
+      ownerId,
+      channel: input.channel,
+      scheduledAt: todayDateOnly(),
+      priority: "P0",
+      creationMethod: "Manual",
+      notes: existing
+        ? "人工追加回复，尚未实际发送。"
+        : "人工发送消息，尚未实际发送。",
+    });
+    taskId = created.id;
+  }
+  return createOutboundConversation({
+    brandName: input.brandName,
+    contactId: input.contactId,
+    contactName: input.contactName,
+    channel: input.channel,
+    content: input.content,
+    sender: input.sender,
+    taskId,
+    interactionAt: new Date().toISOString(),
+    notes: existing
+      ? "人工追加回复，尚未实际发送。"
+      : "人工消息，尚未实际发送。",
+  });
+}
+
+export async function linkConversationToTask(conversationId: string, taskId: string) {
+  await updatePage(conversationId, {
+    "Follow-up Task": { relation: [{ id: taskId }] },
+  });
+  const task = await retrieveFollowupTask(taskId);
+  const ids = [...new Set([...task.conversationIds, conversationId])];
+  await updatePage(taskId, {
+    Conversations: { relation: ids.map((id) => ({ id })) },
+  });
+}
+
+export async function resolveReplyTask(input: {
+  brandName: string;
+  brandOwnerId?: string | null;
+  contactId: string;
+  contactName: string;
+  channel: string;
+  existingTaskId?: string;
+}) {
+  if (input.existingTaskId) {
+    const existing = await retrieveFollowupTask(input.existingTaskId).catch(() => null);
+    if (existing && existing.channel === input.channel) return existing.id;
+  }
+  const tasks = await listFollowupTasks([input.contactId]);
+  const picked = pickReplyTaskForChannel(tasks, input.contactId, input.channel);
+  if (picked && (isOpenTaskStatus(picked.status) || picked.sourceBombId)) return picked.id;
+  const ownerId = input.brandOwnerId || tasks.find((item) => item.ownerId)?.ownerId;
+  if (!ownerId) throw new Error("Owner is required to create a follow-up task");
+  const created = await createFollowupTask({
+    brandName: input.brandName,
+    contactId: input.contactId,
+    contactName: input.contactName,
+    ownerId,
+    channel: input.channel,
+    scheduledAt: todayDateOnly(),
+    priority: "P0",
+    creationMethod: "Manual",
+    notes: "客户回复待处理，尚未人工回复。",
+  });
+  return created.id;
+}
+
+async function backfillUnlinkedInbounds(tasks: BrandTask[], activities: BrandActivity[]) {
+  const created: BrandTask[] = [];
+  for (const thread of groupConversationsByThread(activities).values()) {
+    const latest = thread.at(-1);
+    if (!latest || latest.direction !== "Inbound" || latest.taskId) continue;
+    const sibling = tasks.find((item) => item.contactId === latest.contactId);
+    if (!sibling?.contactId || !latest.channel) continue;
+    const ownerId = sibling.brandOwnerId || sibling.ownerId;
+    if (!ownerId) continue;
+    const taskId = await resolveReplyTask({
+      brandName: sibling.brandName || "Untitled Client",
+      brandOwnerId: ownerId,
+      contactId: sibling.contactId,
+      contactName: sibling.contactName || "KeyPerson",
+      channel: latest.channel,
+    });
+    await linkConversationToTask(latest.id, taskId);
+    if (!tasks.some((item) => item.id === taskId) && !created.some((item) => item.id === taskId)) {
+      created.push(await retrieveFollowupTask(taskId));
+    }
+  }
+  return created;
+}
+
+export async function syncReplyInbox(tasks: BrandTask[]) {
+  const contactIds = [
+    ...new Set(tasks.map((item) => item.contactId).filter((id): id is string => !!id)),
+  ];
+  if (!contactIds.length) return tasks.map((item) => ({ ...item, inboxStatus: null, preview: null, lastInboundAt: null }));
+  let activities = await listFollowupConversations(contactIds);
+  const extras = await backfillUnlinkedInbounds(tasks, activities);
+  if (extras.length) {
+    activities = await listFollowupConversations(contactIds);
+  }
+  return annotateTasksWithReplyInbox([...tasks, ...extras], activities);
 }

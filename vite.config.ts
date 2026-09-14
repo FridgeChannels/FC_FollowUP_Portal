@@ -25,6 +25,10 @@ export default defineConfig(async ({ mode }) => {
   const followupContactDbId =
     process.env.NOTION_FOLLOWUP_CONTACT_DB_ID || loadedEnv.NOTION_FOLLOWUP_CONTACT_DB_ID;
   const adminEmails = process.env.ADMIN_EMAILS || loadedEnv.ADMIN_EMAILS;
+  const skipUnavailableChannels =
+    process.env.SKIP_UNAVAILABLE_CHANNELS || loadedEnv.SKIP_UNAVAILABLE_CHANNELS;
+  const replyIngestToken =
+    process.env.REPLY_INGEST_TOKEN || loadedEnv.REPLY_INGEST_TOKEN || "local-reply-ingest";
   const localBindingConfig = {
     main: "vinext/server/fetch-handler",
     compatibility_flags: ["nodejs_compat"],
@@ -41,6 +45,10 @@ export default defineConfig(async ({ mode }) => {
         ? { NOTION_FOLLOWUP_CONTACT_DB_ID: followupContactDbId }
         : {}),
       ...(adminEmails ? { ADMIN_EMAILS: adminEmails } : {}),
+      ...(skipUnavailableChannels
+        ? { SKIP_UNAVAILABLE_CHANNELS: skipUnavailableChannels }
+        : {}),
+      REPLY_INGEST_TOKEN: replyIngestToken,
     },
     d1_databases: d1
       ? [
@@ -76,6 +84,11 @@ export default defineConfig(async ({ mode }) => {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
+    define: {
+      "import.meta.env.SKIP_UNAVAILABLE_CHANNELS": JSON.stringify(
+        skipUnavailableChannels ?? "",
+      ),
+    },
     server: {
       ...(managedLinux ? { host: "0.0.0.0", allowedHosts: ["terminal.local"] } : {}),
       ...(isCodexSeatbeltSandbox ? { watch: { useFsEvents: false, usePolling: true } } : {}),

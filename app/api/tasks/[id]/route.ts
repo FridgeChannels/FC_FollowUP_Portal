@@ -6,6 +6,7 @@ import { listConversationsByIds, listFollowupConversations } from "@/lib/notion/
 import { listCurrentCps } from "@/lib/notion/cps";
 import { mapFollowupClientDetail } from "@/lib/notion/followup-clients";
 import { completeFollowupCall, updateFollowupTask } from "@/lib/notion/followup-writes";
+import { annotateTasksWithReplyInbox } from "@/lib/notion/reply-inbox";
 import { retrieveFollowupTask } from "@/lib/notion/tasks";
 
 type Params = { params: Promise<{ id: string }> };
@@ -34,7 +35,8 @@ async function taskPayload(id: string) {
     seen.add(item.id);
     return true;
   });
-  return { task, activities, brand, cps };
+  const [annotated] = annotateTasksWithReplyInbox([task], activities);
+  return { task: annotated || task, activities, brand, cps };
 }
 
 export async function GET(request: Request, { params }: Params) {

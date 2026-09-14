@@ -4,6 +4,7 @@ import {
   notionFetch,
   propertyDate,
   propertyText,
+  queryDatabasePages,
   relationIds,
   retrievePage,
   titleFromProperties,
@@ -24,6 +25,7 @@ function mapConversation(page: NotionPage): BrandActivity {
   return {
     id: page.id,
     contactId: firstRelationId(properties["Follow-up Contact"]) || null,
+    taskId: firstRelationId(properties["Follow-up Task"]) || null,
     channel: propertyText(properties.Channel) || null,
     direction: asDirection(propertyText(properties.Direction)),
     status: propertyText(properties["Message Status"]) || null,
@@ -33,8 +35,11 @@ function mapConversation(page: NotionPage): BrandActivity {
     notes: propertyText(properties.Notes) || null,
     callResult: propertyText(properties["Call Result"]) || null,
     sourceUrl: propertyText(properties["Source URL"]) || null,
+    threadId: propertyText(properties["Thread ID"]) || null,
+    messageId: propertyText(properties["Message ID"]) || null,
     createdAt:
       propertyDate(properties["Interaction At"]) || page.created_time || null,
+    recordedAt: page.created_time || propertyDate(properties["Interaction At"]),
   };
 }
 
@@ -135,4 +140,33 @@ export async function listFollowupConversations(
       const right = b.createdAt || "";
       return right.localeCompare(left) || a.id.localeCompare(b.id);
     });
+}
+
+function sortConversations(items: BrandActivity[]) {
+  return items.sort((a, b) => {
+    const left = a.createdAt || "";
+    const right = b.createdAt || "";
+    return right.localeCompare(left) || a.id.localeCompare(b.id);
+  });
+}
+
+async function findConversationsByText(
+  property: "Message ID" | "Thread ID",
+  value?: string | null,
+) {
+  const text = value?.trim();
+  if (!text) return [];
+  const pages = await queryDatabasePages(getFollowupConversationDbId(), {
+    property,
+    rich_text: { equals: text },
+  });
+  return sortConversations(pages.map(mapConversation));
+}
+
+export function findConversationsByMessageId(messageId?: string | null) {
+  return findConversationsByText("Message ID", messageId);
+}
+
+export function findConversationsByThreadId(threadId?: string | null) {
+  return findConversationsByText("Thread ID", threadId);
 }

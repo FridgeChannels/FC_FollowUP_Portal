@@ -64,11 +64,13 @@ export function BombExecutionPlan({
   instanceId,
   contacts,
   tone = "default",
+  onSend,
 }: {
   state: WorkspaceState;
   instanceId: string;
   contacts: Contact[];
   tone?: "default" | "success";
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string) => Promise<void>;
 }) {
   const [expandedId, setExpandedId] = useState<string>();
   const instance = state.bombInstances.find(item => item.id === instanceId);
@@ -88,7 +90,7 @@ export function BombExecutionPlan({
       const numberClass = isCurrent ? "bg-violet-600 text-white" : tone === "success" ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-700";
       const lineClass = isCurrent ? "bg-violet-300" : tone === "success" ? "bg-emerald-200" : "bg-slate-200";
       const expanded = expandedId === action.id;
-      const related = state.interactions.filter(interaction => interaction.customerId === action.customerId && interaction.channel === action.channel && interaction.contactId === contact?.id && (interaction.bombInstanceId === instanceId || !interaction.bombInstanceId && !!instance && interaction.createdAt >= instance.startedAt));
+      const related = state.interactions.filter(interaction => interaction.direction === "Inbound" && interaction.channel === action.channel && (interaction.taskId === action.id || interaction.bombInstanceId === instanceId));
       const hasInbound = related.some(interaction => interaction.direction === "Inbound");
       return <li key={action.id} className="flex gap-3">
         <div className="flex w-7 shrink-0 flex-col items-center">
@@ -106,7 +108,7 @@ export function BombExecutionPlan({
           {skipped && <p className="mt-2 text-xs text-amber-800">{action.note || "Channel unavailable"}</p>}
           </button>
           {expanded&&<div className="mt-3 pt-3"><div className="text-[11px] font-semibold uppercase tracking-[.12em] text-slate-400">Sent content</div><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{action.content||"No written content for this step."}</p></div>}
-          {related.filter(item=>item.direction==="Inbound").map(item=><div key={item.id} className="mt-3"><div className="rounded-xl bg-rose-50 p-3"><div className="text-[11px] font-semibold uppercase tracking-wide text-rose-700">This is a reply</div><div className="mt-0.5 text-[11px] font-medium text-rose-600">from {contact?.name}</div><p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-700">{item.content}</p></div><BrandReplyBox customerId={action.customerId} interaction={item} bombInstanceId={instanceId}/></div>)}
+          {related.filter(item=>item.direction==="Inbound").map(item=><div key={item.id} className="mt-3"><div className="rounded-xl bg-rose-50 p-3"><div className="text-[11px] font-semibold uppercase tracking-wide text-rose-700">This is a reply</div><div className="mt-0.5 text-[11px] font-medium text-rose-600">from {contact?.name}</div><p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-700">{item.content}</p></div><BrandReplyBox customerId={action.customerId} interaction={item} bombInstanceId={instanceId} contacts={contacts} interactions={state.interactions} actions={actions} taskId={action.id} onSend={onSend}/></div>)}
         </div>
       </li>;
     })}

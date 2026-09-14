@@ -1,0 +1,10 @@
+{
+  "channel": "WhatsApp",
+  "content": "The Magnet arrived. I can review the form this afternoon, but I may have questions about the data fields.",
+  "occurredAt": "2026-09-13T16:40:19+08:00",
+  "sender": "+14155550182",
+  "threadId": "whatsapp:+14155550182",
+  "messageId": "wamid.sim-{{stamp}}",
+  "sourceUrl": "https://wa.example.com/chat/sim-whatsapp-thread-001",
+  "notes": "WhatsApp 渠道模拟回写。"
+}

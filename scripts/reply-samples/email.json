@@ -1,0 +1,12 @@
+{
+  "channel": "Email",
+  "content": "Hi Sarah,\n\nYes — Mike has the FC Magnet on his desk now. Please use mike@acme.co for the setup link.\n\nThanks,\nJohn",
+  "occurredAt": "2026-09-13T14:22:08+08:00",
+  "sender": "john@acme.co",
+  "subject": "Re: Did the FC Magnet make it to Mike?",
+  "threadId": "sim-email-thread-001",
+  "messageId": "sim-email-msg-{{stamp}}",
+  "inReplyToMessageId": null,
+  "sourceUrl": "https://mail.example.com/thread/sim-email-thread-001",
+  "notes": "Email 渠道模拟回写。"
+}

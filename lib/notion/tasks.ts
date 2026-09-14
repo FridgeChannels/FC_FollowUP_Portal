@@ -1,4 +1,5 @@
 import type { BrandTask } from "../brand-list";
+import { CHANNELS, type Channel, type ExistingTask, type TaskStatus } from "../scheduling-engine/types";
 import {
   firstRelationId,
   notionFetch,
@@ -242,4 +243,62 @@ export async function listFollowupTasksForViewer(ownerPageId?: string) {
 export async function retrieveFollowupTask(pageId: string) {
   const page = await retrievePage(pageId);
   return mapTaskPage(page, emptyCaches());
+}
+
+const NOTION_PAGE_ID = /^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i;
+
+export function isNotionPageId(value: string) {
+  return NOTION_PAGE_ID.test(value.trim());
+}
+
+export function normalizeTaskTitle(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, " ").replace(/[—–−-]+/g, "-");
+}
+
+export function taskMatchesRef(task: Pick<BrandTask, "id" | "title">, ref: string) {
+  const value = ref.trim();
+  if (!value) return false;
+  const compactId = task.id.replace(/-/g, "");
+  const compactRef = value.replace(/-/g, "");
+  if (task.id === value || compactId === compactRef) return true;
+  return normalizeTaskTitle(task.title) === normalizeTaskTitle(value);
+}
+
+export async function findFollowupTasksByTitle(title: string): Promise<BrandTask[]> {
+  const query = title.trim();
+  if (!query) return [];
+  const pages = await queryTaskPages({
+    property: "Follow-up Task",
+    title: { equals: query },
+  });
+  const caches = emptyCaches();
+  return Promise.all(pages.map((page) => mapTaskPage(page, caches)));
+}
+
+const TASK_STATUSES = new Set<TaskStatus>([
+  "Pending",
+  "In Progress",
+  "Completed",
+  "Failed",
+  "Cancelled",
+]);
+
+export async function listExistingTasksForSchedule(): Promise<ExistingTask[]> {
+  const pages = await queryTaskPages();
+  const caches = emptyCaches();
+  const tasks = await Promise.all(pages.map((page) => mapTaskPage(page, caches)));
+  return tasks.flatMap((task) => {
+    const channel = task.channel;
+    const scheduledAt = task.scheduledAt?.slice(0, 10);
+    const status = task.status as TaskStatus | null;
+    if (!task.brandId || !scheduledAt || !status || !TASK_STATUSES.has(status)) return [];
+    if (!channel || !CHANNELS.includes(channel as Channel)) return [];
+    return [{
+      clientId: task.brandId,
+      contactId: task.contactId || undefined,
+      channel: channel as Channel,
+      scheduledAt,
+      status,
+    }];
+  });
 }

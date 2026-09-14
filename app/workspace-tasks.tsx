@@ -47,6 +47,7 @@ function asPriority(value?: string | null): UnifiedTask["priority"] {
 }
 
 function fromNotionTask(task: BrandTask): UnifiedTask {
+  const priority = asPriority(task.priority);
   return {
     id: task.id,
     source: task.channel === "Phone" ? "call" : "inbox",
@@ -54,10 +55,10 @@ function fromNotionTask(task: BrandTask): UnifiedTask {
     customerId: task.brandId || "",
     contactId: task.contactId || undefined,
     assigneeId: task.ownerId || undefined,
-    dueAt: task.scheduledAt || "",
-    status: task.status || "Pending",
-    priority: asPriority(task.priority),
-    summary: task.title,
+    dueAt: task.lastInboundAt || task.scheduledAt || "",
+    status: task.inboxStatus || task.status || "Pending",
+    priority: task.inboxStatus === "Needs Reply" && priority !== "Urgent" ? "High" : priority,
+    summary: task.inboxStatus && task.preview ? task.preview : task.title,
     brandName: task.brandName || undefined,
     remote: true,
   };
@@ -103,37 +104,7 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
     return () => { cancelled = true; };
   }, []);
 
-  const allTasks = useMemo<UnifiedTask[]>(() => {
-    if (remoteTasks) return remoteTasks;
-    const calls: UnifiedTask[] = state.callTasks.map(task => ({
-      id: task.id,
-      source: "call",
-      type: "Call",
-      customerId: task.customerId,
-      contactId: task.contactId,
-      assigneeId: task.callerId,
-      dueAt: task.scheduledDate,
-      status: task.status,
-      priority: task.priority,
-      summary: task.goal,
-    }));
-    const human: UnifiedTask[] = state.inbox.map(item => {
-      const followUp = state.followUps.find(f => f.inboxItemId === item.id && f.status !== "Cancelled");
-      return {
-        id: item.id,
-        source: "inbox",
-        type: "Reply",
-        customerId: item.customerId,
-        contactId: item.contactId,
-        assigneeId: item.ownerId,
-        dueAt: followUp?.dueAt || item.updatedAt,
-        status: item.status,
-        priority: item.status === "Needs Reply" || followUp?.status === "Due" ? "High" : item.status === "Waiting for Reply" ? "Low" : "Normal",
-        summary: followUp?.reason || item.preview,
-      };
-    });
-    return [...calls, ...human];
-  }, [remoteTasks, state.callTasks, state.inbox, state.followUps]);
+  const allTasks = useMemo<UnifiedTask[]>(() => remoteTasks ?? [], [remoteTasks]);
 
   const tasks = useMemo(() => {
     return allTasks.filter(task => {
@@ -143,7 +114,8 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
       const matchesType = type === "All" || task.type === type;
       const matchesAssignee = assignee === "all" || assignee === "unassigned" && !task.assigneeId || task.assigneeId === assignee;
       const matchesStatus = status === "All" || status === "Open" && !isDone(task) || status === "Completed" && isDone(task);
-      return matchesQuery && matchesScope && matchesType && matchesAssignee && matchesStatus;
+      const matchesReplyOpen = !(task.remote && status === "Open" && task.type === "Reply" && task.status !== "Needs Reply" && task.status !== "Waiting for Reply");
+      return matchesQuery && matchesScope && matchesType && matchesAssignee && matchesStatus && matchesReplyOpen;
     }).sort((a, b) => {
       if (isDone(a) !== isDone(b)) return isDone(a) ? 1 : -1;
       const aDue = isDue(a, state.simulatedDate);
@@ -175,7 +147,7 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
     </div>
 
     <div className="overflow-hidden rounded-2xl bg-white">
-      {tasks.length ? <div className="overflow-x-auto"><Table><TableHeader><TableRow className="bg-slate-50"><TableHead className="min-w-56 pl-5">Brand</TableHead><TableHead>Type</TableHead><TableHead>Status</TableHead><TableHead>Due</TableHead></TableRow></TableHeader><TableBody>{tasks.map(task => {
+      {remoteLoading ? <div className="px-5 py-16 text-sm text-slate-500">Loading tasks…</div> : tasks.length ? <div className="overflow-x-auto"><Table><TableHeader><TableRow className="bg-slate-50"><TableHead className="min-w-56 pl-5">Brand</TableHead><TableHead>Type</TableHead><TableHead>Status</TableHead><TableHead>Due</TableHead></TableRow></TableHeader><TableBody>{tasks.map(task => {
         const customer = state.customers.find(c => c.id === task.customerId);
         const overdue = isDue(task, state.simulatedDate);
         const Icon = task.type === "Call" ? Phone : MessageCircle;

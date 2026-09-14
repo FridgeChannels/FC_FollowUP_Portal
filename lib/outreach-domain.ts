@@ -34,6 +34,7 @@ export type ScheduledAction = {
 export type Interaction = {
   id: string; customerId: string; contactId?: string; bombInstanceId?: string; cp?: CPCode; type: "Message" | "Phone" | "Bomb" | "CP" | "Follow-up" | "Human" | "System";
   channel?: Channel; direction?: "Inbound" | "Outbound"; title: string; content: string; createdAt: string; outcome?: CallOutcome; recording?: string;
+  creationMethod?: "Automated" | "Manual"; threadId?: string; taskId?: string;
 };
 export type InboxItem = {
   id: string; customerId: string; contactId?: string; type: "Reply";

@@ -8,7 +8,10 @@ import {
   type BombListItem,
   type BombScenario,
   type BombTemplateItem,
+  type BombTemplateInput,
   type CreateBombInput,
+  type UpdateBombInput,
+  BOMB_STATUSES,
 } from "../bomb-list";
 import {
   createPage,
@@ -19,11 +22,11 @@ import {
   retrievePage,
   richText,
   titleFromProperties,
+  updatePage,
   type NotionPage,
 } from "./client";
 import {
   getFollowupBombDbId,
-  getFollowupCpDbId,
   getFollowupScenarioDbId,
   getFollowupTemplateDbId,
 } from "./config";
@@ -87,15 +90,15 @@ function mapBombPage(
 }
 
 export async function listFollowupBombs() {
-  const [bombPages, templatePages, scenarioPages, cpPages] = await Promise.all([
+  const [bombPages, templatePages, scenarioPages, cps] = await Promise.all([
     queryDatabasePages(getFollowupBombDbId()),
     queryDatabasePages(getFollowupTemplateDbId()),
     queryDatabasePages(getFollowupScenarioDbId()),
-    queryDatabasePages(getFollowupCpDbId()),
+    listCurrentCps().catch(() => []),
   ]);
   const titles = new Map([
     ...titleMap(scenarioPages),
-    ...titleMap(cpPages),
+    ...cps.map((item) => [item.id, item.name] as const),
   ]);
   const templates = new Map(templatePages.map((page) => [page.id, mapTemplate(page)]));
 
@@ -171,22 +174,29 @@ export async function listFollowupScenarios() {
   return pages.map(mapScenario).sort((a, b) => a.name.localeCompare(b.name));
 }
 
-async function createBombTemplate(bombId: string, bombName: string, input: NonNullable<CreateBombInput["template"]>) {
+function templateProperties(bombId: string, bombName: string, input: BombTemplateInput, status: string) {
   const channel = input.channel.trim();
   if (!isBombChannel(channel)) throw new Error("Invalid template channel");
-  const content = input.content.trim();
-  if (!content) throw new Error("Template content is required");
-  const name = input.name?.trim() || `${bombName} · ${channel}`;
   const phone = channel === "Phone";
-  return createPage(getFollowupTemplateDbId(), {
+  const name = input.name?.trim() || `${bombName} · ${channel}`;
+  return {
     "Template Name": { title: richText(name) },
     Channel: { select: { name: channel } },
     "Template Type": { select: { name: phone ? "Call Script" : "Message" } },
     "Subject Template": { rich_text: !phone && input.subject?.trim() ? richText(input.subject.trim()) : [] },
-    "Content Template": { rich_text: richText(content) },
-    "Template Status": { status: { name: "Draft" } },
+    "Content Template": { rich_text: input.content.trim() ? richText(input.content.trim()) : [] },
+    "Template Status": { status: { name: status } },
     Bombs: { relation: [{ id: bombId }] },
-  });
+  };
+}
+
+async function createBombTemplate(
+  bombId: string,
+  bombName: string,
+  input: BombTemplateInput,
+  status = "Draft",
+) {
+  return createPage(getFollowupTemplateDbId(), templateProperties(bombId, bombName, input, status));
 }
 
 export async function createFollowupBomb(input: CreateBombInput) {
@@ -227,4 +237,74 @@ export async function createFollowupBomb(input: CreateBombInput) {
   }
 
   return retrieveFollowupBomb(page.id);
+}
+
+export async function updateFollowupBomb(id: string, input: UpdateBombInput) {
+  const current = await retrieveFollowupBomb(id);
+  const name = input.name?.trim() || current.name;
+  if (!name) throw new Error("Bomb name is required");
+  const properties: Record<string, unknown> = {};
+
+  if (input.name !== undefined) properties.Bomb = { title: richText(name) };
+  if (input.goal !== undefined) {
+    properties.Goal = { rich_text: input.goal?.trim() ? richText(input.goal.trim()) : [] };
+  }
+  if (input.scenarioId !== undefined) {
+    if (input.scenarioId) await retrievePage(input.scenarioId);
+    properties.Scenario = { relation: input.scenarioId ? [{ id: input.scenarioId }] : [] };
+  }
+  if (input.cpIds !== undefined) {
+    const cpIds = [...new Set(input.cpIds.map((item) => item.trim()).filter(Boolean))];
+    if (cpIds.length) {
+      const cps = await listCurrentCps();
+      if (cpIds.some((item) => !cps.some((cp) => cp.id === item))) {
+        throw new Error("Unknown Applicable CP");
+      }
+    }
+    properties["Applicable CP"] = { relation: cpIds.map((item) => ({ id: item })) };
+  }
+  if (input.targetRole !== undefined) {
+    const targetRole = input.targetRole?.trim() || null;
+    if (targetRole && !(BOMB_TARGET_ROLES as readonly string[]).includes(targetRole)) {
+      throw new Error("Invalid Target Role");
+    }
+    properties["Target Role"] = targetRole ? { select: { name: targetRole } } : { select: null };
+  }
+  if (input.priority !== undefined) {
+    const priority = input.priority?.trim() || null;
+    if (priority && !(BOMB_PRIORITIES as readonly string[]).includes(priority)) {
+      throw new Error("Invalid Priority");
+    }
+    properties.Priority = priority ? { select: { name: priority } } : { select: null };
+  }
+  if (input.notes !== undefined) {
+    properties.Notes = { rich_text: input.notes?.trim() ? richText(input.notes.trim()) : [] };
+  }
+  if (input.status !== undefined) {
+    const status = input.status?.trim() || "";
+    if (!(BOMB_STATUSES as readonly string[]).includes(status)) {
+      throw new Error("Invalid Bomb Status");
+    }
+    properties["Bomb Status"] = { status: { name: status } };
+  }
+
+  const templateStatus = (input.status || current.status) === "Active" ? "Active" : "Draft";
+  if (input.templates) {
+    const templateIds: string[] = [];
+    for (const template of input.templates) {
+      const payload = templateProperties(id, name, template, templateStatus);
+      if (template.id) {
+        await updatePage(template.id, payload);
+        templateIds.push(template.id);
+      } else {
+        const created = await createPage(getFollowupTemplateDbId(), payload);
+        templateIds.push(created.id);
+      }
+    }
+    properties.Templates = { relation: templateIds.map((item) => ({ id: item })) };
+  }
+
+  if (!Object.keys(properties).length) throw new Error("No bomb fields to update");
+  await updatePage(id, properties);
+  return retrieveFollowupBomb(id);
 }

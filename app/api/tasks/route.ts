@@ -1,4 +1,5 @@
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
+import { syncReplyInbox } from "@/lib/notion/followup-writes";
 import { listFollowupTasksForViewer } from "@/lib/notion/tasks";
 
 export async function GET(request: Request) {
@@ -10,9 +11,10 @@ export async function GET(request: Request) {
     if (!viewer.isAdmin && !viewer.ownerId) {
       return Response.json({ tasks: [], viewer: { isAdmin: false, ownerName: viewer.name } });
     }
-    const tasks = await listFollowupTasksForViewer(
+    const listed = await listFollowupTasksForViewer(
       viewer.isAdmin ? undefined : viewer.ownerId || undefined,
     );
+    const tasks = await syncReplyInbox(listed);
     return Response.json({
       tasks,
       viewer: { isAdmin: viewer.isAdmin, ownerName: viewer.name },

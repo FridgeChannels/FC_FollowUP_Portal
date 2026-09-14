@@ -74,11 +74,17 @@ export type BrandTask = {
   conversationIds: string[];
   templateId: string | null;
   sourceBombId: string | null;
+  sourceBombName?: string | null;
+  sourceBombCp?: string | null;
+  inboxStatus?: "Needs Reply" | null;
+  preview?: string | null;
+  lastInboundAt?: string | null;
 };
 
 export type BrandActivity = {
   id: string;
   contactId: string | null;
+  taskId: string | null;
   channel: string | null;
   direction: "Inbound" | "Outbound" | null;
   status: string | null;
@@ -88,7 +94,10 @@ export type BrandActivity = {
   notes: string | null;
   callResult: string | null;
   sourceUrl: string | null;
+  threadId: string | null;
+  messageId: string | null;
   createdAt: string | null;
+  recordedAt?: string | null;
 };
 
 export type BrandDetail = BrandListItem & {
@@ -99,6 +108,7 @@ export type BrandDetail = BrandListItem & {
   currentCpFullName: string | null;
   currentCpDefinition: string | null;
   contacts: BrandContact[];
+  tasks: BrandTask[];
   activities: BrandActivity[];
 };
 

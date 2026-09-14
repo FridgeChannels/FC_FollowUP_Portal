@@ -7,9 +7,6 @@ import { ArrowLeft, Bomb, CircleAlert, MoreHorizontal, Plus } from "lucide-react
 import { toast } from "sonner";
 import type { CurrentCpOption } from "@/lib/brand-list";
 import {
-  BOMB_CHANNELS,
-  BOMB_PRIORITIES,
-  BOMB_TARGET_ROLES,
   isBombChannel,
   type BombDetail,
   type BombListItem,
@@ -34,7 +31,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -68,7 +64,7 @@ function bombStatusClass(status: string) {
 }
 
 function bombPath(id: string) {
-  return `/bombs/${id}`;
+  return `/bombs/${id}/edit`;
 }
 
 function formatWhen(value: string | null) {
@@ -330,28 +326,14 @@ function NewBombDialog({
   onCreated: (id: string) => void;
 }) {
   const [name, setName] = useState("");
-  const [goal, setGoal] = useState("");
   const [scenarioId, setScenarioId] = useState("");
   const [cpId, setCpId] = useState("");
-  const [targetRole, setTargetRole] = useState<(typeof BOMB_TARGET_ROLES)[number]>("Connector");
-  const [priority, setPriority] = useState<(typeof BOMB_PRIORITIES)[number]>("P1");
-  const [notes, setNotes] = useState("");
-  const [channel, setChannel] = useState<(typeof BOMB_CHANNELS)[number]>("Email");
-  const [subject, setSubject] = useState("");
-  const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
   const scenario = scenarios.find((item) => item.id === scenarioId);
   const reset = () => {
     setName("");
-    setGoal("");
     setScenarioId("");
     setCpId("");
-    setTargetRole("Connector");
-    setPriority("P1");
-    setNotes("");
-    setChannel("Email");
-    setSubject("");
-    setContent("");
   };
   const submit = async () => {
     if (!name.trim() || !scenarioId || !cpId || saving) return;
@@ -362,15 +344,10 @@ function NewBombDialog({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name,
-          goal,
           scenarioId,
           cpIds: [cpId],
-          targetRole,
-          priority,
-          notes,
-          template: content.trim()
-            ? { channel, subject, content }
-            : null,
+          targetRole: "Connector",
+          priority: "P1",
         }),
       });
       const payload = (await response.json()) as { bomb?: BombDetail; error?: string };
@@ -398,16 +375,12 @@ function NewBombDialog({
         <DialogHeader>
           <DialogTitle>New Bomb</DialogTitle>
           <DialogDescription>
-            Create a Draft in Follow-up BombDB. You can add more templates later.
+            Start a Draft, then edit the full flow on the next page.
           </DialogDescription>
         </DialogHeader>
         <label className="grid gap-2 text-sm font-medium">
           Name
           <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Bomb name" />
-        </label>
-        <label className="grid gap-2 text-sm font-medium">
-          Goal
-          <Input value={goal} onChange={(event) => setGoal(event.target.value)} placeholder="What this Bomb should achieve" />
         </label>
         <label className="grid gap-2 text-sm font-medium">
           Scenario
@@ -428,83 +401,21 @@ function NewBombDialog({
         {!scenarios.length ? (
           <p className="text-xs text-amber-700">No Scenarios in Notion yet. Create one in Follow-up ScenarioDB first.</p>
         ) : null}
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className="grid gap-2 text-sm font-medium">
-            Applicable CP
-            <Select value={cpId} onValueChange={setCpId}>
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select a CP" />
-              </SelectTrigger>
-              <SelectContent>
-                {cps.map((item) => (
-                  <SelectItem key={item.id} value={item.id}>
-                    {item.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </label>
-          <label className="grid gap-2 text-sm font-medium">
-            Priority
-            <Select value={priority} onValueChange={(value) => setPriority(value as (typeof BOMB_PRIORITIES)[number])}>
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {BOMB_PRIORITIES.map((item) => (
-                  <SelectItem key={item} value={item}>
-                    {item}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </label>
-        </div>
         <label className="grid gap-2 text-sm font-medium">
-          Target role
-          <Select value={targetRole} onValueChange={(value) => setTargetRole(value as (typeof BOMB_TARGET_ROLES)[number])}>
+          Applicable CP
+          <Select value={cpId} onValueChange={setCpId}>
             <SelectTrigger className="w-full">
-              <SelectValue />
+              <SelectValue placeholder="Select a CP" />
             </SelectTrigger>
             <SelectContent>
-              {BOMB_TARGET_ROLES.map((item) => (
-                <SelectItem key={item} value={item}>
-                  {item}
+              {cps.map((item) => (
+                <SelectItem key={item.id} value={item.id}>
+                  {item.name}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </label>
-        <label className="grid gap-2 text-sm font-medium">
-          Notes
-          <Textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="中文备注，可选" />
-        </label>
-        <div className="rounded-xl bg-slate-50 p-3">
-          <div className="text-sm font-medium">First template</div>
-          <p className="mt-1 text-xs text-slate-500">Optional. Leave content empty to create the Bomb without templates.</p>
-          <div className="mt-3 grid gap-3">
-            <Select value={channel} onValueChange={(value) => setChannel(value as (typeof BOMB_CHANNELS)[number])}>
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {BOMB_CHANNELS.map((item) => (
-                  <SelectItem key={item} value={item}>
-                    {item}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {channel === "Email" ? (
-              <Input value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="Email subject" />
-            ) : null}
-            <Textarea
-              value={content}
-              onChange={(event) => setContent(event.target.value)}
-              placeholder={channel === "Phone" ? "Call script" : `${channel} content`}
-            />
-          </div>
-        </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
@@ -712,4 +623,4 @@ export function BombDetailPage({ bombId }: { bombId: string }) {
   );
 }
 
-export const BombEditor = BombDetailPage;
+export { BombEditor } from "./workspace-bomb-editor";

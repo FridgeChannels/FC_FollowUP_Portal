@@ -27,6 +27,7 @@ export type NotionProperty = {
   rollup?: NotionRollup;
   created_time?: string;
   last_edited_time?: string;
+  number?: number | null;
 };
 
 export type NotionPage = {
@@ -71,6 +72,10 @@ export function titleFromProperties(properties?: Record<string, NotionProperty>)
     if (property.type === "title") return plainText(property.title);
   }
   return "";
+}
+
+export function propertyNumber(property?: NotionProperty) {
+  return typeof property?.number === "number" ? property.number : null;
 }
 
 export function propertyText(property?: NotionProperty) {
