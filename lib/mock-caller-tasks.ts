@@ -1,6 +1,7 @@
 import type { BrandActivity, BrandContact, BrandDetail, BrandTask } from "./brand-list";
 import { getMockCallerTaskEmails } from "./notion/config";
 import type { QuoCall, QuoCallData } from "./quo/types";
+import { mergeQuoCallData, recordingsForQuoCall } from "./quo/data";
 
 type MockCallerTaskRecord = {
   task: BrandTask;
@@ -175,21 +176,6 @@ function callContent(data: QuoCallData) {
   return result ? `Quo call ${result}` : "Quo call in progress";
 }
 
-function mergeQuoData(previous: QuoCallData | null | undefined, incoming: QuoCallData, eventType: string): QuoCallData {
-  return {
-    ...(previous || {}),
-    ...incoming,
-    callId: incoming.callId,
-    call: incoming.call || previous?.call || null,
-    recordings: incoming.recordings?.length ? incoming.recordings : previous?.recordings || [],
-    transcript: incoming.transcript || previous?.transcript || null,
-    summary: incoming.summary || previous?.summary || null,
-    voicemail: incoming.voicemail || previous?.voicemail || null,
-    eventTypes: [...new Set([...(previous?.eventTypes || []), ...(incoming.eventTypes || []), eventType])],
-    lastEventAt: incoming.lastEventAt || previous?.lastEventAt || new Date().toISOString(),
-  };
-}
-
 export function listMockCallerTasks(email?: string | null) {
   ensureRecords();
   const normalized = email?.trim().toLowerCase();
@@ -259,7 +245,8 @@ export function upsertMockQuoCallActivity(input: {
 }) {
   const { record, eventType } = input;
   const existing = record.activities.find((activity) => activity.quo?.callId === input.data.callId);
-  const quo = mergeQuoData(existing?.quo, input.data, eventType);
+  const quo = mergeQuoCallData(existing?.quo, input.data, eventType);
+  const recordings = recordingsForQuoCall(quo);
   const result = callResult(quo.call);
   const occurredAt = quo.call?.completedAt || quo.call?.createdAt || quo.lastEventAt || new Date().toISOString();
   const activity: BrandActivity = {
@@ -274,7 +261,7 @@ export function upsertMockQuoCallActivity(input: {
     sender: "Quo",
     notes: `Quo Call ID: ${quo.callId}`,
     callResult: result,
-    sourceUrl: quo.recordings?.[0]?.url || null,
+    sourceUrl: recordings[0]?.url || null,
     threadId: quo.call?.conversationId ? `QUO_CONVERSATION:${quo.call.conversationId}` : null,
     messageId: `QUO_CALL:${quo.callId}`,
     replyStatus: null,

@@ -7,10 +7,12 @@ export type QuoMedia = {
 
 export type QuoCall = {
   id?: string | null;
+  object?: string | null;
   from?: string | null;
   to?: string | null;
   direction?: string | null;
   media?: QuoMedia[] | null;
+  recordings?: QuoRecording[] | null;
   voicemail?: QuoVoicemail | null;
   status?: string | null;
   createdAt?: string | null;
@@ -28,6 +30,7 @@ export type QuoCall = {
   forwardedTo?: string | null;
   aiHandled?: string | null;
   participants?: string[] | null;
+  contactIds?: string[] | null;
   [key: string]: unknown;
 };
 
@@ -51,11 +54,14 @@ export type QuoTranscriptLine = {
 };
 
 export type QuoTranscript = {
+  object?: string | null;
   callId?: string | null;
   createdAt?: string | null;
+  language?: string | null;
   dialogue?: QuoTranscriptLine[] | null;
   duration?: number | null;
   status?: string | null;
+  contactIds?: string[] | null;
   [key: string]: unknown;
 };
 
@@ -67,11 +73,13 @@ export type QuoJob = {
 };
 
 export type QuoSummary = {
+  object?: string | null;
   callId?: string | null;
   status?: string | null;
   summary?: string[] | null;
   nextSteps?: string[] | null;
   jobs?: QuoJob[] | null;
+  contactIds?: string[] | null;
   [key: string]: unknown;
 };
 
@@ -86,6 +94,16 @@ export type QuoVoicemail = {
   [key: string]: unknown;
 };
 
+export type QuoWebhookEvent = {
+  id?: string | null;
+  object?: string | null;
+  apiVersion?: string | null;
+  createdAt?: string | null;
+  type?: string | null;
+  data?: Record<string, unknown> | null;
+  [key: string]: unknown;
+};
+
 export type QuoCallData = {
   callId: string;
   call?: QuoCall | null;
@@ -93,6 +111,7 @@ export type QuoCallData = {
   transcript?: QuoTranscript | null;
   summary?: QuoSummary | null;
   voicemail?: QuoVoicemail | null;
+  webhookEvents?: QuoWebhookEvent[];
   eventTypes?: string[];
   lastEventAt?: string | null;
 };

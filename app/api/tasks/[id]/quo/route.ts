@@ -6,6 +6,7 @@ import { getQuoFromNumber } from "@/lib/quo/config";
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { retrieveFollowupTask } from "@/lib/notion/tasks";
 import type { QuoCallData } from "@/lib/quo/types";
+import { mergeQuoCallData } from "@/lib/quo/data";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -23,14 +24,15 @@ export async function GET(request: Request, { params }: Params) {
     }
     if (!quoApiConfigured()) return Response.json({ configured: false, data: existing, fromNumber: getQuoFromNumber() || null });
     const live = await getQuoCallBundle(existing.callId);
-    const data: QuoCallData = {
-      ...existing,
+    const data: QuoCallData = mergeQuoCallData(existing, {
+      callId: existing.callId,
       call: live.call || existing.call,
       recordings: live.recordings.length ? live.recordings : existing.recordings,
       transcript: live.transcript || existing.transcript,
       summary: live.summary || existing.summary,
       voicemail: live.voicemail || existing.voicemail,
-    };
+      lastEventAt: new Date().toISOString(),
+    });
     await upsertQuoCallActivity({ task, data, eventType: "call.sync" });
     return Response.json({ configured: true, data, errors: live.errors, fromNumber: getQuoFromNumber() || null });
   } catch (error) {
