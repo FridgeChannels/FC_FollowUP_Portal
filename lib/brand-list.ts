@@ -96,6 +96,7 @@ export type BrandActivity = {
   sourceUrl: string | null;
   threadId: string | null;
   messageId: string | null;
+  replyStatus: "Needs Reply" | "Replied" | null;
   createdAt: string | null;
   recordedAt?: string | null;
 };

@@ -15,6 +15,7 @@ import {
 } from "./conversations";
 import { mapFollowupClientPage } from "./followup-clients";
 import {
+  cancelUnsentBombSiblingTasks,
   linkConversationToTask,
   markFollowupClientEngaged,
   resolveConversationThread,
@@ -409,6 +410,7 @@ export async function ingestInboundReply(
     "Thread ID": { rich_text: richText(threadId) },
     "Message ID": { rich_text: richText(messageId) },
     "Interaction At": { date: { start: occurredAt } },
+    "Reply Status": { select: { name: "Needs Reply" } },
   };
   if (channel !== "Phone") {
     properties["Message Status"] = { select: { name: "Received" } };
@@ -422,7 +424,9 @@ export async function ingestInboundReply(
 
   const page = await createPage(getFollowupConversationDbId(), properties);
   await linkConversationToTask(page.id, taskId);
+  await cancelUnsentBombSiblingTasks(outboundTask);
   await markFollowupClientEngaged(target.brandId, {
+    handlingMode: "Human",
     note: "客户已回复，待人工处理。",
   });
   return toResult(

@@ -18,6 +18,7 @@ export async function POST(request: Request, { params }: Params) {
       channel?: string;
       content?: string;
       taskId?: string;
+      threadId?: string;
     };
     const page = await retrievePage(id);
     const brand = await mapFollowupClientPage(page);
@@ -38,6 +39,7 @@ export async function POST(request: Request, { params }: Params) {
       content: body.content || "",
       sender: viewer.email,
       existingTaskId: body.taskId,
+      threadId: body.threadId,
     });
     await markFollowupClientEngaged(id, { note: "已发送人工消息。" });
     return Response.json({

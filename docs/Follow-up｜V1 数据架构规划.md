@@ -359,6 +359,7 @@ Phone
 | Interaction At | Date | 否 | 实际发送、收到或通话发生的时间；Pending 时留空 |
 | Sender | Text | 否 | 发件账号、发送号码、LinkedIn 账号或拨打人 |
 | Message Status | Select | 否 | Pending / Sent / Received / Failed；Phone 可留空 |
+| Reply Status | Select | 否 | 仅 Inbound：Needs Reply / Replied。表示这封客户来信是否已人工回复 |
 | Call Result | Select | 否 | Connected / No Answer / Voicemail / Declined / Invalid Number；仅 Phone 使用 |
 | Source URL | URL | 否 | 打开原始渠道会话或消息的链接 |
 | Notes | Text | 否 | 补充互动异常、失败原因或人工判断；备注内容必须使用中文 |
@@ -393,7 +394,23 @@ Failed
 - **Received**：Inbound 消息已经实际收到；Interaction At 写入实际接收时间。
 - **Failed**：Outbound 消息尝试发送但未成功；失败详情保留在中文 Notes 或渠道原始记录中。
 
-### 7.5 Call Result
+### 7.5 Reply Status
+
+```
+Needs Reply
+Replied
+```
+
+仅 Inbound 使用。Outbound 留空。
+
+状态定义：
+
+- **Needs Reply**：客户来信已入库，等待人工回复。Portal 在对应 Bomb 步骤或会话下显示回复框。
+- **Replied**：已有人工 Outbound 接到这封 Inbound 的同一 Task / Thread。Portal 收起该条回复框。
+
+客户再次来信时，新的 Inbound 重新写入 `Needs Reply`，不影响上一封已标记 `Replied` 的记录。
+
+### 7.6 Call Result
 
 ```
 Connected

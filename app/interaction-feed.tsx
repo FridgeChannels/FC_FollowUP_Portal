@@ -23,7 +23,7 @@ const initials = (name: string) => name.split(/\s+/).map(part => part[0]).join("
 
 const cpCodes: CPCode[] = ["CP1", "CP2", "CP3"];
 
-export function InteractionFeed({ interactions, contacts, customerId: customerIdProp, currentCp: currentCpProp, cpGoals, maxHeight = "max-h-[520px]", bombInstances, actions, onSend }: { interactions: Interaction[]; contacts: Contact[]; customerId?: string; currentCp?: CPCode; cpGoals?: Partial<Record<CPCode, string>>; maxHeight?: string; bombInstances?: BombInstance[]; actions?: ScheduledAction[]; onSend?: (contactId: string, channel: Channel, content: string, taskId?: string) => Promise<void> }) {
+export function InteractionFeed({ interactions, contacts, customerId: customerIdProp, currentCp: currentCpProp, cpGoals, maxHeight = "max-h-[520px]", bombInstances, actions, onSend }: { interactions: Interaction[]; contacts: Contact[]; customerId?: string; currentCp?: CPCode; cpGoals?: Partial<Record<CPCode, string>>; maxHeight?: string; bombInstances?: BombInstance[]; actions?: ScheduledAction[]; onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string) => Promise<void> }) {
   const { state } = useWorkspace();
   const planState = bombInstances ? { ...state, bombInstances, actions: actions ?? [], interactions } : state;
   const customerId = customerIdProp || interactions[0]?.customerId;
@@ -99,7 +99,7 @@ function rootManualSends(pool: Interaction[]) {
   });
 }
 
-function ActivityRows({visible,contacts,maxHeight,onSend,repliesFrom}:{visible:Interaction[];contacts:Contact[];maxHeight:string;onSend?: (contactId: string, channel: Channel, content: string, taskId?: string) => Promise<void>; repliesFrom?: Interaction[]}){
+function ActivityRows({visible,contacts,maxHeight,onSend,repliesFrom}:{visible:Interaction[];contacts:Contact[];maxHeight:string;onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string) => Promise<void>; repliesFrom?: Interaction[]}){
   const pool = repliesFrom || visible;
   return <div className={`${maxHeight} divide-y ${maxHeight?"overflow-y-auto":""}`}>
     {visible.map(interaction => {

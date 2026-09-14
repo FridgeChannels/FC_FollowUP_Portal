@@ -19,6 +19,11 @@ function asDirection(value: string): BrandActivity["direction"] {
   return null;
 }
 
+function asReplyStatus(value: string): BrandActivity["replyStatus"] {
+  if (value === "Needs Reply" || value === "Replied") return value;
+  return null;
+}
+
 function mapConversation(page: NotionPage): BrandActivity {
   const properties = page.properties || {};
   const subject = propertyText(properties.Subject) || null;
@@ -37,6 +42,7 @@ function mapConversation(page: NotionPage): BrandActivity {
     sourceUrl: propertyText(properties["Source URL"]) || null,
     threadId: propertyText(properties["Thread ID"]) || null,
     messageId: propertyText(properties["Message ID"]) || null,
+    replyStatus: asReplyStatus(propertyText(properties["Reply Status"])),
     createdAt:
       propertyDate(properties["Interaction At"]) || page.created_time || null,
     recordedAt: page.created_time || propertyDate(properties["Interaction At"]),

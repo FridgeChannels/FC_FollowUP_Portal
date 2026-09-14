@@ -62,8 +62,11 @@ function groupConversationsByContact(activities: BrandActivity[]) {
 export function annotateTasksWithReplyInbox(tasks: BrandTask[], activities: BrandActivity[]) {
   const replyByTask = new Map<string, { preview: string; lastInboundAt: string | null }>();
   for (const items of groupConversationsByContact(activities).values()) {
-    const latest = items.at(-1);
-    if (!latest || latest.direction !== "Inbound") continue;
+    const pending = items.filter((item) => item.direction === "Inbound" && item.replyStatus !== "Replied");
+    const latest =
+      pending.filter((item) => item.replyStatus === "Needs Reply").at(-1) ||
+      pending.at(-1);
+    if (!latest) continue;
     const thread = items.filter((item) => conversationThreadKey(item) === conversationThreadKey(latest));
     const taskId = pickReplyTaskId(thread.length ? thread : items, tasks);
     if (!taskId) continue;

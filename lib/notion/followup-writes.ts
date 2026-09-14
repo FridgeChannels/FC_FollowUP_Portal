@@ -220,6 +220,27 @@ export async function createOutboundConversation(input: {
   return createPage(getFollowupConversationDbId(), properties);
 }
 
+export async function cancelUnsentBombSiblingTasks(task: BrandTask) {
+  if (!task.sourceBombId || !task.contactId) return [];
+  const siblings = (await listFollowupTasks([task.contactId])).filter((item) =>
+    item.id !== task.id &&
+    item.sourceBombId === task.sourceBombId &&
+    item.contactId === task.contactId &&
+    isOpenTaskStatus(item.status),
+  );
+  const endedAt = new Date().toISOString();
+  await Promise.all(
+    siblings.map((item) =>
+      updateFollowupTask(item.id, {
+        status: "Cancelled",
+        endedAt,
+        notes: [item.notes, "客户已回复，后续未发出渠道已取消。"].filter(Boolean).join("\n"),
+      }),
+    ),
+  );
+  return siblings;
+}
+
 export async function updateFollowupTask(
   pageId: string,
   patch: {
@@ -332,8 +353,9 @@ function todayDateOnly() {
   }).format(new Date());
 }
 
-function canReuseTask(status?: string | null) {
-  return status === "Pending" || status === "In Progress";
+function canContinueTask(task: { status?: string | null; channel?: string | null }, channel: string) {
+  if (task.channel && channel && task.channel !== channel) return false;
+  return task.status === "Pending" || task.status === "In Progress" || task.status === "Completed";
 }
 
 export async function createHumanOutbound(input: {
@@ -345,10 +367,12 @@ export async function createHumanOutbound(input: {
   content: string;
   sender?: string | null;
   existingTaskId?: string;
+  threadId?: string | null;
 }) {
   let taskId = input.existingTaskId;
-  const existing = taskId ? await retrieveFollowupTask(taskId) : null;
-  if (!existing || !canReuseTask(existing.status)) {
+  const existing = taskId ? await retrieveFollowupTask(taskId).catch(() => null) : null;
+  const continueExisting = !!existing && canContinueTask(existing, input.channel);
+  if (!continueExisting) {
     const ownerId = input.brandOwnerId || existing?.ownerId;
     if (!ownerId) throw new Error("Owner is required to create a follow-up task");
     const created = await createFollowupTask({
@@ -366,7 +390,7 @@ export async function createHumanOutbound(input: {
     });
     taskId = created.id;
   }
-  return createOutboundConversation({
+  const page = await createOutboundConversation({
     brandName: input.brandName,
     contactId: input.contactId,
     contactName: input.contactName,
@@ -374,11 +398,44 @@ export async function createHumanOutbound(input: {
     content: input.content,
     sender: input.sender,
     taskId,
+    threadId: input.threadId,
     interactionAt: new Date().toISOString(),
-    notes: existing
+    notes: continueExisting || existing
       ? "人工追加回复，尚未实际发送。"
       : "人工消息，尚未实际发送。",
   });
+  if (taskId) await linkConversationToTask(page.id, taskId);
+  await markInboundsReplied({
+    contactId: input.contactId,
+    channel: input.channel,
+    taskId,
+    threadId: input.threadId,
+  });
+  return page;
+}
+
+export async function markInboundsReplied(input: {
+  contactId: string;
+  channel: string;
+  taskId?: string | null;
+  threadId?: string | null;
+}) {
+  const activities = await listFollowupConversations([input.contactId]);
+  const targets = activities.filter((item) => {
+    if (item.direction !== "Inbound") return false;
+    if (item.replyStatus === "Replied") return false;
+    if (item.channel && item.channel !== input.channel) return false;
+    if (input.threadId?.trim() && item.threadId) return item.threadId === input.threadId.trim();
+    if (input.taskId && item.taskId) return item.taskId === input.taskId;
+    return false;
+  });
+  await Promise.all(
+    targets.map((item) =>
+      updatePage(item.id, {
+        "Reply Status": { select: { name: "Replied" } },
+      }),
+    ),
+  );
 }
 
 export async function linkConversationToTask(conversationId: string, taskId: string) {

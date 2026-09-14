@@ -71,6 +71,7 @@ POST /api/brands/:brandId/replies
 - `Direction = Inbound`
 - 消息渠道 `Message Status = Received`
 - Phone 不写 `Message Status`，写 `Call Result`
+- `Reply Status = Needs Reply`
 - Title：`客户 — 人员 — 渠道 — Inbound`
 - `Conversation Record ID = PORTAL-IN-{messageId}`
 
@@ -118,12 +119,16 @@ Inbound 会挂到这条已发出 Outbound 所属的 Task 和 Thread 上。
 
 ## 回写后的状态
 
-1. 新建 Inbound Conversation，挂到已发出的 Task
+1. 新建 Inbound Conversation，挂到已发出的 Task，`Reply Status = Needs Reply`
 2. Conversation 与 Task 双向关联
-3. 客户 `Follow-up Status` 更新为 `In Progress`
-4. 任务 inbox 标记为 `Needs Reply`
+3. 若该 Task 属于某个 Bomb：同一 Bomb、同一联系人下，其余尚未发出的渠道任务（`Pending` / `In Progress`）全部改为 `Cancelled`
+4. 客户 `Follow-up Status` 更新为 `In Progress`
+5. 客户 `Handling Mode` 更新为 `Human`
+6. 任务 inbox 标记为 `Needs Reply`
 
-本接口不自动改 `Handling Mode`，也不自动取消其他渠道任务。
+人工从该条 Inbound 回复后，同一 Task / Thread 上的待处理 Inbound 更新为 `Reply Status = Replied`，Portal 收起回复框。
+
+已 `Completed` / `Failed` / `Cancelled` 的渠道任务不会被改动。非 Bomb 任务的回复不会取消其他渠道。`Follow-up Status` 保持独立，不会因为切换 Handling Mode 而改成别的状态。
 
 ## 成功响应
 

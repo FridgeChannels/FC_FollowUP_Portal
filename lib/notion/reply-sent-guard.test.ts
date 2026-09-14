@@ -23,6 +23,7 @@ const outbound = (patch: Partial<BrandActivity>): BrandActivity => ({
   sourceUrl: null,
   threadId: "thr",
   messageId: "msg",
+  replyStatus: null,
   createdAt: "2026-09-14T00:00:00.000Z",
   ...patch,
 });

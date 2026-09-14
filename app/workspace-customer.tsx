@@ -209,6 +209,7 @@ function toInteractions(customerId: string, activities: BrandActivity[], activit
     creationMethod: isManualActivity(item, manualTaskIds) ? "Manual" : undefined,
     threadId: item.threadId || undefined,
     taskId: item.taskId || undefined,
+    replyStatus: item.replyStatus || undefined,
   }));
 }
 
@@ -368,8 +369,8 @@ export function BrandDetail({customerId}:{customerId:string}){
       <BrandContactList contacts={notionBacked&&remote?remote.contacts:c.contacts} canEdit={!notionBacked&&can("editBrand")} onAdd={()=>setContact(true)}/>
       <div className="flex flex-wrap gap-2 xl:flex-col xl:items-stretch">{can("reply")&&<Button variant="outline" disabled={notionBacked&&!c.contacts.length} onClick={()=>setReply(true)}><Send className="mr-2 size-4"/>Send message</Button>}{can("launch")&&<Button variant="outline" disabled={!notionBacked&&(!!c.activeBombId||c.status==="Bomb Running")} onClick={()=>setLaunch(true)}><Bomb className="mr-2 size-4"/>Launch Bomb</Button>}{can("changeCP")&&<Button onClick={()=>setCP(true)}>Change CP</Button>}</div>
     </section>
-    <div className={`grid gap-6 ${partnershipContext?"xl:grid-cols-[1fr_340px]":""}`}><section><h2 className="mb-3 font-bold">Brand activity</h2><div className="overflow-hidden rounded-2xl border border-slate-200 bg-white"><InteractionFeed key={`${c.id}-${currentCp}`} customerId={c.id} currentCp={currentCp} cpGoals={notionBacked?toCpGoals(remoteCps):undefined} interactions={interactions} contacts={c.contacts} bombInstances={bombPlan?.bombInstances} actions={bombPlan?.actions} onSend={notionBacked?async (contactId,channel,content,taskId)=>{
-    const response=await fetch(`/api/brands/${c.id}/messages`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId,channel,content,taskId})});
+    <div className={`grid gap-6 ${partnershipContext?"xl:grid-cols-[1fr_340px]":""}`}><section><h2 className="mb-3 font-bold">Brand activity</h2><div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">    <InteractionFeed key={`${c.id}-${currentCp}`} customerId={c.id} currentCp={currentCp} cpGoals={notionBacked?toCpGoals(remoteCps):undefined} interactions={interactions} contacts={c.contacts} bombInstances={bombPlan?.bombInstances} actions={bombPlan?.actions} onSend={notionBacked?async (contactId,channel,content,taskId,threadId)=>{
+    const response=await fetch(`/api/brands/${c.id}/messages`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId,channel,content,taskId,threadId})});
     const payload=await response.json() as {brand?:BrandDetail;cps?:CurrentCpOption[];error?:string};
     if(!response.ok||!payload.brand)throw new Error(payload.error||"Send failed");
     applyRemote(payload.brand,payload.cps||remoteCps);

@@ -18,36 +18,41 @@ const channelAvailable = (contact: Contact, channel: Channel) =>
   : channel === "LinkedIn" ? !!contact.linkedin
   : false;
 
+function activityTime(value?: string) {
+  if (!value) return 0;
+  const normalized = /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00.000Z` : value;
+  const time = Date.parse(normalized);
+  return Number.isNaN(time) ? 0 : time;
+}
+
 function sameConversation(left: Interaction, right: Interaction) {
-  if (left.customerId !== right.customerId || left.contactId !== right.contactId) return false;
+  if (left.customerId !== right.customerId) return false;
+  if (left.contactId && right.contactId && left.contactId !== right.contactId) return false;
   if (left.channel && right.channel && left.channel !== right.channel) return false;
-  if (left.threadId && right.threadId) return left.threadId === right.threadId;
-  return true;
+  if (left.threadId || right.threadId) return !!left.threadId && left.threadId === right.threadId;
+  if (left.taskId || right.taskId) return !!left.taskId && left.taskId === right.taskId;
+  if (left.bombInstanceId && right.bombInstanceId) return left.bombInstanceId === right.bombInstanceId;
+  return false;
 }
 
-function humanTookOver(inbound: Interaction, interactions: Interaction[]) {
+function isHumanOutbound(item: Interaction) {
+  return item.direction === "Outbound" && item.creationMethod === "Manual";
+}
+
+function hasLaterHumanOutbound(inbound: Interaction, interactions: Interaction[]) {
+  const inboundAt = activityTime(inbound.createdAt);
   return interactions.some(item =>
-    item.direction === "Outbound" &&
-    item.creationMethod === "Manual" &&
-    sameConversation(item, inbound)
+    isHumanOutbound(item) &&
+    sameConversation(item, inbound) &&
+    activityTime(item.createdAt) > inboundAt
   );
 }
 
-export function inboundNeedsComposer(state: WorkspaceState, inbound: Interaction, interactions = state.interactions, bombInstanceId?: string) {
+export function inboundNeedsComposer(_state: WorkspaceState, inbound: Interaction, interactions = _state.interactions) {
   if (inbound.direction !== "Inbound") return false;
-  if (bombInstanceId && humanTookOver(inbound, interactions)) return false;
-  if (interactions.some(item =>
-    item.direction === "Outbound" &&
-    sameConversation(item, inbound) &&
-    item.createdAt > inbound.createdAt
-  )) return false;
-  const inbox = state.inbox.find(item =>
-    item.customerId === inbound.customerId &&
-    item.status === "Needs Reply" &&
-    (!item.contactId || !inbound.contactId || item.contactId === inbound.contactId)
-  );
-  if (inbox) return !humanTookOver(inbound, interactions);
-  return true;
+  if (inbound.replyStatus === "Replied") return false;
+  if (inbound.replyStatus === "Needs Reply") return true;
+  return !hasLaterHumanOutbound(inbound, interactions);
 }
 
 export function BrandReplyBox({
@@ -67,7 +72,7 @@ export function BrandReplyBox({
   interactions?: Interaction[];
   actions?: ScheduledAction[];
   taskId?: string;
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string) => Promise<void>;
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string) => Promise<void>;
 }) {
   const { state, can, sendHumanReply } = useWorkspace();
   const customer = state.customers.find(item => item.id === customerId);
@@ -84,9 +89,12 @@ export function BrandReplyBox({
       ? contact.preferredChannel
       : available[0];
   const [channel, setChannel] = useState<Channel>(defaultChannel || "Email");
-  if (!can("reply") || !people.length || customer?.status === "Closed" || !inboundNeedsComposer(state, interaction, interactions, bombInstanceId)) return null;
+  const notionBacked = !!onSend;
+  if (!can("reply") || !people.length) return null;
+  if (!notionBacked && customer?.status === "Closed") return null;
+  if (!inboundNeedsComposer(state, interaction, interactions)) return null;
   const effective = available.includes(channel) ? channel : available[0];
-  const replyTaskId = actions?.find(item => item.bombInstanceId === bombInstanceId && item.channel === effective)?.id || taskId;
+  const replyTaskId = interaction.taskId || actions?.find(item => item.bombInstanceId === bombInstanceId && item.channel === effective)?.id || taskId;
   return (
     <div className="mt-3 rounded-xl bg-slate-50 p-3">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
@@ -108,7 +116,7 @@ export function BrandReplyBox({
           if (!contact || !effective) return;
           if (onSend) {
             setSaving(true);
-            void onSend(contact.id, effective, content, replyTaskId)
+            void onSend(contact.id, effective, content, replyTaskId, interaction.threadId)
               .then(() => { toast.success("Message saved as pending"); setContent(""); })
               .catch(error => toast.error(error instanceof Error ? error.message : "Send failed"))
               .finally(() => setSaving(false));
