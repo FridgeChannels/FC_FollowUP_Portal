@@ -88,21 +88,12 @@ function replaceStamp(value, stamp) {
 function loadPayload(channel, stamp, options, target) {
   const file = join(ROOT, "scripts/reply-samples", SAMPLE_FILES[channel]);
   const raw = JSON.parse(readFileSync(file, "utf8"));
-  const payload = {};
-  for (const [key, value] of Object.entries(raw)) {
-    payload[key] = replaceStamp(value, stamp);
-  }
-  delete payload.inReplyToMessageId;
-  payload.occurredAt = new Date().toISOString();
-  payload.threadId = options.threadId || target?.threadId || payload.threadId;
-  if (target?.outboundMessageId) payload.inReplyToMessageId = target.outboundMessageId;
-  if (target?.brandId) payload.brandId = target.brandId;
-  if (target?.contactId) payload.contactId = target.contactId;
-  if (options.contactId) payload.contactId = options.contactId;
-  if (target?.taskId) payload.taskId = target.taskId;
-  else if (options.taskId) payload.taskId = options.taskId;
-  const sender = target?.senders?.[channel];
-  if (sender) payload.sender = sender;
+  const payload = {
+    taskId: target?.taskId || options.taskId,
+    threadId: options.threadId || target?.threadId,
+    content: replaceStamp(raw.content, stamp),
+  };
+  if (channel === "Phone" && raw.callResult) payload.callResult = raw.callResult;
   return payload;
 }
 

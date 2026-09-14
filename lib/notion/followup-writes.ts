@@ -1,8 +1,8 @@
 import { FOLLOW_UP_STATUSES, HANDLING_MODES, type BrandActivity, type BrandTask } from "../brand-list";
+import { resolveCheckpoint } from "./cps";
 import { createPage, propertyText, retrievePage, richText, updatePage } from "./client";
 import { getFollowupConversationDbId, getFollowupTaskDbId } from "./config";
 import { listFollowupConversations } from "./conversations";
-import { listCurrentCps } from "./cps";
 import { retrieveOwner } from "./owners";
 import {
   annotateTasksWithReplyInbox,
@@ -82,15 +82,13 @@ export async function updateFollowupClient(
   const properties: Record<string, unknown> = {};
 
   if (patch.currentCpId !== undefined) {
-    if (patch.currentCpId) {
-      const cps = await listCurrentCps();
-      if (!cps.some((item) => item.id === patch.currentCpId)) {
-        throw new Error("Unknown Current CP");
-      }
+    if (!patch.currentCpId) {
+      properties["Current CP"] = { relation: [] };
+    } else {
+      const checkpoint = await resolveCheckpoint(patch.currentCpId);
+      if (!checkpoint) throw new Error("Unknown Current CP");
+      properties["Current CP"] = { relation: [{ id: checkpoint.id }] };
     }
-    properties["Current CP"] = {
-      relation: patch.currentCpId ? [{ id: patch.currentCpId }] : [],
-    };
   }
 
   if (patch.ownerId !== undefined) {
@@ -176,6 +174,7 @@ export async function createOutboundConversation(input: {
   interactionAt?: string | null;
   notes?: string;
   titleSuffix?: string;
+  cpAtInteraction?: string | null;
 }) {
   if (!CHANNELS.has(input.channel)) throw new Error("Invalid channel");
   const content = input.content.trim();
@@ -215,6 +214,9 @@ export async function createOutboundConversation(input: {
   }
   if (input.interactionAt) {
     properties["Interaction At"] = { date: { start: input.interactionAt } };
+  }
+  if (input.cpAtInteraction === "CP1" || input.cpAtInteraction === "CP2" || input.cpAtInteraction === "CP3") {
+    properties["CP At Interaction"] = { select: { name: input.cpAtInteraction } };
   }
 
   return createPage(getFollowupConversationDbId(), properties);
@@ -284,6 +286,7 @@ export async function completeFollowupCall(input: {
   outcome: string;
   summary?: string;
   sender?: string | null;
+  cpAtInteraction?: string | null;
 }) {
   const callResult = mapCallOutcome(input.outcome);
   const now = new Date().toISOString();
@@ -301,6 +304,7 @@ export async function completeFollowupCall(input: {
     interactionAt: now,
     notes,
     titleSuffix: callResult || "Phone",
+    cpAtInteraction: input.cpAtInteraction,
   });
   return updateFollowupTask(input.taskId, {
     status: "Completed",
@@ -368,6 +372,7 @@ export async function createHumanOutbound(input: {
   sender?: string | null;
   existingTaskId?: string;
   threadId?: string | null;
+  cpAtInteraction?: string | null;
 }) {
   let taskId = input.existingTaskId;
   const existing = taskId ? await retrieveFollowupTask(taskId).catch(() => null) : null;
@@ -399,6 +404,7 @@ export async function createHumanOutbound(input: {
     sender: input.sender,
     taskId,
     threadId: input.threadId,
+    cpAtInteraction: input.cpAtInteraction,
     interactionAt: new Date().toISOString(),
     notes: continueExisting || existing
       ? "人工追加回复，尚未实际发送。"

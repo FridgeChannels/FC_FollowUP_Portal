@@ -8,8 +8,8 @@ const src: Record<Channel, string> = {
   Phone: "/channels/phone.png",
 };
 
-export function ChannelIcon({ channel, className = "size-5" }: { channel: Channel; className?: string }) {
-  return <img src={src[channel]} alt={channel} className={className} />;
+export function ChannelIcon({ channel, className = "size-5", alt }: { channel: Channel; className?: string; alt?: string }) {
+  return <img src={src[channel]} alt={alt ?? channel} className={className} />;
 }
 
 export function ChannelOption({ channel }: { channel: Channel }) {

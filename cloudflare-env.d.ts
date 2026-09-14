@@ -5,7 +5,6 @@ declare namespace Cloudflare {
     NOTION_API_KEY?: string;
     NOTION_FOLLOWUP_CLIENT_DB_ID?: string;
     NOTION_FOLLOWUP_OWNER_DB_ID?: string;
-    NOTION_FOLLOWUP_CP_DB_ID?: string;
     NOTION_FOLLOWUP_CONTACT_DB_ID?: string;
     NOTION_FOLLOWUP_CONVERSATION_DB_ID?: string;
     NOTION_FOLLOWUP_TASK_DB_ID?: string;
@@ -13,6 +12,7 @@ declare namespace Cloudflare {
     NOTION_FOLLOWUP_SCENARIO_DB_ID?: string;
     NOTION_FOLLOWUP_TEMPLATE_DB_ID?: string;
     NOTION_FOLLOWUP_CAPACITY_DB_ID?: string;
+    NOTION_FOLLOWUP_CHECKPOINT_DB_ID?: string;
     ADMIN_EMAILS?: string;
     NOTION_ADMIN_EMAILS?: string;
     SKIP_UNAVAILABLE_CHANNELS?: string;

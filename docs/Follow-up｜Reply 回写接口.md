@@ -29,22 +29,23 @@ POST /api/brands/:brandId/replies
 
 ## 标准请求
 
+最少三个字段：定位到哪一步已发出，再加上回复原文。渠道、联系人、主题、Sender、Message ID 都从该 Task / Thread 的 Outbound 补全。
+
 ```json
 {
-  "channel": "Email",
-  "content": "Yes, Mike has the Magnet.",
-  "occurredAt": "2026-09-13T14:22:08+08:00",
-  "sender": "john@acme.co",
-  "subject": "Re: Did the FC Magnet make it to Mike?",
-  "threadId": "gmail-thread-18c4",
-  "messageId": "gmail-msg-18c4",
-  "sourceUrl": "https://mail.example.com/thread/18c4",
-  "inReplyToMessageId": "gmail-msg-18c3",
-  "taskId": null,
-  "contactId": null,
-  "brandId": null,
-  "callResult": null,
-  "notes": null
+  "taskId": "<Follow-up Task 页面 ID 或标题>",
+  "threadId": "<Thread ID>",
+  "content": "Yes, Mike has the Magnet."
+}
+```
+
+Phone 可以只给通话结果：
+
+```json
+{
+  "taskId": "<Follow-up Task 页面 ID 或标题>",
+  "threadId": "<Thread ID>",
+  "callResult": "Connected"
 }
 ```
 
@@ -52,19 +53,15 @@ POST /api/brands/:brandId/replies
 
 | 字段 | 必填 | 说明 |
 | --- | --- | --- |
-| `channel` | 是 | `Email` / `LinkedIn` / `SMS` / `WhatsApp` / `Phone` |
-| `content` | 消息渠道必填 | 回复原文，完整写入 `Content`。Phone 可写通话摘要；缺省时回退 `callResult` |
-| `occurredAt` | 否 | 渠道真实接收或通话时间，写入 `Interaction At`。缺省为服务器当前时间 |
-| `sender` | 建议 | Email 地址、E.164 手机号、LinkedIn URL/handle、来电号码 |
-| `messageId` | 强烈建议 | 渠道单条消息 ID，作为幂等键。重复提交返回 `duplicate: true` |
-| `threadId` | 建议 | 渠道会话 ID。缺省回退已有线程或 `contactId + channel` |
-| `inReplyToMessageId` | 否 | 对应 outbound 的 `Message ID`，用于挂回原会话 |
-| `sourceUrl` | 否 | 原始渠道链接，写入 `Source URL` |
-| `subject` | Email 建议 | 其他渠道留空 |
-| `taskId` / `contactId` / `brandId` | 定位用 | 能给就给。解析顺序见下表 |
-| `brandName` | 模拟/人工可用 | 按企业名称匹配 Follow-up Client，并自动选当前正在联系的人 |
+| `taskId` | 是 | Follow-up Task 页面 ID 或标题。必须与 `threadId` 指向同一条已发出 Outbound |
+| `threadId` | 是 | 同一联系人、同一渠道、同一场对话的 Thread ID |
+| `content` | 消息渠道必填 | 回复原文。Phone 可省略，回退 `callResult` |
+| `channel` | 否 | 缺省用该 Task / Thread 上 Outbound 的渠道 |
 | `callResult` | Phone 建议 | `Connected` / `No Answer` / `Voicemail` / `Declined` / `Invalid Number` |
-| `notes` | 否 | 中文备注。缺省为「渠道回复已入库，待人工处理。」 |
+| `occurredAt` | 否 | 真实接收时间。缺省为服务器当前时间 |
+| `messageId` | 否 | 幂等键。缺省自动生成 `IN-{channel}-{timestamp}` |
+| `sender` / `subject` / `inReplyToMessageId` | 否 | 缺省从联系人和对应 Outbound 补全 |
+| `sourceUrl` / `notes` / `contactId` / `brandId` / `brandName` | 否 | 兼容旧调用，不再需要 |
 
 ### 固定写入
 
@@ -72,6 +69,7 @@ POST /api/brands/:brandId/replies
 - 消息渠道 `Message Status = Received`
 - Phone 不写 `Message Status`，写 `Call Result`
 - `Reply Status = Needs Reply`
+- `CP At Interaction` = 入库当时 Follow-up Client 的 Current CP（CP1 / CP2 / CP3）。历史消息不得用客户此刻的 CP 回填
 - Title：`客户 — 人员 — 渠道 — Inbound`
 - `Conversation Record ID = PORTAL-IN-{messageId}`
 
@@ -161,40 +159,38 @@ Inbound 会挂到这条已发出 Outbound 所属的 Task 和 Thread 上。
 
 ## 五渠道映射
 
-| 渠道 | `threadId` | `messageId` | `sender` | 特殊字段 |
-| --- | --- | --- | --- | --- |
-| Email | 邮件线程 ID | RFC Message-ID 或供应商 message id | From 邮箱 | `subject` |
-| LinkedIn | 会话 ID | 单条 message id | profile URL 或 handle | `sourceUrl` 指向对话页 |
-| SMS | 建议 `sms:{e164}` | 供应商 message sid | E.164 手机号 | 号码先规范化 |
-| WhatsApp | WhatsApp conversation id | wamid | E.164 手机号 | `channel` 必须是 `WhatsApp`，不要写成 SMS |
-| Phone | 建议 `phone:{e164}` 或 Call SID | Call SID | 来电号码 | `callResult` 必填语义；`content` 写摘要 |
+标准写入只传 `taskId` + `threadId` + `content`（Phone 可用 `callResult`）。下表是服务端从 Outbound / Contact 补全时用的含义；渠道适配器不必再传。
+
+| 渠道 | `threadId` | 自动补全 |
+| --- | --- | --- |
+| Email | 邮件线程 ID | Sender = 联系人邮箱；Subject = `Re:` + Outbound 主题 |
+| LinkedIn | 会话 ID | Sender = 联系人 LinkedIn |
+| SMS | 建议 `sms:{e164}` | Sender = 联系人手机号 |
+| WhatsApp | WhatsApp conversation id | Sender = 联系人手机号 |
+| Phone | 建议 `phone:{e164}` | Sender = 联系人手机号；`callResult` 可单独传入 |
 
 ## 示例
 
 本地默认：
 
 ```bash
-curl -X POST http://127.0.0.1:5173/api/replies \
+curl -sS -X POST "http://127.0.0.1:5173/api/replies" \
   -H "Authorization: Bearer local-reply-ingest" \
   -H "Content-Type: application/json" \
-  -d @scripts/reply-samples/email.json
+  -d '{
+    "taskId": "<Follow-up Task 页面 ID 或标题>",
+    "threadId": "<Thread ID>",
+    "content": "Yes, Mike has the Magnet."
+  }'
 ```
-
-提交前把 sample 里的 `{{stamp}}` 换成唯一值，并补上 `brandId` / `contactId` / `taskId`。
 
 ### Email
 
 ```json
 {
-  "channel": "Email",
-  "brandId": "<follow-up-client-id>",
-  "contactId": "<follow-up-contact-id>",
-  "content": "Yes, Mike has the Magnet.",
-  "sender": "john@acme.co",
-  "subject": "Re: Did the FC Magnet make it to Mike?",
-  "threadId": "gmail-thread-18c4",
-  "messageId": "gmail-msg-18c4",
-  "occurredAt": "2026-09-13T14:22:08+08:00"
+  "taskId": "<Follow-up Task 页面 ID 或标题>",
+  "threadId": "<Thread ID>",
+  "content": "Yes, Mike has the Magnet."
 }
 ```
 
@@ -202,13 +198,9 @@ curl -X POST http://127.0.0.1:5173/api/replies \
 
 ```json
 {
-  "channel": "LinkedIn",
-  "contactId": "<follow-up-contact-id>",
-  "content": "I will confirm with Mike this afternoon.",
-  "sender": "https://www.linkedin.com/in/john-smith",
-  "threadId": "linkedin-thread-001",
-  "messageId": "linkedin-msg-001",
-  "sourceUrl": "https://www.linkedin.com/messaging/thread/linkedin-thread-001"
+  "taskId": "<Follow-up Task 页面 ID 或标题>",
+  "threadId": "<Thread ID>",
+  "content": "I will confirm with Mike this afternoon."
 }
 ```
 
@@ -216,12 +208,9 @@ curl -X POST http://127.0.0.1:5173/api/replies \
 
 ```json
 {
-  "channel": "SMS",
-  "contactId": "<follow-up-contact-id>",
-  "content": "Magnet arrived yesterday.",
-  "sender": "+14155550182",
-  "threadId": "sms:+14155550182",
-  "messageId": "SM1234567890"
+  "taskId": "<Follow-up Task 页面 ID 或标题>",
+  "threadId": "<Thread ID>",
+  "content": "Magnet arrived yesterday."
 }
 ```
 
@@ -229,12 +218,9 @@ curl -X POST http://127.0.0.1:5173/api/replies \
 
 ```json
 {
-  "channel": "WhatsApp",
-  "contactId": "<follow-up-contact-id>",
-  "content": "The Magnet arrived. I can review the form this afternoon.",
-  "sender": "+14155550182",
-  "threadId": "whatsapp:+14155550182",
-  "messageId": "wamid.HBgM..."
+  "taskId": "<Follow-up Task 页面 ID 或标题>",
+  "threadId": "<Thread ID>",
+  "content": "The Magnet arrived. I can review the form this afternoon."
 }
 ```
 
@@ -242,12 +228,8 @@ curl -X POST http://127.0.0.1:5173/api/replies \
 
 ```json
 {
-  "channel": "Phone",
-  "contactId": "<follow-up-contact-id>",
-  "content": "对方回拨确认 Magnet 已交给 Mike。",
-  "sender": "+14155550182",
-  "threadId": "phone:+14155550182",
-  "messageId": "CA1234567890",
+  "taskId": "<Follow-up Task 页面 ID 或标题>",
+  "threadId": "<Thread ID>",
   "callResult": "Connected"
 }
 ```

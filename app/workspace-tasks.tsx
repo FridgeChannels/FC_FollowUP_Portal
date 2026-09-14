@@ -212,7 +212,15 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
       createdAt: payload.brand?.createdAt || "",
       updatedAt: payload.brand?.lastEditedAt || "",
     };
-    const timeline: Interaction[] = (payload.activities || []).map(activity => ({
+    const activities = payload.activities || [];
+    const threadCp = new Map<string, NonNullable<BrandActivity["cpAtInteraction"]>>();
+    const taskCp = new Map<string, NonNullable<BrandActivity["cpAtInteraction"]>>();
+    for (const activity of activities) {
+      if (!activity.cpAtInteraction) continue;
+      if (activity.threadId && !threadCp.has(activity.threadId)) threadCp.set(activity.threadId, activity.cpAtInteraction);
+      if (activity.taskId && !taskCp.has(activity.taskId)) taskCp.set(activity.taskId, activity.cpAtInteraction);
+    }
+    const timeline: Interaction[] = activities.map(activity => ({
       id: activity.id,
       customerId: customer.id,
       contactId: activity.contactId || undefined,
@@ -223,6 +231,9 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
       content: activity.content,
       createdAt: activity.createdAt || "",
       outcome: activity.callResult as Interaction["outcome"],
+      cp: activity.cpAtInteraction || (activity.threadId ? threadCp.get(activity.threadId) : undefined) || (activity.taskId ? taskCp.get(activity.taskId) : undefined),
+      taskId: activity.taskId || undefined,
+      threadId: activity.threadId || undefined,
     }));
     setRemote({ customer, contact, timeline, ownerName: item.ownerName || payload.brand?.ownerName || undefined, brand: payload.brand || undefined, cps: payload.cps });
     setLiveTask(fromNotionTask(item));
@@ -259,7 +270,7 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
   const partnershipContext=customer?.partnershipContext;
   const contact = localCustomer?.contacts.find(c => c.id === task.contactId) || localCustomer?.contacts[0] || remote?.contact;
   const callTask = liveTask.source === "call" ? state.callTasks.find(call => call.id === liveTask.id) : undefined;
-  const timeline = (remote?.timeline || state.interactions.filter(item => item.customerId === task.customerId)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const timeline = (remote?.timeline || state.interactions.filter(item => item.customerId === task.customerId).map(item => ({ ...item, cp: item.cp || customer?.cp }))).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   if (task.remote && !customer) return <main className="grid place-items-center bg-slate-50 text-sm text-slate-500">Loading task…</main>;
   if (!customer || !contact) return <main className="grid place-items-center bg-slate-50 text-sm text-slate-500">Brand context unavailable.</main>;
   const humanAssignees = state.users.filter(user => user.role === "FC_Owner" || user.role === "Admin");
@@ -278,7 +289,7 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
         <section>
           <h3 className="mb-3 font-bold">Brand activity</h3>
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-          <InteractionFeed key={`${customer.id}-${customer.cp}`} customerId={customer.id} interactions={timeline} contacts={customer.contacts} maxHeight="max-h-[480px]"/>
+          <InteractionFeed key={`${customer.id}-${customer.cp}`} customerId={customer.id} currentCp={customer.cp} interactions={timeline} contacts={customer.contacts} maxHeight="max-h-[480px]"/>
           </div>
         </section>
 
@@ -296,7 +307,7 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
 
         {task.source === "inbox" && <div className="mt-5 grid gap-2">
           {can("reply") && <Button variant="outline" className="justify-start" onClick={() => setSendMessage(true)}><Send className="mr-2 size-4"/>Send message</Button>}
-          {can("launch") && <Button variant="outline" className="justify-start" disabled={!task.remote && (!!customer.activeBombId || customer.status === "Bomb Running")} onClick={() => setLaunch(true)}><Bomb className="mr-2 size-4"/>Launch Bomb</Button>}
+          {can("launch") && <Button variant="outline" className="justify-start" disabled={!task.remote && (!!customer.activeBombId || customer.status === "Bomb Running")} onClick={() => setLaunch(true)}><Bomb className="mr-2 size-4"/>Launch OmniReach</Button>}
           {can("changeCP") && <Button variant="outline" className="justify-start" onClick={() => setChangeCP(true)}><Check className="mr-2 size-4"/>Change CP</Button>}
           {can("reply") && !isDone(liveTask) && <Button variant="outline" className="justify-start" disabled={saving} onClick={() => { if (!task.remote) { show(resolveInbox(task.id)); return; } void (async () => { setSaving(true); try { const response = await fetch(`/api/tasks/${task.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "Completed" }) }); const payload = await response.json(); if (!response.ok) throw new Error(payload.error || "Update failed"); applyTaskPayload(payload); toast.success("Task completed"); } catch (error) { toast.error(error instanceof Error ? error.message : "Update failed"); } finally { setSaving(false); } })(); }}><CheckCircle2 className="mr-2 size-4"/>End task</Button>}
         </div>}

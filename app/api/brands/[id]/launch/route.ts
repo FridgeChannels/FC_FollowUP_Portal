@@ -23,7 +23,7 @@ export async function POST(request: Request, { params }: Params) {
       copies?: Record<string, LaunchStepCopy>;
     };
     if (!body.bombId || !body.contactId) {
-      return Response.json({ error: "Bomb and KeyPerson are required" }, { status: 400 });
+      return Response.json({ error: "OmniReach and KeyPerson are required" }, { status: 400 });
     }
     const result = await launchFollowupBomb({
       brandId: id,

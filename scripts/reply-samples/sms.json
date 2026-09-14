@@ -1,10 +1,3 @@
 {
-  "channel": "SMS",
-  "content": "Got it, the Magnet arrived yesterday. Send the setup link to this number.",
-  "occurredAt": "2026-09-13T16:11:02+08:00",
-  "sender": "+14155550182",
-  "threadId": "sms:+14155550182",
-  "messageId": "sim-sms-msg-{{stamp}}",
-  "sourceUrl": "https://sms.example.com/messages/sim-sms-msg",
-  "notes": "SMS 渠道模拟回写。"
+  "content": "Got it, the Magnet arrived yesterday. Send the setup link to this number."
 }

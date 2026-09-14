@@ -1,9 +1,12 @@
 import {
   brandInitials,
+  currentCpOption,
+  parseApplicableCp,
   type BrandDetail,
   type BrandListItem,
   type HandlingMode,
 } from "../brand-list";
+import { checkpointShortName, resolveCheckpoint } from "./cps";
 import {
   firstRelationId,
   propertyText,
@@ -17,7 +20,6 @@ import { listFollowupContacts } from "./contacts";
 import { listFollowupConversations } from "./conversations";
 import { listFollowupTasks } from "./tasks";
 import { retrieveOwner, type FollowupOwner } from "./owners";
-
 const HANDLING_MODES = new Set(["Automated", "Human"]);
 
 function asHandlingMode(value: string): HandlingMode | null {
@@ -56,12 +58,12 @@ export async function mapFollowupClientPage(
   const properties = page.properties || {};
   const followupTitle = titleFromProperties(properties);
   const clientId = firstRelationId(properties.Client);
-  const cpId = firstRelationId(properties["Current CP"]);
   const ownerId = firstRelationId(properties.Owner);
-  const [clientName, currentCp, owner] = await Promise.all([
+  const currentCpId = firstRelationId(properties["Current CP"]);
+  const [clientName, owner, currentCpTitle] = await Promise.all([
     resolveRelatedTitle(clientId, titleCache),
-    resolveRelatedTitle(cpId, titleCache),
     resolveOwner(ownerId, ownerCache),
+    resolveRelatedTitle(currentCpId, titleCache).catch(() => ""),
   ]);
   const name = clientName || followupTitle || "Untitled Client";
 
@@ -69,7 +71,8 @@ export async function mapFollowupClientPage(
     id: page.id,
     name,
     initials: brandInitials(name),
-    currentCp: currentCp || "NONE",
+    currentCp: checkpointShortName(currentCpTitle) || "NONE",
+    currentCpId: currentCpId || null,
     status: propertyText(properties["Follow-up Status"]),
     handlingMode: asHandlingMode(propertyText(properties["Handling Mode"])),
     lastInteractionAt: rollupDate(properties["Last Interaction At"]),
@@ -89,50 +92,30 @@ export async function mapFollowupClientPages(pages: NotionPage[]) {
   return brands.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-async function resolveCpMeta(pageId: string | undefined) {
-  if (!pageId) return { fullName: null, definition: null };
-  try {
-    const page = await retrievePage(pageId);
-    const properties = page.properties || {};
-    return {
-      fullName: propertyText(properties["Full Name"]) || null,
-      definition: propertyText(properties["Chinese Definition"]) || null,
-    };
-  } catch {
-    return { fullName: null, definition: null };
-  }
-}
-
 async function resolveBombMeta(pageId: string) {
   try {
     const page = await retrievePage(pageId);
     const properties = page.properties || {};
-    const cpId = firstRelationId(properties["Applicable CP"]);
-    let cp: string | null = null;
-    if (cpId) {
-      try {
-        const cpPage = await retrievePage(cpId);
-        cp = titleFromProperties(cpPage.properties) || null;
-      } catch {
-        cp = null;
-      }
-    }
     return {
-      name: titleFromProperties(properties) || "Untitled Bomb",
-      cp,
+      name: titleFromProperties(properties) || "Untitled OmniReach",
+      cp:
+        parseApplicableCp(propertyText(properties.CP) || propertyText(properties["Applicable CP"])) ||
+        null,
     };
   } catch {
-    return { name: "Untitled Bomb", cp: null };
+    return { name: "Untitled OmniReach", cp: null };
   }
 }
 
 export async function mapFollowupClientDetail(page: NotionPage): Promise<BrandDetail> {
   const properties = page.properties || {};
-  const [brand, cpMeta, contacts] = await Promise.all([
+  const [brand, contacts] = await Promise.all([
     mapFollowupClientPage(page),
-    resolveCpMeta(firstRelationId(properties["Current CP"])),
     listFollowupContacts(page.id, relationIds(properties["Follow-up Contacts"])),
   ]);
+  const cpMeta =
+    (brand.currentCpId ? await resolveCheckpoint(brand.currentCpId) : null) ||
+    currentCpOption(brand.currentCp);
   const contactIds = contacts.map((item) => item.id);
   const [activities, tasks] = await Promise.all([
     listFollowupConversations(contactIds),

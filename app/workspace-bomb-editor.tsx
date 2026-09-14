@@ -14,7 +14,6 @@ import {
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
-import type { CurrentCpOption } from "@/lib/brand-list";
 import {
   BOMB_CHANNELS,
   BOMB_PRIORITIES,
@@ -23,7 +22,8 @@ import {
   type BombDetail,
   type BombScenario,
 } from "@/lib/bomb-list";
-import { BombStep, Channel, uid } from "@/lib/outreach-domain";
+import { listApplicableCps } from "@/lib/brand-list";
+import { BombStep, Channel, interactionCpCode, uid } from "@/lib/outreach-domain";
 import { templateVariables, variableToken } from "@/lib/template-variables";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -60,7 +60,7 @@ function draftFromBomb(bomb: BombDetail): EditorDraft {
   return {
     name: bomb.name,
     goal: bomb.goal,
-    cpId: bomb.cpIds[0] || "",
+    cpId: interactionCpCode(bomb.cps[0]?.name) || interactionCpCode(bomb.cp) || "",
     targetRole: bomb.targetRole || "Connector",
     priority: bomb.priority || "P1",
     notes: bomb.notes || "",
@@ -208,7 +208,6 @@ function TemplateVariableField({
 export function BombEditor({ bombId }: { bombId: string }) {
   const router = useRouter();
   const [bomb, setBomb] = useState<BombDetail | null>(null);
-  const [cps, setCps] = useState<CurrentCpOption[]>([]);
   const [scenarios, setScenarios] = useState<BombScenario[]>([]);
   const [draft, setDraft] = useState<EditorDraft | undefined>();
   const [loading, setLoading] = useState(true);
@@ -222,18 +221,16 @@ export function BombEditor({ bombId }: { bombId: string }) {
       .then(async (response) => {
         const payload = (await response.json()) as {
           bomb?: BombDetail;
-          cps?: CurrentCpOption[];
           scenarios?: BombScenario[];
           error?: string;
         };
-        if (!response.ok) throw new Error(payload.error || "Failed to load bomb");
-        if (!payload.bomb) throw new Error("Bomb not found");
+        if (!response.ok) throw new Error(payload.error || "Failed to load OmniReach");
+        if (!payload.bomb) throw new Error("OmniReach not found");
         return payload;
       })
       .then((payload) => {
         if (cancelled || !payload.bomb) return;
         setBomb(payload.bomb);
-        setCps((payload.cps || []).filter((item) => item.name.toUpperCase() !== "NONE"));
         setScenarios(payload.scenarios || []);
         setDraft(draftFromBomb(payload.bomb));
         setError(undefined);
@@ -242,7 +239,7 @@ export function BombEditor({ bombId }: { bombId: string }) {
         if (cancelled) return;
         setBomb(null);
         setDraft(undefined);
-        setError(err instanceof Error ? err.message : "Failed to load bomb");
+        setError(err instanceof Error ? err.message : "Failed to load OmniReach");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -256,11 +253,11 @@ export function BombEditor({ bombId }: { bombId: string }) {
     bomb
       ? {
           title: `Edit ${bomb.name}`,
-          description: bomb.goal || "Edit this Follow-up Bomb.",
+          description: bomb.goal || "Edit this Follow-up OmniReach.",
         }
       : {
-          title: error ? "Bomb not found" : "Edit Bomb",
-          description: error || "Loading Follow-up Bomb editor.",
+          title: error ? "OmniReach not found" : "Edit OmniReach",
+          description: error || "Loading Follow-up OmniReach editor.",
         },
   );
 
@@ -289,13 +286,13 @@ export function BombEditor({ bombId }: { bombId: string }) {
         }),
       });
       const payload = (await response.json()) as { bomb?: BombDetail; error?: string };
-      if (!response.ok) throw new Error(payload.error || "Failed to save bomb");
-      if (!payload.bomb) throw new Error("Bomb was not saved");
+      if (!response.ok) throw new Error(payload.error || "Failed to save OmniReach");
+      if (!payload.bomb) throw new Error("OmniReach was not saved");
       setBomb(payload.bomb);
       setDraft(draftFromBomb(payload.bomb));
-      toast.success(status === "Active" && draft.status !== "Active" ? "Bomb activated" : "Bomb saved");
+      toast.success(status === "Active" && draft.status !== "Active" ? "OmniReach activated" : "OmniReach saved");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to save bomb");
+      toast.error(err instanceof Error ? err.message : "Failed to save OmniReach");
     } finally {
       setSaving(false);
     }
@@ -304,7 +301,7 @@ export function BombEditor({ bombId }: { bombId: string }) {
   if (loading) {
     return (
       <div className="grid min-h-[60vh] place-items-center text-sm text-slate-500">
-        Loading bomb…
+        Loading OmniReach…
       </div>
     );
   }
@@ -313,10 +310,10 @@ export function BombEditor({ bombId }: { bombId: string }) {
       <div className="grid min-h-[60vh] place-items-center">
         <div className="text-center">
           <Bomb className="mx-auto size-9 text-slate-300" />
-          <h1 className="mt-3 font-bold">Bomb not found</h1>
+          <h1 className="mt-3 font-bold">OmniReach not found</h1>
           {error && <p className="mt-2 text-sm text-slate-500">{error}</p>}
           <Button variant="link" onClick={() => router.push("/bombs")}>
-            Back to Bombs
+            Back to OmniReach
           </Button>
         </div>
       </div>
@@ -352,14 +349,14 @@ export function BombEditor({ bombId }: { bombId: string }) {
         className="mb-5 flex items-center gap-2 text-sm font-semibold text-slate-500"
       >
         <ArrowLeft className="size-4" />
-        Bombs
+        OmniReach
       </button>
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
           <div className="text-xs font-semibold uppercase tracking-wide text-violet-600">
             {draft.status} · Version 1
           </div>
-          <h1 className="mt-1 text-2xl font-bold">Edit Bomb</h1>
+          <h1 className="mt-1 text-2xl font-bold">Edit OmniReach</h1>
         </div>
         <div className="flex gap-2">
           <Button
@@ -388,21 +385,21 @@ export function BombEditor({ bombId }: { bombId: string }) {
                   onChange={(event) => setDraft({ ...draft, name: event.target.value })}
                 />
               </label>
-              <label className="text-sm font-medium">
+              <div className="text-sm font-medium">
                 Applicable CP
-                <Select value={draft.cpId} onValueChange={(value) => setDraft({ ...draft, cpId: value })}>
+                <Select value={draft.cpId || undefined} onValueChange={(value) => setDraft({ ...draft, cpId: value })}>
                   <SelectTrigger className="mt-2 w-full">
                     <SelectValue placeholder="Select a CP" />
                   </SelectTrigger>
-                  <SelectContent>
-                    {cps.map((item) => (
+                  <SelectContent position="popper">
+                    {listApplicableCps().map((item) => (
                       <SelectItem key={item.id} value={item.id}>
-                        {item.name}
+                        {item.name} · {item.fullName}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-              </label>
+              </div>
               <label className="text-sm font-medium md:col-span-2">
                 Goal
                 <Input
@@ -460,7 +457,7 @@ export function BombEditor({ bombId }: { bombId: string }) {
               <div>
                 <h2 className="font-bold">Action flow</h2>
                 <p className="text-xs text-slate-500">
-                  Sequence is assigned automatically when the Bomb is launched.
+                  Sequence is assigned automatically when OmniReach is launched.
                 </p>
               </div>
               <Select
@@ -580,7 +577,7 @@ export function BombEditor({ bombId }: { bombId: string }) {
             <div className="text-xs font-semibold uppercase tracking-wide text-violet-300">
               Estimated flow
             </div>
-            <h2 className="mt-1 font-bold">{draft.name || "Untitled Bomb"}</h2>
+            <h2 className="mt-1 font-bold">{draft.name || "Untitled OmniReach"}</h2>
             <div className="mt-6 space-y-5">
               {draft.steps.map((step, index) => (
                 <div key={step.id} className="flex gap-3">

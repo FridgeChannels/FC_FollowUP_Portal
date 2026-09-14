@@ -8,6 +8,7 @@ import type {
   Priority,
 } from "../scheduling-engine/types";
 import { CHANNELS } from "../scheduling-engine/types";
+import { interactionCpCode } from "../outreach-domain";
 import { retrieveFollowupBomb } from "./bombs";
 import { skipUnavailableChannels } from "./config";
 import { listChannelDailyMax } from "./capacity";
@@ -90,7 +91,7 @@ export async function launchFollowupBomb(input: {
   const contact = brand.contacts.find((item) => item.id === input.contactId);
   if (!contact) throw new Error("Contact not found on this brand");
   if (!brand.ownerId) throw new Error("客户未分配 Owner，不可生成任务");
-  if (bomb.status !== "Active") throw new Error("Only Active Bombs can be launched");
+  if (bomb.status !== "Active") throw new Error("Only Active OmniReach can be launched");
 
   const enforceReachable = skipUnavailableChannels();
   const selectedChannels = bomb.templates
@@ -126,7 +127,7 @@ export async function launchFollowupBomb(input: {
     throw new Error(result.needsReview[0]?.reason || "Launch needs review");
   }
   if (!result.writes.length) {
-    throw new Error(result.unscheduled[0]?.reason || "No working-day capacity for this Bomb");
+    throw new Error(result.unscheduled[0]?.reason || "No working-day capacity for this OmniReach");
   }
 
   for (const write of result.writes) {
@@ -154,6 +155,7 @@ export async function launchFollowupBomb(input: {
         content,
         sender: input.sender,
         taskId: task.id,
+        cpAtInteraction: interactionCpCode(brand.currentCp),
         notes: "Bomb 方案已排班，尚未实际发送。",
       });
     }

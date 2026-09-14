@@ -1,4 +1,10 @@
 import {
+  applicableCpSelect,
+  currentCpOption,
+  parseApplicableCp,
+  resolveApplicableCp,
+} from "../brand-list";
+import {
   BOMB_PRIORITIES,
   BOMB_TARGET_ROLES,
   isBombChannel,
@@ -30,7 +36,6 @@ import {
   getFollowupScenarioDbId,
   getFollowupTemplateDbId,
 } from "./config";
-import { listCurrentCps } from "./cps";
 
 function titleMap(pages: NotionPage[]) {
   return new Map(
@@ -60,24 +65,43 @@ function templatesForBomb(
     .filter((item): item is BombTemplateItem => !!item);
 }
 
+function bombCpCode(properties: NotionPage["properties"]) {
+  return parseApplicableCp(propertyText(properties?.CP) || propertyText(properties?.["Applicable CP"]));
+}
+
+function bombCpRef(code: string | null | undefined): BombCpRef | null {
+  const parsed = parseApplicableCp(code);
+  if (!parsed) return null;
+  const option = currentCpOption(parsed);
+  return { id: option.id, name: option.name, fullName: option.fullName };
+}
+
+function bombStatus(properties: NotionPage["properties"]) {
+  return (
+    propertyText(properties?.["OmniReach Status"]) ||
+    propertyText(properties?.["Bomb Status"]) ||
+    "Draft"
+  );
+}
+
 function mapBombPage(
   page: NotionPage,
   titles: Map<string, string>,
   templates: BombTemplateItem[],
 ): BombListItem {
   const properties = page.properties || {};
-  const cpIds = relationIds(properties["Applicable CP"]);
+  const cp = bombCpCode(properties);
   const scenarioId = firstRelationId(properties.Scenario);
 
   return {
     id: page.id,
-    name: titleFromProperties(properties) || "Untitled Bomb",
+    name: titleFromProperties(properties) || "Untitled OmniReach",
     goal: propertyText(properties.Goal),
-    status: propertyText(properties["Bomb Status"]) || "Draft",
+    status: bombStatus(properties),
     priority: propertyText(properties.Priority) || null,
     targetRole: propertyText(properties["Target Role"]) || null,
-    cp: cpIds.map((id) => titles.get(id) || "").filter(Boolean).join(", ") || null,
-    cpIds,
+    cp,
+    cpIds: cp ? [cp] : [],
     scenarioId: scenarioId || null,
     scenarioName: (scenarioId && titles.get(scenarioId)) || null,
     channels: orderedBombChannels(
@@ -90,16 +114,12 @@ function mapBombPage(
 }
 
 export async function listFollowupBombs() {
-  const [bombPages, templatePages, scenarioPages, cps] = await Promise.all([
+  const [bombPages, templatePages, scenarioPages] = await Promise.all([
     queryDatabasePages(getFollowupBombDbId()),
     queryDatabasePages(getFollowupTemplateDbId()),
     queryDatabasePages(getFollowupScenarioDbId()),
-    listCurrentCps().catch(() => []),
   ]);
-  const titles = new Map([
-    ...titleMap(scenarioPages),
-    ...cps.map((item) => [item.id, item.name] as const),
-  ]);
+  const titles = titleMap(scenarioPages);
   const templates = new Map(templatePages.map((page) => [page.id, mapTemplate(page)]));
 
   return bombPages
@@ -107,35 +127,20 @@ export async function listFollowupBombs() {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function mapCpRef(page: NotionPage): BombCpRef {
-  const properties = page.properties || {};
-  return {
-    id: page.id,
-    name: titleFromProperties(properties),
-    fullName: propertyText(properties["Full Name"]) || null,
-  };
-}
-
 export async function retrieveFollowupBomb(id: string): Promise<BombDetail> {
   const page = await retrievePage(id);
   const properties = page.properties || {};
-  const cpIds = relationIds(properties["Applicable CP"]);
   const scenarioId = firstRelationId(properties.Scenario);
   const templateIds = relationIds(properties.Templates);
-  const [cpPages, scenarioPage, templatePages] = await Promise.all([
-    Promise.all(cpIds.map((pageId) => retrievePage(pageId).catch(() => null))),
+  const [scenarioPage, templatePages] = await Promise.all([
     scenarioId ? retrievePage(scenarioId).catch(() => null) : Promise.resolve(null),
     Promise.all(templateIds.map((pageId) => retrievePage(pageId).catch(() => null))),
   ]);
 
   const titles = new Map<string, string>();
-  const cps = cpPages
-    .filter((item): item is NotionPage => !!item)
-    .map((item) => {
-      const cp = mapCpRef(item);
-      titles.set(cp.id, cp.name);
-      return cp;
-    });
+  const cps = [bombCpRef(bombCpCode(properties))].filter(
+    (item): item is BombCpRef => !!item,
+  );
   if (scenarioPage) {
     titles.set(scenarioPage.id, titleFromProperties(scenarioPage.properties));
   }
@@ -201,7 +206,7 @@ async function createBombTemplate(
 
 export async function createFollowupBomb(input: CreateBombInput) {
   const name = input.name.trim();
-  if (!name) throw new Error("Bomb name is required");
+  if (!name) throw new Error("OmniReach name is required");
   const targetRole = input.targetRole?.trim() || null;
   if (targetRole && !(BOMB_TARGET_ROLES as readonly string[]).includes(targetRole)) {
     throw new Error("Invalid Target Role");
@@ -214,21 +219,15 @@ export async function createFollowupBomb(input: CreateBombInput) {
   if (scenarioId) {
     await retrievePage(scenarioId);
   }
-  const cpIds = [...new Set((input.cpIds || []).map((id) => id.trim()).filter(Boolean))];
-  if (cpIds.length) {
-    const cps = await listCurrentCps();
-    if (cpIds.some((id) => !cps.some((item) => item.id === id))) {
-      throw new Error("Unknown Applicable CP");
-    }
-  }
+  const cp = resolveApplicableCp(input.cpIds || []);
   const page = await createPage(getFollowupBombDbId(), {
-    Bomb: { title: richText(name) },
+    "OmniReach Name": { title: richText(name) },
     Goal: { rich_text: input.goal?.trim() ? richText(input.goal.trim()) : [] },
     Scenario: { relation: scenarioId ? [{ id: scenarioId }] : [] },
-    "Applicable CP": { relation: cpIds.map((id) => ({ id })) },
+    ...(cp ? { CP: applicableCpSelect(cp) } : {}),
     ...(targetRole ? { "Target Role": { select: { name: targetRole } } } : {}),
     Priority: { select: { name: priority } },
-    "Bomb Status": { status: { name: "Draft" } },
+    "OmniReach Status": { status: { name: "Draft" } },
     Notes: { rich_text: input.notes?.trim() ? richText(input.notes.trim()) : [] },
   });
 
@@ -242,10 +241,10 @@ export async function createFollowupBomb(input: CreateBombInput) {
 export async function updateFollowupBomb(id: string, input: UpdateBombInput) {
   const current = await retrieveFollowupBomb(id);
   const name = input.name?.trim() || current.name;
-  if (!name) throw new Error("Bomb name is required");
+  if (!name) throw new Error("OmniReach name is required");
   const properties: Record<string, unknown> = {};
 
-  if (input.name !== undefined) properties.Bomb = { title: richText(name) };
+  if (input.name !== undefined) properties["OmniReach Name"] = { title: richText(name) };
   if (input.goal !== undefined) {
     properties.Goal = { rich_text: input.goal?.trim() ? richText(input.goal.trim()) : [] };
   }
@@ -254,14 +253,8 @@ export async function updateFollowupBomb(id: string, input: UpdateBombInput) {
     properties.Scenario = { relation: input.scenarioId ? [{ id: input.scenarioId }] : [] };
   }
   if (input.cpIds !== undefined) {
-    const cpIds = [...new Set(input.cpIds.map((item) => item.trim()).filter(Boolean))];
-    if (cpIds.length) {
-      const cps = await listCurrentCps();
-      if (cpIds.some((item) => !cps.some((cp) => cp.id === item))) {
-        throw new Error("Unknown Applicable CP");
-      }
-    }
-    properties["Applicable CP"] = { relation: cpIds.map((item) => ({ id: item })) };
+    const cp = resolveApplicableCp(input.cpIds);
+    properties.CP = cp ? applicableCpSelect(cp) : { select: null };
   }
   if (input.targetRole !== undefined) {
     const targetRole = input.targetRole?.trim() || null;
@@ -283,9 +276,9 @@ export async function updateFollowupBomb(id: string, input: UpdateBombInput) {
   if (input.status !== undefined) {
     const status = input.status?.trim() || "";
     if (!(BOMB_STATUSES as readonly string[]).includes(status)) {
-      throw new Error("Invalid Bomb Status");
+      throw new Error("Invalid OmniReach Status");
     }
-    properties["Bomb Status"] = { status: { name: status } };
+    properties["OmniReach Status"] = { status: { name: status } };
   }
 
   const templateStatus = (input.status || current.status) === "Active" ? "Active" : "Draft";
@@ -304,7 +297,7 @@ export async function updateFollowupBomb(id: string, input: UpdateBombInput) {
     properties.Templates = { relation: templateIds.map((item) => ({ id: item })) };
   }
 
-  if (!Object.keys(properties).length) throw new Error("No bomb fields to update");
+  if (!Object.keys(properties).length) throw new Error("No OmniReach fields to update");
   await updatePage(id, properties);
   return retrieveFollowupBomb(id);
 }

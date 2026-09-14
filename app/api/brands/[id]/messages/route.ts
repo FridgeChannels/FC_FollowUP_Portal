@@ -3,6 +3,7 @@ import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { retrievePage } from "@/lib/notion/client";
 import { mapFollowupClientDetail, mapFollowupClientPage } from "@/lib/notion/followup-clients";
 import { createHumanOutbound, markFollowupClientEngaged } from "@/lib/notion/followup-writes";
+import { interactionCpCode } from "@/lib/outreach-domain";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -40,6 +41,7 @@ export async function POST(request: Request, { params }: Params) {
       sender: viewer.email,
       existingTaskId: body.taskId,
       threadId: body.threadId,
+      cpAtInteraction: interactionCpCode(brand.currentCp),
     });
     await markFollowupClientEngaged(id, { note: "已发送人工消息。" });
     return Response.json({

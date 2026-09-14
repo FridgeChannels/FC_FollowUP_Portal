@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Send } from "lucide-react";
 import { toast } from "sonner";
 import { Channel, Contact, Interaction, ScheduledAction, WorkspaceState } from "@/lib/outreach-domain";
@@ -128,6 +128,83 @@ export function BrandReplyBox({
           if (result.ok) setContent("");
         }}><Send className="size-4"/></Button>
       </div>
+    </div>
+  );
+}
+
+export function ChannelSendBox({
+  customerId,
+  channel,
+  contacts,
+  interactions,
+  onSend,
+}: {
+  customerId?: string;
+  channel: Channel;
+  contacts: Contact[];
+  interactions: Interaction[];
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string) => Promise<void>;
+}) {
+  const { state, can, sendHumanReply } = useWorkspace();
+  const people = contacts.filter(item => channelAvailable(item, channel));
+  const latest = [...interactions]
+    .filter(item => item.contactId && people.some(person => person.id === item.contactId))
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+  const [contactId, setContactId] = useState(latest?.contactId || people[0]?.id || "");
+  const [content, setContent] = useState("");
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    setContactId(latest?.contactId || people[0]?.id || "");
+    setContent("");
+  }, [channel, customerId]);
+  const contact = people.find(item => item.id === contactId) || people[0];
+  const customer = state.customers.find(item => item.id === customerId);
+  if (!can("reply") || !customerId) return null;
+  if (!onSend && customer?.status === "Closed") return null;
+
+  const pool = interactions.filter(item => item.contactId === contact?.id && item.channel === channel);
+  const pending = pool.find(item => inboundNeedsComposer(state, item, interactions));
+  const latestOutbound = [...pool].reverse().find(item => item.direction === "Outbound");
+  const threadId = pending?.threadId || latestOutbound?.threadId || pool.at(-1)?.threadId;
+  const taskId = pending?.taskId || latestOutbound?.taskId || pool.at(-1)?.taskId;
+
+  return (
+    <div className="border-t border-slate-200 px-5 py-4">
+      {!people.length ? (
+        <div className="text-sm text-slate-400">No contact has a valid {channel} endpoint.</div>
+      ) : (
+        <div className="rounded-xl bg-slate-50 p-3">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+            <Select value={contact?.id} onValueChange={setContactId}>
+              <SelectTrigger size="sm" className="w-44"><SelectValue placeholder="KeyPerson"/></SelectTrigger>
+              <SelectContent>{people.map(item => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectContent>
+            </Select>
+            <span className="text-xs text-slate-400">{pending ? "Reply needed" : `Send ${channel}`}</span>
+          </div>
+          <div className="flex gap-2">
+            <Textarea
+              value={content}
+              onChange={event => setContent(event.target.value)}
+              className="min-h-20 resize-none"
+              placeholder={`Write ${channel === "Phone" ? "a call note" : `a ${channel} message`}…`}
+            />
+            <Button className="h-20 px-5" disabled={!contact || !content.trim() || saving} onClick={() => {
+              if (!contact) return;
+              if (onSend) {
+                setSaving(true);
+                void onSend(contact.id, channel, content, taskId, threadId)
+                  .then(() => { toast.success("Message saved as pending"); setContent(""); })
+                  .catch(error => toast.error(error instanceof Error ? error.message : "Send failed"))
+                  .finally(() => setSaving(false));
+                return;
+              }
+              const result = sendHumanReply(customerId, contact.id, channel, content, pending?.bombInstanceId || latestOutbound?.bombInstanceId);
+              show(result);
+              if (result.ok) setContent("");
+            }}><Send className="size-4"/></Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

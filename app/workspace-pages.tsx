@@ -21,8 +21,8 @@ import { toast } from "sonner";
 import { useWorkspace } from "./workspace-store";
 import { cacheBrandList } from "@/lib/brand-list-cache";
 import {
-  CURRENT_CPS,
   FOLLOW_UP_STATUSES,
+  listCurrentCps,
   type BrandListItem,
   type CurrentCpOption,
 } from "@/lib/brand-list";
@@ -130,7 +130,7 @@ export function Status({ value }: { value: string }) {
       )}
     >
       <span className="size-1.5 rounded-full bg-current" />
-      {value}
+      {value === "Bomb Running" ? "OmniReach Running" : value}
     </span>
   );
 }
@@ -264,7 +264,7 @@ export function Dashboard() {
           color="bg-amber-500"
         />
         <Metric
-          label="Active Bombs"
+          label="Active OmniReach"
           value={String(active)}
           sub="Running now"
           color="bg-blue-500"
@@ -483,9 +483,8 @@ export function BrandsPage() {
   );
   const { q: query, status, cp, owner } = filters;
   const [brands, setBrands] = useState<BrandListItem[]>([]);
-  const [cps, setCps] = useState<CurrentCpOption[]>(
-    CURRENT_CPS.map((name) => ({ id: name, name })),
-  );
+  const [remoteCps, setRemoteCps] = useState<CurrentCpOption[]>([]);
+  const cps = remoteCps.length ? remoteCps : listCurrentCps();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
   const setListParam = (key: keyof BrandListFilters, value: string) => {
@@ -513,16 +512,13 @@ export function BrandsPage() {
           error?: string;
         };
         if (!response.ok) throw new Error(payload.error || "Failed to load brands");
-        return {
-          brands: payload.brands || [],
-          cps: payload.cps || [],
-        };
+        return { brands: payload.brands || [], cps: payload.cps || [] };
       })
       .then((payload) => {
         if (cancelled) return;
         cacheBrandList(payload.brands);
         setBrands(payload.brands);
-        if (payload.cps.length) setCps(payload.cps);
+        setRemoteCps(payload.cps);
         setError(undefined);
       })
       .catch((err: unknown) => {

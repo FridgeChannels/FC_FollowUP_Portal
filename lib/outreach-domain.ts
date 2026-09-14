@@ -1,6 +1,14 @@
 export type Role = "Admin" | "FC_Owner" | "Caller";
 export type Channel = "Email" | "SMS" | "WhatsApp" | "LinkedIn" | "Phone";
 export type CPCode = "CP1" | "CP2" | "CP3";
+export const CP_CODES: CPCode[] = ["CP1", "CP2", "CP3"];
+
+export function interactionCpCode(value?: string | null): CPCode | null {
+  const raw = (value || "").trim().toUpperCase();
+  if (raw === "CP1" || raw === "CP2" || raw === "CP3") return raw;
+  const match = raw.match(/^CP([123])/);
+  return match ? (`CP${match[1]}` as CPCode) : null;
+}
 export type CustomerStatus = "Ready" | "Bomb Running" | "Waiting for Reply" | "Human Handling" | "Paused" | "Closed";
 export type ActionStatus = "Scheduled" | "Sending" | "Sent" | "Delivered" | "Failed" | "Cancelled" | "Skipped" | "Completed";
 export type CallOutcome = "Contact Responded" | "Connected — No Useful Response" | "No Answer" | "Voicemail" | "Call Back Requested" | "Wrong Number" | "Wrong Contact" | "Other";
@@ -35,6 +43,7 @@ export type Interaction = {
   id: string; customerId: string; contactId?: string; bombInstanceId?: string; cp?: CPCode; type: "Message" | "Phone" | "Bomb" | "CP" | "Follow-up" | "Human" | "System";
   channel?: Channel; direction?: "Inbound" | "Outbound"; title: string; content: string; createdAt: string; outcome?: CallOutcome; recording?: string;
   creationMethod?: "Automated" | "Manual"; threadId?: string; taskId?: string; replyStatus?: "Needs Reply" | "Replied";
+  messageStatus?: string; callResult?: string;
 };
 export type InboxItem = {
   id: string; customerId: string; contactId?: string; type: "Reply";
@@ -138,12 +147,12 @@ export function createSeedState(): WorkspaceState {
   ];
   const interactions: Interaction[] = [
     {id:"int_acme_reply",customerId:"c_acme",contactId:"ct_acme_john",type:"Message",channel:"WhatsApp",direction:"Inbound",title:"WhatsApp · Contact → FC",content:"Yes, I handed the FC Magnet to Mike yesterday afternoon. He has it on his desk now. Mike asked me to send him the setup link as well, so please use mike@acme.co for anything that needs his direct response.",createdAt:at("2026-09-11","08:41:27")},
-    {id:"int_acme_stop",customerId:"c_acme",type:"Bomb",title:"Bomb stopped automatically",content:"John Smith replied via WhatsApp. Four future actions were cancelled and one reserved phone slot was released.",createdAt:at("2026-09-11","08:41:29")},
+    {id:"int_acme_stop",customerId:"c_acme",type:"Bomb",title:"OmniReach stopped automatically",content:"John Smith replied via WhatsApp. Four future actions were cancelled and one reserved phone slot was released.",createdAt:at("2026-09-11","08:41:29")},
     {id:"int_acme_owner_email",customerId:"c_acme",contactId:"ct_acme_mike",type:"Message",channel:"Email",direction:"Outbound",title:"Email · FC → Contact",content:"Subject: Your FC Magnet setup link\n\nHi Mike,\n\nJohn mentioned that the FC Magnet reached you yesterday. Here is the short setup link he requested: https://example.com/fc-setup\n\nIf anything is unclear, reply directly to this email and our team will help.\n\nBest,\nSarah",createdAt:at("2026-09-10","16:08:42")},
     {id:"int_acme_call",customerId:"c_acme",contactId:"ct_acme_john",type:"Phone",channel:"Phone",direction:"Outbound",title:"Phone · No Answer",content:"Caller: Alex Morgan\nDialed: +1 415 555 0182\nDuration: 00:24\nResult: The call rang four times and then disconnected. No voicemail message was left.",outcome:"No Answer",createdAt:at("2026-09-10","15:16:09")},
     {id:"int_acme_linkedin",customerId:"c_acme",contactId:"ct_acme_john",type:"Message",channel:"LinkedIn",direction:"Inbound",title:"LinkedIn · Contact → FC",content:"Hi Sarah — I saw your note. I am checking with Mike this afternoon and will confirm once the package is in his hands.",createdAt:at("2026-09-09","11:27:55")},
     {id:"int_acme_email",customerId:"c_acme",contactId:"ct_acme_john",type:"Message",channel:"Email",direction:"Outbound",title:"Email · FC → Contact",content:"Subject: Did the FC Magnet make it to Mike?\n\nHi John,\n\nI wanted to check whether the FC Magnet reached Mike. If it has, could you confirm when it was handed over? If not, I can help arrange another delivery.\n\nThanks,\nSarah",createdAt:at("2026-09-09","09:00:12")},
-    {id:"int_n_bomb",customerId:"c_northstar",contactId:"ct_north_maya",bombInstanceId:"bi_north",type:"Bomb",title:"Bomb started",content:"Owner Meeting · Version 4",createdAt:addDays(today,-1)},
+    {id:"int_n_bomb",customerId:"c_northstar",contactId:"ct_north_maya",bombInstanceId:"bi_north",type:"Bomb",title:"OmniReach started",content:"Owner Meeting · Version 4",createdAt:addDays(today,-1)},
     {id:"int_n_email",customerId:"c_northstar",contactId:"ct_north_maya",type:"Message",channel:"Email",direction:"Outbound",title:"Email · FC → Contact",content:"Subject: Your FC setup\n\nHi Maya,\n\nHere is the short setup form we discussed: https://example.com/northstar-setup\n\nOnce it is complete, reply here and I will send two review times.\n\nBest,\nSarah",createdAt:at("2026-09-10","09:04:18")},
     {id:"int_kite_reply",customerId:"c_kite",contactId:"ct_kite_emma",type:"Message",channel:"Email",direction:"Inbound",title:"Email · Contact → FC",content:"Hi Sarah,\n\nCould you send me more details about how this works, including the expected setup time and what information our team needs to provide? I can review it with our operations lead tomorrow morning.\n\nThanks,\nEmma",createdAt:at("2026-09-11","05:00:44")},
     {id:"int_sunridge_reply",customerId:"c_sunridge",contactId:"ct_sunridge_olivia",type:"Message",channel:"Email",direction:"Inbound",title:"Email · Contact → FC",content:"Hi Sarah,\n\nThanks for sending the FC Magnet details. We are interested, but I want to understand the setup effort and timeline before I loop in our operations lead. Could you send the short overview and two times for a call?\n\nBest,\nOlivia",createdAt:at("2026-09-11","07:52:18")},
@@ -171,9 +180,9 @@ export function createSeedState(): WorkspaceState {
     {id:"call_olive",customerId:"c_olive",contactId:"ct_olive_liam",bombInstanceId:"bi_olive",scheduledActionId:"a_o2",callerId:"u_alex",scheduledDate:addDays(today,-1),priority:"Normal",goal:"Confirm interest",script:"Ask whether timing has changed.",status:"Completed",outcome:"No Answer",recordingStatus:"Unavailable"},
   ];
   const cps: CPStage[] = [
-    {code:"CP1",name:"Post-Tap Brand Experience Delivered",goal:"Post-Tap Brand Experience Delivered",criteria:"The post-tap Brand experience has been delivered.",color:"violet"},
-    {code:"CP2",name:"Sample Delivered to Owner",goal:"Sample Delivered to Owner",criteria:"Sample delivery to the Owner is confirmed.",color:"blue"},
-    {code:"CP3",name:"Owner Input Completed",goal:"Owner Input Completed",criteria:"Required Owner input is completed.",color:"emerald"},
+    {code:"CP1",name:"Post-Tap Brand Experience Delivered",goal:"Post-Tap Brand Experience Delivered",criteria:"Brand Customized Post-tap 已完成；Connector 或 Owner 已收到 FC 产品；对方可以实际 Tap 并访问该品牌体验。",color:"violet"},
+    {code:"CP2",name:"Sample Delivered to Owner",goal:"Sample Delivered to Owner",criteria:"正确 Owner 已识别；Owner 已收到 Sample；Owner Fire Cover Complete。",color:"blue"},
+    {code:"CP3",name:"Owner Input & Plan Review Completed",goal:"Owner Input & Plan Review Completed",criteria:"Business Objective 已确认；必要业务流程、事实和限制已记录；AI 已生成客户专属 Plan；FC 已完成人工审核；Plan 已达到可进入 Review 的完整度。",color:"emerald"},
   ];
   const integrations: ChannelIntegration[] = [
     {channel:"Email",status:"Connected",account:"sales@fridgechannel.com"},{channel:"SMS",status:"Connected",account:"+1 415 555 0100"},{channel:"WhatsApp",status:"Needs Attention",account:"FC Outreach"},{channel:"LinkedIn",status:"Disconnected",account:"No account"},{channel:"Phone",status:"Connected",account:"Quo workspace"},
@@ -188,8 +197,8 @@ export function createSeedState(): WorkspaceState {
     {id:"sc_partnership_review",name:"Partnership review",cp:"CP3",description:"Review partnership context and the next commercial step."},
   ];
   const audit: AuditEntry[] = [
-    {id:"au1",actorId:"system",customerId:"c_acme",action:"Bomb stopped on contact response",previousValue:"Bomb Running",newValue:"Human Handling",createdAt:at("2026-09-11","08:41:29")},
-    {id:"au2",actorId:"u_sarah",customerId:"c_northstar",action:"Bomb launched",newValue:"Owner Meeting V4",createdAt:addDays(today,-1)},
+    {id:"au1",actorId:"system",customerId:"c_acme",action:"OmniReach stopped on contact response",previousValue:"OmniReach Running",newValue:"Human Handling",createdAt:at("2026-09-11","08:41:29")},
+    {id:"au2",actorId:"u_sarah",customerId:"c_northstar",action:"OmniReach launched",newValue:"Owner Meeting V4",createdAt:addDays(today,-1)},
     {id:"au3",actorId:"u_mike",customerId:"c_brightland",action:"Follow-up created",newValue:"Sep 11, 7:00 AM",createdAt:addDays(today,-3)},
   ];
   return {version:4,simulatedDate:today,currentRole:"Admin",currentUserId:"u_sarah",users,customers,bombs,bombInstances,actions,interactions,inbox,followUps,callTasks,audit,cps,integrations,scenarios};

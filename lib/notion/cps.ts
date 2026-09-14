@@ -1,99 +1,74 @@
-import type { CurrentCpOption } from "../brand-list";
+import { parseCurrentCp, type CurrentCpOption } from "../brand-list";
 import {
-  firstRelationId,
-  notionFetch,
   propertyText,
-  queryFollowupClientPages,
-  retrievePage,
+  queryDatabasePages,
   titleFromProperties,
   type NotionPage,
 } from "./client";
-import { getFollowupCpDbId } from "./config";
+import { getFollowupCheckpointDbId } from "./config";
 
-function cpSortValue(name: string) {
-  if (name.toUpperCase() === "NONE") return [0, 0, name] as const;
-  const match = name.match(/^CP(\d+)$/i);
-  if (match) return [1, Number(match[1]), name] as const;
-  return [2, 0, name] as const;
+export {
+  applicableCpSelect,
+  currentCpOption,
+  currentCpSelect,
+  listApplicableCps,
+  listCurrentCps,
+  parseApplicableCp,
+  parseCurrentCp,
+  resolveApplicableCp,
+} from "../brand-list";
+
+export function checkpointShortName(value?: string | null): string {
+  const raw = (value || "").trim();
+  if (!raw) return "";
+  const parsed = parseCurrentCp(raw);
+  if (parsed) return parsed;
+  const match = raw.toUpperCase().match(/^CP(\d+)/);
+  if (match) return `CP${match[1]}`;
+  if (/^nurture$/i.test(raw)) return "Nurture";
+  return raw;
 }
 
-export function sortCurrentCps(items: CurrentCpOption[]) {
-  return [...items].sort((a, b) => {
-    const left = cpSortValue(a.name);
-    const right = cpSortValue(b.name);
-    return left[0] - right[0] || left[1] - right[1] || left[2].localeCompare(right[2]);
-  });
-}
-
-function isMissingObject(error: unknown) {
-  return (
-    error instanceof Error &&
-    (error.message.includes("object_not_found") || error.message.includes("Could not find database"))
-  );
-}
-
-function mapCpPage(page: NotionPage): CurrentCpOption | null {
-  const properties = page.properties || {};
-  const name = titleFromProperties(properties);
-  if (!name) return null;
+export function mapCheckpointPage(page: NotionPage): CurrentCpOption {
+  const title = titleFromProperties(page.properties);
+  const name = checkpointShortName(title) || "NONE";
+  const fullName = title.includes("-")
+    ? title.split("-").slice(1).join("-").trim()
+    : title;
   return {
     id: page.id,
     name,
-    fullName: propertyText(properties["Full Name"]) || null,
-    definition: propertyText(properties["Chinese Definition"]) || null,
-    criteria: propertyText(properties["Completion Criteria"]) || null,
+    fullName: fullName || title,
+    definition:
+      propertyText(page.properties?.["External Stage (Client Safe Wording)"]) || "",
+    criteria: propertyText(page.properties?.["Completion Criteria"]) || "",
+    evidence: propertyText(page.properties?.["Evidence"]) || "",
   };
 }
 
-async function queryCpDictionary() {
-  const pages: NotionPage[] = [];
-  let cursor: string | undefined;
-  do {
-    const data = await notionFetch<{
-      results: NotionPage[];
-      has_more?: boolean;
-      next_cursor?: string | null;
-    }>(`/databases/${getFollowupCpDbId()}/query`, {
-      method: "POST",
-      body: JSON.stringify({
-        page_size: 100,
-        start_cursor: cursor,
-      }),
-    });
-    pages.push(...data.results);
-    cursor = data.has_more && data.next_cursor ? data.next_cursor : undefined;
-  } while (cursor);
-
-  return sortCurrentCps(
-    pages.map(mapCpPage).filter((item): item is CurrentCpOption => !!item),
-  );
+function checkpointSortKey(item: CurrentCpOption) {
+  if (item.name === "NONE") return "0";
+  const match = item.name.match(/^CP(\d+)$/);
+  if (match) return `1-${match[1].padStart(2, "0")}`;
+  return `2-${item.name}`;
 }
 
-async function listCurrentCpsFromClients() {
-  const pages = await queryFollowupClientPages();
-  const ids = [...new Set(
-    pages
-      .map((page) => firstRelationId(page.properties?.["Current CP"]))
-      .filter((id): id is string => !!id),
-  )];
-  const cps = await Promise.all(
-    ids.map(async (id) => {
-      try {
-        return mapCpPage(await retrievePage(id));
-      } catch {
-        return null;
-      }
-    }),
-  );
-  return sortCurrentCps(cps.filter((item): item is CurrentCpOption => !!item));
+export async function listCheckpoints(): Promise<CurrentCpOption[]> {
+  const pages = await queryDatabasePages(getFollowupCheckpointDbId());
+  return pages.map(mapCheckpointPage).sort((left, right) => {
+    return checkpointSortKey(left).localeCompare(checkpointSortKey(right));
+  });
 }
 
-export async function listCurrentCps(): Promise<CurrentCpOption[]> {
-  try {
-    const cps = await queryCpDictionary();
-    if (cps.length) return cps;
-  } catch (error) {
-    if (!isMissingObject(error)) throw error;
-  }
-  return listCurrentCpsFromClients();
+export async function resolveCheckpoint(value?: string | null) {
+  const query = value?.trim();
+  if (!query) return null;
+  const items = await listCheckpoints();
+  const short = checkpointShortName(query);
+  return (
+    items.find((item) => item.id === query) ||
+    items.find((item) => item.name === query || item.name === short) ||
+    items.find((item) => item.fullName === query) ||
+    null
+  );
 }

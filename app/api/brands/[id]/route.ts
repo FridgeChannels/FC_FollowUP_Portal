@@ -1,20 +1,12 @@
-import { CURRENT_CPS, type CurrentCpOption } from "@/lib/brand-list";
+import { currentCpOption } from "@/lib/brand-list";
 import { canAssignBrandOwner, canViewBrand, canWriteBrand } from "@/lib/brand-access";
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { propertyText, retrievePage } from "@/lib/notion/client";
-import { listCurrentCps } from "@/lib/notion/cps";
+import { listCheckpoints, resolveCheckpoint } from "@/lib/notion/cps";
 import { mapFollowupClientDetail, mapFollowupClientPage } from "@/lib/notion/followup-clients";
 import { updateFollowupClient } from "@/lib/notion/followup-writes";
 
 type Params = { params: Promise<{ id: string }> };
-
-async function loadCurrentCps(): Promise<CurrentCpOption[]> {
-  try {
-    return await listCurrentCps();
-  } catch {
-    return CURRENT_CPS.map((name) => ({ id: name, name }));
-  }
-}
 
 export async function GET(request: Request, { params }: Params) {
   try {
@@ -23,8 +15,11 @@ export async function GET(request: Request, { params }: Params) {
       return Response.json({ error: "Sign in required" }, { status: 401 });
     }
     const { id } = await params;
-    const [page, cps] = await Promise.all([retrievePage(id), loadCurrentCps()]);
-    const brand = await mapFollowupClientDetail(page);
+    const page = await retrievePage(id);
+    const [cps, brand] = await Promise.all([
+      listCheckpoints(),
+      mapFollowupClientDetail(page),
+    ]);
     if (!canViewBrand(viewer, brand)) {
       return Response.json({ error: "You do not have access to this brand" }, { status: 403 });
     }
@@ -62,11 +57,11 @@ export async function PATCH(request: Request, { params }: Params) {
 
     const extras: string[] = [];
     if (body.currentCpId && (body.evidence?.trim() || body.note?.trim())) {
-      const cps = await listCurrentCps();
-      const next = cps.find((item) => item.id === body.currentCpId);
+      const next =
+        (await resolveCheckpoint(body.currentCpId)) || currentCpOption(body.currentCpId);
       extras.push(
         [
-          `CP 更新为 ${next?.name || "未知"}。`,
+          `CP 更新为 ${next.name}。`,
           body.evidence?.trim() ? `证据：${body.evidence.trim()}。` : "",
           body.note?.trim() || "",
         ]
@@ -91,10 +86,8 @@ export async function PATCH(request: Request, { params }: Params) {
       handlingMode: body.handlingMode,
       notes,
     });
-    const [updated, cps] = await Promise.all([
-      mapFollowupClientDetail(await retrievePage(id)),
-      loadCurrentCps(),
-    ]);
+    const updated = await mapFollowupClientDetail(await retrievePage(id));
+    const cps = await listCheckpoints();
     return Response.json({ brand: updated, cps });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";

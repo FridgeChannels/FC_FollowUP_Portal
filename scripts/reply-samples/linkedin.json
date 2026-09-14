@@ -1,10 +1,3 @@
 {
-  "channel": "LinkedIn",
-  "content": "Hi — I saw your note. I am checking with Mike this afternoon and will confirm once the package is in his hands.",
-  "occurredAt": "2026-09-13T15:04:31+08:00",
-  "sender": "https://www.linkedin.com/in/john-smith",
-  "threadId": "sim-linkedin-thread-001",
-  "messageId": "sim-linkedin-msg-{{stamp}}",
-  "sourceUrl": "https://www.linkedin.com/messaging/thread/sim-linkedin-thread-001",
-  "notes": "LinkedIn 渠道模拟回写。"
+  "content": "Hi — I saw your note. I am checking with Mike this afternoon and will confirm once the package is in his hands."
 }

@@ -25,18 +25,18 @@ import { BombEditor, BombsPage } from "./workspace-bombs";
 import { SettingsPage } from "./workspace-admin";
 import { useSession } from "./use-session";
 
-type Screen = "Brands" | "ReplyTask" | "Bombs" | "Settings";
+type Screen = "Brands" | "ReplyTask" | "OmniReach" | "Settings";
 const nav: { label: Screen; path: string; icon: typeof Users; cap: string; badge?: boolean }[] = [
   { label: "Brands", path: "/customers", icon: Users, cap: "customers" },
   { label: "ReplyTask", path: "/tasks", icon: ClipboardCheck, cap: "tasks", badge: true },
-  { label: "Bombs", path: "/bombs", icon: Bomb, cap: "bombs" },
+  { label: "OmniReach", path: "/bombs", icon: Bomb, cap: "bombs" },
 ];
 const roleHome: Record<Role, string> = {
   Admin: "/tasks",
   "FC_Owner": "/customers",
   Caller: "/tasks",
 };
-const routeScreen = (path: string): Screen => path.startsWith("/customers") ? "Brands" : path.startsWith("/bombs") ? "Bombs" : path.startsWith("/settings") ? "Settings" : "ReplyTask";
+const routeScreen = (path: string): Screen => path.startsWith("/customers") ? "Brands" : path.startsWith("/bombs") ? "OmniReach" : path.startsWith("/settings") ? "Settings" : "ReplyTask";
 const accountInitials = (name?: string | null, email?: string | null) => {
   const source = name?.trim() || email?.split("@")[0] || "?";
   const parts = source.split(/[\s._-]+/).filter(Boolean);
@@ -102,7 +102,7 @@ export default function OutreachWorkspace() {
       router.replace(state.currentRole === "FC_Owner" ? "/customers" : pathname.replace(/^\/(inbox|call-tasks)/, "/tasks"));
       return;
     }
-    const capability = screen === "Brands" ? "customers" : screen === "ReplyTask" ? "tasks" : screen.toLowerCase();
+    const capability = screen === "Brands" ? "customers" : screen === "ReplyTask" ? "tasks" : screen === "OmniReach" ? "bombs" : screen.toLowerCase();
     if (!can(capability)) router.replace(roleHome[state.currentRole]);
   }, [sessionLoading, user, pathname, screen, state.currentRole, can, router]);
 

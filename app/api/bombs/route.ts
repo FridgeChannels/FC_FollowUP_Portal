@@ -1,15 +1,13 @@
-import { CURRENT_CPS, type CurrentCpOption } from "@/lib/brand-list";
+import { listApplicableCps } from "@/lib/brand-list";
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import type { CreateBombInput } from "@/lib/bomb-list";
 import { createFollowupBomb, listFollowupBombs, listFollowupScenarios } from "@/lib/notion/bombs";
-import { listCurrentCps } from "@/lib/notion/cps";
 
 async function loadFormOptions() {
-  const [scenarios, cps] = await Promise.all([
-    listFollowupScenarios(),
-    listCurrentCps().catch(() => CURRENT_CPS.map((name) => ({ id: name, name }) as CurrentCpOption)),
-  ]);
-  return { scenarios, cps };
+  return {
+    scenarios: await listFollowupScenarios(),
+    cps: listApplicableCps(),
+  };
 }
 
 export async function GET(request: Request) {
@@ -33,7 +31,7 @@ export async function POST(request: Request) {
       return Response.json({ error: "Sign in required" }, { status: 401 });
     }
     if (!viewer.isAdmin && !viewer.ownerId) {
-      return Response.json({ error: "You do not have access to create Bombs" }, { status: 403 });
+      return Response.json({ error: "You do not have access to create OmniReach" }, { status: 403 });
     }
     const body = (await request.json()) as CreateBombInput;
     const bomb = await createFollowupBomb(body);

@@ -133,12 +133,12 @@ export function CurrentBombPlan({
   const currentAction = current >= 0 ? actions[current] : undefined;
   const stage = currentAction && openStatuses.has(currentAction.status)
     ? `Current stage · Step ${current + 1} · ${currentAction.channel}`
-    : instance.status === "Paused" ? "Bomb paused" : "All scheduled steps are complete";
+    : instance.status === "Paused" ? "OmniReach paused" : "All scheduled steps are complete";
 
   return <div className="bg-slate-50/80 px-5 py-4">
     <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
       <div>
-        <div className="text-[11px] font-semibold uppercase tracking-[.12em] text-slate-400">This bomb · execution plan</div>
+        <div className="text-[11px] font-semibold uppercase tracking-[.12em] text-slate-400">This OmniReach · execution plan</div>
         <div className="mt-1 text-sm font-bold text-slate-950">{instance.templateName} · Version {instance.version}</div>
       </div>
       <Badge className={currentAction && openStatuses.has(currentAction.status) ? "bg-violet-100 text-violet-800" : "bg-slate-100 text-slate-700"}>{stage}</Badge>

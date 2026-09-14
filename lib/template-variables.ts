@@ -19,8 +19,8 @@ export const templateVariables: TemplateVariable[] = [
   { key: "brand.name", label: "Brand name", category: "Brand", description: "The Brand's name" },
   { key: "brand.source", label: "Brand source", category: "Brand", description: "Where the Brand came from" },
   { key: "brand.cp", label: "CP stage", category: "Brand", description: "The Brand's current CP stage" },
-  { key: "sender.first_name", label: "Sender first name", category: "Sender", description: "The FC teammate launching the Bomb" },
-  { key: "sender.name", label: "Sender name", category: "Sender", description: "The FC teammate launching the Bomb" },
+  { key: "sender.first_name", label: "Sender first name", category: "Sender", description: "The FC teammate launching OmniReach" },
+  { key: "sender.name", label: "Sender name", category: "Sender", description: "The FC teammate launching OmniReach" },
 ];
 
 const nameParts = (name?: string) => (name || "").trim().split(/\s+/).filter(Boolean);

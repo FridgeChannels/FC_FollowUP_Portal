@@ -1,17 +1,15 @@
-import { CURRENT_CPS, type CurrentCpOption } from "@/lib/brand-list";
+import { listApplicableCps } from "@/lib/brand-list";
 import type { UpdateBombInput } from "@/lib/bomb-list";
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { retrieveFollowupBomb, updateFollowupBomb, listFollowupScenarios } from "@/lib/notion/bombs";
-import { listCurrentCps } from "@/lib/notion/cps";
 
 type Params = { params: Promise<{ id: string }> };
 
 async function loadFormOptions() {
-  const [scenarios, cps] = await Promise.all([
-    listFollowupScenarios(),
-    listCurrentCps().catch(() => CURRENT_CPS.map((name) => ({ id: name, name }) as CurrentCpOption)),
-  ]);
-  return { scenarios, cps };
+  return {
+    scenarios: await listFollowupScenarios(),
+    cps: listApplicableCps(),
+  };
 }
 
 export async function GET(request: Request, { params }: Params) {
@@ -37,7 +35,7 @@ export async function PATCH(request: Request, { params }: Params) {
       return Response.json({ error: "Sign in required" }, { status: 401 });
     }
     if (!viewer.isAdmin && !viewer.ownerId) {
-      return Response.json({ error: "You do not have access to edit Bombs" }, { status: 403 });
+      return Response.json({ error: "You do not have access to edit OmniReach" }, { status: 403 });
     }
     const { id } = await params;
     const body = (await request.json()) as UpdateBombInput;

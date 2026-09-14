@@ -23,8 +23,9 @@ import {
 } from "./followup-writes";
 import { annotateTasksWithReplyInbox } from "./reply-inbox";
 import { outboundMessageIsSent, pickOutboundCandidate, taskIsSent } from "./reply-sent-guard";
-import { resolveCurrentContactForBrand, resolveReplyTargetByBrandName, resolveReplyTargetByThreadId } from "./reply-target";
+import { resolveCurrentContactForBrand, resolveReplyTargetByBrandName, resolveReplyTargetByThreadId, senderForChannel } from "./reply-target";
 import { retrieveFollowupTask } from "./tasks";
+import { interactionCpCode } from "../outreach-domain";
 
 const CHANNELS = new Set(["Email", "LinkedIn", "SMS", "WhatsApp", "Phone"]);
 const CALL_RESULTS = new Set(["Connected", "No Answer", "Voicemail", "Declined", "Invalid Number"]);
@@ -75,6 +76,9 @@ type ResolvedTarget = {
   contactName: string;
   taskId?: string;
   existingThreadId?: string | null;
+  currentCp?: "CP1" | "CP2" | "CP3" | null;
+  inferredSender?: string | null;
+  outboundMessageId?: string | null;
 };
 
 export function contactMatchesReplySender(
@@ -111,6 +115,17 @@ function asChannel(value?: string) {
     throw new InboundReplyError("Invalid channel", 400);
   }
   return value;
+}
+
+async function inferChannel(input: InboundReplyInput) {
+  if (input.channel?.trim()) return asChannel(input.channel.trim());
+  if (input.taskId && input.threadId?.trim()) {
+    const resolved = await resolveReplyTargetByThreadId(input.threadId, input.taskId);
+    if (!resolved.ok) throw new InboundReplyError(resolved.error, resolved.status);
+    const channel = resolved.target.outbound?.channel || resolved.target.task?.channel || "";
+    if (CHANNELS.has(channel)) return channel;
+  }
+  throw new InboundReplyError("Provide channel, or taskId + threadId of a sent outbound", 400);
 }
 
 function asOccurredAt(value?: string) {
@@ -163,6 +178,7 @@ async function loadContactContext(contactId: string): Promise<ResolvedTarget> {
     brandOwnerId: brand.ownerId,
     contactId,
     contactName: contact?.name || titleFromProperties(contactPage.properties) || "KeyPerson",
+    currentCp: interactionCpCode(brand.currentCp),
   };
 }
 
@@ -199,6 +215,9 @@ async function resolveInboundReplyTarget(input: InboundReplyInput, channel: stri
       contactName: resolved.target.contact.name,
       taskId: resolved.target.task?.id || resolved.target.outbound?.taskId || undefined,
       existingThreadId: resolved.target.outbound?.threadId || input.threadId.trim(),
+      currentCp: interactionCpCode(resolved.target.brand.currentCp),
+      inferredSender: senderForChannel(resolved.target.contact, channel) || null,
+      outboundMessageId: resolved.target.outbound?.messageId || null,
     };
   }
 
@@ -217,6 +236,9 @@ async function resolveInboundReplyTarget(input: InboundReplyInput, channel: stri
       contactId: task.contactId,
       contactName: task.contactName || "KeyPerson",
       taskId: task.channel === channel ? task.id : undefined,
+      currentCp: interactionCpCode(
+        (await mapFollowupClientPage(await retrievePage(task.brandId))).currentCp,
+      ),
     };
   }
 
@@ -283,11 +305,12 @@ async function resolveInboundReplyTarget(input: InboundReplyInput, channel: stri
       contactId: resolved.target.contact.id,
       contactName: resolved.target.contact.name,
       taskId: resolved.target.task?.id,
+      currentCp: interactionCpCode(resolved.target.brand.currentCp),
     };
   }
 
   throw new InboundReplyError(
-    "Unable to resolve Follow-up Contact. Provide brandName, taskId, threadId, contactId, or brandId + sender.",
+    "Unable to resolve Follow-up Contact. Provide taskId + threadId, or contactId / threadId / brandId.",
     422,
   );
 }
@@ -325,7 +348,7 @@ export async function ingestInboundReply(
   input: InboundReplyInput,
   assertAccess?: (target: ResolvedTarget) => Promise<void>,
 ): Promise<InboundReplyResult> {
-  const channel = asChannel(input.channel);
+  const channel = await inferChannel(input);
   const content = asContent(channel, input.content, input.callResult);
   const occurredAt = asOccurredAt(input.occurredAt);
   const callResult = asCallResult(channel, input.callResult);
@@ -356,7 +379,7 @@ export async function ingestInboundReply(
     channel,
     taskId: target.taskId || input.taskId,
     threadId: input.threadId || target.existingThreadId,
-    inReplyToMessageId: input.inReplyToMessageId,
+    inReplyToMessageId: input.inReplyToMessageId?.trim() || target.outboundMessageId,
   });
   if (!outbound) {
     throw new InboundReplyError(
@@ -391,9 +414,14 @@ export async function ingestInboundReply(
     target.existingThreadId ||
     (await resolveConversationThread(target.contactId, channel, outboundTask.id)).threadId;
   const taskId = outboundTask.id;
+  const sender = input.sender?.trim() || target.inferredSender || "";
   const subject =
     input.subject?.trim() ||
-    (channel === "Email" ? `Re: ${content.split("\n")[0].slice(0, 116)}` : "");
+    (channel === "Email"
+      ? outbound.subject
+        ? `Re: ${outbound.subject.replace(/^Re:\s*/i, "").slice(0, 116)}`
+        : `Re: ${content.split("\n")[0].slice(0, 116)}`
+      : "");
   const properties: Record<string, unknown> = {
     "Conversation Record": {
       title: richText(`${target.brandName} — ${target.contactName} — ${channel} — Inbound`),
@@ -405,13 +433,16 @@ export async function ingestInboundReply(
     Direction: { select: { name: "Inbound" } },
     Subject: { rich_text: subject ? richText(subject) : [] },
     Content: { rich_text: richText(content) },
-    Sender: { rich_text: input.sender?.trim() ? richText(input.sender.trim()) : [] },
+    Sender: { rich_text: sender ? richText(sender) : [] },
     Notes: { rich_text: richText(input.notes?.trim() || "渠道回复已入库，待人工处理。") },
     "Thread ID": { rich_text: richText(threadId) },
     "Message ID": { rich_text: richText(messageId) },
     "Interaction At": { date: { start: occurredAt } },
     "Reply Status": { select: { name: "Needs Reply" } },
   };
+  if (target.currentCp) {
+    properties["CP At Interaction"] = { select: { name: target.currentCp } };
+  }
   if (channel !== "Phone") {
     properties["Message Status"] = { select: { name: "Received" } };
   }

@@ -80,7 +80,7 @@ Follow-up ChannelCapacityDB ── 每日渠道上限 ──→ Follow-up TaskDB
 | Owner | Relation | 是 | 关联 FC3.0-Follow-up-OwnerDB；每条客户最多关联一个 Owner |
 | Follow-up Status | Status | 是 | 客户整体跟进状态；选项见 4.3 |
 | Handling Mode | Select | 是 | Automated / Human，表示客户级主要跟进方式；选项见 4.4 |
-| Current CP | Relation | 是 | 关联 FC3.0-Follow-up-CPDictionaryDB；每个客户最多关联一个最近已经完成的 CP，默认关联 NONE |
+| Current CP | Select | 是 | 本地字典单选：NONE / CP1 / CP2 / CP3；记录最近已经完成的 CP，默认 NONE |
 | Priority | Select | 否 | P0 / P1 / P2，表示客户处理优先级 |
 | Last Interaction At | Rollup | 否 | 从关联 Follow-up Contacts 汇总最近一次实际互动时间 |
 | Notes | Text | 否 | 客户级补充信息； |
@@ -125,28 +125,19 @@ Handling Mode 与 Follow-up Status 相互独立。切换 Handling Mode 时不改
 
 Current CP 只记录该客户**最近已经完成的 CP**，默认值为 `NONE`。只有同时满足对应完成标准并具备可核验的 Evidence 后，才能更新。
 
-数据库字典：FC3.0-Follow-up-CPDictionaryDB。Follow-up ClientDB 的 Current CP 已改为 Relation 字段，每个客户最多关联一条 CPDictionaryDB 记录；CPDictionaryDB 通过 Follow-up Clients 反向关联使用该 CP 的客户。
+CP1–CP3 与 NONE 全部使用 Portal 本地字典，不再查询或回写 FC3.0-Follow-up-CPDictionaryDB。Follow-up ClientDB 的 Current CP、OmniReachDB 的 CP 都是 Select 单选字段，选项名称与本地字典短名称一致。
 
-#### 4.5.1 数据库表结构
+#### 4.5.1 本地字典
 
-数据库名称：**FC3.0-Follow-up-CPDictionaryDB**
+Portal 本地字典是 Current CP / Applicable CP 的唯一来源。Notion 只保存 Select 选项值，不保存 Full Name、中文定义或完成标准。
 
-| Field Name | Type | 必填 | 中文说明 |
-| --- | --- | --- | --- |
-| Name | Title | 是 | CP 的唯一短名称，例如 CP1、CP2、CP3 或 NONE |
-| Full Name | Text | 是 | CP 的完整英文名称 |
-| Chinese Definition | Text | 是 | CP 的中文业务定义，说明该里程碑代表的业务含义 |
-| Completion Criteria | Text | 是 | 更新到该 CP 前必须全部满足的完成标准 |
-| Evidence | Text | 是 | 用于核验该 CP 已完成的证据要求；NONE 对应为“无” |
-| Follow-up Clients | Relation | 自动 | 与 Follow-up ClientDB 双向关联；显示当前关联到该 CP 的客户记录 |
-
-数据库规则：
+规则：
 
 - 每个 CP 标准值只保留一条字典记录，Name 必须唯一。
 - Name 和 Full Name 使用英文，其他说明内容使用中文，必要的业务术语可保留英文。
-- Follow-up ClientDB 的 Current CP 是指向本字典表的单值 Relation，不再使用 Select。
-- 修改 CP 的 Name 或 Full Name 不需要同步维护 Select 选项；关联通过数据库记录保持稳定。
-- 只有 Completion Criteria 全部满足且 Evidence 可核验时，才能将客户的 Current CP 更新为对应记录。
+- Follow-up ClientDB 的 Current CP 是 Select 单选：`NONE` / `CP1` / `CP2` / `CP3`。
+- OmniReachDB 的 CP 是 Select 单选：`CP1` / `CP2` / `CP3`，表示该方案适用的阶段。
+- 只有 Completion Criteria 全部满足且 Evidence 可核验时，才能将客户的 Current CP 更新为对应选项。
 
 | Name | Full Name | 中文定义 | 完成标准 | Evidence |
 | --- | --- | --- | --- | --- |
@@ -347,7 +338,7 @@ Phone
 | --- | --- | --- | --- |
 | Conversation Record | Title | 是 | 完整对话记录标题，建议格式：客户—人员—渠道—记录类型 |
 | Conversation Record ID | Text | 是 | 完整对话记录的系统唯一 ID |
-| Thread ID | Text | 否 | 渠道提供的会话线程 ID |
+| Thread ID | Text | 否 | 同一联系人、同一渠道、同一场对话共用的会话线程 ID |
 | Message ID | Text | 否 | 渠道提供的单条消息 ID |
 | Follow-up Contact | Relation | 是 | 关联 Follow-up ContactDB；客户归属通过 Follow-up Contact 获取 |
 | Follow-up Task | Relation | 否 | 关联触发本次互动的 Follow-up Task；Inbound 无对应任务时可留空 |
@@ -360,6 +351,7 @@ Phone
 | Sender | Text | 否 | 发件账号、发送号码、LinkedIn 账号或拨打人 |
 | Message Status | Select | 否 | Pending / Sent / Received / Failed；Phone 可留空 |
 | Reply Status | Select | 否 | 仅 Inbound：Needs Reply / Replied。表示这封客户来信是否已人工回复 |
+| CP At Interaction | Select | 否 | 该条消息发送或收到当时客户所处的 CP（CP1 / CP2 / CP3）。用于还原当时阶段，禁止用客户当前 CP 回填历史消息 |
 | Call Result | Select | 否 | Connected / No Answer / Voicemail / Declined / Invalid Number；仅 Phone 使用 |
 | Source URL | URL | 否 | 打开原始渠道会话或消息的链接 |
 | Notes | Text | 否 | 补充互动异常、失败原因或人工判断；备注内容必须使用中文 |
@@ -405,12 +397,38 @@ Replied
 
 状态定义：
 
-- **Needs Reply**：客户来信已入库，等待人工回复。Portal 在对应 Bomb 步骤或会话下显示回复框。
+- **Needs Reply**：客户来信已入库，等待人工回复。Portal 在对应联系人会话下显示回复框。
 - **Replied**：已有人工 Outbound 接到这封 Inbound 的同一 Task / Thread。Portal 收起该条回复框。
 
 客户再次来信时，新的 Inbound 重新写入 `Needs Reply`，不影响上一封已标记 `Replied` 的记录。
 
-### 7.6 Call Result
+### 7.6 CP At Interaction
+
+```
+CP1
+CP2
+CP3
+```
+
+每条 Conversation 必须记录**发生当时**的客户 CP，而不是客户此刻的 Current CP。
+
+- Outbound：写入发出（或生成待发记录）时 Follow-up Client 的 Current CP。
+- Inbound：写入收到时 Follow-up Client 的 Current CP。
+- 历史记录若未盖章，Portal 单独标为「发送时未记录 CP」，不得归入当前 CP 时间线。
+- CP 是客户完整生命周期；渠道消息不能默认归属到当前 CP。
+
+### 7.7 Portal Brand activity
+
+Brand activity 按以下结构展示，Bomb 执行计划不是对话的唯一骨架：
+
+1. **CP 选项卡**（CP1 / CP2 / CP3）：客户生命周期阶段，仅可查看已到达或当前阶段。
+2. **渠道选项卡**（Email / LinkedIn / SMS / WhatsApp / Phone）。
+3. **联系人 / Thread**：同一联系人、同一渠道、同一场对话共用 Thread ID，完整展示 Bomb 发出、客户回复、人工跟进。
+4. **Bomb execution plan**：独立按钮打开，不塞进对话时间线当唯一结构。
+
+每条消息展示发给谁 / 谁回复、时间、人工或 Bomb。回复框挂在仍为 `Needs Reply` 的 Inbound 下。
+
+### 7.8 Call Result
 
 ```
 Connected

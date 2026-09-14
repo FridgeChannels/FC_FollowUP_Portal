@@ -1,4 +1,5 @@
 import type { BrandActivity } from "../brand-list";
+import { interactionCpCode } from "../outreach-domain";
 import {
   firstRelationId,
   notionFetch,
@@ -43,6 +44,7 @@ function mapConversation(page: NotionPage): BrandActivity {
     threadId: propertyText(properties["Thread ID"]) || null,
     messageId: propertyText(properties["Message ID"]) || null,
     replyStatus: asReplyStatus(propertyText(properties["Reply Status"])),
+    cpAtInteraction: interactionCpCode(propertyText(properties["CP At Interaction"])),
     createdAt:
       propertyDate(properties["Interaction At"]) || page.created_time || null,
     recordedAt: page.created_time || propertyDate(properties["Interaction At"]),

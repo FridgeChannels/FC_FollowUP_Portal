@@ -1,11 +1,4 @@
 {
-  "channel": "Phone",
   "content": "对方下午回拨，确认 Magnet 已交给 Mike，并约定明天发送 setup link。",
-  "occurredAt": "2026-09-13T17:05:44+08:00",
-  "sender": "+14155550182",
-  "threadId": "phone:+14155550182",
-  "messageId": "CA-sim-{{stamp}}",
-  "callResult": "Connected",
-  "sourceUrl": "https://phone.example.com/calls/CA-sim",
-  "notes": "Phone 渠道模拟回写。"
+  "callResult": "Connected"
 }

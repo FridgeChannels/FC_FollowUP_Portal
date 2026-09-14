@@ -20,8 +20,6 @@ export default defineConfig(async ({ mode }) => {
     process.env.NOTION_FOLLOWUP_CLIENT_DB_ID || loadedEnv.NOTION_FOLLOWUP_CLIENT_DB_ID;
   const followupOwnerDbId =
     process.env.NOTION_FOLLOWUP_OWNER_DB_ID || loadedEnv.NOTION_FOLLOWUP_OWNER_DB_ID;
-  const followupCpDbId =
-    process.env.NOTION_FOLLOWUP_CP_DB_ID || loadedEnv.NOTION_FOLLOWUP_CP_DB_ID;
   const followupContactDbId =
     process.env.NOTION_FOLLOWUP_CONTACT_DB_ID || loadedEnv.NOTION_FOLLOWUP_CONTACT_DB_ID;
   const adminEmails = process.env.ADMIN_EMAILS || loadedEnv.ADMIN_EMAILS;
@@ -40,7 +38,6 @@ export default defineConfig(async ({ mode }) => {
       ...(followupOwnerDbId
         ? { NOTION_FOLLOWUP_OWNER_DB_ID: followupOwnerDbId }
         : {}),
-      ...(followupCpDbId ? { NOTION_FOLLOWUP_CP_DB_ID: followupCpDbId } : {}),
       ...(followupContactDbId
         ? { NOTION_FOLLOWUP_CONTACT_DB_ID: followupContactDbId }
         : {}),

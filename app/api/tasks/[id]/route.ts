@@ -1,22 +1,19 @@
-import { CURRENT_CPS, type CurrentCpOption } from "@/lib/brand-list";
+import type { CurrentCpOption } from "@/lib/brand-list";
+import { listCheckpoints } from "@/lib/notion/cps";
 import { canAssignBrandOwner, canViewTask, canWriteTask } from "@/lib/brand-access";
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { retrievePage } from "@/lib/notion/client";
 import { listConversationsByIds, listFollowupConversations } from "@/lib/notion/conversations";
-import { listCurrentCps } from "@/lib/notion/cps";
-import { mapFollowupClientDetail } from "@/lib/notion/followup-clients";
+import { mapFollowupClientDetail, mapFollowupClientPage } from "@/lib/notion/followup-clients";
 import { completeFollowupCall, updateFollowupTask } from "@/lib/notion/followup-writes";
+import { interactionCpCode } from "@/lib/outreach-domain";
 import { annotateTasksWithReplyInbox } from "@/lib/notion/reply-inbox";
 import { retrieveFollowupTask } from "@/lib/notion/tasks";
 
 type Params = { params: Promise<{ id: string }> };
 
-async function loadCurrentCps(): Promise<CurrentCpOption[]> {
-  try {
-    return await listCurrentCps();
-  } catch {
-    return CURRENT_CPS.map((name) => ({ id: name, name }));
-  }
+function loadCurrentCps(): Promise<CurrentCpOption[]> {
+  return listCheckpoints();
 }
 
 async function taskPayload(id: string) {
@@ -119,6 +116,9 @@ export async function POST(request: Request, { params }: Params) {
     if (!task.contactId) {
       return Response.json({ error: "Task has no Follow-up Contact" }, { status: 400 });
     }
+    const brand = task.brandId
+      ? await mapFollowupClientPage(await retrievePage(task.brandId)).catch(() => null)
+      : null;
     await completeFollowupCall({
       taskId: id,
       brandName: task.brandName || "Untitled Client",
@@ -127,6 +127,7 @@ export async function POST(request: Request, { params }: Params) {
       outcome: body.outcome || "Other",
       summary: body.summary,
       sender: viewer.email,
+      cpAtInteraction: interactionCpCode(brand?.currentCp),
     });
     return Response.json(await taskPayload(id));
   } catch (error) {
