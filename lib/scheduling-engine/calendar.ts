@@ -4,11 +4,11 @@ export const DEFAULT_MAX_HORIZON_DAYS = 90;
 
 export function assertDateOnly(value: string, label: string): string {
   if (!DATE_PATTERN.test(value)) {
-    throw new Error(`${label} 必须是 YYYY-MM-DD，收到：${value}`);
+    throw new Error(`${label} must be YYYY-MM-DD, received: ${value}`);
   }
   const date = parseDateOnly(value);
   if (formatDateOnly(date) !== value) {
-    throw new Error(`${label} 不是有效日历日期：${value}`);
+    throw new Error(`${label} is not a valid calendar date: ${value}`);
   }
   return value;
 }
@@ -43,7 +43,7 @@ export function firstWorkingDayOnOrAfter(value: string): string {
     if (isWorkingDay(current)) return current;
     current = addCalendarDays(current, 1);
   }
-  throw new Error(`无法从 ${value} 找到工作日`);
+  throw new Error(`No weekday found from ${value}`);
 }
 
 export function nextWorkingDay(value: string): string {

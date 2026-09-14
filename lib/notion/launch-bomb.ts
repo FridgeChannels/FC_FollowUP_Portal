@@ -90,7 +90,7 @@ export async function launchFollowupBomb(input: {
   const brand = await mapFollowupClientDetail(page);
   const contact = brand.contacts.find((item) => item.id === input.contactId);
   if (!contact) throw new Error("Contact not found on this brand");
-  if (!brand.ownerId) throw new Error("客户未分配 Owner，不可生成任务");
+  if (!brand.ownerId) throw new Error("Client has no Owner assigned; tasks cannot be created");
   if (bomb.status !== "Active") throw new Error("Only Active OmniReach can be launched");
 
   const enforceReachable = skipUnavailableChannels();
@@ -155,6 +155,7 @@ export async function launchFollowupBomb(input: {
         content,
         sender: input.sender,
         taskId: task.id,
+        cpId: brand.currentCpId,
         cpAtInteraction: interactionCpCode(brand.currentCp),
         notes: "Bomb 方案已排班，尚未实际发送。",
       });

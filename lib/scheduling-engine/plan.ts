@@ -22,13 +22,13 @@ export function previewSchedule(input: ScheduleInput): SchedulePlan {
 
   for (const candidate of sortCandidates(candidates)) {
     if (dailyMaxFor(board.dailyMax, candidate.channel) === 0) {
-      unscheduled.push(toUnscheduled(candidate, "CHANNEL_PAUSED", "渠道 Daily Max 为 0，已暂停排班"));
+      unscheduled.push(toUnscheduled(candidate, "CHANNEL_PAUSED", "Channel Daily Max is 0; scheduling is paused"));
       continue;
     }
 
     const date = findEarliestSlot(board, candidate.channel, candidate.clientId, window.start, window.end);
     if (!date) {
-      unscheduled.push(toUnscheduled(candidate, "NO_SLOT_IN_WINDOW", "在排班窗口内找不到可用工作日"));
+      unscheduled.push(toUnscheduled(candidate, "NO_SLOT_IN_WINDOW", "No available weekday in the scheduling window"));
       continue;
     }
 

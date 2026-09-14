@@ -41,6 +41,7 @@ export async function POST(request: Request, { params }: Params) {
       sender: viewer.email,
       existingTaskId: body.taskId,
       threadId: body.threadId,
+      cpId: brand.currentCpId,
       cpAtInteraction: interactionCpCode(brand.currentCp),
     });
     await markFollowupClientEngaged(id, { note: "已发送人工消息。" });

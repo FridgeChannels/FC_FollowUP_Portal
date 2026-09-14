@@ -44,15 +44,16 @@ function SourceBadge({ source }: { source: "Human" | "OmniReach" }) {
 }
 
 function outboundStatus(item: Interaction) {
-  if (item.channel === "Phone") return item.callResult || item.messageStatus || null;
-  return item.messageStatus || null;
+  if (item.channel === "Phone") return item.callResult || item.taskStatus || item.messageStatus || null;
+  if (item.creationMethod === "Manual") return item.messageStatus || item.taskStatus || null;
+  return item.taskStatus || item.messageStatus || null;
 }
 
 function SendStatusBadge({ status }: { status: string }) {
   const tone =
-    status === "Sent" || status === "Delivered" || status === "Connected" ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-100"
+    status === "Sent" || status === "Delivered" || status === "Connected" || status === "Completed" ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-100"
     : status === "Failed" || status === "Declined" || status === "Invalid Number" ? "bg-rose-100 text-rose-800 hover:bg-rose-100"
-    : status === "Pending" ? "bg-amber-100 text-amber-800 hover:bg-amber-100"
+    : status === "Pending" || status === "In Progress" ? "bg-amber-100 text-amber-800 hover:bg-amber-100"
     : "bg-slate-100 text-slate-700 hover:bg-slate-100";
   return <Badge className={`text-[10px] ${tone}`}>{status}</Badge>;
 }
@@ -283,7 +284,7 @@ function ThreadMessages({
       const source = sourceLabel(item);
       const who = inbound
         ? `${endpoint || contact?.name || "Contact"} Reply`
-        : `发给 ${endpoint || contact?.name || "Contact"}`;
+        : `To ${endpoint || contact?.name || "Contact"}`;
       return <article key={item.id} className={`rounded-xl p-4 ${inbound ? "bg-rose-50/80" : "bg-slate-50"}`}>
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">

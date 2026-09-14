@@ -127,6 +127,7 @@ export async function POST(request: Request, { params }: Params) {
       outcome: body.outcome || "Other",
       summary: body.summary,
       sender: viewer.email,
+      cpId: brand?.currentCpId,
       cpAtInteraction: interactionCpCode(brand?.currentCp),
     });
     return Response.json(await taskPayload(id));

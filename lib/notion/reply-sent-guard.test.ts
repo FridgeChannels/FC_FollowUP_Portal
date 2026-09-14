@@ -24,6 +24,7 @@ const outbound = (patch: Partial<BrandActivity>): BrandActivity => ({
   threadId: "thr",
   messageId: "msg",
   replyStatus: null,
+  cpId: null,
   cpAtInteraction: null,
   createdAt: "2026-09-14T00:00:00.000Z",
   ...patch,

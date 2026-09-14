@@ -351,7 +351,7 @@ Phone
 | Sender | Text | 否 | 发件账号、发送号码、LinkedIn 账号或拨打人 |
 | Message Status | Select | 否 | Pending / Sent / Received / Failed；Phone 可留空 |
 | Reply Status | Select | 否 | 仅 Inbound：Needs Reply / Replied。表示这封客户来信是否已人工回复 |
-| CP At Interaction | Select | 否 | 该条消息发送或收到当时客户所处的 CP（CP1 / CP2 / CP3）。用于还原当时阶段，禁止用客户当前 CP 回填历史消息 |
+| CP | Relation | 否 | 关联 FC3.0 CheckPoint DB，记录该条消息发送或收到当时客户所处的 CP。用于还原当时阶段，禁止用客户当前 CP 回填历史消息 |
 | Call Result | Select | 否 | Connected / No Answer / Voicemail / Declined / Invalid Number；仅 Phone 使用 |
 | Source URL | URL | 否 | 打开原始渠道会话或消息的链接 |
 | Notes | Text | 否 | 补充互动异常、失败原因或人工判断；备注内容必须使用中文 |
@@ -402,19 +402,16 @@ Replied
 
 客户再次来信时，新的 Inbound 重新写入 `Needs Reply`，不影响上一封已标记 `Replied` 的记录。
 
-### 7.6 CP At Interaction
+### 7.6 CP
 
-```
-CP1
-CP2
-CP3
-```
+Conversation 的 `CP` 是 Relation，关联 **FC3.0 CheckPoint DB** 中的一条 CheckPoint 记录。Portal 读取关联标题后映射为 CP1 / CP2 / CP3。
 
 每条 Conversation 必须记录**发生当时**的客户 CP，而不是客户此刻的 Current CP。
 
-- Outbound：写入发出（或生成待发记录）时 Follow-up Client 的 Current CP。
-- Inbound：写入收到时 Follow-up Client 的 Current CP。
-- 历史记录若未盖章，Portal 单独标为「发送时未记录 CP」，不得归入当前 CP 时间线。
+- Outbound：写入发出（或生成待发记录）时 Follow-up Client 的 Current CP 对应 CheckPoint。
+- Inbound：写入收到时 Follow-up Client 的 Current CP 对应 CheckPoint。
+- Current CP 为 NONE 时不写 `CP`。
+- 历史记录若未关联 CheckPoint，不得归入当前 CP 时间线。
 - CP 是客户完整生命周期；渠道消息不能默认归属到当前 CP。
 
 ### 7.7 Portal Brand activity

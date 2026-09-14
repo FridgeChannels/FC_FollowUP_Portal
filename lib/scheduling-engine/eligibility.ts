@@ -24,7 +24,7 @@ export function evaluateEligibility(
         scope: "client",
         clientId: client.clientId,
         code: "NO_CONTACTS_SELECTED",
-        reason: "未选择任何目标联系人，不生成 Follow-up Task",
+        reason: "No target contact selected; Follow-up Task was not created",
       });
       continue;
     }
@@ -63,7 +63,7 @@ function reviewClient(client: ClientSelection): NeedsReviewItem[] {
       scope: "client",
       clientId: client.clientId,
       code: "CLIENT_STATUS_BLOCKED",
-      reason: `客户跟进状态为 ${client.followUpStatus}，不可继续生成任务`,
+      reason: `Client follow-up status is ${client.followUpStatus}; new tasks cannot be created`,
     }];
   }
 
@@ -72,7 +72,7 @@ function reviewClient(client: ClientSelection): NeedsReviewItem[] {
       scope: "client",
       clientId: client.clientId,
       code: "MISSING_OWNER",
-      reason: "客户未分配 Owner，不可生成任务",
+      reason: "Client has no Owner assigned; tasks cannot be created",
     }];
   }
 
@@ -90,7 +90,7 @@ function reviewContact(
       clientId,
       contactId: contact.contactId,
       code: "CONTACT_STATUS_BLOCKED",
-      reason: `联系人跟进状态为 ${contact.followUpStatus}，不可继续生成任务`,
+      reason: `Contact follow-up status is ${contact.followUpStatus}; new tasks cannot be created`,
     }];
   }
 
@@ -100,7 +100,7 @@ function reviewContact(
       clientId,
       contactId: contact.contactId,
       code: "CONTACT_MODE_BLOCKS_AUTOMATED",
-      reason: "联系人已转为人工跟进，自动流程不再生成标准任务",
+      reason: "Contact is on manual follow-up; automated standard tasks are not created",
     }];
   }
 
@@ -110,7 +110,7 @@ function reviewContact(
       clientId,
       contactId: contact.contactId,
       code: "NO_CHANNELS_SELECTED",
-      reason: "未选择目标渠道，不生成 Follow-up Task",
+      reason: "No target channel selected; Follow-up Task was not created",
     }];
   }
 
@@ -122,7 +122,7 @@ function reviewContact(
       contactId: contact.contactId,
       channels: blocked.map(channel => channel.channel),
       code: "DO_NOT_CONTACT",
-      reason: "存在禁止继续联系的规则，整位联系人进入复核",
+      reason: "A do-not-contact rule applies; this contact needs review",
     }];
   }
 
@@ -134,7 +134,7 @@ function reviewContact(
       contactId: contact.contactId,
       channels: unreachable.map(channel => channel.channel),
       code: "CHANNEL_UNREACHABLE",
-      reason: "选中渠道缺少有效联系方式，整位联系人进入复核",
+      reason: "A selected channel is missing a valid endpoint; this contact needs review",
     }];
   }
 

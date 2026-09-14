@@ -31,35 +31,35 @@ export const CURRENT_CP_DICTIONARY: Record<CurrentCp, CurrentCpOption> = {
     id: "NONE",
     name: "NONE",
     fullName: "No CP Completed",
-    definition: "尚未完成任何 CP。",
-    criteria: "没有任何一个 CP 达到完整完成标准。",
-    evidence: "无",
+    definition: "No checkpoint has been completed yet.",
+    criteria: "None of the checkpoints have met their full completion standard.",
+    evidence: "None",
   },
   CP1: {
     id: "CP1",
     name: "CP1",
     fullName: "Post-Tap Brand Experience Delivered",
-    definition: "品牌定制的 Post-tap 体验已经完成，并已交付给 Connector 或 Owner 实际体验。",
+    definition: "The brand-customized post-tap experience is complete and has been delivered for the Connector or Owner to try.",
     criteria:
-      "Brand Customized Post-tap 已完成；Connector 或 Owner 已收到 FC 产品；对方可以实际 Tap 并访问该品牌体验。",
-    evidence: "体验链接、测试记录、交付对象、交付日期",
+      "Brand Customized Post-tap is complete; the Connector or Owner has received the FC product; they can tap and access the brand experience.",
+    evidence: "Experience link, test record, recipient, delivery date",
   },
   CP2: {
     id: "CP2",
     name: "CP2",
     fullName: "Sample Delivered to Owner",
-    definition: "正确 Owner 已经识别并收到 Sample，同时已具备后续直接推进所需的必要联系方式。",
-    criteria: "正确 Owner 已识别；Owner 已收到 Sample；Owner Fire Cover Complete。",
-    evidence: "Owner 身份记录、联系人信息、引荐记录、签收或确认记录",
+    definition: "The correct Owner has been identified, received the sample, and has the contact details needed to move forward.",
+    criteria: "Correct Owner identified; Owner received the sample; Owner Fire Cover Complete.",
+    evidence: "Owner identity, contact details, intro record, receipt or confirmation",
   },
   CP3: {
     id: "CP3",
     name: "CP3",
     fullName: "Owner Input & Plan Review Completed",
-    definition: "Owner 的业务目标及必要输入已经收集完成，并形成可进入 Review 的客户专属 Plan。",
+    definition: "The Owner's business objective and required inputs have been collected, and a client-specific plan is ready for review.",
     criteria:
-      "Business Objective 已确认；必要业务流程、事实和限制已记录；AI 已生成客户专属 Plan；FC 已完成人工审核；Plan 已达到可进入 Review 的完整度。",
-    evidence: "Guided Input 记录、Plan 版本、FC Review 记录",
+      "Business Objective confirmed; required workflows, facts, and constraints recorded; AI generated a client-specific plan; FC completed human review; the plan is complete enough to enter Review.",
+    evidence: "Guided Input record, plan version, FC Review record",
   },
 };
 
@@ -209,7 +209,9 @@ export type BrandActivity = {
   sourceUrl: string | null;
   threadId: string | null;
   messageId: string | null;
+  extendedParameters?: string | null;
   replyStatus: "Needs Reply" | "Replied" | null;
+  cpId: string | null;
   cpAtInteraction: "CP1" | "CP2" | "CP3" | null;
   createdAt: string | null;
   recordedAt?: string | null;

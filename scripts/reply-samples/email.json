@@ -1,3 +1,9 @@
 {
-  "content": "Hi Sarah,\n\nYes — Mike has the FC Magnet on his desk now. Please use mike@acme.co for the setup link.\n\nThanks,\nJohn"
+  "channel": "Email",
+  "content": "Yes, Mike has the Magnet.",
+  "sender": "",
+  "subject": "",
+  "messageId": "",
+  "occurredAt": "",
+  "extendedParameters": {}
 }

@@ -13,6 +13,7 @@ import {
   findConversationsByThreadId,
   listFollowupConversations,
 } from "./conversations";
+import { conversationCpRelation } from "./cps";
 import { mapFollowupClientPage } from "./followup-clients";
 import {
   cancelUnsentBombSiblingTasks,
@@ -26,6 +27,7 @@ import { outboundMessageIsSent, pickOutboundCandidate, taskIsSent } from "./repl
 import { resolveCurrentContactForBrand, resolveReplyTargetByBrandName, resolveReplyTargetByThreadId, senderForChannel } from "./reply-target";
 import { retrieveFollowupTask } from "./tasks";
 import { interactionCpCode } from "../outreach-domain";
+import { ExtendedParametersError, asExtendedParameters } from "./extended-parameters";
 
 const CHANNELS = new Set(["Email", "LinkedIn", "SMS", "WhatsApp", "Phone"]);
 const CALL_RESULTS = new Set(["Connected", "No Answer", "Voicemail", "Declined", "Invalid Number"]);
@@ -55,6 +57,8 @@ export type InboundReplyInput = {
   brandName?: string | null;
   callResult?: string | null;
   notes?: string | null;
+  extendedParameters?: Record<string, unknown> | string | null;
+  "Extended Parameters"?: Record<string, unknown> | string | null;
 };
 
 export type InboundReplyResult = {
@@ -77,6 +81,7 @@ type ResolvedTarget = {
   taskId?: string;
   existingThreadId?: string | null;
   currentCp?: "CP1" | "CP2" | "CP3" | null;
+  currentCpId?: string | null;
   inferredSender?: string | null;
   outboundMessageId?: string | null;
 };
@@ -179,6 +184,7 @@ async function loadContactContext(contactId: string): Promise<ResolvedTarget> {
     contactId,
     contactName: contact?.name || titleFromProperties(contactPage.properties) || "KeyPerson",
     currentCp: interactionCpCode(brand.currentCp),
+    currentCpId: brand.currentCpId,
   };
 }
 
@@ -216,6 +222,7 @@ async function resolveInboundReplyTarget(input: InboundReplyInput, channel: stri
       taskId: resolved.target.task?.id || resolved.target.outbound?.taskId || undefined,
       existingThreadId: resolved.target.outbound?.threadId || input.threadId.trim(),
       currentCp: interactionCpCode(resolved.target.brand.currentCp),
+      currentCpId: resolved.target.brand.currentCpId,
       inferredSender: senderForChannel(resolved.target.contact, channel) || null,
       outboundMessageId: resolved.target.outbound?.messageId || null,
     };
@@ -229,6 +236,7 @@ async function resolveInboundReplyTarget(input: InboundReplyInput, channel: stri
     }
     if (!task.contactId) throw new InboundReplyError("Task has no Follow-up Contact", 422);
     if (!task.brandId) throw new InboundReplyError("Task has no Follow-up Client", 422);
+    const brand = await mapFollowupClientPage(await retrievePage(task.brandId));
     return {
       brandId: task.brandId,
       brandName: task.brandName || "Untitled Client",
@@ -236,9 +244,8 @@ async function resolveInboundReplyTarget(input: InboundReplyInput, channel: stri
       contactId: task.contactId,
       contactName: task.contactName || "KeyPerson",
       taskId: task.channel === channel ? task.id : undefined,
-      currentCp: interactionCpCode(
-        (await mapFollowupClientPage(await retrievePage(task.brandId))).currentCp,
-      ),
+      currentCp: interactionCpCode(brand.currentCp),
+      currentCpId: brand.currentCpId,
     };
   }
 
@@ -306,6 +313,7 @@ async function resolveInboundReplyTarget(input: InboundReplyInput, channel: stri
       contactName: resolved.target.contact.name,
       taskId: resolved.target.task?.id,
       currentCp: interactionCpCode(resolved.target.brand.currentCp),
+      currentCpId: resolved.target.brand.currentCpId,
     };
   }
 
@@ -353,6 +361,17 @@ export async function ingestInboundReply(
   const occurredAt = asOccurredAt(input.occurredAt);
   const callResult = asCallResult(channel, input.callResult);
   const sourceUrl = asSourceUrl(input.sourceUrl);
+  let extendedParameters: string | null = null;
+  try {
+    extendedParameters = asExtendedParameters(
+      input.extendedParameters ?? input["Extended Parameters"],
+    );
+  } catch (error) {
+    if (error instanceof ExtendedParametersError) {
+      throw new InboundReplyError(error.message, 400);
+    }
+    throw error;
+  }
   const messageId = input.messageId?.trim() || `IN-${channel}-${Date.now()}`;
 
   const [duplicate] = await findConversationsByMessageId(messageId);
@@ -440,9 +459,8 @@ export async function ingestInboundReply(
     "Interaction At": { date: { start: occurredAt } },
     "Reply Status": { select: { name: "Needs Reply" } },
   };
-  if (target.currentCp) {
-    properties["CP At Interaction"] = { select: { name: target.currentCp } };
-  }
+  const cp = await conversationCpRelation(target.currentCpId || target.currentCp);
+  if (cp) properties.CP = cp;
   if (channel !== "Phone") {
     properties["Message Status"] = { select: { name: "Received" } };
   }
@@ -451,6 +469,9 @@ export async function ingestInboundReply(
   }
   if (sourceUrl) {
     properties["Source URL"] = { url: sourceUrl };
+  }
+  if (extendedParameters) {
+    properties["Extended Parameters"] = { rich_text: richText(extendedParameters) };
   }
 
   const page = await createPage(getFollowupConversationDbId(), properties);

@@ -1,8 +1,9 @@
 import { FOLLOW_UP_STATUSES, HANDLING_MODES, type BrandActivity, type BrandTask } from "../brand-list";
-import { resolveCheckpoint } from "./cps";
+import { conversationCpRelation, resolveCheckpoint } from "./cps";
 import { createPage, propertyText, retrievePage, richText, updatePage } from "./client";
 import { getFollowupConversationDbId, getFollowupTaskDbId } from "./config";
 import { listFollowupConversations } from "./conversations";
+import { asExtendedParameters } from "./extended-parameters";
 import { retrieveOwner } from "./owners";
 import {
   annotateTasksWithReplyInbox,
@@ -174,7 +175,9 @@ export async function createOutboundConversation(input: {
   interactionAt?: string | null;
   notes?: string;
   titleSuffix?: string;
+  cpId?: string | null;
   cpAtInteraction?: string | null;
+  extendedParameters?: string | null;
 }) {
   if (!CHANNELS.has(input.channel)) throw new Error("Invalid channel");
   const content = input.content.trim();
@@ -215,8 +218,17 @@ export async function createOutboundConversation(input: {
   if (input.interactionAt) {
     properties["Interaction At"] = { date: { start: input.interactionAt } };
   }
-  if (input.cpAtInteraction === "CP1" || input.cpAtInteraction === "CP2" || input.cpAtInteraction === "CP3") {
-    properties["CP At Interaction"] = { select: { name: input.cpAtInteraction } };
+  const cp = await conversationCpRelation(input.cpId || input.cpAtInteraction);
+  if (cp) properties.CP = cp;
+  const inherited = input.extendedParameters?.trim();
+  if (inherited) {
+    let encoded = inherited;
+    try {
+      encoded = asExtendedParameters(inherited) || inherited;
+    } catch {
+      encoded = inherited;
+    }
+    properties["Extended Parameters"] = { rich_text: richText(encoded) };
   }
 
   return createPage(getFollowupConversationDbId(), properties);
@@ -286,6 +298,7 @@ export async function completeFollowupCall(input: {
   outcome: string;
   summary?: string;
   sender?: string | null;
+  cpId?: string | null;
   cpAtInteraction?: string | null;
 }) {
   const callResult = mapCallOutcome(input.outcome);
@@ -304,6 +317,7 @@ export async function completeFollowupCall(input: {
     interactionAt: now,
     notes,
     titleSuffix: callResult || "Phone",
+    cpId: input.cpId,
     cpAtInteraction: input.cpAtInteraction,
   });
   return updateFollowupTask(input.taskId, {
@@ -357,9 +371,22 @@ function todayDateOnly() {
   }).format(new Date());
 }
 
-function canContinueTask(task: { status?: string | null; channel?: string | null }, channel: string) {
-  if (task.channel && channel && task.channel !== channel) return false;
-  return task.status === "Pending" || task.status === "In Progress" || task.status === "Completed";
+function pickThreadExtendedParameters(
+  activities: BrandActivity[],
+  input: { channel: string; threadId?: string | null; taskId?: string | null },
+) {
+  const threadId = input.threadId?.trim();
+  const related = activities.filter((item) => {
+    if (item.channel && item.channel !== input.channel) return false;
+    if (threadId && item.threadId) return item.threadId === threadId;
+    if (input.taskId && item.taskId) return item.taskId === input.taskId;
+    return false;
+  }).sort((left, right) => (right.createdAt || "").localeCompare(left.createdAt || ""));
+  return (
+    related.find((item) => item.direction === "Inbound" && item.extendedParameters)?.extendedParameters ||
+    related.find((item) => item.extendedParameters)?.extendedParameters ||
+    null
+  );
 }
 
 export async function createHumanOutbound(input: {
@@ -372,29 +399,27 @@ export async function createHumanOutbound(input: {
   sender?: string | null;
   existingTaskId?: string;
   threadId?: string | null;
+  cpId?: string | null;
   cpAtInteraction?: string | null;
 }) {
-  let taskId = input.existingTaskId;
-  const existing = taskId ? await retrieveFollowupTask(taskId).catch(() => null) : null;
-  const continueExisting = !!existing && canContinueTask(existing, input.channel);
-  if (!continueExisting) {
-    const ownerId = input.brandOwnerId || existing?.ownerId;
-    if (!ownerId) throw new Error("Owner is required to create a follow-up task");
-    const created = await createFollowupTask({
-      brandName: input.brandName,
-      contactId: input.contactId,
-      contactName: input.contactName,
-      ownerId,
-      channel: input.channel,
-      scheduledAt: todayDateOnly(),
-      priority: "P0",
-      creationMethod: "Manual",
-      notes: existing
-        ? "人工追加回复，尚未实际发送。"
-        : "人工发送消息，尚未实际发送。",
-    });
-    taskId = created.id;
-  }
+  const isReply = !!(input.threadId?.trim() || input.existingTaskId);
+  const threadActivities = isReply ? await listFollowupConversations([input.contactId]) : [];
+  const ownerId = input.brandOwnerId;
+  if (!ownerId) throw new Error("Owner is required to create a follow-up task");
+  const created = await createFollowupTask({
+    brandName: input.brandName,
+    contactId: input.contactId,
+    contactName: input.contactName,
+    ownerId,
+    channel: input.channel,
+    scheduledAt: todayDateOnly(),
+    priority: "P0",
+    creationMethod: "Manual",
+    notes: isReply
+      ? "人工追加回复，尚未实际发送。"
+      : "人工发送消息，尚未实际发送。",
+  });
+  const taskId = created.id;
   const page = await createOutboundConversation({
     brandName: input.brandName,
     contactId: input.contactId,
@@ -404,17 +429,22 @@ export async function createHumanOutbound(input: {
     sender: input.sender,
     taskId,
     threadId: input.threadId,
+    cpId: input.cpId,
     cpAtInteraction: input.cpAtInteraction,
-    interactionAt: new Date().toISOString(),
-    notes: continueExisting || existing
+    extendedParameters: pickThreadExtendedParameters(threadActivities, {
+      channel: input.channel,
+      threadId: input.threadId,
+      taskId: input.existingTaskId,
+    }),
+    notes: isReply
       ? "人工追加回复，尚未实际发送。"
       : "人工消息，尚未实际发送。",
   });
-  if (taskId) await linkConversationToTask(page.id, taskId);
+  await linkConversationToTask(page.id, taskId);
   await markInboundsReplied({
     contactId: input.contactId,
     channel: input.channel,
-    taskId,
+    taskId: input.existingTaskId,
     threadId: input.threadId,
   });
   return page;

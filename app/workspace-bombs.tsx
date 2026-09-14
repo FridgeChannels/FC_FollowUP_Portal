@@ -537,12 +537,12 @@ export function BombDetailPage({ bombId }: { bombId: string }) {
               <Field label="Priority">{bomb.priority || "—"}</Field>
               <Field label="Scenario">
                 <div>{bomb.scenarioName || "—"}</div>
-                {bomb.scenarioDescription ? (
+                {bomb.scenarioDescription && !/[\u4e00-\u9fff]/.test(bomb.scenarioDescription) ? (
                   <p className="mt-1 text-xs leading-5 text-slate-500">{bomb.scenarioDescription}</p>
                 ) : null}
               </Field>
               <Field label="Target role">{bomb.targetRole || "—"}</Field>
-              {bomb.notes ? (
+              {bomb.notes && !/[\u4e00-\u9fff]/.test(bomb.notes) ? (
                 <div className="md:col-span-2">
                   <Field label="Notes">
                     <p className="whitespace-pre-wrap leading-6">{bomb.notes}</p>

@@ -12,6 +12,7 @@ import {
   type NotionPage,
 } from "./client";
 import { getFollowupConversationDbId } from "./config";
+import { listCheckpoints } from "./cps";
 
 const CONTACT_CONVERSATION_KEYS = ["Interactions", "Conversations", "Conversation Records"];
 
@@ -43,8 +44,10 @@ function mapConversation(page: NotionPage): BrandActivity {
     sourceUrl: propertyText(properties["Source URL"]) || null,
     threadId: propertyText(properties["Thread ID"]) || null,
     messageId: propertyText(properties["Message ID"]) || null,
+    extendedParameters: propertyText(properties["Extended Parameters"]) || null,
     replyStatus: asReplyStatus(propertyText(properties["Reply Status"])),
-    cpAtInteraction: interactionCpCode(propertyText(properties["CP At Interaction"])),
+    cpId: firstRelationId(properties.CP) || null,
+    cpAtInteraction: null,
     createdAt:
       propertyDate(properties["Interaction At"]) || page.created_time || null,
     recordedAt: page.created_time || propertyDate(properties["Interaction At"]),
@@ -112,14 +115,11 @@ async function listFromContactRelations(contactIds: string[]) {
 export async function listConversationsByIds(ids: string[]): Promise<BrandActivity[]> {
   if (!ids.length) return [];
   const pages = await Promise.all(ids.map((id) => retrievePage(id).catch(() => null)));
-  return pages
-    .filter((page): page is NotionPage => !!page)
-    .map(mapConversation)
-    .sort((a, b) => {
-      const left = a.createdAt || "";
-      const right = b.createdAt || "";
-      return right.localeCompare(left) || a.id.localeCompare(b.id);
-    });
+  return attachConversationCp(
+    pages
+      .filter((page): page is NotionPage => !!page)
+      .map(mapConversation),
+  ).then(sortConversations);
 }
 
 export async function listFollowupConversations(
@@ -141,13 +141,7 @@ export async function listFollowupConversations(
     }
   }
 
-  return pages
-    .map(mapConversation)
-    .sort((a, b) => {
-      const left = a.createdAt || "";
-      const right = b.createdAt || "";
-      return right.localeCompare(left) || a.id.localeCompare(b.id);
-    });
+  return attachConversationCp(pages.map(mapConversation)).then(sortConversations);
 }
 
 function sortConversations(items: BrandActivity[]) {
@@ -155,6 +149,20 @@ function sortConversations(items: BrandActivity[]) {
     const left = a.createdAt || "";
     const right = b.createdAt || "";
     return right.localeCompare(left) || a.id.localeCompare(b.id);
+  });
+}
+
+async function attachConversationCp(items: BrandActivity[]) {
+  const ids = [...new Set(items.map((item) => item.cpId).filter((id): id is string => !!id))];
+  if (!ids.length) return items;
+  const checkpoints = await listCheckpoints();
+  const byId = new Map(checkpoints.map((item) => [item.id, item]));
+  return items.map((item) => {
+    const checkpoint = item.cpId ? byId.get(item.cpId) : undefined;
+    return {
+      ...item,
+      cpAtInteraction: interactionCpCode(checkpoint?.name) || null,
+    };
   });
 }
 
@@ -168,7 +176,7 @@ async function findConversationsByText(
     property,
     rich_text: { equals: text },
   });
-  return sortConversations(pages.map(mapConversation));
+  return attachConversationCp(pages.map(mapConversation)).then(sortConversations);
 }
 
 export function findConversationsByMessageId(messageId?: string | null) {

@@ -43,7 +43,7 @@ export type Interaction = {
   id: string; customerId: string; contactId?: string; bombInstanceId?: string; cp?: CPCode; type: "Message" | "Phone" | "Bomb" | "CP" | "Follow-up" | "Human" | "System";
   channel?: Channel; direction?: "Inbound" | "Outbound"; title: string; content: string; createdAt: string; outcome?: CallOutcome; recording?: string;
   creationMethod?: "Automated" | "Manual"; threadId?: string; taskId?: string; replyStatus?: "Needs Reply" | "Replied";
-  messageStatus?: string; callResult?: string;
+  messageStatus?: string; taskStatus?: string; callResult?: string;
 };
 export type InboxItem = {
   id: string; customerId: string; contactId?: string; type: "Reply";
@@ -180,9 +180,9 @@ export function createSeedState(): WorkspaceState {
     {id:"call_olive",customerId:"c_olive",contactId:"ct_olive_liam",bombInstanceId:"bi_olive",scheduledActionId:"a_o2",callerId:"u_alex",scheduledDate:addDays(today,-1),priority:"Normal",goal:"Confirm interest",script:"Ask whether timing has changed.",status:"Completed",outcome:"No Answer",recordingStatus:"Unavailable"},
   ];
   const cps: CPStage[] = [
-    {code:"CP1",name:"Post-Tap Brand Experience Delivered",goal:"Post-Tap Brand Experience Delivered",criteria:"Brand Customized Post-tap 已完成；Connector 或 Owner 已收到 FC 产品；对方可以实际 Tap 并访问该品牌体验。",color:"violet"},
-    {code:"CP2",name:"Sample Delivered to Owner",goal:"Sample Delivered to Owner",criteria:"正确 Owner 已识别；Owner 已收到 Sample；Owner Fire Cover Complete。",color:"blue"},
-    {code:"CP3",name:"Owner Input & Plan Review Completed",goal:"Owner Input & Plan Review Completed",criteria:"Business Objective 已确认；必要业务流程、事实和限制已记录；AI 已生成客户专属 Plan；FC 已完成人工审核；Plan 已达到可进入 Review 的完整度。",color:"emerald"},
+    {code:"CP1",name:"Post-Tap Brand Experience Delivered",goal:"Post-Tap Brand Experience Delivered",criteria:"Brand Customized Post-tap is complete; the Connector or Owner has received the FC product; they can tap and access the brand experience.",color:"violet"},
+    {code:"CP2",name:"Sample Delivered to Owner",goal:"Sample Delivered to Owner",criteria:"Correct Owner identified; Owner received the sample; Owner Fire Cover Complete.",color:"blue"},
+    {code:"CP3",name:"Owner Input & Plan Review Completed",goal:"Owner Input & Plan Review Completed",criteria:"Business Objective confirmed; required workflows, facts, and constraints recorded; AI generated a client-specific plan; FC completed human review; the plan is complete enough to enter Review.",color:"emerald"},
   ];
   const integrations: ChannelIntegration[] = [
     {channel:"Email",status:"Connected",account:"sales@fridgechannel.com"},{channel:"SMS",status:"Connected",account:"+1 415 555 0100"},{channel:"WhatsApp",status:"Needs Attention",account:"FC Outreach"},{channel:"LinkedIn",status:"Disconnected",account:"No account"},{channel:"Phone",status:"Connected",account:"Quo workspace"},

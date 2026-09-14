@@ -220,6 +220,8 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
       if (activity.threadId && !threadCp.has(activity.threadId)) threadCp.set(activity.threadId, activity.cpAtInteraction);
       if (activity.taskId && !taskCp.has(activity.taskId)) taskCp.set(activity.taskId, activity.cpAtInteraction);
     }
+    const taskById = new Map((payload.brand?.tasks || []).map(item => [item.id, item]));
+    if (payload.task) taskById.set(payload.task.id, payload.task);
     const timeline: Interaction[] = activities.map(activity => ({
       id: activity.id,
       customerId: customer.id,
@@ -234,6 +236,8 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
       cp: activity.cpAtInteraction || (activity.threadId ? threadCp.get(activity.threadId) : undefined) || (activity.taskId ? taskCp.get(activity.taskId) : undefined),
       taskId: activity.taskId || undefined,
       threadId: activity.threadId || undefined,
+      messageStatus: activity.status || undefined,
+      taskStatus: (activity.taskId ? taskById.get(activity.taskId)?.status : undefined) || undefined,
     }));
     setRemote({ customer, contact, timeline, ownerName: item.ownerName || payload.brand?.ownerName || undefined, brand: payload.brand || undefined, cps: payload.cps });
     setLiveTask(fromNotionTask(item));

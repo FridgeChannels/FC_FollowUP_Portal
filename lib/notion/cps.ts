@@ -1,4 +1,5 @@
-import { parseCurrentCp, type CurrentCpOption } from "../brand-list";
+import { currentCpOption, parseCurrentCp, type CurrentCpOption } from "../brand-list";
+import { interactionCpCode } from "../outreach-domain";
 import {
   propertyText,
   queryDatabasePages,
@@ -35,14 +36,14 @@ export function mapCheckpointPage(page: NotionPage): CurrentCpOption {
   const fullName = title.includes("-")
     ? title.split("-").slice(1).join("-").trim()
     : title;
+  const local = parseCurrentCp(name) ? currentCpOption(name) : null;
   return {
     id: page.id,
     name,
-    fullName: fullName || title,
-    definition:
-      propertyText(page.properties?.["External Stage (Client Safe Wording)"]) || "",
-    criteria: propertyText(page.properties?.["Completion Criteria"]) || "",
-    evidence: propertyText(page.properties?.["Evidence"]) || "",
+    fullName: fullName || title || local?.fullName || name,
+    definition: local?.definition || propertyText(page.properties?.["External Stage (Client Safe Wording)"]) || "",
+    criteria: local?.criteria || propertyText(page.properties?.["Completion Criteria"]) || "",
+    evidence: local?.evidence || propertyText(page.properties?.["Evidence"]) || "",
   };
 }
 
@@ -71,4 +72,10 @@ export async function resolveCheckpoint(value?: string | null) {
     items.find((item) => item.fullName === query) ||
     null
   );
+}
+
+export async function conversationCpRelation(value?: string | null) {
+  const checkpoint = await resolveCheckpoint(value);
+  if (!checkpoint || !interactionCpCode(checkpoint.name)) return null;
+  return { relation: [{ id: checkpoint.id }] };
 }
