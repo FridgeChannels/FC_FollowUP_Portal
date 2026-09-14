@@ -12,11 +12,12 @@ export async function GET(request: Request) {
       return Response.json({ error: "Only Admin can list owners" }, { status: 403 });
     }
     const owners = (await queryOwnerPages())
-      .filter((owner) => owner.status === "Active")
+      .filter((owner) => owner.status === "Active" && owner.role !== "Caller")
       .map((owner) => ({
         id: owner.id,
         name: owner.name,
         account: owner.account,
+        role: owner.role,
       }));
     return Response.json({ owners });
   } catch (error) {

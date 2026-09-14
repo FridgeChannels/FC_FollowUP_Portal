@@ -472,8 +472,35 @@ function brandListPath(filters: BrandListFilters) {
   return qs ? `/customers?${qs}` : "/customers";
 }
 
+async function patchBrandListItem(id: string, body: Record<string, unknown>) {
+  const response = await fetch(`/api/brands/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload = (await response.json()) as {
+    brand?: BrandListItem;
+    error?: string;
+  };
+  if (!response.ok || !payload.brand) throw new Error(payload.error || "Update failed");
+  return payload.brand;
+}
+
+function mergeBrandListItem(current: BrandListItem, next: BrandListItem): BrandListItem {
+  return {
+    ...current,
+    ownerId: next.ownerId,
+    ownerName: next.ownerName,
+    ownerEmail: next.ownerEmail,
+    status: next.status,
+    handlingMode: next.handlingMode,
+    currentCp: next.currentCp,
+    currentCpId: next.currentCpId,
+  };
+}
+
 export function BrandsPage() {
-  const { state } = useWorkspace();
+  const { state, can } = useWorkspace();
   const router = useRouter();
   const searchParams = useSearchParams();
   const isAdmin = state.currentRole === "Admin";
@@ -485,9 +512,17 @@ export function BrandsPage() {
   const [brands, setBrands] = useState<BrandListItem[]>([]);
   const [remoteCps, setRemoteCps] = useState<CurrentCpOption[]>([]);
   const [ownerOptions, setOwnerOptions] = useState<Array<{ id: string; name: string }>>([]);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
   const cps = remoteCps.length ? remoteCps : listCurrentCps();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
+  const applyBrandUpdate = (brand: BrandListItem) => {
+    cacheBrandItem(brand);
+    setBrands((prev) =>
+      prev.map((item) => (item.id === brand.id ? mergeBrandListItem(item, brand) : item)),
+    );
+  };
   const ownerQuery =
     isAdmin && owner !== "all" ? `?owner=${encodeURIComponent(owner)}` : "";
   const brandsPath = `/api/brands${ownerQuery}`;
@@ -592,6 +627,72 @@ export function BrandsPage() {
     });
     return [...seen.entries()].map(([id, name]) => ({ id, name }));
   }, [brands, ownerOptions]);
+  useEffect(() => {
+    const visible = new Set(filtered.map((item) => item.id));
+    setSelected((ids) => {
+      const next = ids.filter((id) => visible.has(id));
+      return next.length === ids.length ? ids : next;
+    });
+  }, [filtered]);
+  const runBulkUpdate = async (
+    ids: string[],
+    bodyFor: (brand: BrandListItem) => Record<string, unknown>,
+    successMessage: string,
+  ) => {
+    if (!ids.length || busy) return;
+    setBusy(true);
+    let ok = 0;
+    let failed = 0;
+    try {
+      for (const id of ids) {
+        const brand = brands.find((item) => item.id === id);
+        if (!brand) continue;
+        try {
+          applyBrandUpdate(await patchBrandListItem(id, bodyFor(brand)));
+          ok += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+      if (ok && !failed) toast.success(successMessage);
+      else if (ok) toast.success(`${ok} updated, ${failed} failed`);
+      else toast.error("Update failed");
+      if (ok) setSelected([]);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const assignSelected = (ownerId: string) => {
+    const nextOwnerId = ownerId === "unassigned" ? null : ownerId;
+    void runBulkUpdate(
+      selected,
+      (brand) => ({
+        ownerId: nextOwnerId,
+        ...(nextOwnerId && (!brand.status || brand.status === "Unassigned")
+          ? { status: "Ready" }
+          : {}),
+      }),
+      "FC-Owner assigned",
+    );
+  };
+  const pauseSelected = () => {
+    void runBulkUpdate(selected, () => ({ status: "Paused" }), "Outreach paused");
+  };
+  const toggleOutreach = async (brand: BrandListItem) => {
+    if (busy) return;
+    const paused = brand.status === "Paused";
+    setBusy(true);
+    try {
+      applyBrandUpdate(
+        await patchBrandListItem(brand.id, { status: paused ? "Ready" : "Paused" }),
+      );
+      toast.success(paused ? "Outreach resumed" : "Outreach paused");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Update failed");
+    } finally {
+      setBusy(false);
+    }
+  };
   usePageMetadata(
     brandListMetadata({
       q: query || undefined,
@@ -611,6 +712,34 @@ export function BrandsPage() {
         eyebrow={`${loading ? "Loading" : `${brands.length} records`}`}
         title="Brands"
       />
+      {isAdmin && selected.length > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl bg-violet-50 px-4 py-3">
+          <b className="text-sm text-violet-900">{selected.length} selected</b>
+          {can("assignOwner") && (
+            <Select disabled={busy} onValueChange={assignSelected}>
+              <SelectTrigger size="sm" className="bg-white">
+                <SelectValue placeholder="Assign FC-Owner" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="unassigned">Unassigned</SelectItem>
+                {owners.map((item) => (
+                  <SelectItem key={item.id} value={item.id}>
+                    {item.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          {can("editBrand") && (
+            <Button variant="outline" size="sm" disabled={busy} onClick={pauseSelected}>
+              Pause outreach
+            </Button>
+          )}
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => setSelected([])}>
+            Clear
+          </Button>
+        </div>
+      )}
       <div className="overflow-hidden rounded-2xl bg-white">
         <div className="flex flex-col gap-3 p-4 sm:flex-row">
           <div className="relative flex-1 sm:max-w-sm">
@@ -682,7 +811,24 @@ export function BrandsPage() {
             <Table>
               <TableHeader>
                 <TableRow className="bg-slate-50">
-                  <TableHead className="min-w-56 pl-5">Brand</TableHead>
+                  {isAdmin && (
+                    <TableHead className="w-10 pl-5">
+                      <Checkbox
+                        checked={
+                          selected.length === filtered.length && filtered.length > 0
+                            ? true
+                            : selected.length > 0
+                              ? "indeterminate"
+                              : false
+                        }
+                        disabled={busy}
+                        onCheckedChange={(value) =>
+                          setSelected(value ? filtered.map((item) => item.id) : [])
+                        }
+                      />
+                    </TableHead>
+                  )}
+                  <TableHead className={isAdmin ? "min-w-56" : "min-w-56 pl-5"}>Brand</TableHead>
                   <TableHead>CP</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Handling Mode</TableHead>
@@ -698,7 +844,21 @@ export function BrandsPage() {
                       className="cursor-pointer hover:bg-violet-50/30"
                       onClick={() => router.push(`/customers/${c.id}`)}
                     >
-                      <TableCell className="pl-5">
+                      {isAdmin && (
+                        <TableCell className="pl-5" onClick={(e) => e.stopPropagation()}>
+                          <Checkbox
+                            checked={selected.includes(c.id)}
+                            disabled={busy}
+                            onCheckedChange={(value) =>
+                              setSelected((ids) => {
+                                if (value) return ids.includes(c.id) ? ids : [...ids, c.id];
+                                return ids.filter((id) => id !== c.id);
+                              })
+                            }
+                          />
+                        </TableCell>
+                      )}
+                      <TableCell className={isAdmin ? undefined : "pl-5"}>
                         <div className="flex items-center gap-3">
                           <Avatar className="size-9">
                             <AvatarFallback className="bg-violet-100 text-xs font-bold text-violet-700">
@@ -743,6 +903,14 @@ export function BrandsPage() {
                               >
                                 Open Brand
                               </DropdownMenuItem>
+                              {isAdmin && can("editBrand") && (
+                                <DropdownMenuItem
+                                  disabled={busy}
+                                  onClick={() => void toggleOutreach(c)}
+                                >
+                                  {c.status === "Paused" ? "Resume" : "Pause"} outreach
+                                </DropdownMenuItem>
+                              )}
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </TableCell>

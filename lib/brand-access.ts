@@ -1,9 +1,10 @@
 import type { BrandListItem, BrandTask } from "./brand-list";
-import { getAdminEmails } from "./notion/config";
 import { findOwnerByAccount } from "./notion/owners";
+import { isAdminRole, type PortalRole } from "./notion/owner-role";
 
 export type BrandViewer = {
   isAdmin: boolean;
+  role: PortalRole;
   email: string | null;
   ownerId: string | null;
   name: string | null;
@@ -19,12 +20,11 @@ export async function resolveBrandViewer(input: {
 }): Promise<BrandViewer> {
   const email = normalizeEmail(input.email);
   const owner = await findOwnerByAccount(email);
-  const isAdmin =
-    owner?.isAdmin === true || (!!email && getAdminEmails().has(email));
 
   if (!owner || owner.status !== "Active") {
     return {
       isAdmin: false,
+      role: "FC_Owner",
       email,
       ownerId: null,
       name: input.name || null,
@@ -32,7 +32,8 @@ export async function resolveBrandViewer(input: {
   }
 
   return {
-    isAdmin,
+    isAdmin: isAdminRole(owner.role),
+    role: owner.role,
     email,
     ownerId: owner.id,
     name: owner.name || input.name || null,
@@ -56,6 +57,7 @@ export function canAssignBrandOwner(viewer: BrandViewer) {
 
 export function canViewTask(viewer: BrandViewer, task: BrandTask) {
   if (viewer.isAdmin) return true;
+  if (viewer.role === "Caller") return task.channel === "Phone";
   if (viewer.ownerId && task.ownerId === viewer.ownerId) return true;
   if (viewer.ownerId && task.brandOwnerId === viewer.ownerId) return true;
   return false;

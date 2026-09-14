@@ -1,6 +1,6 @@
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { syncReplyInbox } from "@/lib/notion/followup-writes";
-import { ownerPageIdFromQueryParam } from "@/lib/notion/owner-filter";
+import { taskQueryForViewer } from "@/lib/notion/owner-filter";
 import { listFollowupTasksForViewer } from "@/lib/notion/tasks";
 
 export async function GET(request: Request) {
@@ -13,10 +13,8 @@ export async function GET(request: Request) {
       return Response.json({ tasks: [], viewer: { isAdmin: false, ownerName: viewer.name } });
     }
     const ownerParam = new URL(request.url).searchParams.get("owner");
-    const listed = await listFollowupTasksForViewer(
-      ownerPageIdFromQueryParam(viewer.isAdmin, viewer.ownerId, ownerParam),
-    );
-    const tasks = await syncReplyInbox(listed);
+    const listed = await listFollowupTasksForViewer(taskQueryForViewer(viewer, ownerParam));
+    const tasks = viewer.role === "Caller" ? listed : await syncReplyInbox(listed);
     return Response.json({
       tasks,
       viewer: { isAdmin: viewer.isAdmin, ownerName: viewer.name },

@@ -81,7 +81,7 @@ export const visibleOpenTaskCount = (state: WorkspaceState) => {
 };
 
 export const roleCapabilities: Record<Role, string[]> = {
-  Admin: ["dashboard","customers","tasks","inbox","calls","bombs","workflow","analytics","settings","reply","launch","changeCP","editBrand","assignOwner","manageCalls","editBomb","editWorkflow","audit","importBrands"],
+  Admin: ["dashboard","customers","tasks","inbox","calls","bombs","workflow","analytics","reply","launch","changeCP","editBrand","assignOwner","manageCalls","editBomb","editWorkflow","audit","importBrands"],
   "FC_Owner": ["dashboard","customers","bombs","reply","launch","changeCP","editBrand","createCall","editBomb"],
   Caller: ["tasks","calls","bombs","submitCall","editBomb"],
 };

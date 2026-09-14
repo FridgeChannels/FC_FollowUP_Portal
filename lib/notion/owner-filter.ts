@@ -1,3 +1,5 @@
+import type { PortalRole } from "./owner-role";
+
 /** `undefined` = all owners, `null` = Owner is empty, string = specific Owner page. */
 export function ownerRelationFilter(ownerPageId?: string | null) {
   if (ownerPageId === undefined) return undefined;
@@ -17,4 +19,31 @@ export function ownerPageIdFromQueryParam(
   if (!value || value === "all") return undefined;
   if (value === "unassigned") return null;
   return value;
+}
+
+export type TaskListQuery = {
+  ownerPageId?: string | null;
+  channel?: string;
+};
+
+export function taskListFilter(query: TaskListQuery = {}) {
+  const filters: Record<string, unknown>[] = [];
+  const owner = ownerRelationFilter(query.ownerPageId);
+  if (owner) filters.push(owner);
+  if (query.channel) {
+    filters.push({ property: "Channel", select: { equals: query.channel } });
+  }
+  if (!filters.length) return undefined;
+  if (filters.length === 1) return filters[0];
+  return { and: filters };
+}
+
+export function taskQueryForViewer(
+  viewer: { isAdmin: boolean; role: PortalRole; ownerId: string | null },
+  ownerParam?: string | null,
+): TaskListQuery {
+  if (viewer.role === "Caller") return { channel: "Phone" };
+  return {
+    ownerPageId: ownerPageIdFromQueryParam(viewer.isAdmin, viewer.ownerId, ownerParam),
+  };
 }

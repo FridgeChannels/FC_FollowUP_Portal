@@ -1,3 +1,5 @@
+import type { PortalRole } from "./notion/owner-role";
+
 export const SESSION_COOKIE = "fc_portal_session";
 export const SESSION_MAX_AGE = 60 * 60 * 24 * 30;
 
@@ -8,7 +10,7 @@ export type PortalSession = {
 export type SessionUser = {
   email: string;
   name: string | null;
-  role: "Admin" | "FC_Owner";
+  role: PortalRole;
 };
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

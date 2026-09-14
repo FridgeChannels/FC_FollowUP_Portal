@@ -11,7 +11,7 @@ import {
   type NotionPage,
 } from "./client";
 import { getFollowupTaskDbId } from "./config";
-import { ownerRelationFilter } from "./owner-filter";
+import { taskListFilter, type TaskListQuery } from "./owner-filter";
 import { retrieveOwner, type FollowupOwner } from "./owners";
 
 const CONTACT_TASK_KEYS = ["Follow-up Tasks", "Tasks"];
@@ -227,10 +227,10 @@ export async function listFollowupTasks(contactIds: string[]): Promise<BrandTask
   return sortTasks(tasks);
 }
 
-export async function listFollowupTasksForViewer(ownerPageId?: string | null) {
+export async function listFollowupTasksForViewer(query: TaskListQuery = {}) {
   let pages: NotionPage[] = [];
   try {
-    pages = await queryTaskPages(ownerRelationFilter(ownerPageId));
+    pages = await queryTaskPages(taskListFilter(query));
   } catch {
     pages = [];
   }

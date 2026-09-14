@@ -8,6 +8,6 @@ export async function resolveSessionUser(email?: string | null): Promise<Session
   return {
     email: viewer.email,
     name: viewer.name,
-    role: viewer.isAdmin ? "Admin" : "FC_Owner",
+    role: viewer.role,
   };
 }

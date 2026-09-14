@@ -1,21 +1,25 @@
 import { notionFetch, propertyText, titleFromProperties, type NotionPage } from "./client";
 import { getFollowupOwnerDbId } from "./config";
+import { isAdminRole, ownerRoleFromRecord, type PortalRole } from "./owner-role";
 
 export type FollowupOwner = {
   id: string;
   name: string;
   account: string | null;
+  role: PortalRole;
   isAdmin: boolean;
   status: string;
 };
 
 function mapOwner(page: NotionPage): FollowupOwner {
   const properties = page.properties || {};
+  const role = ownerRoleFromRecord(propertyText(properties.Role));
   return {
     id: page.id,
     name: titleFromProperties(properties) || "Untitled Owner",
     account: propertyText(properties.Account) || null,
-    isAdmin: properties["Is Admin"]?.checkbox === true,
+    role,
+    isAdmin: isAdminRole(role),
     status: propertyText(properties["Owner Status"]),
   };
 }
