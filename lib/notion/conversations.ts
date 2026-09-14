@@ -13,7 +13,7 @@ import {
 } from "./client";
 import { getFollowupConversationDbId } from "./config";
 import { listCheckpoints } from "./cps";
-import type { QuoCallData } from "../quo/types";
+import { parseQuoCallData } from "../quo/call-payload";
 
 const CONTACT_CONVERSATION_KEYS = ["Interactions", "Conversations", "Conversation Records"];
 
@@ -27,25 +27,11 @@ function asReplyStatus(value: string): BrandActivity["replyStatus"] {
   return null;
 }
 
-const QUO_MARKER = "[QUO_CALL_DATA]";
-
-export function serializeQuoCallData(data: QuoCallData) {
-  return `${QUO_MARKER}\n${JSON.stringify(data)}`;
-}
-
-function parseQuoData(notes: string | null): QuoCallData | null {
-  if (!notes?.startsWith(QUO_MARKER)) return null;
-  try {
-    return JSON.parse(notes.slice(QUO_MARKER.length).trim()) as QuoCallData;
-  } catch {
-    return null;
-  }
-}
-
 function mapConversation(page: NotionPage): BrandActivity {
   const properties = page.properties || {};
   const subject = propertyText(properties.Subject) || null;
   const notes = propertyText(properties.Notes) || null;
+  const extendedParameters = propertyText(properties["Extended Parameters"]) || null;
   return {
     id: page.id,
     contactId: firstRelationId(properties["Follow-up Contact"]) || null,
@@ -61,14 +47,14 @@ function mapConversation(page: NotionPage): BrandActivity {
     sourceUrl: propertyText(properties["Source URL"]) || null,
     threadId: propertyText(properties["Thread ID"]) || null,
     messageId: propertyText(properties["Message ID"]) || null,
-    extendedParameters: propertyText(properties["Extended Parameters"]) || null,
+    extendedParameters,
     replyStatus: asReplyStatus(propertyText(properties["Reply Status"])),
     cpId: firstRelationId(properties.CP) || null,
     cpAtInteraction: null,
     createdAt:
       propertyDate(properties["Interaction At"]) || page.created_time || null,
     recordedAt: page.created_time || propertyDate(properties["Interaction At"]),
-    quo: parseQuoData(notes),
+    quo: parseQuoCallData(extendedParameters),
   };
 }
 

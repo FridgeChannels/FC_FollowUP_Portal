@@ -20,7 +20,7 @@ export async function GET(request: Request, { params }: Params) {
       listCheckpoints(),
       mapFollowupClientDetail(page),
     ]);
-    if (!canViewBrand(viewer, brand)) {
+    if (!canViewBrand(viewer, brand, brand.tasks)) {
       return Response.json({ error: "You do not have access to this brand" }, { status: 403 });
     }
     return Response.json({ brand, cps });

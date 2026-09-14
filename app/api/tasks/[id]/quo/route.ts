@@ -15,22 +15,26 @@ export async function GET(request: Request, { params }: Params) {
   if (!viewer.email) return Response.json({ error: "Sign in required" }, { status: 401 });
   try {
     const { id } = await params;
+    const callId = new URL(request.url).searchParams.get("callId");
     const task = await retrieveFollowupTask(id);
     if (!canViewTask(viewer, task)) return Response.json({ error: "You do not have access to this task" }, { status: 403 });
     const activities = await findQuoCallConversationFromTask(task.id, task.conversationIds, task.contactId);
-    const existing = activities[0]?.quo || null;
-    if (!existing) {
+    const existing = callId
+      ? activities.find((item) => item.quo?.callId === callId) || null
+      : activities[0] || null;
+    const existingData = existing?.quo || null;
+    if (!existingData) {
       return Response.json({ configured: quoApiConfigured(), data: null, fromNumber: getQuoFromNumber() || null });
     }
-    if (!quoApiConfigured()) return Response.json({ configured: false, data: existing, fromNumber: getQuoFromNumber() || null });
-    const live = await getQuoCallBundle(existing.callId);
-    const data: QuoCallData = mergeQuoCallData(existing, {
-      callId: existing.callId,
-      call: live.call || existing.call,
-      recordings: live.recordings.length ? live.recordings : existing.recordings,
-      transcript: live.transcript || existing.transcript,
-      summary: live.summary || existing.summary,
-      voicemail: live.voicemail || existing.voicemail,
+    if (!quoApiConfigured()) return Response.json({ configured: false, data: existingData, fromNumber: getQuoFromNumber() || null });
+    const live = await getQuoCallBundle(existingData.callId);
+    const data: QuoCallData = mergeQuoCallData(existingData, {
+      callId: existingData.callId,
+      call: live.call || existingData.call,
+      recordings: live.recordings.length ? live.recordings : existingData.recordings,
+      transcript: live.transcript || existingData.transcript,
+      summary: live.summary || existingData.summary,
+      voicemail: live.voicemail || existingData.voicemail,
       lastEventAt: new Date().toISOString(),
     });
     await upsertQuoCallActivity({ task, data, eventType: "call.sync" });

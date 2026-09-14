@@ -6,6 +6,7 @@ import { BombInstance, Channel, Contact, CPCode, CP_CODES, Interaction, Schedule
 import { BombExecutionPlan, formatUtcTime } from "./bomb-plan";
 import { BrandReplyBox, ChannelSendBox } from "./brand-reply-box";
 import { ChannelIcon } from "./channel-icon";
+import { QuoCallPanel } from "./quo-call-panel";
 import { useWorkspace } from "./workspace-store";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -44,9 +45,7 @@ function SourceBadge({ source }: { source: "Human" | "OmniReach" }) {
 }
 
 function outboundStatus(item: Interaction) {
-  if (item.channel === "Phone") return item.callResult || item.taskStatus || item.messageStatus || null;
-  if (item.creationMethod === "Manual") return item.messageStatus || item.taskStatus || null;
-  return item.taskStatus || item.messageStatus || null;
+  return item.taskStatus || null;
 }
 
 function SendStatusBadge({ status }: { status: string }) {
@@ -76,6 +75,9 @@ export function InteractionFeed({
   actions,
   maxHeight,
   onSend,
+  initialChannel,
+  onRefreshQuo,
+  quoRefreshingCallId,
 }: {
   interactions: Interaction[];
   contacts: Contact[];
@@ -86,13 +88,16 @@ export function InteractionFeed({
   bombInstances?: BombInstance[];
   actions?: ScheduledAction[];
   onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string) => Promise<void>;
+  initialChannel?: Channel;
+  onRefreshQuo?: (callId: string) => void;
+  quoRefreshingCallId?: string | null;
 }) {
   const { state } = useWorkspace();
   const customerId = customerIdProp || interactions[0]?.customerId;
   const customer = state.customers.find(item => item.id === customerId);
   const currentCp = currentCpProp || customer?.cp || "CP1";
   const [selectedCp, setSelectedCp] = useState<CPCode>(currentCp);
-  const [selectedChannel, setSelectedChannel] = useState<Channel>("Email");
+  const [selectedChannel, setSelectedChannel] = useState<Channel>(initialChannel || "Email");
   const [bombOpen, setBombOpen] = useState(false);
   const currentIndex = CP_CODES.indexOf(currentCp);
   const cpInteractions = interactions.filter(item => !isChannelMessage(item) || belongsToCp(item, selectedCp));
@@ -145,6 +150,8 @@ export function InteractionFeed({
       contacts={contacts}
       channel={selectedChannel}
       onSend={onSend}
+      onRefreshQuo={onRefreshQuo}
+      quoRefreshingCallId={quoRefreshingCallId}
     />
 
     <Dialog open={bombOpen} onOpenChange={setBombOpen}>
@@ -178,12 +185,16 @@ function ChannelTranscript({
   contacts,
   channel,
   onSend,
+  onRefreshQuo,
+  quoRefreshingCallId,
 }: {
   customerId?: string;
   messages: Interaction[];
   contacts: Contact[];
   channel: Channel;
   onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string) => Promise<void>;
+  onRefreshQuo?: (callId: string) => void;
+  quoRefreshingCallId?: string | null;
 }) {
   const contactGroups = groupByContact(messages, contacts);
   return <div>
@@ -192,11 +203,11 @@ function ChannelTranscript({
     ) : (
       <div className="divide-y">
         {contactGroups.map(group => (
-          <ContactThreads key={group.contact?.id || "unknown"} group={group} replyPool={messages} channel={channel} onSend={onSend}/>
+          <ContactThreads key={group.contact?.id || "unknown"} group={group} replyPool={messages} channel={channel} onSend={onSend} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId}/>
         ))}
       </div>
     )}
-    <ChannelSendBox customerId={customerId} channel={channel} contacts={contacts} interactions={messages} onSend={onSend}/>
+    {channel === "Phone" ? null : <ChannelSendBox customerId={customerId} channel={channel} contacts={contacts} interactions={messages} onSend={onSend}/>}
   </div>;
 }
 
@@ -233,11 +244,15 @@ function ContactThreads({
   replyPool,
   channel,
   onSend,
+  onRefreshQuo,
+  quoRefreshingCallId,
 }: {
   group: { contact?: Contact; messages: Interaction[] };
   replyPool: Interaction[];
   channel: Channel;
   onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string) => Promise<void>;
+  onRefreshQuo?: (callId: string) => void;
+  quoRefreshingCallId?: string | null;
 }) {
   const endpoint = group.contact ? contactPoint(group.contact, channel) : undefined;
   const threads = groupByThread(group.messages);
@@ -257,7 +272,7 @@ function ContactThreads({
     </div>
     <div className="space-y-6">
       {threads.map(thread => (
-        <ThreadMessages key={threadKey(thread[0])} thread={thread} replyPool={replyPool} contact={group.contact} channel={channel} endpoint={endpoint} onSend={onSend}/>
+        <ThreadMessages key={threadKey(thread[0])} thread={thread} replyPool={replyPool} contact={group.contact} channel={channel} endpoint={endpoint} onSend={onSend} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId}/>
       ))}
     </div>
   </section>;
@@ -270,6 +285,8 @@ function ThreadMessages({
   channel,
   endpoint,
   onSend,
+  onRefreshQuo,
+  quoRefreshingCallId,
 }: {
   thread: Interaction[];
   replyPool: Interaction[];
@@ -277,26 +294,42 @@ function ThreadMessages({
   channel: Channel;
   endpoint?: string;
   onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string) => Promise<void>;
+  onRefreshQuo?: (callId: string) => void;
+  quoRefreshingCallId?: string | null;
 }) {
   return <div className="space-y-3">
     {thread.map(item => {
       const inbound = item.direction === "Inbound";
       const source = sourceLabel(item);
+      const phoneCall = channel === "Phone";
       const who = inbound
-        ? `${endpoint || contact?.name || "Contact"} Reply`
+        ? phoneCall
+          ? `${endpoint || contact?.name || "Contact"} call`
+          : `${endpoint || contact?.name || "Contact"} Reply`
         : `To ${endpoint || contact?.name || "Contact"}`;
+      const callId = item.quo?.callId;
+      const canRefresh = !!callId && !callId.startsWith("ACsim") && !!onRefreshQuo;
       return <article key={item.id} className={`rounded-xl p-4 ${inbound ? "bg-rose-50/80" : "bg-slate-50"}`}>
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
             <div className="text-xs font-semibold text-slate-900">{who}</div>
-            {inbound ? <Badge className="bg-rose-600 text-[10px] text-white hover:bg-rose-600">This is a reply</Badge> : <Badge variant="secondary" className="text-[10px]">{item.direction || "Outbound"}</Badge>}
+            {inbound && !phoneCall ? <Badge className="bg-rose-600 text-[10px] text-white hover:bg-rose-600">This is a reply</Badge> : <Badge variant="secondary" className="text-[10px]">{item.direction || "Outbound"}</Badge>}
             {source && <SourceBadge source={source}/>}
             {!inbound && (outboundStatus(item) ? <SendStatusBadge status={outboundStatus(item)!}/> : <Badge variant="outline" className="text-[10px] text-slate-500">No send status</Badge>)}
+            {phoneCall && item.callResult ? <SendStatusBadge status={item.callResult}/> : null}
           </div>
           <time dateTime={item.createdAt} className="font-mono text-[11px] text-slate-500">{formatUtcTime(item.createdAt)}</time>
         </div>
-        <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{item.content}</p>
-        {inbound && contact && (
+        {!item.quo && <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{item.content}</p>}
+        {item.quo ? <div className="mt-3">
+          <QuoCallPanel
+            compact
+            data={item.quo}
+            refreshing={quoRefreshingCallId === callId}
+            onRefresh={canRefresh ? () => onRefreshQuo?.(callId!) : undefined}
+          />
+        </div> : null}
+        {inbound && !phoneCall && contact && (
           <BrandReplyBox
             customerId={item.customerId}
             interaction={item}

@@ -40,15 +40,20 @@ export async function resolveBrandViewer(input: {
   };
 }
 
-export function canViewBrand(viewer: BrandViewer, brand: BrandListItem) {
+export function canViewBrand(viewer: BrandViewer, brand: BrandListItem, tasks?: BrandTask[]) {
   if (viewer.isAdmin) return true;
   if (viewer.ownerId && brand.ownerId === viewer.ownerId) return true;
   if (viewer.email && brand.ownerEmail?.toLowerCase() === viewer.email) return true;
+  if (tasks?.some((task) => canViewTask(viewer, task))) return true;
   return false;
 }
 
 export function canWriteBrand(viewer: BrandViewer, brand: BrandListItem) {
-  return canViewBrand(viewer, brand);
+  if (viewer.role === "Caller") return false;
+  if (viewer.isAdmin) return true;
+  if (viewer.ownerId && brand.ownerId === viewer.ownerId) return true;
+  if (viewer.email && brand.ownerEmail?.toLowerCase() === viewer.email) return true;
+  return false;
 }
 
 export function canAssignBrandOwner(viewer: BrandViewer) {

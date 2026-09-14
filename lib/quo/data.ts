@@ -46,11 +46,17 @@ function mergeMedia(...groups: Array<QuoMedia[] | null | undefined>) {
   return Array.from(new Map(media.map((item, index) => [mediaKey(item, index), item])).values());
 }
 
+function definedFields<T extends Record<string, unknown>>(value: T) {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, item]) => item !== null && item !== undefined),
+  ) as Partial<T>;
+}
+
 function mergeCall(previous?: QuoCall | null, incoming?: QuoCall | null): QuoCall | null {
   if (!previous && !incoming) return null;
   return {
     ...(previous || {}),
-    ...(incoming || {}),
+    ...definedFields((incoming || {}) as Record<string, unknown>),
     media: mergeMedia(previous?.media, incoming?.media),
     recordings: mergeQuoRecordings(previous?.recordings, incoming?.recordings),
     voicemail: incoming?.voicemail || previous?.voicemail || null,

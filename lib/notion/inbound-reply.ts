@@ -23,7 +23,7 @@ import {
   resolveReplyTask,
 } from "./followup-writes";
 import { annotateTasksWithReplyInbox } from "./reply-inbox";
-import { outboundMessageIsSent, pickOutboundCandidate, taskIsSent } from "./reply-sent-guard";
+import { pickOutboundCandidate, taskIsSent } from "./reply-sent-guard";
 import { resolveCurrentContactForBrand, resolveReplyTargetByBrandName, resolveReplyTargetByThreadId, senderForChannel } from "./reply-target";
 import { retrieveFollowupTask } from "./tasks";
 import { interactionCpCode } from "../outreach-domain";
@@ -406,12 +406,6 @@ export async function ingestInboundReply(
       422,
     );
   }
-  if (!outboundMessageIsSent({ ...outbound, channel: outbound.channel || channel })) {
-    throw new InboundReplyError(
-      `Message Status must be Sent before writing a reply. Current Message Status: ${outbound.status || "empty"}.`,
-      409,
-    );
-  }
   const outboundTask = outbound.taskId
     ? await retrieveFollowupTask(outbound.taskId).catch(() => null)
     : (target.taskId || input.taskId)
@@ -427,11 +421,13 @@ export async function ingestInboundReply(
     );
   }
 
-  const threadId =
-    input.threadId?.trim() ||
-    outbound.threadId ||
-    target.existingThreadId ||
-    (await resolveConversationThread(target.contactId, channel, outboundTask.id)).threadId;
+  const threadId = (
+    await resolveConversationThread(
+      target.contactId,
+      channel,
+      input.threadId?.trim() || outbound.threadId || target.existingThreadId,
+    )
+  ).threadId;
   const taskId = outboundTask.id;
   const sender = input.sender?.trim() || target.inferredSender || "";
   const subject =

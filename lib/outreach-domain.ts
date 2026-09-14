@@ -1,3 +1,5 @@
+import type { QuoCallData } from "./quo/types";
+
 export type Role = "Admin" | "FC_Owner" | "Caller";
 export type Channel = "Email" | "SMS" | "WhatsApp" | "LinkedIn" | "Phone";
 export type CPCode = "CP1" | "CP2" | "CP3";
@@ -44,6 +46,7 @@ export type Interaction = {
   channel?: Channel; direction?: "Inbound" | "Outbound"; title: string; content: string; createdAt: string; outcome?: CallOutcome; recording?: string;
   creationMethod?: "Automated" | "Manual"; threadId?: string; taskId?: string; replyStatus?: "Needs Reply" | "Replied";
   messageStatus?: string; taskStatus?: string; callResult?: string;
+  quo?: QuoCallData | null;
 };
 export type InboxItem = {
   id: string; customerId: string; contactId?: string; type: "Reply";
@@ -83,7 +86,7 @@ export const visibleOpenTaskCount = (state: WorkspaceState) => {
 export const roleCapabilities: Record<Role, string[]> = {
   Admin: ["dashboard","customers","tasks","inbox","calls","bombs","workflow","analytics","reply","launch","changeCP","editBrand","assignOwner","manageCalls","editBomb","editWorkflow","audit","importBrands"],
   "FC_Owner": ["dashboard","customers","bombs","reply","launch","changeCP","editBrand","createCall","editBomb"],
-  Caller: ["tasks","calls","bombs","submitCall","editBomb"],
+  Caller: ["tasks","calls"],
 };
 
 const at = (day: string, time = "09:00:00") => `${day}T${time.length === 5 ? `${time}:00` : time}.000Z`;

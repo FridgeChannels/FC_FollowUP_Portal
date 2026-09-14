@@ -8,19 +8,16 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import type { BrandActivity, BrandContact, BrandDetail, BrandTask, CurrentCpOption } from "@/lib/brand-list";
-import { CallOutcome, canSeeTask, dateOnly, isClosedTaskStatus, type Contact, type Customer, type Interaction } from "@/lib/outreach-domain";
+import { canSeeTask, dateOnly, isClosedTaskStatus, type Contact, type Customer, type Interaction } from "@/lib/outreach-domain";
 import { useWorkspace } from "./workspace-store";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import { ChangeCPDialog, LaunchBombDialog, ReplyDialog } from "./workspace-customer";
 import { InteractionFeed } from "./interaction-feed";
-import { QuoCallPanel } from "./quo-call-panel";
 import { Status } from "./workspace-pages";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { devCallPhoneOnClient } from "@/lib/quo/dev-call-phone";
@@ -197,15 +194,13 @@ function toTaskContact(item: BrandContact): Contact {
 function TaskDetail({ task }: { task: UnifiedTask }) {
   const { state, can, resolveInbox, assignBrand, reassignCall } = useWorkspace();
   const router = useRouter();
-  const [callResult, setCallResult] = useState(false);
   const [launch, setLaunch] = useState(false);
   const [sendMessage, setSendMessage] = useState(false);
   const [changeCP, setChangeCP] = useState(false);
   const [saving, setSaving] = useState(false);
   const [owners, setOwners] = useState<Array<{id:string;name:string}>>([]);
   const [liveTask, setLiveTask] = useState(task);
-  const [quoData, setQuoData] = useState<import("@/lib/quo/types").QuoCallData | null>(null);
-  const [quoRefreshing, setQuoRefreshing] = useState(false);
+  const [quoRefreshingCallId, setQuoRefreshingCallId] = useState<string | null>(null);
   const [remote, setRemote] = useState<{ customer: Customer; contact: Contact; timeline: Interaction[]; ownerName?: string; brand?: BrandDetail; cps?: CurrentCpOption[] } | null>(null);
   const applyTaskPayload = (payload: { task?: BrandTask; activities?: BrandActivity[]; brand?: BrandDetail | null; cps?: CurrentCpOption[] }) => {
     if (!payload.task) return;
@@ -237,10 +232,6 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
       updatedAt: payload.brand?.lastEditedAt || "",
     };
     const activities = payload.activities || [];
-    const latestQuo = activities
-      .filter((activity) => activity.quo)
-      .sort((left, right) => (right.createdAt || "").localeCompare(left.createdAt || ""))[0]?.quo || null;
-    setQuoData(latestQuo);
     const threadInboundCp = new Map<string, NonNullable<BrandActivity["cpAtInteraction"]>>();
     const threadCp = new Map<string, NonNullable<BrandActivity["cpAtInteraction"]>>();
     const taskCp = new Map<string, NonNullable<BrandActivity["cpAtInteraction"]>>();
@@ -268,7 +259,9 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
       content: activity.content,
       createdAt: activity.createdAt || "",
       outcome: activity.callResult as Interaction["outcome"],
-      cp: (activity.threadId ? threadInboundCp.get(activity.threadId) : undefined) || activity.cpAtInteraction || (activity.threadId ? threadCp.get(activity.threadId) : undefined) || (activity.taskId ? taskCp.get(activity.taskId) : undefined),
+      callResult: activity.callResult || undefined,
+      quo: activity.quo || null,
+      cp: (activity.threadId ? threadInboundCp.get(activity.threadId) : undefined) || activity.cpAtInteraction || (activity.threadId ? threadCp.get(activity.threadId) : undefined) || (activity.taskId ? taskCp.get(activity.taskId) : undefined) || (activity.quo ? customer.cp : undefined),
       taskId: activity.taskId || undefined,
       threadId: activity.threadId || undefined,
       messageStatus: activity.status || undefined,
@@ -307,7 +300,10 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
   useEffect(() => {
     if (!task.remote || task.type !== "Call" || isDone(liveTask)) return;
     let cancelled = false;
+    let inFlight = false;
     const poll = async () => {
+      if (cancelled || inFlight) return;
+      inFlight = true;
       try {
         const response = await fetch(`/api/tasks/${task.id}`);
         if (!response.ok) return;
@@ -315,6 +311,8 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
         if (!cancelled) applyTaskPayload(payload);
       } catch {
         // The Quo webhook may still be processing; the next poll retries safely.
+      } finally {
+        inFlight = false;
       }
     };
     const interval = window.setInterval(() => { void poll(); }, 10000);
@@ -326,20 +324,21 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
   const contact = localCustomer?.contacts.find(c => c.id === task.contactId) || localCustomer?.contacts[0] || remote?.contact;
   const callTask = liveTask.source === "call" ? state.callTasks.find(call => call.id === liveTask.id) : undefined;
   const timeline = (remote?.timeline || state.interactions.filter(item => item.customerId === task.customerId).map(item => ({ ...item, cp: item.cp || customer?.cp }))).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  const refreshQuo = async () => {
-    if (!task.remote || quoRefreshing) return;
-    setQuoRefreshing(true);
+  const refreshQuo = async (callId: string) => {
+    if (!task.remote || quoRefreshingCallId) return;
+    setQuoRefreshingCallId(callId);
     try {
-      const response = await fetch(`/api/tasks/${task.id}/quo`);
+      const response = await fetch(`/api/tasks/${task.id}/quo?callId=${encodeURIComponent(callId)}`);
       const payload = await response.json() as { data?: import("@/lib/quo/types").QuoCallData | null; errors?: string[]; error?: string };
       if (!response.ok) throw new Error(payload.error || "Unable to refresh Quo data");
-      setQuoData(payload.data || null);
+      const next = await fetch(`/api/tasks/${task.id}`);
+      applyTaskPayload(await next.json() as TaskPayload);
       if (payload.errors?.length) toast.warning(`Quo refresh completed with ${payload.errors.length} unavailable section${payload.errors.length === 1 ? "" : "s"}`);
       else toast.success("Quo data refreshed");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to refresh Quo data");
     } finally {
-      setQuoRefreshing(false);
+      setQuoRefreshingCallId(null);
     }
   };
   if (task.remote && !customer) return <main className="grid place-items-center bg-slate-50 text-sm text-slate-500">Loading task…</main>;
@@ -352,7 +351,7 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
     <main className="min-w-0 overflow-hidden rounded-2xl bg-slate-50">
     <header className="flex flex-wrap items-start justify-between gap-4 bg-white px-5 py-4 lg:px-7">
       <div><div className="flex flex-wrap items-center gap-2"><Badge variant="outline">{liveTask.type}</Badge>{isDue(liveTask, state.simulatedDate) ? <Status value="Due"/> : <Badge variant="secondary">{liveTask.status}</Badge>}<span className="text-xs text-slate-400">{dateOnly(liveTask.dueAt)}</span></div><h2 className="mt-2 text-xl font-bold">{customer.name}</h2><p className="mt-1 text-xs text-slate-500">{contact.name} · {contact.role} · {customer.cp} · {customer.status}</p></div>
-      <Button variant="outline" size="sm" onClick={() => router.push(`/customers/${customer.id}`)}>Brand profile</Button>
+      <Button variant="outline" size="sm" disabled={!customer.id} onClick={() => router.push(`/customers/${encodeURIComponent(customer.id)}`)}>Brand profile</Button>
     </header>
 
     <div className="grid lg:grid-cols-[minmax(0,1fr)_290px]">
@@ -366,21 +365,29 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
             keepalive: true,
           }).catch(() => undefined);
         }} /> : null}
-        {liveTask.type === "Call" ? <QuoCallPanel data={quoData} onRefresh={task.remote && !task.id.startsWith("mock-") ? refreshQuo : undefined} refreshing={quoRefreshing}/> : null}
         <section>
           <h3 className="mb-3 font-bold">Brand activity</h3>
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-          <InteractionFeed key={`${customer.id}-${customer.cp}`} customerId={customer.id} currentCp={customer.cp} interactions={timeline} contacts={customer.contacts} maxHeight="max-h-[480px]"/>
+          <InteractionFeed
+            key={`${customer.id}-${customer.cp}-${liveTask.type}`}
+            customerId={customer.id}
+            currentCp={customer.cp}
+            interactions={timeline}
+            contacts={customer.contacts}
+            maxHeight="max-h-[640px]"
+            initialChannel={liveTask.type === "Call" ? "Phone" : undefined}
+            onRefreshQuo={task.remote ? refreshQuo : undefined}
+            quoRefreshingCallId={quoRefreshingCallId}
+          />
           </div>
         </section>
       </div>
 
-      <aside className="bg-white p-5 lg:pl-0">
+      <aside className="border-t border-slate-200 bg-white p-5 lg:border-l lg:border-t-0 lg:p-6">
         <div className="flex items-center gap-3"><Avatar><AvatarFallback className="bg-violet-100 font-bold text-violet-700">{customer.initials}</AvatarFallback></Avatar><div><b className="text-sm">{customer.name}</b><div className="text-xs text-slate-500">{state.cps.find(cp => cp.code === customer.cp)?.goal}</div></div></div>
         {(customer.cp === "CP3" || partnershipContext) && partnershipContext && <section className="mt-5 rounded-xl bg-emerald-50 p-4"><div className="text-[11px] font-semibold tracking-wide text-emerald-700">CP3 · Partnership context</div><div className="mt-2 text-sm font-bold text-emerald-950">{partnershipContext.headline}</div><p className="mt-2 text-xs leading-5 text-emerald-900">{partnershipContext.summary}</p><div className="mt-3 space-y-2">{partnershipContext.signals.map(signal=><div key={signal} className="rounded-lg bg-white/70 px-2.5 py-2 text-xs leading-5 text-slate-700">{signal}</div>)}</div></section>}
         <div className="mt-5 rounded-xl bg-slate-50 p-4"><div className="text-xs font-semibold uppercase tracking-wide text-slate-400">FC-Owner</div><div className="mt-2 flex items-center gap-2 text-sm font-semibold"><UserRound className="size-4"/>{remote?.ownerName || state.users.find(user => user.id === task.assigneeId)?.name || "Unassigned"}</div></div>
 
-        {((callTask && can("submitCall") && callTask.status === "Scheduled") || (liveTask.remote && liveTask.type === "Call" && !isDone(liveTask))) && <Button className="mt-4 w-full" disabled={saving} onClick={() => setCallResult(true)}><Phone className="mr-2 size-4"/>Complete call</Button>}
         {callTask && can("manageCalls") && <div className="mt-4"><label className="text-xs font-semibold text-slate-500">Assign caller</label><Select value={callTask.callerId} onValueChange={value => show(reassignCall(callTask.id, value))}><SelectTrigger className="mt-2 w-full"><SelectValue/></SelectTrigger><SelectContent>{callers.map(user => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}</SelectContent></Select></div>}
         {task.remote && task.type === "Call" && can("assignOwner") && <div className="mt-4"><label className="text-xs font-semibold text-slate-500">Assign caller</label><Select value={task.assigneeId || "unassigned"} onValueChange={value => { void (async () => { setSaving(true); try { const response = await fetch(`/api/tasks/${task.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ownerId: value === "unassigned" ? null : value }) }); const payload = await response.json() as TaskPayload; if (!response.ok) throw new Error(payload.error || "Assign failed"); applyTaskPayload(payload); toast.success("Owner assigned"); } catch (error) { toast.error(error instanceof Error ? error.message : "Assign failed"); } finally { setSaving(false); } })(); }}><SelectTrigger className="mt-2 w-full"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="unassigned">Unassigned</SelectItem>{owners.map(user => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}</SelectContent></Select></div>}
         {task.source === "inbox" && can("assignOwner") && <div className="mt-4"><label className="text-xs font-semibold text-slate-500">Assign FC-Owner</label><Select value={task.assigneeId || customer.ownerId || "unassigned"} onValueChange={value => { if (!task.remote) { show(assignBrand(customer.id, value)); return; } void (async () => { setSaving(true); try { const response = await fetch(`/api/brands/${customer.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ownerId: value === "unassigned" ? null : value }) }); const payload = await response.json() as { error?: string }; if (!response.ok) throw new Error(payload.error || "Assign failed"); applyTaskPayload(await fetch(`/api/tasks/${task.id}`).then(item => item.json())); toast.success("Owner assigned"); } catch (error) { toast.error(error instanceof Error ? error.message : "Assign failed"); } finally { setSaving(false); } })(); }}><SelectTrigger className="mt-2 w-full"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="unassigned">Unassigned</SelectItem>{(task.remote ? owners : humanAssignees).map(user => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}</SelectContent></Select></div>}
@@ -394,12 +401,6 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
       </aside>
     </div>
 
-    {(callTask || (task.remote && task.type === "Call")) && <CallResultDialog taskId={task.id} open={callResult} onOpenChange={setCallResult} onSubmit={task.remote ? async (outcome, summary) => {
-      const response = await fetch(`/api/tasks/${task.id}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "complete-call", outcome, summary }) });
-      const payload = await response.json() as TaskPayload;
-      if (!response.ok) throw new Error(payload.error || "Complete call failed");
-      applyTaskPayload(payload);
-    } : undefined}/>} 
     <LaunchBombDialog customerId={customer.id} open={launch} onOpenChange={setLaunch} contacts={task.remote ? customer.contacts : undefined} currentCp={remote?.brand?.currentCp} companyName={remote?.brand?.name || customer.name} productDescription={remote?.brand?.productDescription} matchedCategory={remote?.brand?.matchedCategory} previewOnly={task.remote}/>
     <ReplyDialog customerId={customer.id} open={sendMessage} onOpenChange={setSendMessage} contacts={task.remote ? customer.contacts : undefined} onSend={task.remote ? async (contactId, channel, content) => {
       const response = await fetch(`/api/brands/${customer.id}/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contactId, channel, content, taskId: task.id }) });
@@ -417,17 +418,6 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
     } : undefined}/>
   </main>
   </div>;
-}
-
-function CallResultDialog({ taskId, open, onOpenChange, onSubmit }: { taskId: string; open: boolean; onOpenChange: (value: boolean) => void; onSubmit?: (outcome: CallOutcome, summary: string) => Promise<void> }) {
-  const { submitCallResult } = useWorkspace();
-  const [outcome, setOutcome] = useState<CallOutcome>("No Answer");
-  const [summary, setSummary] = useState("");
-  const [recording, setRecording] = useState<"Attached" | "Upload manually" | "Unavailable">("Attached");
-  const [callback, setCallback] = useState("");
-  const [saving, setSaving] = useState(false);
-  const requiresSummary = outcome === "Contact Responded" || outcome === "Connected — No Useful Response" || outcome === "Call Back Requested";
-  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent><DialogHeader><DialogTitle>Complete call task</DialogTitle><DialogDescription>The call record is saved before the workflow moves forward.</DialogDescription></DialogHeader><Select value={outcome} onValueChange={value => setOutcome(value as CallOutcome)}><SelectTrigger className="w-full"><SelectValue/></SelectTrigger><SelectContent>{["Contact Responded", "Connected — No Useful Response", "No Answer", "Voicemail", "Call Back Requested", "Wrong Number", "Wrong Contact", "Other"].map(value => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select>{requiresSummary && <Textarea value={summary} onChange={event => setSummary(event.target.value)} placeholder="Full call notes or transcript (required)"/>}{outcome === "Call Back Requested" && <Input type="date" value={callback} onChange={event => setCallback(event.target.value)}/>}<Select value={recording} onValueChange={value => setRecording(value as typeof recording)}><SelectTrigger className="w-full"><SelectValue/></SelectTrigger><SelectContent>{["Attached", "Upload manually", "Unavailable"].map(value => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select><div className="rounded-xl bg-slate-50 p-4 text-xs leading-5 text-slate-600">If the correct contact answers, the call is recorded, the Bomb stops, and a Reply Task is created for a FC_Owner. No Answer and Voicemail let the Bomb continue.</div><DialogFooter><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button disabled={saving || (requiresSummary && !summary.trim())} onClick={() => { void (async () => { if (onSubmit) { setSaving(true); try { await onSubmit(outcome, summary); toast.success("Call result saved"); onOpenChange(false); } catch (error) { toast.error(error instanceof Error ? error.message : "Update failed"); } finally { setSaving(false); } return; } const result = submitCallResult(taskId, outcome, summary, callback ? `${callback}T09:00:00.000Z` : undefined, recording); show(result); if (result.ok) onOpenChange(false); })(); }}>Submit result</Button></DialogFooter></DialogContent></Dialog>;
 }
 
 function CallBrief({ task, contact, completed, onCallOpening }: { task: UnifiedTask; contact: Contact; completed: boolean; onCallOpening: () => void }) {

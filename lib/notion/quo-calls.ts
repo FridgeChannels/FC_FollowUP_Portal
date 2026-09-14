@@ -1,11 +1,13 @@
 import type { BrandTask } from "../brand-list";
-import { findQuoCallConversation, serializeQuoCallData } from "./conversations";
+import { findQuoCallConversation } from "./conversations";
+import { serializeQuoCallData } from "../quo/call-payload";
 import { createOutboundConversation } from "./followup-writes";
-import { richText, updatePage } from "./client";
+import { firstRelationId, retrievePage, richText, updatePage } from "./client";
 import { retrieveFollowupTask } from "./tasks";
 import type { QuoCall, QuoCallData } from "../quo/types";
 import { mergeQuoCallData, recordingsForQuoCall } from "../quo/data";
 import { findRecentQuoDialAttempt } from "../quo/dial-attempts";
+import { interactionCpCode } from "../outreach-domain";
 
 function normalizePhone(value?: string | null) {
   return (value || "").replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
@@ -34,6 +36,13 @@ function callResult(call?: QuoCall | null) {
 
 function eventTime(data: QuoCallData) {
   return data.call?.completedAt || data.call?.createdAt || data.transcript?.createdAt || data.lastEventAt || new Date().toISOString();
+}
+
+async function brandCheckpoint(task: BrandTask) {
+  if (!task.brandId) return { cpId: null as string | null, cpAtInteraction: interactionCpCode(task.sourceBombCp) };
+  const page = await retrievePage(task.brandId).catch(() => null);
+  const cpId = firstRelationId(page?.properties?.["Current CP"]) || null;
+  return { cpId, cpAtInteraction: interactionCpCode(task.sourceBombCp) };
 }
 
 function readableContent(data: QuoCallData) {
@@ -89,9 +98,10 @@ export async function upsertQuoCallActivity(input: {
   const content = readableContent(data);
   const result = callResult(data.call);
   const createdAt = eventTime(data);
+  const extendedParameters = serializeQuoCallData(data, existing?.extendedParameters);
   const properties = {
     Content: { rich_text: richText(content) },
-    Notes: { rich_text: richText(serializeQuoCallData(data)) },
+    "Extended Parameters": { rich_text: richText(extendedParameters) },
     "Message ID": { rich_text: richText(`QUO_CALL:${data.callId}`) },
     "Call Result": { rich_text: result ? richText(result) : [] },
     Direction: { select: { name: "Inbound" } },
@@ -102,6 +112,7 @@ export async function upsertQuoCallActivity(input: {
   if (existing) {
     await updatePage(existing.id, properties);
   } else {
+    const checkpoint = await brandCheckpoint(input.task);
     await createOutboundConversation({
       brandName: input.task.brandName || "Untitled Brand",
       contactId: input.task.contactId,
@@ -110,14 +121,16 @@ export async function upsertQuoCallActivity(input: {
       content,
       sender: input.task.contactName || input.task.contactPhone || "Contact",
       taskId: input.task.id,
-      threadId: data.call?.conversationId ? `QUO_CONVERSATION:${data.call.conversationId}` : undefined,
       messageId: `QUO_CALL:${data.callId}`,
       messageStatus: null,
       callResult: result,
       interactionAt: createdAt,
-      notes: serializeQuoCallData(data),
+      notes: "Quo 通话回写。",
+      extendedParameters,
       titleSuffix: "Inbound",
       direction: "Inbound",
+      cpId: checkpoint.cpId,
+      cpAtInteraction: checkpoint.cpAtInteraction,
     });
   }
 

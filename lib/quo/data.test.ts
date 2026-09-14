@@ -44,6 +44,28 @@ describe("Quo call data", () => {
     ]);
   });
 
+  it("does not let later transcript events wipe call timestamps", () => {
+    const merged = mergeQuoCallData({
+      callId: "AC1",
+      call: {
+        id: "AC1",
+        status: "answered",
+        createdAt: "2026-09-14T09:00:00.000Z",
+        answeredAt: "2026-09-14T09:00:10.000Z",
+        completedAt: "2026-09-14T09:01:00.000Z",
+      },
+    }, {
+      callId: "AC1",
+      call: { id: "AC1" },
+      transcript: { callId: "AC1", dialogue: [{ content: "Hello" }] },
+    }, "call.transcript.completed");
+
+    assert.equal(merged.call?.status, "answered");
+    assert.equal(merged.call?.createdAt, "2026-09-14T09:00:00.000Z");
+    assert.equal(merged.call?.answeredAt, "2026-09-14T09:00:10.000Z");
+    assert.equal(merged.call?.completedAt, "2026-09-14T09:01:00.000Z");
+  });
+
   it("deduplicates webhook retries by event id", () => {
     const event = { id: "EV1", type: "call.completed", createdAt: "2026-09-14T00:00:00.000Z" };
     const merged = mergeQuoCallData(

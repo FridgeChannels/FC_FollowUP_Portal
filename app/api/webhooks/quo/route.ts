@@ -1,9 +1,6 @@
+import { after } from "next/server";
 import { getQuoWebhookSigningSecrets } from "@/lib/quo/config";
-import {
-  resolveFollowupTaskForQuoWebhook,
-  upsertQuoCallActivity,
-} from "@/lib/notion/quo-calls";
-import { removeQuoDialAttempt } from "@/lib/quo/dial-attempts";
+import { enqueueQuoWebhookJob, processQuoWebhookEvent } from "@/lib/quo/webhook-job";
 import {
   callDataFromQuoWebhook,
   isHandledQuoWebhookType,
@@ -14,6 +11,16 @@ import {
 } from "@/lib/quo/webhook-signature";
 
 type JsonObject = Record<string, unknown>;
+
+function runWebhookJobInBackground(job: Promise<unknown>) {
+  try {
+    after(() => job);
+  } catch {
+    void job.catch((error) => {
+      console.error("Quo webhook job failed", error);
+    });
+  }
+}
 
 export async function GET() {
   return Response.json({ ok: true, configured: getQuoWebhookSigningSecrets().length > 0 });
@@ -46,38 +53,37 @@ export async function POST(request: Request) {
     return Response.json({ ok: true, ignored: true });
   }
 
-  try {
-    const resolved = await resolveFollowupTaskForQuoWebhook({
-      callId: data.callId,
-      call: data.call,
-      eventAt: data.lastEventAt,
-    });
-    if (type === "call.ringing") {
-      return Response.json({
-        ok: true,
-        pending: true,
-        linked: !!resolved.task,
-        taskId: resolved.task?.id || null,
-        callId: data.callId,
-        matchedBy: resolved.matchedBy,
-      });
+  const wait = new URL(request.url).searchParams.get("wait") === "1";
+  if (type === "call.ringing") {
+    try {
+      const result = await processQuoWebhookEvent(type, data);
+      return Response.json(result.body, { status: result.status });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to process Quo webhook";
+      console.error("Quo webhook job failed", error);
+      return Response.json({ error: message }, { status: 500 });
     }
-    if (!resolved.task) {
-      return Response.json({ ok: true, linked: false, callId: data.callId }, { status: 202 });
-    }
-    const created = !resolved.existing;
-    await upsertQuoCallActivity({ task: resolved.task, data, eventType: type });
-    await removeQuoDialAttempt(resolved.task.id);
-    return Response.json({
-      ok: true,
-      linked: true,
-      taskId: resolved.task.id,
-      callId: data.callId,
-      matchedBy: resolved.matchedBy,
-      created,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to process Quo webhook";
-    return Response.json({ error: message }, { status: 500 });
   }
+
+  const job = enqueueQuoWebhookJob(type, data);
+  if (wait) {
+    try {
+      const result = await job;
+      return Response.json(result.body, { status: result.status });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to process Quo webhook";
+      console.error("Quo webhook job failed", error);
+      return Response.json({ error: message }, { status: 500 });
+    }
+  }
+
+  runWebhookJobInBackground(job.catch((error) => {
+    console.error("Quo webhook job failed", { callId: data.callId, type, error });
+  }));
+  return Response.json({
+    ok: true,
+    accepted: true,
+    callId: data.callId,
+    eventType: type,
+  });
 }

@@ -2,6 +2,7 @@ import { FOLLOW_UP_STATUSES, HANDLING_MODES, type BrandActivity, type BrandTask 
 import { conversationCpRelation, resolveCheckpoint } from "./cps";
 import { createPage, propertyText, retrievePage, richText, updatePage } from "./client";
 import { getFollowupConversationDbId, getFollowupTaskDbId } from "./config";
+import { pickContactChannelThreadId } from "./conversation-thread";
 import { listFollowupConversations } from "./conversations";
 import { asExtendedParameters } from "./extended-parameters";
 import { retrieveOwner } from "./owners";
@@ -15,16 +16,6 @@ import { listFollowupTasks, retrieveFollowupTask } from "./tasks";
 
 const TASK_STATUSES = new Set(["Pending", "In Progress", "Completed", "Failed", "Cancelled"]);
 const CALL_RESULTS = new Set(["Connected", "No Answer", "Voicemail", "Declined", "Invalid Number"]);
-const CALL_OUTCOME_MAP: Record<string, string | null> = {
-  "Contact Responded": "Connected",
-  "Connected — No Useful Response": "Connected",
-  "No Answer": "No Answer",
-  Voicemail: "Voicemail",
-  "Call Back Requested": "Connected",
-  "Wrong Number": "Invalid Number",
-  "Wrong Contact": "Declined",
-  Other: null,
-};
 
 const CHANNELS = new Set(["Email", "LinkedIn", "SMS", "WhatsApp", "Phone"]);
 
@@ -38,22 +29,14 @@ function uniqueRecordId(prefix: string, channel: string) {
 export async function resolveConversationThread(
   contactId: string,
   channel: string,
-  taskId?: string,
+  preferredThreadId?: string | null,
 ) {
-  if (taskId) {
-    const existing = await listFollowupConversations([contactId]);
-    const sameTask = existing.find(
-      (item) => item.taskId === taskId && item.channel === channel && item.threadId,
-    );
-    if (sameTask?.threadId) {
-      return {
-        threadId: sameTask.threadId,
-        messageId: uniqueRecordId("MSG", channel),
-      };
-    }
-  }
+  const existing = await listFollowupConversations([contactId]);
   return {
-    threadId: uniqueRecordId("THR", channel),
+    threadId:
+      pickContactChannelThreadId(existing, channel) ||
+      preferredThreadId?.trim() ||
+      uniqueRecordId("THR", channel),
     messageId: uniqueRecordId("MSG", channel),
   };
 }
@@ -191,12 +174,10 @@ export async function createOutboundConversation(input: {
   const subject =
     input.subject?.trim() ||
     (input.channel === "Email" ? content.split("\n")[0].slice(0, 120) : "");
-  const thread = input.threadId?.trim()
-    ? {
-        threadId: input.threadId.trim(),
-        messageId: input.messageId?.trim() || uniqueRecordId("MSG", input.channel),
-      }
-    : await resolveConversationThread(contact.id, input.channel, input.taskId);
+  const thread = await resolveConversationThread(contact.id, input.channel, input.threadId);
+  if (input.messageId?.trim()) {
+    thread.messageId = input.messageId.trim();
+  }
   const properties: Record<string, unknown> = {
     "Conversation Record": { title: richText(title) },
     "Conversation Record ID": { rich_text: richText(`PORTAL-${Date.now()}`) },
@@ -288,47 +269,6 @@ export async function updateFollowupTask(
   }
   if (!Object.keys(properties).length) throw new Error("No task fields to update");
   return updatePage(pageId, properties);
-}
-
-export function mapCallOutcome(outcome: string) {
-  return CALL_OUTCOME_MAP[outcome] ?? null;
-}
-
-export async function completeFollowupCall(input: {
-  taskId: string;
-  brandName: string;
-  contactId: string;
-  contactName: string;
-  outcome: string;
-  summary?: string;
-  sender?: string | null;
-  cpId?: string | null;
-  cpAtInteraction?: string | null;
-}) {
-  const callResult = mapCallOutcome(input.outcome);
-  const now = new Date().toISOString();
-  const notes = [`电话结果：${input.outcome}。`, input.summary?.trim() || ""].filter(Boolean).join("");
-  await createOutboundConversation({
-    brandName: input.brandName,
-    contactId: input.contactId,
-    contactName: input.contactName,
-    channel: "Phone",
-    content: input.summary?.trim() || input.outcome,
-    sender: input.sender,
-    taskId: input.taskId,
-    messageStatus: null,
-    callResult,
-    interactionAt: now,
-    notes,
-    titleSuffix: callResult || "Phone",
-    cpId: input.cpId,
-    cpAtInteraction: input.cpAtInteraction,
-  });
-  return updateFollowupTask(input.taskId, {
-    status: "Completed",
-    endedAt: now,
-    notes,
-  });
 }
 
 export async function createFollowupTask(input: {

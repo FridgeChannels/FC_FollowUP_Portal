@@ -69,15 +69,15 @@ describe("reply sent guard", () => {
     );
   });
 
-  it("rejects pending outbound even when a task exists", () => {
+  it("accepts outbound regardless of Message Status when the task is Completed", () => {
+    const pending = outbound({ status: "Pending" });
     const result = evaluateSentOutbound({
       channel: "Email",
-      activities: [outbound({ status: "Pending" })],
+      activities: [pending],
       task: task("Completed"),
     });
-    assert.equal(result.ok, false);
-    assert.equal(result.status, 409);
-    assert.match(result.error, /Message Status must be Sent/);
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.outbound.id, pending.id);
   });
 
   it("rejects sent outbound when the task is still In Progress", () => {

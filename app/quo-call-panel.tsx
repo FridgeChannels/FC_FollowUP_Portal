@@ -98,8 +98,18 @@ function AwaitingQuoData() {
   </section>;
 }
 
-export function QuoCallPanel({ data, onRefresh, refreshing = false }: { data: QuoCallData | null; onRefresh?: () => void; refreshing?: boolean }) {
-  if (!data) return <AwaitingQuoData/>;
+export function QuoCallPanel({
+  data,
+  onRefresh,
+  refreshing = false,
+  compact = false,
+}: {
+  data: QuoCallData | null;
+  onRefresh?: () => void;
+  refreshing?: boolean;
+  compact?: boolean;
+}) {
+  if (!data) return compact ? null : <AwaitingQuoData/>;
 
   const call = data.call;
   const recordings = recordingsForQuoCall(data);
@@ -110,12 +120,12 @@ export function QuoCallPanel({ data, onRefresh, refreshing = false }: { data: Qu
   const jobs = data.summary?.jobs || [];
   const eventTypes = new Set(data.eventTypes || []);
 
-  return <section className="mt-6 rounded-2xl bg-white shadow-sm">
-    <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-5 sm:px-5">
+  return <section className={compact ? "rounded-xl bg-white p-4" : "mt-6 rounded-2xl bg-white p-4 shadow-sm sm:p-5"}>
+    <div className="flex flex-wrap items-start justify-between gap-3 pb-3">
       <div className="flex min-w-0 items-start gap-3"><span className="grid size-9 shrink-0 place-items-center rounded-xl bg-blue-100 text-blue-700"><PhoneCall className="size-4"/></span><h3 className="pt-1 font-bold text-slate-950">Quo call details</h3></div>
       {onRefresh ? <Button size="sm" variant="outline" disabled={refreshing} onClick={onRefresh}><RefreshCw className={`mr-2 size-3.5 ${refreshing ? "animate-spin" : ""}`}/>Refresh Quo data</Button> : null}
     </div>
-    <Tabs defaultValue="call" className="px-4 pb-5 sm:px-5">
+    <Tabs defaultValue="call">
       <TabsList variant="line" className="grid h-11 w-full grid-cols-4 gap-0">
         <TabsTrigger value="call" className="min-w-0 px-1 text-xs sm:text-sm"><Activity className="size-3.5"/>Call</TabsTrigger>
         <TabsTrigger value="recording" className="min-w-0 px-1 text-xs sm:text-sm"><FileAudio className="size-3.5"/>Recording</TabsTrigger>
@@ -137,7 +147,11 @@ export function QuoCallPanel({ data, onRefresh, refreshing = false }: { data: Qu
       </TabsContent>
 
       <TabsContent value="transcript" className="mt-5">
-        {data.transcript || eventTypes.has("call.transcript.completed") ? <div><div className="rounded-xl bg-blue-50 p-4"><Field label="Spoken language" value={data.transcript?.language}/></div>{dialogue.length ? <div className="mt-4 space-y-3 rounded-xl bg-slate-50 p-4">{dialogue.map((line, index) => <SpeakerLine key={`${line.start}-${line.end}-${index}`} line={line}/>)}</div> : <p className="mt-4 rounded-xl bg-slate-50 p-4 text-sm text-slate-500">Quo returned the transcript event without dialogue lines.</p>}</div> : <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">No transcript available yet.</p>}
+        {data.transcript || eventTypes.has("call.transcript.completed")
+          ? dialogue.length
+            ? <div className="space-y-3 rounded-xl bg-slate-50 p-4">{dialogue.map((line, index) => <SpeakerLine key={`${line.start}-${line.end}-${index}`} line={line}/>)}</div>
+            : <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">Quo returned the transcript event without dialogue lines.</p>
+          : <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">No transcript available yet.</p>}
       </TabsContent>
     </Tabs>
   </section>;

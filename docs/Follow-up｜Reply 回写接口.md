@@ -44,7 +44,7 @@ Authorization: Bearer <REPLY_INGEST_TOKEN>
 | `occurredAt` | 否 | 真实收到时间。空则用服务器时间 |
 | `extendedParameters` | 否 | JSON 对象，写入 ConversationDB `Extended Parameters`。Gmail thread / message id 放这里 |
 
-`taskId` + `threadId` 必须指向同一条已发出 Email：`Message Status = Sent`，`Task Status = Completed`。
+`taskId` + `threadId` 必须指向同一条 Outbound Email，且对应 `Task Status = Completed`。不检查 ConversationDB 的 `Message Status`。
 
 写入后：
 
@@ -61,7 +61,7 @@ Authorization: Bearer <REPLY_INGEST_TOKEN>
 | 401 | 未鉴权 |
 | 403 | 登录用户无权写该品牌 |
 | 404 | Task / Thread 不存在 |
-| 409 | Task 与 Thread 对不上，或尚未发出 |
+| 409 | Task 与 Thread 对不上，或 Task Status 尚未 Completed |
 | 422 | 找不到可挂靠的已发出记录 |
 | 500 | 写入失败 |
 
@@ -114,7 +114,7 @@ GET /api/replies/target?taskId=<Task>&threadId=<系统线程 ID>
 | `occurredAt` | 否 | 真实收到时间。空则用服务器时间 |
 | `extendedParameters` | 否 | LinkedIn 会话 / 消息 ID 放这里，不要当作 `threadId` |
 
-`taskId` + `threadId` 必须指向同一条已发出 LinkedIn：`Message Status = Sent`，`Task Status = Completed`。写入后行为与错误码同 Email。
+`taskId` + `threadId` 必须指向同一条 Outbound LinkedIn，且对应 `Task Status = Completed`。不检查 ConversationDB 的 `Message Status`。写入后行为与错误码同 Email。
 
 ```bash
 curl -sS -X POST "http://127.0.0.1:5173/api/replies" \
@@ -159,7 +159,7 @@ curl -sS -X POST "http://127.0.0.1:5173/api/replies" \
 | `occurredAt` | 否 | 真实收到时间。空则用服务器时间 |
 | `extendedParameters` | 否 | 供应商 Message SID、来信号码放这里，不要当作 `threadId` |
 
-`taskId` + `threadId` 必须指向同一条已发出 SMS：`Message Status = Sent`，`Task Status = Completed`。写入后行为与错误码同 Email。
+`taskId` + `threadId` 必须指向同一条 Outbound SMS，且对应 `Task Status = Completed`。不检查 ConversationDB 的 `Message Status`。写入后行为与错误码同 Email。
 
 ```bash
 curl -sS -X POST "http://127.0.0.1:5173/api/replies" \
@@ -204,7 +204,7 @@ curl -sS -X POST "http://127.0.0.1:5173/api/replies" \
 | `occurredAt` | 否 | 真实收到时间。空则用服务器时间 |
 | `extendedParameters` | 否 | wamid、WhatsApp conversation id 放这里，不要当作 `threadId` |
 
-`taskId` + `threadId` 必须指向同一条已发出 WhatsApp：`Message Status = Sent`，`Task Status = Completed`。写入后行为与错误码同 Email。
+`taskId` + `threadId` 必须指向同一条 Outbound WhatsApp，且对应 `Task Status = Completed`。不检查 ConversationDB 的 `Message Status`。写入后行为与错误码同 Email。
 
 ```bash
 curl -sS -X POST "http://127.0.0.1:5173/api/replies" \
@@ -253,7 +253,7 @@ curl -sS -X POST "http://127.0.0.1:5173/api/replies" \
 
 `callResult` 仅 Phone 可用，其它渠道传入会 `400`。
 
-`taskId` + `threadId` 必须指向同一条已发出 Phone：Outbound 有 `Call Result` 或 `Message Status = Sent`，且 `Task Status = Completed`。
+`taskId` + `threadId` 必须指向同一条 Outbound Phone，且对应 `Task Status = Completed`。不检查 ConversationDB 的 `Message Status` 或 `Call Result`。
 
 写入后与其它渠道相同，但 **不写 `Message Status = Received`**，只写 `Call Result`（若传入）。
 

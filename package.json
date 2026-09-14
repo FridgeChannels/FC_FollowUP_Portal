@@ -12,7 +12,7 @@
     "start": "node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js dev --config dist/server/wrangler.json --local --persist-to .wrangler/state --ip 127.0.0.1 --inspector-port 0",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "test:engine": "node --experimental-strip-types --test lib/scheduling-engine/engine.test.ts",
-    "test:quo": "node --experimental-strip-types --test lib/quo/*.test.ts",
+    "test:quo": "node --experimental-strip-types --test lib/quo/*.test.ts lib/notion/rate-limit.test.ts lib/notion/conversation-thread.test.ts",
     "test:variables": "node --experimental-strip-types --test lib/template-variables.test.ts",
     "simulate:replies": "node scripts/simulate-channel-replies.mjs",
     "simulate:replies:email": "node scripts/simulate-channel-replies.mjs --channel Email",
@@ -21,6 +21,7 @@
     "simulate:replies:whatsapp": "node scripts/simulate-channel-replies.mjs --channel WhatsApp",
     "simulate:replies:phone": "node scripts/simulate-channel-replies.mjs --channel Phone",
     "simulate:quo": "node scripts/simulate-quo-call.mjs",
+    "simulate:quo:concurrency": "node scripts/simulate-quo-concurrency.mjs",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {

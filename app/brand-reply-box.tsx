@@ -47,11 +47,27 @@ function hasLaterHumanOutbound(inbound: Interaction, interactions: Interaction[]
   );
 }
 
-export function inboundNeedsComposer(_state: WorkspaceState, inbound: Interaction, interactions = _state.interactions) {
+function laterThan(left: Interaction, right: Interaction) {
+  const leftTime = activityTime(left.createdAt);
+  const rightTime = activityTime(right.createdAt);
+  return leftTime > rightTime || (leftTime === rightTime && left.id.localeCompare(right.id) > 0);
+}
+
+function inboundIsAwaitingReply(inbound: Interaction, interactions: Interaction[]) {
   if (inbound.direction !== "Inbound") return false;
   if (inbound.replyStatus === "Replied") return false;
   if (inbound.replyStatus === "Needs Reply") return true;
   return !hasLaterHumanOutbound(inbound, interactions);
+}
+
+export function inboundNeedsComposer(_state: WorkspaceState, inbound: Interaction, interactions = _state.interactions) {
+  if (!inboundIsAwaitingReply(inbound, interactions)) return false;
+  return !interactions.some(item =>
+    item.id !== inbound.id &&
+    inboundIsAwaitingReply(item, interactions) &&
+    sameConversation(item, inbound) &&
+    laterThan(item, inbound)
+  );
 }
 
 export function BrandReplyBox({

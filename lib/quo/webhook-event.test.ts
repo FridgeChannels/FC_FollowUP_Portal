@@ -53,7 +53,22 @@ describe("Quo webhook event payloads", () => {
     assert.equal(data?.transcript?.dialogue?.[0]?.content, "Hello");
   });
 
-  it("still accepts the legacy data.object call envelope", () => {
+  it("does not put null timestamps on transcript-only payloads", () => {
+    const data = callDataFromQuoWebhook({
+      type: "call.transcript.completed",
+      data: {
+        resource: {
+          callId: "ACcall1",
+          dialogue: [{ content: "Hello", start: 0, end: 1 }],
+        },
+      },
+    });
+    assert.equal(data?.call?.status, undefined);
+    assert.equal(data?.call?.answeredAt, undefined);
+    assert.equal(data?.call?.completedAt, undefined);
+  });
+
+  it("reads legacy object envelopes", () => {
     const data = callDataFromQuoWebhook({
       type: "call.completed",
       data: {

@@ -4,9 +4,8 @@ import { canAssignBrandOwner, canViewTask, canWriteTask } from "@/lib/brand-acce
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { retrievePage } from "@/lib/notion/client";
 import { listConversationsByIds, listFollowupConversations } from "@/lib/notion/conversations";
-import { mapFollowupClientDetail, mapFollowupClientPage } from "@/lib/notion/followup-clients";
-import { completeFollowupCall, updateFollowupTask } from "@/lib/notion/followup-writes";
-import { interactionCpCode } from "@/lib/outreach-domain";
+import { mapFollowupClientDetail } from "@/lib/notion/followup-clients";
+import { updateFollowupTask } from "@/lib/notion/followup-writes";
 import { annotateTasksWithReplyInbox } from "@/lib/notion/reply-inbox";
 import { retrieveFollowupTask } from "@/lib/notion/tasks";
 import { dialPhoneForTask } from "@/lib/quo/config";
@@ -105,47 +104,25 @@ export async function POST(request: Request, { params }: Params) {
     const { id } = await params;
     const body = (await request.json()) as {
       action?: string;
-      outcome?: string;
-      summary?: string;
     };
     const task = await retrieveFollowupTask(id);
     if (!canWriteTask(viewer, task)) {
       return Response.json({ error: "You do not have access to this task" }, { status: 403 });
     }
-    if (body.action === "quo-attempt") {
-      if (task.channel !== "Phone") {
-        return Response.json({ error: "quo-attempt is only valid for Phone tasks" }, { status: 400 });
-      }
-      await recordQuoDialAttempt({
-        taskId: task.id,
-        phone: dialPhoneForTask(task.contactPhone),
-        contactId: task.contactId,
-        brandId: task.brandId,
-        brandName: task.brandName,
-        contactName: task.contactName,
-        channel: task.channel,
-      });
-      return Response.json(await taskPayload(id));
-    }
-    if (body.action !== "complete-call") {
+    if (body.action !== "quo-attempt") {
       return Response.json({ error: "Unsupported task action" }, { status: 400 });
     }
-    if (!task.contactId) {
-      return Response.json({ error: "Task has no Follow-up Contact" }, { status: 400 });
+    if (task.channel !== "Phone") {
+      return Response.json({ error: "quo-attempt is only valid for Phone tasks" }, { status: 400 });
     }
-    const brand = task.brandId
-      ? await mapFollowupClientPage(await retrievePage(task.brandId)).catch(() => null)
-      : null;
-    await completeFollowupCall({
-      taskId: id,
-      brandName: task.brandName || "Untitled Client",
+    await recordQuoDialAttempt({
+      taskId: task.id,
+      phone: dialPhoneForTask(task.contactPhone),
       contactId: task.contactId,
-      contactName: task.contactName || "KeyPerson",
-      outcome: body.outcome || "Other",
-      summary: body.summary,
-      sender: viewer.email,
-      cpId: brand?.currentCpId,
-      cpAtInteraction: interactionCpCode(brand?.currentCp),
+      brandId: task.brandId,
+      brandName: task.brandName,
+      contactName: task.contactName,
+      channel: task.channel,
     });
     return Response.json(await taskPayload(id));
   } catch (error) {

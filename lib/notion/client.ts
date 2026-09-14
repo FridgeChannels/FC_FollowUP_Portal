@@ -1,5 +1,6 @@
 import { getFollowupClientDbId, getNotionApiKey, NOTION_VERSION } from "./config";
 import { ownerRelationFilter } from "./owner-filter";
+import { notionRetry } from "./rate-limit";
 
 const NOTION_API = "https://api.notion.com/v1";
 
@@ -49,13 +50,13 @@ function notionHeaders() {
 }
 
 export async function notionFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${NOTION_API}${path}`, {
+  const response = await notionRetry.fetchWithRetry(() => fetch(`${NOTION_API}${path}`, {
     ...init,
     headers: {
       ...notionHeaders(),
       ...(init?.headers || {}),
     },
-  });
+  }));
   if (!response.ok) {
     const body = await response.text();
     throw new Error(`Notion ${response.status}: ${body.slice(0, 300)}`);

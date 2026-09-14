@@ -58,7 +58,6 @@ export type QuoTranscript = {
   object?: string | null;
   callId?: string | null;
   createdAt?: string | null;
-  language?: string | null;
   dialogue?: QuoTranscriptLine[] | null;
   duration?: number | null;
   status?: string | null;

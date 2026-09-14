@@ -67,14 +67,6 @@ export function evaluateSentOutbound(input: {
       error: `No outbound ${input.channel} message found. A reply can only be written after a message has been sent.`,
     };
   }
-  if (!outboundMessageIsSent({ ...outbound, channel: outbound.channel || input.channel })) {
-    return {
-      ok: false as const,
-      status: 409,
-      error: `Message Status must be Sent before writing a reply. Current Message Status: ${outbound.status || "empty"}.`,
-      outbound,
-    };
-  }
   const taskStatus = input.task?.status || null;
   if (!taskIsSent(taskStatus)) {
     return {

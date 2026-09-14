@@ -308,7 +308,7 @@ for (const event of events) {
     continue;
   }
   const posted = await requestJson(options.url, {
-    path: "/api/webhooks/quo",
+    path: "/api/webhooks/quo?wait=1",
     method: "POST",
     headers: signBody(body, secret),
     payload: body,

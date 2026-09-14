@@ -78,23 +78,30 @@ function asCall(resource: JsonObject, context: JsonObject | null): QuoCall | nul
   const outgoing = direction === "outgoing" || direction === "outbound";
   const from = text(resource.from, outgoing ? phones.workspace[0] : phones.external[0]);
   const to = text(resource.to, outgoing ? phones.external[0] : phones.workspace[0]);
-  return {
-    ...resource,
+  const call: QuoCall = {
     id: callId,
     object: text(resource.object) || "call",
-    from,
-    to,
-    direction,
-    participants: phones.all,
-    conversationId: text(resource.conversationId, context?.conversationId),
-    status: text(resource.status),
-    createdAt: text(resource.createdAt),
-    answeredAt: text(resource.answeredAt),
-    completedAt: text(resource.completedAt),
-    updatedAt: text(resource.updatedAt),
-    hasVoicemail: resource.hasVoicemail === true,
-    recordings: Array.isArray(resource.recordings) ? resource.recordings as QuoRecording[] : undefined,
   };
+  if (from) call.from = from;
+  if (to) call.to = to;
+  if (direction) call.direction = direction;
+  if (phones.all.length) call.participants = phones.all;
+  const conversationId = text(resource.conversationId, context?.conversationId);
+  if (conversationId) call.conversationId = conversationId;
+  const status = text(resource.status);
+  if (status) call.status = status;
+  const createdAt = text(resource.createdAt);
+  if (createdAt) call.createdAt = createdAt;
+  const answeredAt = text(resource.answeredAt);
+  if (answeredAt) call.answeredAt = answeredAt;
+  const completedAt = text(resource.completedAt);
+  if (completedAt) call.completedAt = completedAt;
+  const updatedAt = text(resource.updatedAt);
+  if (updatedAt) call.updatedAt = updatedAt;
+  if (resource.hasVoicemail === true) call.hasVoicemail = true;
+  if (typeof resource.duration === "number") call.duration = resource.duration;
+  if (Array.isArray(resource.recordings)) call.recordings = resource.recordings as QuoRecording[];
+  return call;
 }
 
 function asTranscript(resource: JsonObject, callId: string): QuoTranscript {
