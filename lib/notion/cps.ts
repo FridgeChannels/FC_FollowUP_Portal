@@ -61,6 +61,10 @@ export async function listCheckpoints(): Promise<CurrentCpOption[]> {
   });
 }
 
+export async function listApplicableCheckpoints(): Promise<CurrentCpOption[]> {
+  return (await listCheckpoints()).filter((item) => item.name !== "NONE");
+}
+
 export async function resolveCheckpoint(value?: string | null) {
   const query = value?.trim();
   if (!query) return null;

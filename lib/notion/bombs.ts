@@ -1,11 +1,10 @@
 import {
-  applicableCpSelect,
   currentCpOption,
   parseApplicableCp,
-  resolveApplicableCp,
+  type CurrentCpOption,
 } from "../brand-list";
+import { listCheckpoints, resolveCheckpoint } from "./cps";
 import {
-  BOMB_PRIORITIES,
   BOMB_TARGET_ROLES,
   isBombChannel,
   orderedBombChannels,
@@ -49,7 +48,7 @@ function mapTemplate(page: NotionPage): BombTemplateItem {
     id: page.id,
     name: titleFromProperties(properties),
     channel: propertyText(properties.Channel) || null,
-    templateType: propertyText(properties["Template Type"]) || null,
+    templateType: propertyText(properties.Type) || propertyText(properties["Template Type"]) || null,
     subject: propertyText(properties["Subject Template"]) || null,
     content: propertyText(properties["Content Template"]),
     status: propertyText(properties["Template Status"]) || null,
@@ -69,11 +68,28 @@ function bombCpCode(properties: NotionPage["properties"]) {
   return parseApplicableCp(propertyText(properties?.CP) || propertyText(properties?.["Applicable CP"]));
 }
 
-function bombCpRef(code: string | null | undefined): BombCpRef | null {
-  const parsed = parseApplicableCp(code);
-  if (!parsed) return null;
-  const option = currentCpOption(parsed);
-  return { id: option.id, name: option.name, fullName: option.fullName };
+function bombCpWrite(checkpoint: CurrentCpOption | null) {
+  return checkpoint ? { relation: [{ id: checkpoint.id }] } : { relation: [] };
+}
+
+async function resolveBombCheckpoint(cpIds: string[] = []) {
+  for (const value of cpIds) {
+    const checkpoint = await resolveCheckpoint(value);
+    if (checkpoint && checkpoint.name !== "NONE") return checkpoint;
+  }
+  return null;
+}
+
+async function bombCpRefFromPage(properties: NotionPage["properties"]): Promise<BombCpRef | null> {
+  const relationId = firstRelationId(properties?.CP) || firstRelationId(properties?.["Applicable CP"]);
+  const code = bombCpCode(properties);
+  const checkpoint = await resolveCheckpoint(relationId || code);
+  if (!checkpoint || checkpoint.name === "NONE") {
+    if (!code) return null;
+    const option = currentCpOption(code);
+    return { id: option.id, name: option.name, fullName: option.fullName };
+  }
+  return { id: checkpoint.id, name: checkpoint.name, fullName: checkpoint.fullName };
 }
 
 function bombStatus(properties: NotionPage["properties"]) {
@@ -88,9 +104,12 @@ function mapBombPage(
   page: NotionPage,
   titles: Map<string, string>,
   templates: BombTemplateItem[],
+  checkpoints: Map<string, CurrentCpOption> = new Map(),
 ): BombListItem {
   const properties = page.properties || {};
-  const cp = bombCpCode(properties);
+  const relationId = firstRelationId(properties.CP) || firstRelationId(properties["Applicable CP"]);
+  const checkpoint = relationId ? checkpoints.get(relationId) : null;
+  const cp = checkpoint?.name || bombCpCode(properties);
   const scenarioId = firstRelationId(properties.Scenario);
 
   return {
@@ -101,7 +120,7 @@ function mapBombPage(
     priority: propertyText(properties.Priority) || null,
     targetRole: propertyText(properties["Target Role"]) || null,
     cp,
-    cpIds: cp ? [cp] : [],
+    cpIds: relationId ? [relationId] : cp ? [cp] : [],
     scenarioId: scenarioId || null,
     scenarioName: (scenarioId && titles.get(scenarioId)) || null,
     channels: orderedBombChannels(
@@ -114,16 +133,18 @@ function mapBombPage(
 }
 
 export async function listFollowupBombs() {
-  const [bombPages, templatePages, scenarioPages] = await Promise.all([
+  const [bombPages, templatePages, scenarioPages, checkpoints] = await Promise.all([
     queryDatabasePages(getFollowupBombDbId()),
     queryDatabasePages(getFollowupTemplateDbId()),
     queryDatabasePages(getFollowupScenarioDbId()),
+    listCheckpoints(),
   ]);
   const titles = titleMap(scenarioPages);
   const templates = new Map(templatePages.map((page) => [page.id, mapTemplate(page)]));
+  const checkpointById = new Map(checkpoints.map((item) => [item.id, item]));
 
   return bombPages
-    .map((page) => mapBombPage(page, titles, templatesForBomb(page, templates)))
+    .map((page) => mapBombPage(page, titles, templatesForBomb(page, templates), checkpointById))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -138,7 +159,7 @@ export async function retrieveFollowupBomb(id: string): Promise<BombDetail> {
   ]);
 
   const titles = new Map<string, string>();
-  const cps = [bombCpRef(bombCpCode(properties))].filter(
+  const cps = [await bombCpRefFromPage(properties)].filter(
     (item): item is BombCpRef => !!item,
   );
   if (scenarioPage) {
@@ -153,8 +174,11 @@ export async function retrieveFollowupBomb(id: string): Promise<BombDetail> {
     .map((pageId) => templates.get(pageId))
     .filter((item): item is BombTemplateItem => !!item);
 
+  const mapped = mapBombPage(page, titles, orderedTemplates);
   return {
-    ...mapBombPage(page, titles, orderedTemplates),
+    ...mapped,
+    cp: cps[0]?.name || mapped.cp,
+    cpIds: cps[0] ? [cps[0].id] : mapped.cpIds,
     notes: propertyText(properties.Notes) || null,
     createdAt: page.created_time || properties["Created At"]?.created_time || null,
     scenarioDescription: scenarioPage
@@ -179,19 +203,18 @@ export async function listFollowupScenarios() {
   return pages.map(mapScenario).sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function templateProperties(bombId: string, bombName: string, input: BombTemplateInput, status: string) {
+function templateProperties(bombId: string, bombName: string, input: BombTemplateInput) {
   const channel = input.channel.trim();
   if (!isBombChannel(channel)) throw new Error("Invalid template channel");
   const phone = channel === "Phone";
   const name = input.name?.trim() || `${bombName} · ${channel}`;
   return {
-    "Template Name": { title: richText(name) },
+    Name: { title: richText(name) },
     Channel: { select: { name: channel } },
-    "Template Type": { select: { name: phone ? "Call Script" : "Message" } },
+    Type: { select: { name: phone ? "Call Script" : "Message" } },
     "Subject Template": { rich_text: !phone && input.subject?.trim() ? richText(input.subject.trim()) : [] },
     "Content Template": { rich_text: input.content.trim() ? richText(input.content.trim()) : [] },
-    "Template Status": { status: { name: status } },
-    Bombs: { relation: [{ id: bombId }] },
+    OmniReach: { relation: [{ id: bombId }] },
   };
 }
 
@@ -199,9 +222,8 @@ async function createBombTemplate(
   bombId: string,
   bombName: string,
   input: BombTemplateInput,
-  status = "Draft",
 ) {
-  return createPage(getFollowupTemplateDbId(), templateProperties(bombId, bombName, input, status));
+  return createPage(getFollowupTemplateDbId(), templateProperties(bombId, bombName, input));
 }
 
 export async function createFollowupBomb(input: CreateBombInput) {
@@ -211,24 +233,18 @@ export async function createFollowupBomb(input: CreateBombInput) {
   if (targetRole && !(BOMB_TARGET_ROLES as readonly string[]).includes(targetRole)) {
     throw new Error("Invalid Target Role");
   }
-  const priority = input.priority?.trim() || "P1";
-  if (!(BOMB_PRIORITIES as readonly string[]).includes(priority)) {
-    throw new Error("Invalid Priority");
-  }
   const scenarioId = input.scenarioId?.trim() || null;
   if (scenarioId) {
     await retrievePage(scenarioId);
   }
-  const cp = resolveApplicableCp(input.cpIds || []);
+  const checkpoint = await resolveBombCheckpoint(input.cpIds || []);
   const page = await createPage(getFollowupBombDbId(), {
     "OmniReach Name": { title: richText(name) },
     Goal: { rich_text: input.goal?.trim() ? richText(input.goal.trim()) : [] },
     Scenario: { relation: scenarioId ? [{ id: scenarioId }] : [] },
-    ...(cp ? { CP: applicableCpSelect(cp) } : {}),
+    ...(checkpoint ? { CP: bombCpWrite(checkpoint) } : {}),
     ...(targetRole ? { "Target Role": { select: { name: targetRole } } } : {}),
-    Priority: { select: { name: priority } },
     "OmniReach Status": { status: { name: "Draft" } },
-    Notes: { rich_text: input.notes?.trim() ? richText(input.notes.trim()) : [] },
   });
 
   if (input.template?.content?.trim()) {
@@ -253,8 +269,8 @@ export async function updateFollowupBomb(id: string, input: UpdateBombInput) {
     properties.Scenario = { relation: input.scenarioId ? [{ id: input.scenarioId }] : [] };
   }
   if (input.cpIds !== undefined) {
-    const cp = resolveApplicableCp(input.cpIds);
-    properties.CP = cp ? applicableCpSelect(cp) : { select: null };
+    const checkpoint = await resolveBombCheckpoint(input.cpIds);
+    properties.CP = bombCpWrite(checkpoint);
   }
   if (input.targetRole !== undefined) {
     const targetRole = input.targetRole?.trim() || null;
@@ -262,16 +278,6 @@ export async function updateFollowupBomb(id: string, input: UpdateBombInput) {
       throw new Error("Invalid Target Role");
     }
     properties["Target Role"] = targetRole ? { select: { name: targetRole } } : { select: null };
-  }
-  if (input.priority !== undefined) {
-    const priority = input.priority?.trim() || null;
-    if (priority && !(BOMB_PRIORITIES as readonly string[]).includes(priority)) {
-      throw new Error("Invalid Priority");
-    }
-    properties.Priority = priority ? { select: { name: priority } } : { select: null };
-  }
-  if (input.notes !== undefined) {
-    properties.Notes = { rich_text: input.notes?.trim() ? richText(input.notes.trim()) : [] };
   }
   if (input.status !== undefined) {
     const status = input.status?.trim() || "";
@@ -281,11 +287,10 @@ export async function updateFollowupBomb(id: string, input: UpdateBombInput) {
     properties["OmniReach Status"] = { status: { name: status } };
   }
 
-  const templateStatus = (input.status || current.status) === "Active" ? "Active" : "Draft";
   if (input.templates) {
     const templateIds: string[] = [];
     for (const template of input.templates) {
-      const payload = templateProperties(id, name, template, templateStatus);
+      const payload = templateProperties(id, name, template);
       if (template.id) {
         await updatePage(template.id, payload);
         templateIds.push(template.id);

@@ -1,5 +1,6 @@
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { syncReplyInbox } from "@/lib/notion/followup-writes";
+import { ownerPageIdFromQueryParam } from "@/lib/notion/owner-filter";
 import { listFollowupTasksForViewer } from "@/lib/notion/tasks";
 
 export async function GET(request: Request) {
@@ -11,8 +12,9 @@ export async function GET(request: Request) {
     if (!viewer.isAdmin && !viewer.ownerId) {
       return Response.json({ tasks: [], viewer: { isAdmin: false, ownerName: viewer.name } });
     }
+    const ownerParam = new URL(request.url).searchParams.get("owner");
     const listed = await listFollowupTasksForViewer(
-      viewer.isAdmin ? undefined : viewer.ownerId || undefined,
+      ownerPageIdFromQueryParam(viewer.isAdmin, viewer.ownerId, ownerParam),
     );
     const tasks = await syncReplyInbox(listed);
     return Response.json({

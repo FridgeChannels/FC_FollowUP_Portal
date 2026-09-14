@@ -2,6 +2,7 @@ import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { queryFollowupClientPages } from "@/lib/notion/client";
 import { listCheckpoints } from "@/lib/notion/cps";
 import { mapFollowupClientPages } from "@/lib/notion/followup-clients";
+import { ownerPageIdFromQueryParam } from "@/lib/notion/owner-filter";
 
 export async function GET(request: Request) {
   try {
@@ -17,8 +18,9 @@ export async function GET(request: Request) {
         viewer: { isAdmin: false, ownerName: viewer.name },
       });
     }
+    const ownerParam = new URL(request.url).searchParams.get("owner");
     const pages = await queryFollowupClientPages(
-      viewer.isAdmin ? undefined : viewer.ownerId || undefined,
+      ownerPageIdFromQueryParam(viewer.isAdmin, viewer.ownerId, ownerParam),
     );
     const brands = await mapFollowupClientPages(pages);
     return Response.json({

@@ -1,15 +1,16 @@
-import { listApplicableCps } from "@/lib/brand-list";
 import type { UpdateBombInput } from "@/lib/bomb-list";
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { retrieveFollowupBomb, updateFollowupBomb, listFollowupScenarios } from "@/lib/notion/bombs";
+import { listApplicableCheckpoints } from "@/lib/notion/cps";
 
 type Params = { params: Promise<{ id: string }> };
 
 async function loadFormOptions() {
-  return {
-    scenarios: await listFollowupScenarios(),
-    cps: listApplicableCps(),
-  };
+  const [scenarios, cps] = await Promise.all([
+    listFollowupScenarios(),
+    listApplicableCheckpoints(),
+  ]);
+  return { scenarios, cps };
 }
 
 export async function GET(request: Request, { params }: Params) {

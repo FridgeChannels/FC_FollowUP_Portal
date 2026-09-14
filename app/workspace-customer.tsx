@@ -229,11 +229,20 @@ function toInteractions(
     item,
     cp: resolveActivityCp(item, tasks, activityInstanceIds, bombInstances),
   }));
+  const threadInboundCp = new Map<string, CPCode>();
   const threadCp = new Map<string, CPCode>();
   const taskCp = new Map<string, CPCode>();
-  for (const entry of resolved) {
+  const chronological = [...resolved].sort((left, right) =>
+    (left.item.createdAt || "").localeCompare(right.item.createdAt || ""),
+  );
+  for (const entry of chronological) {
     if (!entry.cp) continue;
-    if (entry.item.threadId && !threadCp.has(entry.item.threadId)) threadCp.set(entry.item.threadId, entry.cp);
+    if (entry.item.threadId) {
+      if (entry.item.direction === "Inbound" && !threadInboundCp.has(entry.item.threadId)) {
+        threadInboundCp.set(entry.item.threadId, entry.cp);
+      }
+      if (!threadCp.has(entry.item.threadId)) threadCp.set(entry.item.threadId, entry.cp);
+    }
     if (entry.item.taskId && !taskCp.has(entry.item.taskId)) taskCp.set(entry.item.taskId, entry.cp);
   }
   return resolved.map(({ item, cp }) => ({
@@ -255,7 +264,7 @@ function toInteractions(
     threadId: item.threadId || undefined,
     taskId: item.taskId || undefined,
     replyStatus: item.replyStatus || undefined,
-    cp: cp || (item.threadId ? threadCp.get(item.threadId) : undefined) || (item.taskId ? taskCp.get(item.taskId) : undefined),
+    cp: (item.threadId ? threadInboundCp.get(item.threadId) : undefined) || cp || (item.threadId ? threadCp.get(item.threadId) : undefined) || (item.taskId ? taskCp.get(item.taskId) : undefined),
     messageStatus: item.status || undefined,
     taskStatus: (item.taskId ? tasks.find((task) => task.id === item.taskId)?.status : undefined) || undefined,
     callResult: item.callResult || undefined,
@@ -297,6 +306,8 @@ export function BrandDetail({customerId}:{customerId:string}){
     lastEditedAt:null,
     currentCpFullName:null,
     currentCpDefinition:null,
+    productDescription:null,
+    matchedCategory:null,
     contacts:[],
     tasks:[],
     activities:[],
@@ -316,6 +327,8 @@ export function BrandDetail({customerId}:{customerId:string}){
       lastEditedAt:null,
       currentCpFullName:null,
       currentCpDefinition:null,
+      productDescription:null,
+      matchedCategory:null,
       contacts:[],
       tasks:[],
       activities:[],

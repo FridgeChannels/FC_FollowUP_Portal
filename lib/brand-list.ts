@@ -224,6 +224,8 @@ export type BrandDetail = BrandListItem & {
   lastEditedAt: string | null;
   currentCpFullName: string | null;
   currentCpDefinition: string | null;
+  productDescription: string | null;
+  matchedCategory: string | null;
   contacts: BrandContact[];
   tasks: BrandTask[];
   activities: BrandActivity[];

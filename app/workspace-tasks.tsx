@@ -89,10 +89,11 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
     setAssignee("all");
   }, [state.currentRole]);
 
+  const taskOwnerQuery = manager && assignee === "unassigned" ? "?owner=unassigned" : "";
   useEffect(() => {
     let cancelled = false;
     setRemoteLoading(true);
-    fetch("/api/tasks")
+    fetch(`/api/tasks${taskOwnerQuery}`)
       .then(async response => {
         const payload = await response.json() as { tasks?: BrandTask[]; error?: string };
         if (!response.ok) throw new Error(payload.error || "Failed to load tasks");
@@ -102,7 +103,7 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
       .catch(() => { if (!cancelled) setRemoteTasks([]); })
       .finally(() => { if (!cancelled) setRemoteLoading(false); });
     return () => { cancelled = true; };
-  }, []);
+  }, [taskOwnerQuery]);
 
   const allTasks = useMemo<UnifiedTask[]>(() => remoteTasks ?? [], [remoteTasks]);
 
@@ -112,7 +113,7 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
       const matchesQuery = !query || customer?.name.toLowerCase().includes(query.toLowerCase()) || (task.brandName || "").toLowerCase().includes(query.toLowerCase()) || task.summary.toLowerCase().includes(query.toLowerCase());
       const matchesScope = task.remote || canSeeTask(state, task.customerId, task.assigneeId);
       const matchesType = type === "All" || task.type === type;
-      const matchesAssignee = assignee === "all" || assignee === "unassigned" && !task.assigneeId || task.assigneeId === assignee;
+      const matchesAssignee = assignee === "all" || (assignee === "unassigned" ? !task.assigneeId : task.assigneeId === assignee);
       const matchesStatus = status === "All" || status === "Open" && !isDone(task) || status === "Completed" && isDone(task);
       const matchesReplyOpen = !(task.remote && status === "Open" && task.type === "Reply" && task.status !== "Needs Reply" && task.status !== "Waiting for Reply");
       return matchesQuery && matchesScope && matchesType && matchesAssignee && matchesStatus && matchesReplyOpen;
@@ -213,11 +214,18 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
       updatedAt: payload.brand?.lastEditedAt || "",
     };
     const activities = payload.activities || [];
+    const threadInboundCp = new Map<string, NonNullable<BrandActivity["cpAtInteraction"]>>();
     const threadCp = new Map<string, NonNullable<BrandActivity["cpAtInteraction"]>>();
     const taskCp = new Map<string, NonNullable<BrandActivity["cpAtInteraction"]>>();
-    for (const activity of activities) {
+    const chronological = [...activities].sort((left, right) => (left.createdAt || "").localeCompare(right.createdAt || ""));
+    for (const activity of chronological) {
       if (!activity.cpAtInteraction) continue;
-      if (activity.threadId && !threadCp.has(activity.threadId)) threadCp.set(activity.threadId, activity.cpAtInteraction);
+      if (activity.threadId) {
+        if (activity.direction === "Inbound" && !threadInboundCp.has(activity.threadId)) {
+          threadInboundCp.set(activity.threadId, activity.cpAtInteraction);
+        }
+        if (!threadCp.has(activity.threadId)) threadCp.set(activity.threadId, activity.cpAtInteraction);
+      }
       if (activity.taskId && !taskCp.has(activity.taskId)) taskCp.set(activity.taskId, activity.cpAtInteraction);
     }
     const taskById = new Map((payload.brand?.tasks || []).map(item => [item.id, item]));
@@ -233,7 +241,7 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
       content: activity.content,
       createdAt: activity.createdAt || "",
       outcome: activity.callResult as Interaction["outcome"],
-      cp: activity.cpAtInteraction || (activity.threadId ? threadCp.get(activity.threadId) : undefined) || (activity.taskId ? taskCp.get(activity.taskId) : undefined),
+      cp: (activity.threadId ? threadInboundCp.get(activity.threadId) : undefined) || activity.cpAtInteraction || (activity.threadId ? threadCp.get(activity.threadId) : undefined) || (activity.taskId ? taskCp.get(activity.taskId) : undefined),
       taskId: activity.taskId || undefined,
       threadId: activity.threadId || undefined,
       messageStatus: activity.status || undefined,

@@ -13,6 +13,7 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "test:engine": "node --experimental-strip-types --test lib/scheduling-engine/engine.test.ts",
     "test:replies": "node --experimental-strip-types --test lib/notion/reply-sent-guard.test.ts lib/notion/extended-parameters.test.ts",
+    "test:variables": "node --experimental-strip-types --test lib/template-variables.test.ts",
     "simulate:replies": "node scripts/simulate-channel-replies.mjs",
     "simulate:replies:email": "node scripts/simulate-channel-replies.mjs --channel Email",
     "simulate:replies:linkedin": "node scripts/simulate-channel-replies.mjs --channel LinkedIn",

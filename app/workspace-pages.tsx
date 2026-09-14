@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "./workspace-store";
-import { cacheBrandList } from "@/lib/brand-list-cache";
+import { cacheBrandItem, cacheBrandList } from "@/lib/brand-list-cache";
 import {
   FOLLOW_UP_STATUSES,
   listCurrentCps,
@@ -484,9 +484,13 @@ export function BrandsPage() {
   const { q: query, status, cp, owner } = filters;
   const [brands, setBrands] = useState<BrandListItem[]>([]);
   const [remoteCps, setRemoteCps] = useState<CurrentCpOption[]>([]);
+  const [ownerOptions, setOwnerOptions] = useState<Array<{ id: string; name: string }>>([]);
   const cps = remoteCps.length ? remoteCps : listCurrentCps();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
+  const ownerQuery =
+    isAdmin && owner !== "all" ? `?owner=${encodeURIComponent(owner)}` : "";
+  const brandsPath = `/api/brands${ownerQuery}`;
   const setListParam = (key: keyof BrandListFilters, value: string) => {
     setFilters((prev) => {
       const next = { ...prev, [key]: value };
@@ -502,9 +506,34 @@ export function BrandsPage() {
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
   useEffect(() => {
+    if (!isAdmin) {
+      setOwnerOptions([]);
+      return;
+    }
+    let cancelled = false;
+    fetch("/api/owners")
+      .then(async (response) => {
+        const payload = (await response.json()) as {
+          owners?: Array<{ id: string; name: string }>;
+          error?: string;
+        };
+        if (!response.ok) throw new Error(payload.error || "Failed to load owners");
+        return payload.owners || [];
+      })
+      .then((items) => {
+        if (!cancelled) setOwnerOptions(items);
+      })
+      .catch(() => {
+        if (!cancelled) setOwnerOptions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin]);
+  useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    fetch("/api/brands")
+    fetch(brandsPath)
       .then(async (response) => {
         const payload = (await response.json()) as {
           brands?: BrandListItem[];
@@ -516,7 +545,8 @@ export function BrandsPage() {
       })
       .then((payload) => {
         if (cancelled) return;
-        cacheBrandList(payload.brands);
+        if (ownerQuery) payload.brands.forEach(cacheBrandItem);
+        else cacheBrandList(payload.brands);
         setBrands(payload.brands);
         setRemoteCps(payload.cps);
         setError(undefined);
@@ -531,7 +561,7 @@ export function BrandsPage() {
     return () => {
       cancelled = true;
     };
-  }, [state.currentRole]);
+  }, [brandsPath, state.currentRole]);
   const filtered = useMemo(
     () =>
       brands
@@ -553,6 +583,7 @@ export function BrandsPage() {
     [brands, status, cp, owner, query, isAdmin],
   );
   const owners = useMemo(() => {
+    if (ownerOptions.length) return ownerOptions;
     const seen = new Map<string, string>();
     brands.forEach((brand) => {
       if (brand.ownerId && brand.ownerName && !seen.has(brand.ownerId)) {
@@ -560,7 +591,7 @@ export function BrandsPage() {
       }
     });
     return [...seen.entries()].map(([id, name]) => ({ id, name }));
-  }, [brands]);
+  }, [brands, ownerOptions]);
   usePageMetadata(
     brandListMetadata({
       q: query || undefined,

@@ -29,14 +29,15 @@ type Screen = "Brands" | "ReplyTask" | "OmniReach" | "Settings";
 const nav: { label: Screen; path: string; icon: typeof Users; cap: string; badge?: boolean }[] = [
   { label: "Brands", path: "/customers", icon: Users, cap: "customers" },
   { label: "ReplyTask", path: "/tasks", icon: ClipboardCheck, cap: "tasks", badge: true },
-  { label: "OmniReach", path: "/bombs", icon: Bomb, cap: "bombs" },
+  { label: "OmniReach", path: "/omnireach", icon: Bomb, cap: "bombs" },
 ];
 const roleHome: Record<Role, string> = {
   Admin: "/tasks",
   "FC_Owner": "/customers",
   Caller: "/tasks",
 };
-const routeScreen = (path: string): Screen => path.startsWith("/customers") ? "Brands" : path.startsWith("/bombs") ? "OmniReach" : path.startsWith("/settings") ? "Settings" : "ReplyTask";
+const isOmniReachPath = (path: string) => /^\/(omnireach|bombs)(\/|$)/i.test(path);
+const routeScreen = (path: string): Screen => path.startsWith("/customers") ? "Brands" : isOmniReachPath(path) ? "OmniReach" : path.startsWith("/settings") ? "Settings" : "ReplyTask";
 const accountInitials = (name?: string | null, email?: string | null) => {
   const source = name?.trim() || email?.split("@")[0] || "?";
   const parts = source.split(/[\s._-]+/).filter(Boolean);
@@ -102,6 +103,10 @@ export default function OutreachWorkspace() {
       router.replace(state.currentRole === "FC_Owner" ? "/customers" : pathname.replace(/^\/(inbox|call-tasks)/, "/tasks"));
       return;
     }
+    if (/^\/bombs(\/|$)/i.test(pathname)) {
+      router.replace(pathname.replace(/^\/bombs/i, "/omnireach"));
+      return;
+    }
     const capability = screen === "Brands" ? "customers" : screen === "ReplyTask" ? "tasks" : screen === "OmniReach" ? "bombs" : screen.toLowerCase();
     if (!can(capability)) router.replace(roleHome[state.currentRole]);
   }, [sessionLoading, user, pathname, screen, state.currentRole, can, router]);
@@ -115,7 +120,7 @@ export default function OutreachWorkspace() {
         name: "navigate_outreach_workspace",
         title: "Navigate workspace",
         description: "Open a primary Outreach Control workspace.",
-        inputSchema: { type: "object", properties: { path: { type: "string", enum: ["/customers", "/tasks", "/bombs", "/settings"] } }, required: ["path"], additionalProperties: false },
+        inputSchema: { type: "object", properties: { path: { type: "string", enum: ["/customers", "/tasks", "/omnireach", "/settings"] } }, required: ["path"], additionalProperties: false },
         annotations: { readOnlyHint: true, untrustedContentHint: false },
         execute(input: unknown) {
           const path = (input as { path?: string }).path;
@@ -153,8 +158,8 @@ function RouteContent() {
   const parts = path.split("/").filter(Boolean);
   if (parts[0] === "customers" && parts[1]) return <BrandDetail customerId={parts[1]}/>;
   if (parts[0] === "tasks" || parts[0] === "inbox" || parts[0] === "call-tasks") return <TasksPage selectedId={parts[1]}/>;
-  if (parts[0] === "bombs" && parts[1]) return <BombEditor bombId={parts[1]}/>;
-  if (parts[0] === "bombs") return <BombsPage/>;
+  if (/^(omnireach|bombs)$/i.test(parts[0] || "") && parts[1]) return <BombEditor bombId={parts[1]}/>;
+  if (/^(omnireach|bombs)$/i.test(parts[0] || "")) return <BombsPage/>;
   if (parts[0] === "customers") return <BrandsPage/>;
   if (parts[0] === "settings") return <SettingsPage section={parts[1]}/>;
   return <TasksPage/>;

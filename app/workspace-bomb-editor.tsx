@@ -16,14 +16,13 @@ import {
 import { toast } from "sonner";
 import {
   BOMB_CHANNELS,
-  BOMB_PRIORITIES,
   BOMB_TARGET_ROLES,
   isBombChannel,
   type BombDetail,
   type BombScenario,
 } from "@/lib/bomb-list";
-import { listApplicableCps } from "@/lib/brand-list";
-import { BombStep, Channel, interactionCpCode, uid } from "@/lib/outreach-domain";
+import type { CurrentCpOption } from "@/lib/brand-list";
+import { BombStep, Channel, uid } from "@/lib/outreach-domain";
 import { templateVariables, variableToken } from "@/lib/template-variables";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -43,7 +42,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ChannelIcon } from "./channel-icon";
 import { usePageMetadata } from "./use-page-metadata";
 
-type VariableCategory = "All" | "Contact" | "Brand" | "Sender";
+type VariableCategory = "All" | "Company" | "Contact";
 
 type EditorDraft = {
   name: string;
@@ -56,11 +55,18 @@ type EditorDraft = {
   steps: BombStep[];
 };
 
-function draftFromBomb(bomb: BombDetail): EditorDraft {
+function draftCpId(bomb: BombDetail, cps: CurrentCpOption[]) {
+  const selected = bomb.cps[0];
+  if (selected && cps.some((item) => item.id === selected.id)) return selected.id;
+  const name = selected?.name || bomb.cp;
+  return cps.find((item) => item.id === name || item.name === name)?.id || selected?.id || "";
+}
+
+function draftFromBomb(bomb: BombDetail, cps: CurrentCpOption[] = []): EditorDraft {
   return {
     name: bomb.name,
     goal: bomb.goal,
-    cpId: interactionCpCode(bomb.cps[0]?.name) || interactionCpCode(bomb.cp) || "",
+    cpId: draftCpId(bomb, cps),
     targetRole: bomb.targetRole || "Connector",
     priority: bomb.priority || "P1",
     notes: bomb.notes || "",
@@ -167,7 +173,7 @@ function TemplateVariableField({
                 />
               </div>
               <div className="mt-3 flex gap-1 overflow-x-auto pb-1">
-                {(["All", "Contact", "Brand", "Sender"] as VariableCategory[]).map((item) => (
+                {(["All", "Company", "Contact"] as VariableCategory[]).map((item) => (
                   <button
                     type="button"
                     key={item}
@@ -209,6 +215,7 @@ export function BombEditor({ bombId }: { bombId: string }) {
   const router = useRouter();
   const [bomb, setBomb] = useState<BombDetail | null>(null);
   const [scenarios, setScenarios] = useState<BombScenario[]>([]);
+  const [cps, setCps] = useState<CurrentCpOption[]>([]);
   const [draft, setDraft] = useState<EditorDraft | undefined>();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -222,6 +229,7 @@ export function BombEditor({ bombId }: { bombId: string }) {
         const payload = (await response.json()) as {
           bomb?: BombDetail;
           scenarios?: BombScenario[];
+          cps?: CurrentCpOption[];
           error?: string;
         };
         if (!response.ok) throw new Error(payload.error || "Failed to load OmniReach");
@@ -232,7 +240,8 @@ export function BombEditor({ bombId }: { bombId: string }) {
         if (cancelled || !payload.bomb) return;
         setBomb(payload.bomb);
         setScenarios(payload.scenarios || []);
-        setDraft(draftFromBomb(payload.bomb));
+        setCps(payload.cps || []);
+        setDraft(draftFromBomb(payload.bomb, payload.cps || []));
         setError(undefined);
       })
       .catch((err: unknown) => {
@@ -273,8 +282,6 @@ export function BombEditor({ bombId }: { bombId: string }) {
           goal: draft.goal,
           cpIds: draft.cpId ? [draft.cpId] : [],
           targetRole: draft.targetRole,
-          priority: draft.priority,
-          notes: draft.notes,
           status,
           templates: draft.steps.map((step) => ({
             id: step.id.startsWith("step_") ? undefined : step.id,
@@ -312,7 +319,7 @@ export function BombEditor({ bombId }: { bombId: string }) {
           <Bomb className="mx-auto size-9 text-slate-300" />
           <h1 className="mt-3 font-bold">OmniReach not found</h1>
           {error && <p className="mt-2 text-sm text-slate-500">{error}</p>}
-          <Button variant="link" onClick={() => router.push("/bombs")}>
+          <Button variant="link" onClick={() => router.push("/omnireach")}>
             Back to OmniReach
           </Button>
         </div>
@@ -345,7 +352,7 @@ export function BombEditor({ bombId }: { bombId: string }) {
   return (
     <div className="mx-auto max-w-[1480px]">
       <button
-        onClick={() => router.push("/bombs")}
+        onClick={() => router.push("/omnireach")}
         className="mb-5 flex items-center gap-2 text-sm font-semibold text-slate-500"
       >
         <ArrowLeft className="size-4" />
@@ -392,9 +399,9 @@ export function BombEditor({ bombId }: { bombId: string }) {
                     <SelectValue placeholder="Select a CP" />
                   </SelectTrigger>
                   <SelectContent position="popper">
-                    {listApplicableCps().map((item) => (
+                    {cps.map((item) => (
                       <SelectItem key={item.id} value={item.id}>
-                        {item.name} · {item.fullName}
+                        {item.fullName ? `${item.name} · ${item.fullName}` : item.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -419,24 +426,6 @@ export function BombEditor({ bombId }: { bombId: string }) {
                   </SelectTrigger>
                   <SelectContent>
                     {BOMB_TARGET_ROLES.map((item) => (
-                      <SelectItem key={item} value={item}>
-                        {item}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </label>
-              <label className="text-sm font-medium">
-                Priority
-                <Select
-                  value={draft.priority}
-                  onValueChange={(value) => setDraft({ ...draft, priority: value })}
-                >
-                  <SelectTrigger className="mt-2 w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {BOMB_PRIORITIES.map((item) => (
                       <SelectItem key={item} value={item}>
                         {item}
                       </SelectItem>

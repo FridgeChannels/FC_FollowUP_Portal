@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Bomb, CircleAlert, MoreHorizontal, Plus } from "lucide-react";
 import { toast } from "sonner";
-import { listApplicableCps, type CurrentCpOption } from "@/lib/brand-list";
+import type { CurrentCpOption } from "@/lib/brand-list";
 import {
   isBombChannel,
   type BombDetail,
@@ -64,7 +64,7 @@ function bombStatusClass(status: string) {
 }
 
 function bombPath(id: string) {
-  return `/bombs/${id}/edit`;
+  return `/omnireach/${id}/edit`;
 }
 
 function formatWhen(value: string | null) {
@@ -137,6 +137,7 @@ export function BombsPage() {
   const [create, setCreate] = useState(false);
   const [bombs, setBombs] = useState<BombListItem[]>([]);
   const [scenarios, setScenarios] = useState<BombScenario[]>([]);
+  const [cps, setCps] = useState<CurrentCpOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
   useEffect(() => {
@@ -147,6 +148,7 @@ export function BombsPage() {
         const payload = (await response.json()) as {
           bombs?: BombListItem[];
           scenarios?: BombScenario[];
+          cps?: CurrentCpOption[];
           error?: string;
         };
         if (!response.ok) throw new Error(payload.error || "Failed to load OmniReach");
@@ -156,6 +158,7 @@ export function BombsPage() {
         if (cancelled) return;
         setBombs(payload.bombs || []);
         setScenarios(payload.scenarios || []);
+        setCps(payload.cps || []);
         setError(undefined);
       })
       .catch((err: unknown) => {
@@ -302,7 +305,7 @@ export function BombsPage() {
         open={create}
         onOpenChange={setCreate}
         scenarios={scenarios}
-        cps={listApplicableCps()}
+        cps={cps}
         onCreated={(id) => router.push(bombPath(id))}
       />
     </div>
@@ -344,7 +347,6 @@ function NewBombDialog({
           scenarioId,
           cpIds: [cpId],
           targetRole: "Connector",
-          priority: "P1",
         }),
       });
       const payload = (await response.json()) as { bomb?: BombDetail; error?: string };
@@ -398,6 +400,9 @@ function NewBombDialog({
         {!scenarios.length ? (
           <p className="text-xs text-amber-700">No Scenarios in Notion yet. Create one in Follow-up ScenarioDB first.</p>
         ) : null}
+        {!cps.length ? (
+          <p className="text-xs text-amber-700">No CheckPoints in Notion yet.</p>
+        ) : null}
         <div className="grid gap-2 text-sm font-medium">
           Applicable CP
           <Select value={cpId || undefined} onValueChange={setCpId}>
@@ -407,7 +412,7 @@ function NewBombDialog({
             <SelectContent position="popper">
               {cps.map((item) => (
                 <SelectItem key={item.id} value={item.id}>
-                  {item.name}
+                  {item.fullName ? `${item.name} · ${item.fullName}` : item.name}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -486,7 +491,7 @@ export function BombDetailPage({ bombId }: { bombId: string }) {
           <Bomb className="mx-auto size-9 text-slate-300" />
           <h1 className="mt-3 font-bold">OmniReach not found</h1>
           {error && <p className="mt-2 text-sm text-slate-500">{error}</p>}
-          <Button variant="link" onClick={() => router.push("/bombs")}>
+          <Button variant="link" onClick={() => router.push("/omnireach")}>
             Back to OmniReach
           </Button>
         </div>
@@ -496,7 +501,7 @@ export function BombDetailPage({ bombId }: { bombId: string }) {
   return (
     <div className="mx-auto max-w-[1480px]">
       <button
-        onClick={() => router.push("/bombs")}
+        onClick={() => router.push("/omnireach")}
         className="mb-5 flex items-center gap-2 text-sm font-semibold text-slate-500"
       >
         <ArrowLeft className="size-4" />

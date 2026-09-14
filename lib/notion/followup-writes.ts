@@ -166,6 +166,7 @@ export async function createOutboundConversation(input: {
   contactName: string;
   channel: string;
   content: string;
+  subject?: string | null;
   sender?: string | null;
   taskId?: string;
   threadId?: string | null;
@@ -186,7 +187,9 @@ export async function createOutboundConversation(input: {
   const contact = await retrievePage(input.contactId);
   const suffix = input.titleSuffix || (input.messageStatus === null ? input.channel : "Pending");
   const title = `${input.brandName} — ${input.contactName} — ${input.channel} — ${suffix}`;
-  const subject = input.channel === "Email" ? content.split("\n")[0].slice(0, 120) : "";
+  const subject =
+    input.subject?.trim() ||
+    (input.channel === "Email" ? content.split("\n")[0].slice(0, 120) : "");
   const thread = input.threadId?.trim()
     ? {
         threadId: input.threadId.trim(),
@@ -371,6 +374,25 @@ function todayDateOnly() {
   }).format(new Date());
 }
 
+function pickThreadCp(
+  activities: BrandActivity[],
+  input: { channel: string; threadId?: string | null; taskId?: string | null },
+) {
+  const threadId = input.threadId?.trim();
+  const related = activities.filter((item) => {
+    if (!item.cpId && !item.cpAtInteraction) return false;
+    if (item.channel && item.channel !== input.channel) return false;
+    if (threadId && item.threadId) return item.threadId === threadId;
+    if (input.taskId && item.taskId) return item.taskId === input.taskId;
+    return false;
+  }).sort((left, right) => (left.createdAt || "").localeCompare(right.createdAt || ""));
+  return (
+    related.find((item) => item.direction === "Inbound") ||
+    related[0] ||
+    null
+  );
+}
+
 function pickThreadExtendedParameters(
   activities: BrandActivity[],
   input: { channel: string; threadId?: string | null; taskId?: string | null },
@@ -420,6 +442,13 @@ export async function createHumanOutbound(input: {
       : "人工发送消息，尚未实际发送。",
   });
   const taskId = created.id;
+  const threadCp = isReply
+    ? pickThreadCp(threadActivities, {
+        channel: input.channel,
+        threadId: input.threadId,
+        taskId: input.existingTaskId,
+      })
+    : null;
   const page = await createOutboundConversation({
     brandName: input.brandName,
     contactId: input.contactId,
@@ -429,8 +458,8 @@ export async function createHumanOutbound(input: {
     sender: input.sender,
     taskId,
     threadId: input.threadId,
-    cpId: input.cpId,
-    cpAtInteraction: input.cpAtInteraction,
+    cpId: threadCp?.cpId || input.cpId,
+    cpAtInteraction: threadCp?.cpAtInteraction || input.cpAtInteraction,
     extendedParameters: pickThreadExtendedParameters(threadActivities, {
       channel: input.channel,
       threadId: input.threadId,

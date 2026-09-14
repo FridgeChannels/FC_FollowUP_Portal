@@ -26,6 +26,33 @@ function asHandlingMode(value: string): HandlingMode | null {
   return HANDLING_MODES.has(value) ? (value as HandlingMode) : null;
 }
 
+async function resolveClientCompany(pageId?: string | null) {
+  if (!pageId) {
+    return { companyName: null, productDescription: null, matchedCategory: null };
+  }
+  try {
+    const page = await retrievePage(pageId);
+    const properties = page.properties || {};
+    const categoryIds = relationIds(properties["Matched Category"]);
+    const categories = await Promise.all(
+      categoryIds.map(async (id) => {
+        try {
+          return titleFromProperties((await retrievePage(id)).properties);
+        } catch {
+          return "";
+        }
+      }),
+    );
+    return {
+      companyName: propertyText(properties["Company Name"]) || titleFromProperties(properties) || null,
+      productDescription: propertyText(properties["Product Description"]) || null,
+      matchedCategory: categories.filter(Boolean).join(", ") || null,
+    };
+  } catch {
+    return { companyName: null, productDescription: null, matchedCategory: null };
+  }
+}
+
 async function resolveRelatedTitle(
   pageId: string | undefined,
   cache: Map<string, string>,
@@ -109,9 +136,10 @@ async function resolveBombMeta(pageId: string) {
 
 export async function mapFollowupClientDetail(page: NotionPage): Promise<BrandDetail> {
   const properties = page.properties || {};
-  const [brand, contacts] = await Promise.all([
+  const [brand, contacts, company] = await Promise.all([
     mapFollowupClientPage(page),
     listFollowupContacts(page.id, relationIds(properties["Follow-up Contacts"])),
+    resolveClientCompany(firstRelationId(properties.Client)),
   ]);
   const cpMeta =
     (brand.currentCpId ? await resolveCheckpoint(brand.currentCpId) : null) ||
@@ -129,6 +157,9 @@ export async function mapFollowupClientDetail(page: NotionPage): Promise<BrandDe
   );
   return {
     ...brand,
+    name: company.companyName || brand.name,
+    productDescription: company.productDescription,
+    matchedCategory: company.matchedCategory,
     priority: propertyText(properties.Priority) || null,
     notes: propertyText(properties.Notes) || null,
     createdAt: page.created_time || properties["Created At"]?.created_time || null,

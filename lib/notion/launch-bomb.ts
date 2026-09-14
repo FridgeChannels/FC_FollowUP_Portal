@@ -9,6 +9,10 @@ import type {
 } from "../scheduling-engine/types";
 import { CHANNELS } from "../scheduling-engine/types";
 import { interactionCpCode } from "../outreach-domain";
+import {
+  buildTemplateVariableContext,
+  resolveOutboundFields,
+} from "../template-variables";
 import { retrieveFollowupBomb } from "./bombs";
 import { skipUnavailableChannels } from "./config";
 import { listChannelDailyMax } from "./capacity";
@@ -64,14 +68,18 @@ function channelReachable(contact: BrandContact, channel: Channel) {
   return contact.phoneValid;
 }
 
-function stepContent(channel: Channel, copy?: LaunchStepCopy) {
-  if (channel === "Phone") return copy?.script?.trim() || copy?.callGoal?.trim() || "";
-  if (channel === "Email") {
-    const subject = copy?.subject?.trim() || "";
-    const body = copy?.content?.trim() || "";
-    return subject && body ? `${subject}\n\n${body}` : body || subject;
-  }
-  return copy?.content?.trim() || "";
+function outboundFromTemplate(
+  channel: Channel,
+  copy: LaunchStepCopy | undefined,
+  context: ReturnType<typeof buildTemplateVariableContext>,
+) {
+  return resolveOutboundFields({
+    channel,
+    subject: copy?.subject,
+    content: copy?.content,
+    callGoal: copy?.callGoal,
+    script: copy?.script,
+  }, context);
 }
 
 export async function launchFollowupBomb(input: {
@@ -130,9 +138,28 @@ export async function launchFollowupBomb(input: {
     throw new Error(result.unscheduled[0]?.reason || "No working-day capacity for this OmniReach");
   }
 
+  const context = buildTemplateVariableContext({
+    companyName: brand.name,
+    productDescription: brand.productDescription,
+    matchedCategory: brand.matchedCategory,
+    contactName: contact.name,
+    contactTitle: contact.title,
+    contactRole: contact.contactRole,
+    email: contact.email,
+    phone: contact.phone,
+    ownerOrConnector: contact.role,
+    linkedinUrl: contact.linkedin,
+  });
   for (const write of result.writes) {
-    const copy = input.copies?.[write.templateId || ""];
-    const content = stepContent(write.channel, copy);
+    const template = bomb.templates.find((item) => item.id === write.templateId);
+    const incoming = input.copies?.[write.templateId || ""];
+    const resolved = outboundFromTemplate(write.channel, {
+      subject: incoming?.subject ?? template?.subject ?? undefined,
+      content: incoming?.content ?? (write.channel === "Phone" ? undefined : template?.content || undefined),
+      callGoal: incoming?.callGoal ?? (write.channel === "Phone" ? template?.name || undefined : undefined),
+      script: incoming?.script ?? (write.channel === "Phone" ? template?.content || undefined : undefined),
+    }, context);
+    const content = resolved.content.trim() || resolved.subject.trim();
     const task = await createFollowupTask({
       brandName: brand.name,
       contactId: write.followUpContactId,
@@ -152,6 +179,7 @@ export async function launchFollowupBomb(input: {
         contactId: contact.id,
         contactName: contact.name,
         channel: write.channel,
+        subject: resolved.subject || null,
         content,
         sender: input.sender,
         taskId: task.id,

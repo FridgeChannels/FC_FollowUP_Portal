@@ -1,4 +1,5 @@
 import { getFollowupClientDbId, getNotionApiKey, NOTION_VERSION } from "./config";
+import { ownerRelationFilter } from "./owner-filter";
 
 const NOTION_API = "https://api.notion.com/v1";
 
@@ -141,33 +142,8 @@ export async function queryDatabasePages(
   return pages;
 }
 
-export async function queryFollowupClientPages(ownerPageId?: string) {
-  const pages: NotionPage[] = [];
-  let cursor: string | undefined;
-  do {
-    const data = await notionFetch<{
-      results: NotionPage[];
-      has_more?: boolean;
-      next_cursor?: string | null;
-    }>(`/databases/${getFollowupClientDbId()}/query`, {
-      method: "POST",
-      body: JSON.stringify({
-        page_size: 100,
-        start_cursor: cursor,
-        ...(ownerPageId
-          ? {
-              filter: {
-                property: "Owner",
-                relation: { contains: ownerPageId },
-              },
-            }
-          : {}),
-      }),
-    });
-    pages.push(...data.results);
-    cursor = data.has_more && data.next_cursor ? data.next_cursor : undefined;
-  } while (cursor);
-  return pages;
+export async function queryFollowupClientPages(ownerPageId?: string | null) {
+  return queryDatabasePages(getFollowupClientDbId(), ownerRelationFilter(ownerPageId));
 }
 
 export async function retrievePage(pageId: string) {
