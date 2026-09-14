@@ -29,6 +29,7 @@ export default defineConfig(async ({ mode }) => {
     process.env.REPLY_INGEST_TOKEN || loadedEnv.REPLY_INGEST_TOKEN || "local-reply-ingest";
   const quoApiKey = process.env.QUO_API_KEY || loadedEnv.QUO_API_KEY;
   const quoFromNumber = process.env.QUO_FROM_NUMBER || loadedEnv.QUO_FROM_NUMBER;
+  const devCallPhone = process.env.DEV_CALL_PHONE || loadedEnv.DEV_CALL_PHONE;
   const quoWebhookSigningSecret =
     process.env.QUO_WEBHOOK_SIGNING_SECRET || loadedEnv.QUO_WEBHOOK_SIGNING_SECRET;
   const quoWebhookSigningSecrets =
@@ -58,6 +59,7 @@ export default defineConfig(async ({ mode }) => {
       REPLY_INGEST_TOKEN: replyIngestToken,
       ...(quoApiKey ? { QUO_API_KEY: quoApiKey } : {}),
       ...(quoFromNumber ? { QUO_FROM_NUMBER: quoFromNumber } : {}),
+      ...(devCallPhone ? { DEV_CALL_PHONE: devCallPhone } : {}),
       ...(quoWebhookSigningSecret
         ? { QUO_WEBHOOK_SIGNING_SECRET: quoWebhookSigningSecret }
         : {}),
@@ -103,6 +105,7 @@ export default defineConfig(async ({ mode }) => {
       "import.meta.env.SKIP_UNAVAILABLE_CHANNELS": JSON.stringify(
         skipUnavailableChannels ?? "",
       ),
+      "import.meta.env.DEV_CALL_PHONE": JSON.stringify(devCallPhone ?? ""),
     },
     server: {
       ...(managedLinux ? { host: "0.0.0.0" } : {}),

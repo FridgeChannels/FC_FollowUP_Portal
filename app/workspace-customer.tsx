@@ -541,6 +541,7 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
     companyName:companyName||c?.name,
     productDescription,
     matchedCategory,
+    hasContact:!!person,
     contactName:person?.name,
     contactTitle:person?.title,
     contactRole:person?.contactRole,
@@ -576,13 +577,21 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
     return ()=>{cancelled=true};
   },[open,previewOnly,bombId]);
   useEffect(()=>{
-    if(!selected){setCopies({});return;}
+    if(open)return;
+    setBombId("");
+    setTarget("");
+    setCopies({});
+    setRemoteDetail(undefined);
+    setRemoteBombs([]);
+  },[open]);
+  useEffect(()=>{
+    if(!selected||!person){setCopies({});return;}
     const next:Record<string,LaunchStepCopy>={};
     selected.steps.forEach(s=>{
       next[s.id]=resolveLaunchStepCopy({subject:s.subject,content:s.content,callGoal:s.callGoal,script:s.script},templateContext);
     });
     setCopies(next);
-  },[selected?.id,target,companyName,productDescription,matchedCategory]);
+  },[selected,target,companyName,productDescription,matchedCategory]);
   const updateCopy=(id:string,patch:Partial<LaunchStepCopy>)=>setCopies(prev=>({...prev,[id]:{...prev[id],...patch}}));
   const enforceSkip=skipUnavailableChannelsOnClient();
   const unavailable=enforceSkip&&selected&&person?selected.steps.filter(s=>!channelAvailable(person,s.channel)).map(s=>s.channel):[];
@@ -602,6 +611,7 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
       <label className="text-sm font-medium">OmniReach<Select value={bombId} onValueChange={v=>{setBombId(v);setTarget("");}}><SelectTrigger className="mt-2 w-full"><SelectValue placeholder="Select an OmniReach"/></SelectTrigger><SelectContent>{(previewOnly?notionBombs:localBombs).map(b=><SelectItem key={b.id} value={b.id}>{previewOnly?`${b.name}${b.cp?` · ${b.cp}`:""}`:`${b.name} · V${"version" in b ? b.version : ""}`}</SelectItem>)}</SelectContent></Select></label>
       {selected&&<>
         <label className="text-sm font-medium">Launch for<Select value={target} onValueChange={setTarget}><SelectTrigger className="mt-2 w-full"><SelectValue placeholder="Select a KeyPerson"/></SelectTrigger><SelectContent>{targets.map(t=><SelectItem key={t.id} value={t.id}>{t.name} · {t.role}</SelectItem>)}</SelectContent></Select></label>
+        {person&&<>
         <div className="rounded-xl bg-slate-50 p-4 text-sm"><b>{selected.goal}</b><p className="mt-1 text-xs text-slate-500">Edits apply only to this launch.</p>{unavailable.length>0&&<div className="mt-2 text-xs text-amber-700">Unavailable steps will be skipped: {[...new Set(unavailable)].join(", ")}</div>}</div>
         {selected.steps.map((s,index)=>{
           const copy=copies[s.id]||{};
@@ -613,6 +623,7 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
             {s.channel!=="Email"&&s.channel!=="Phone"&&<Textarea className="min-h-24" value={copy.content||""} onChange={e=>updateCopy(s.id,{content:e.target.value})} placeholder={`${s.channel} content`}/>}
           </div>;
         })}
+        </>}
       </>}
       </>}
     </div>

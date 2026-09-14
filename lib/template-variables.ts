@@ -31,6 +31,7 @@ export type TemplateVariableSource = {
   phone?: string | null;
   ownerOrConnector?: string | null;
   linkedinUrl?: string | null;
+  hasContact?: boolean;
 };
 
 export type TemplateVariableContext = Record<string, string>;
@@ -52,13 +53,26 @@ export function variableToken(key: string) {
   return `{{${key}}}`;
 }
 
+function normalizeVariableKey(key: string) {
+  return key.trim().replace(/[\s-]+/g, "_").toLowerCase();
+}
+
+function contextValue(context: TemplateVariableContext, key: string) {
+  if (Object.prototype.hasOwnProperty.call(context, key)) return context[key];
+  const normalized = normalizeVariableKey(key);
+  for (const [candidate, value] of Object.entries(context)) {
+    if (normalizeVariableKey(candidate) === normalized) return value;
+  }
+  return undefined;
+}
+
 export function buildTemplateVariableContext(source: TemplateVariableSource): TemplateVariableContext {
   const context: TemplateVariableContext = {
     company_name: source.companyName?.trim() || "",
     product_description: source.productDescription?.trim() || "",
     "Matched Category": source.matchedCategory?.trim() || "",
   };
-  const hasContact = [
+  const hasContact = source.hasContact === true || [
     source.contactName,
     source.contactTitle,
     source.contactRole,
@@ -87,8 +101,8 @@ export function resolveTemplateVariables(
 ) {
   if (!text) return "";
   return text.replace(/{{\s*([^}]+?)\s*}}/g, (placeholder, rawKey: string) => {
-    const key = rawKey.trim();
-    return Object.prototype.hasOwnProperty.call(context, key) ? context[key] : placeholder;
+    const value = contextValue(context, rawKey.trim());
+    return value === undefined ? placeholder : value;
   });
 }
 

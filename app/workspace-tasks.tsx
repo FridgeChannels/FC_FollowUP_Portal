@@ -23,6 +23,7 @@ import { InteractionFeed } from "./interaction-feed";
 import { QuoCallPanel } from "./quo-call-panel";
 import { Status } from "./workspace-pages";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { devCallPhoneOnClient } from "@/lib/quo/dev-call-phone";
 
 type TaskType = "Call" | "Reply";
 type UnifiedTask = {
@@ -38,6 +39,7 @@ type UnifiedTask = {
   summary: string;
   notes?: string | null;
   brandName?: string;
+  contactPhone?: string | null;
   remote?: boolean;
 };
 
@@ -71,6 +73,7 @@ function fromNotionTask(task: BrandTask): UnifiedTask {
     summary: task.inboxStatus && task.preview ? task.preview : task.title,
     notes: task.notes,
     brandName: task.brandName || undefined,
+    contactPhone: task.contactPhone || undefined,
     remote: true,
   };
 }
@@ -208,13 +211,18 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
     if (!payload.task) return;
     const item = payload.task;
     const brandContacts = (payload.brand?.contacts || []).map(toTaskContact);
-    const contact = brandContacts.find(entry => entry.id === item.contactId) || brandContacts[0] || {
+    const matched = brandContacts.find(entry => entry.id === item.contactId) || brandContacts[0];
+    const phone = matched?.phone || item.contactPhone || undefined;
+    const contact = matched
+      ? { ...matched, phone, phoneValid: matched.phoneValid || !!phone }
+      : {
       id: item.contactId || "unknown",
       name: item.contactName || "KeyPerson",
       role: "Other" as const,
+      phone,
       preferredChannel: item.channel === "Phone" || item.channel === "Email" || item.channel === "SMS" || item.channel === "WhatsApp" || item.channel === "LinkedIn" ? item.channel : "Email",
       emailValid: false,
-      phoneValid: false,
+      phoneValid: !!phone,
     };
     const customer: Customer = {
       id: item.brandId || payload.brand?.id || task.customerId,
@@ -423,13 +431,12 @@ function CallResultDialog({ taskId, open, onOpenChange, onSubmit }: { taskId: st
 }
 
 function CallBrief({ task, contact, completed, onCallOpening }: { task: UnifiedTask; contact: Contact; completed: boolean; onCallOpening: () => void }) {
-  const phone = contact.phone?.trim();
-  if (!phone) return null;
-  const quoDial = `openphone://dial?number=${encodeURIComponent(phone)}&action=call`;
+  const phone = (devCallPhoneOnClient() || contact.phone || task.contactPhone || "").trim();
+  const quoDial = phone ? `openphone://dial?number=${encodeURIComponent(phone)}&action=call` : "";
   return <section className="mb-6 rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
     <div className="flex flex-wrap items-start justify-between gap-4">
-      <div className="min-w-0"><div className="text-[11px] font-semibold tracking-[.14em] text-blue-700">Caller brief</div><h3 className="mt-1 text-base font-bold text-blue-950">{task.summary || "Call this Contact"}</h3><p className="mt-1 text-sm text-blue-900">{contact.name} · {phone}</p></div>
-      <div className="flex shrink-0 flex-wrap gap-2">{completed ? <Button disabled className="bg-emerald-600 text-white hover:bg-emerald-600"><CheckCircle2 className="mr-2 size-4"/>Call completed</Button> : <Button asChild><a href={quoDial} onClick={onCallOpening}><Phone className="mr-2 size-4"/>Call with Quo</a></Button>}</div>
+      <div className="min-w-0"><div className="text-[11px] font-semibold tracking-[.14em] text-blue-700">Caller brief</div><h3 className="mt-1 text-base font-bold text-blue-950">{task.summary || "Call this Contact"}</h3><p className="mt-1 text-sm text-blue-900">{contact.name} · {phone || "No phone number"}</p></div>
+      <div className="flex shrink-0 flex-wrap gap-2">{completed ? <Button disabled className="bg-emerald-600 text-white hover:bg-emerald-600"><CheckCircle2 className="mr-2 size-4"/>Call completed</Button> : phone ? <Button asChild><a href={quoDial} onClick={onCallOpening}><Phone className="mr-2 size-4"/>Call with Quo</a></Button> : <Button disabled><Phone className="mr-2 size-4"/>Call with Quo</Button>}</div>
     </div>
   </section>;
 }

@@ -44,6 +44,25 @@ describe("template variable engine", () => {
     );
   });
 
+  it("replaces contact_role once a contact is selected", () => {
+    const withContact = buildTemplateVariableContext({
+      companyName: "Oxyfresh",
+      productDescription: "Oral care",
+      matchedCategory: "Pet",
+      hasContact: true,
+      contactName: "Melissa Gulbranson",
+      contactRole: "Founder / CEO / COO",
+    });
+    assert.equal(
+      resolveTemplateVariables("{{Matched Category}}{{contact_role}}{{product_description}}", withContact),
+      "PetFounder / CEO / COOOral care",
+    );
+  });
+
+  it("matches contact_role regardless of spacing or case", () => {
+    assert.equal(resolveTemplateVariables("{{Contact Role}}", context), "Decision Maker");
+  });
+
   it("resolves spaced keys and empty fields", () => {
     const text = "{{Matched Category}} {{LinkedIn URL}} {{missing_optional}}";
     assert.equal(

@@ -1,16 +1,8 @@
 import { getQuoWebhookSigningSecrets } from "@/lib/quo/config";
-import { findQuoCallConversation } from "@/lib/notion/conversations";
 import {
-  findFollowupTaskForQuoCall,
+  resolveFollowupTaskForQuoWebhook,
   upsertQuoCallActivity,
 } from "@/lib/notion/quo-calls";
-import {
-  findMockCallerTaskForQuoCall,
-  findMockCallerTaskForQuoCallId,
-  findMockCallerTaskForRecentQuoAttempt,
-  upsertMockQuoCallActivity,
-} from "@/lib/mock-caller-tasks";
-import { retrieveFollowupTask } from "@/lib/notion/tasks";
 import type {
   QuoCall,
   QuoCallData,
@@ -119,24 +111,23 @@ export async function POST(request: Request) {
   }
 
   try {
-    const mockTask = findMockCallerTaskForQuoCallId(data.callId)
-      || (data.call ? findMockCallerTaskForQuoCall(data.call) : null)
-      || findMockCallerTaskForRecentQuoAttempt(data.lastEventAt);
-    if (mockTask) {
-      upsertMockQuoCallActivity({ record: mockTask, data, eventType: type });
-      return Response.json({ ok: true, linked: true, taskId: mockTask.task.id, callId: data.callId, mock: true });
-    }
-    const existing = (await findQuoCallConversation(data.callId))[0];
-    const task = existing?.taskId
-      ? await retrieveFollowupTask(existing.taskId)
-      : data.call
-        ? await findFollowupTaskForQuoCall(data.call)
-        : null;
-    if (!task) {
+    const resolved = await resolveFollowupTaskForQuoWebhook({
+      callId: data.callId,
+      call: data.call,
+      eventAt: data.lastEventAt,
+    });
+    if (!resolved.task) {
       return Response.json({ ok: true, linked: false, callId: data.callId }, { status: 202 });
     }
-    await upsertQuoCallActivity({ task, data, eventType: type });
-    return Response.json({ ok: true, linked: true, taskId: task.id, callId: data.callId });
+    await upsertQuoCallActivity({ task: resolved.task, data, eventType: type });
+    return Response.json({
+      ok: true,
+      linked: true,
+      taskId: resolved.task.id,
+      callId: data.callId,
+      matchedBy: resolved.matchedBy,
+      created: !resolved.existing,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to process Quo webhook";
     return Response.json({ error: message }, { status: 500 });

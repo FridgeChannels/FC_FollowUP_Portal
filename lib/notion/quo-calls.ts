@@ -5,12 +5,13 @@ import { richText, updatePage } from "./client";
 import { listFollowupTasksForViewer, retrieveFollowupTask } from "./tasks";
 import type { QuoCall, QuoCallData } from "../quo/types";
 import { mergeQuoCallData, recordingsForQuoCall } from "../quo/data";
+import { findRecentQuoDialAttempt } from "../quo/dial-attempts";
 
 function normalizePhone(value?: string | null) {
   return (value || "").replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
 }
 
-function callPhones(call?: QuoCall | null) {
+export function callPhones(call?: QuoCall | null) {
   return [call?.from, call?.to, ...(call?.participants || [])]
     .map(normalizePhone)
     .filter(Boolean);
@@ -59,6 +60,31 @@ export async function findFollowupTaskForQuoCall(call: QuoCall) {
     const rightTime = Math.abs(new Date(right.scheduledAt || 0).getTime() - callTime);
     return leftTime - rightTime;
   })[0] || null;
+}
+
+export async function resolveFollowupTaskForQuoWebhook(input: {
+  callId: string;
+  call?: QuoCall | null;
+  eventAt?: string | null;
+}) {
+  const existing = (await findQuoCallConversation(input.callId))[0];
+  if (existing?.taskId) {
+    const task = await retrieveFollowupTask(existing.taskId).catch(() => null);
+    if (task) return { task, existing, matchedBy: "callId" as const };
+  }
+
+  const attempt = await findRecentQuoDialAttempt(
+    callPhones(input.call),
+    input.call?.createdAt || input.call?.completedAt || input.eventAt,
+  );
+  if (attempt?.taskId) {
+    const task = await retrieveFollowupTask(attempt.taskId).catch(() => null);
+    if (task) return { task, existing: existing || null, matchedBy: "dial-attempt" as const };
+  }
+
+  if (!input.call) return { task: null, existing: existing || null, matchedBy: null };
+  const task = await findFollowupTaskForQuoCall(input.call);
+  return { task, existing: existing || null, matchedBy: task ? "phone" as const : null };
 }
 
 export async function upsertQuoCallActivity(input: {

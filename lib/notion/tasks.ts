@@ -141,18 +141,31 @@ async function resolveBrandFromContact(contact: NotionPage | null, caches: TaskC
   }
 }
 
-async function contactDisplayName(contact: NotionPage | null, fallbackTitle: string) {
-  if (!contact) return fallbackTitle || null;
-  const keyPersonId = firstRelationId(contact.properties?.["Key Person"]);
-  if (keyPersonId) {
-    try {
-      const person = await retrievePage(keyPersonId);
-      return titleFromProperties(person.properties) || fallbackTitle || null;
-    } catch {
-      /* use contact title */
-    }
-  }
-  return titleFromProperties(contact.properties) || fallbackTitle || null;
+function phoneFromProperties(properties?: NotionPage["properties"]) {
+  return propertyText(properties?.Phone) || propertyText(properties?.["Phone Number"]) || null;
+}
+
+async function resolveKeyPerson(contact: NotionPage | null, caches: TaskCaches) {
+  const keyPersonId = firstRelationId(contact?.properties?.["Key Person"]);
+  if (!keyPersonId) return null;
+  const cacheKey = `key-person:${keyPersonId}`;
+  if (caches.contacts.has(cacheKey)) return caches.contacts.get(cacheKey) || null;
+  const page = await retrievePage(keyPersonId).catch(() => null);
+  caches.contacts.set(cacheKey, page);
+  return page;
+}
+
+async function contactDisplayName(contact: NotionPage | null, fallbackTitle: string, caches: TaskCaches) {
+  const person = await resolveKeyPerson(contact, caches);
+  if (person) return titleFromProperties(person.properties) || fallbackTitle || null;
+  return titleFromProperties(contact?.properties) || fallbackTitle || null;
+}
+
+async function contactPhoneNumber(contact: NotionPage | null, caches: TaskCaches) {
+  const direct = phoneFromProperties(contact?.properties);
+  if (direct) return direct;
+  const person = await resolveKeyPerson(contact, caches);
+  return phoneFromProperties(person?.properties);
 }
 
 async function mapTaskPage(page: NotionPage, caches: TaskCaches): Promise<BrandTask> {
@@ -172,17 +185,21 @@ async function mapTaskPage(page: NotionPage, caches: TaskCaches): Promise<BrandT
   ]);
   const brand = await resolveBrandFromContact(contact, caches);
   const contactTitle = titleFromProperties(contact?.properties);
+  const [contactName, contactPhone] = await Promise.all([
+    contactDisplayName(contact, contactTitle, caches),
+    contactPhoneNumber(contact, caches),
+  ]);
   return {
     id: page.id,
     title: titleFromProperties(properties) || "Untitled Task",
     contactId,
-    contactName: await contactDisplayName(contact, contactTitle),
+    contactName,
     brandId: brand?.id || null,
     brandName: brand?.name || null,
     brandOwnerId: brand?.ownerId || null,
     ownerId: owner?.id || ownerId,
     ownerName: owner?.name || null,
-    contactPhone: propertyText(contact?.properties?.Phone) || propertyText(contact?.properties?.["Phone Number"]) || null,
+    contactPhone,
     channel: propertyText(properties.Channel) || null,
     status: propertyText(properties["Task Status"]) || null,
     priority: propertyText(properties.Priority) || null,

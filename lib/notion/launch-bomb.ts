@@ -142,6 +142,7 @@ export async function launchFollowupBomb(input: {
     companyName: brand.name,
     productDescription: brand.productDescription,
     matchedCategory: brand.matchedCategory,
+    hasContact: true,
     contactName: contact.name,
     contactTitle: contact.title,
     contactRole: contact.contactRole,
