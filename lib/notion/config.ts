@@ -137,3 +137,28 @@ export function getAdminEmails() {
       .filter(Boolean),
   );
 }
+
+export function getCallerEmails() {
+  const raw =
+    env.CALLER_EMAILS ||
+    env.NOTION_CALLER_EMAILS ||
+    (typeof process !== "undefined"
+      ? process.env.CALLER_EMAILS || process.env.NOTION_CALLER_EMAILS
+      : undefined);
+  return new Set(
+    (raw || "")
+      .split(",")
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+export function getMockCallerTaskEmails() {
+  const raw =
+    env.MOCK_CALLER_TASK_EMAILS ||
+    (typeof process !== "undefined" ? process.env.MOCK_CALLER_TASK_EMAILS : undefined);
+  return (raw || "")
+    .split(",")
+    .map((item: string) => item.trim().toLowerCase())
+    .filter(Boolean);
+}

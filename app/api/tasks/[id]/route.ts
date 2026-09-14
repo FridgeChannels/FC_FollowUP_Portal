@@ -9,6 +9,12 @@ import { completeFollowupCall, updateFollowupTask } from "@/lib/notion/followup-
 import { interactionCpCode } from "@/lib/outreach-domain";
 import { annotateTasksWithReplyInbox } from "@/lib/notion/reply-inbox";
 import { retrieveFollowupTask } from "@/lib/notion/tasks";
+import {
+  completeMockCallerTask,
+  getMockCallerTask,
+  markMockCallerQuoDialAttempt,
+  updateMockCallerTask,
+} from "@/lib/mock-caller-tasks";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -43,6 +49,10 @@ export async function GET(request: Request, { params }: Params) {
       return Response.json({ error: "Sign in required" }, { status: 401 });
     }
     const { id } = await params;
+    const mock = getMockCallerTask(id, viewer.email, viewer.isAdmin);
+    if (mock) {
+      return Response.json({ task: mock.task, activities: mock.activities, brand: mock.brand, cps: [] });
+    }
     const payload = await taskPayload(id);
     if (!canViewTask(viewer, payload.task)) {
       return Response.json({ error: "You do not have access to this task" }, { status: 403 });
@@ -62,15 +72,23 @@ export async function PATCH(request: Request, { params }: Params) {
       return Response.json({ error: "Sign in required" }, { status: 401 });
     }
     const { id } = await params;
-    const task = await retrieveFollowupTask(id);
-    if (!canWriteTask(viewer, task)) {
-      return Response.json({ error: "You do not have access to this task" }, { status: 403 });
-    }
     const body = (await request.json()) as {
       status?: string;
       ownerId?: string | null;
       notes?: string;
     };
+    const mock = getMockCallerTask(id, viewer.email, viewer.isAdmin);
+    if (mock) {
+      if (body.ownerId !== undefined) {
+        return Response.json({ error: "Caller tasks do not use Owner assignment" }, { status: 400 });
+      }
+      const updated = updateMockCallerTask(id, viewer.email, body, viewer.isAdmin);
+      return Response.json({ task: updated?.task, activities: updated?.activities || [], brand: updated?.brand, cps: [] });
+    }
+    const task = await retrieveFollowupTask(id);
+    if (!canWriteTask(viewer, task)) {
+      return Response.json({ error: "You do not have access to this task" }, { status: 403 });
+    }
     if (body.ownerId !== undefined && !canAssignBrandOwner(viewer)) {
       return Response.json({ error: "Only Admin can assign Owner" }, { status: 403 });
     }
@@ -101,15 +119,27 @@ export async function POST(request: Request, { params }: Params) {
       return Response.json({ error: "Sign in required" }, { status: 401 });
     }
     const { id } = await params;
-    const task = await retrieveFollowupTask(id);
-    if (!canWriteTask(viewer, task)) {
-      return Response.json({ error: "You do not have access to this task" }, { status: 403 });
-    }
     const body = (await request.json()) as {
       action?: string;
       outcome?: string;
       summary?: string;
     };
+    const mock = getMockCallerTask(id, viewer.email, viewer.isAdmin);
+    if (mock) {
+      if (body.action === "quo-attempt") {
+        const updated = markMockCallerQuoDialAttempt(id, viewer.email, viewer.isAdmin);
+        return Response.json({ task: updated?.task, activities: updated?.activities || [], brand: updated?.brand, cps: [] });
+      }
+      if (body.action !== "complete-call") {
+        return Response.json({ error: "Unsupported task action" }, { status: 400 });
+      }
+      const completed = completeMockCallerTask(id, viewer.email, body.outcome || "Other", body.summary, viewer.isAdmin);
+      return Response.json({ task: completed?.task, activities: completed?.activities || [], brand: completed?.brand, cps: [] });
+    }
+    const task = await retrieveFollowupTask(id);
+    if (!canWriteTask(viewer, task)) {
+      return Response.json({ error: "You do not have access to this task" }, { status: 403 });
+    }
     if (body.action !== "complete-call") {
       return Response.json({ error: "Unsupported task action" }, { status: 400 });
     }

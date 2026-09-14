@@ -31,6 +31,12 @@ export default defineConfig(async ({ mode }) => {
   const quoFromNumber = process.env.QUO_FROM_NUMBER || loadedEnv.QUO_FROM_NUMBER;
   const quoWebhookSigningSecret =
     process.env.QUO_WEBHOOK_SIGNING_SECRET || loadedEnv.QUO_WEBHOOK_SIGNING_SECRET;
+  const quoWebhookSigningSecrets =
+    process.env.QUO_WEBHOOK_SIGNING_SECRETS || loadedEnv.QUO_WEBHOOK_SIGNING_SECRETS;
+  const devAllowedHosts = (process.env.DEV_ALLOWED_HOSTS || loadedEnv.DEV_ALLOWED_HOSTS || "")
+    .split(",")
+    .map((host) => host.trim())
+    .filter(Boolean);
   const localBindingConfig = {
     main: "vinext/server/fetch-handler",
     compatibility_flags: ["nodejs_compat"],
@@ -54,6 +60,9 @@ export default defineConfig(async ({ mode }) => {
       ...(quoFromNumber ? { QUO_FROM_NUMBER: quoFromNumber } : {}),
       ...(quoWebhookSigningSecret
         ? { QUO_WEBHOOK_SIGNING_SECRET: quoWebhookSigningSecret }
+        : {}),
+      ...(quoWebhookSigningSecrets
+        ? { QUO_WEBHOOK_SIGNING_SECRETS: quoWebhookSigningSecrets }
         : {}),
     },
     d1_databases: d1
@@ -96,7 +105,10 @@ export default defineConfig(async ({ mode }) => {
       ),
     },
     server: {
-      ...(managedLinux ? { host: "0.0.0.0", allowedHosts: ["terminal.local"] } : {}),
+      ...(managedLinux ? { host: "0.0.0.0" } : {}),
+      ...(managedLinux || devAllowedHosts.length
+        ? { allowedHosts: [...new Set([...(managedLinux ? ["terminal.local"] : []), ...devAllowedHosts])] }
+        : {}),
       ...(isCodexSeatbeltSandbox ? { watch: { useFsEvents: false, usePolling: true } } : {}),
     },
     plugins: [
