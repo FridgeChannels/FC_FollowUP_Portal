@@ -1,0 +1,100 @@
+export type QuoMedia = {
+  url?: string | null;
+  type?: string | null;
+  duration?: number | null;
+  [key: string]: unknown;
+};
+
+export type QuoCall = {
+  id?: string | null;
+  from?: string | null;
+  to?: string | null;
+  direction?: string | null;
+  media?: QuoMedia[] | null;
+  voicemail?: QuoVoicemail | null;
+  status?: string | null;
+  createdAt?: string | null;
+  answeredAt?: string | null;
+  completedAt?: string | null;
+  updatedAt?: string | null;
+  userId?: string | null;
+  phoneNumberId?: string | null;
+  conversationId?: string | null;
+  answeredBy?: string | null;
+  initiatedBy?: string | null;
+  callRoute?: string | null;
+  duration?: number | null;
+  forwardedFrom?: string | null;
+  forwardedTo?: string | null;
+  aiHandled?: string | null;
+  participants?: string[] | null;
+  [key: string]: unknown;
+};
+
+export type QuoRecording = {
+  id?: string | null;
+  duration?: number | null;
+  startTime?: string | null;
+  status?: string | null;
+  type?: string | null;
+  url?: string | null;
+  [key: string]: unknown;
+};
+
+export type QuoTranscriptLine = {
+  content?: string | null;
+  start?: number | null;
+  end?: number | null;
+  identifier?: string | null;
+  userId?: string | null;
+  [key: string]: unknown;
+};
+
+export type QuoTranscript = {
+  callId?: string | null;
+  createdAt?: string | null;
+  dialogue?: QuoTranscriptLine[] | null;
+  duration?: number | null;
+  status?: string | null;
+  [key: string]: unknown;
+};
+
+export type QuoJob = {
+  icon?: string | null;
+  name?: string | null;
+  result?: { data?: Array<{ name?: string | null; value?: string | null; [key: string]: unknown }> | null; [key: string]: unknown } | null;
+  [key: string]: unknown;
+};
+
+export type QuoSummary = {
+  callId?: string | null;
+  status?: string | null;
+  summary?: string[] | null;
+  nextSteps?: string[] | null;
+  jobs?: QuoJob[] | null;
+  [key: string]: unknown;
+};
+
+export type QuoVoicemail = {
+  id?: string | null;
+  duration?: number | null;
+  transcript?: string | null;
+  recordingUrl?: string | null;
+  url?: string | null;
+  type?: string | null;
+  status?: string | null;
+  [key: string]: unknown;
+};
+
+export type QuoCallData = {
+  callId: string;
+  call?: QuoCall | null;
+  recordings?: QuoRecording[];
+  transcript?: QuoTranscript | null;
+  summary?: QuoSummary | null;
+  voicemail?: QuoVoicemail | null;
+  eventTypes?: string[];
+  lastEventAt?: string | null;
+};
+
+export type QuoApiEnvelope<T> = { data: T };

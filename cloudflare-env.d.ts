@@ -17,5 +17,8 @@ declare namespace Cloudflare {
     NOTION_ADMIN_EMAILS?: string;
     SKIP_UNAVAILABLE_CHANNELS?: string;
     REPLY_INGEST_TOKEN?: string;
+    QUO_API_KEY?: string;
+    QUO_FROM_NUMBER?: string;
+    QUO_WEBHOOK_SIGNING_SECRET?: string;
   }
 }

@@ -13,6 +13,7 @@ import {
 } from "./client";
 import { getFollowupConversationDbId } from "./config";
 import { listCheckpoints } from "./cps";
+import type { QuoCallData } from "../quo/types";
 
 const CONTACT_CONVERSATION_KEYS = ["Interactions", "Conversations", "Conversation Records"];
 
@@ -26,9 +27,25 @@ function asReplyStatus(value: string): BrandActivity["replyStatus"] {
   return null;
 }
 
+const QUO_MARKER = "[QUO_CALL_DATA]";
+
+export function serializeQuoCallData(data: QuoCallData) {
+  return `${QUO_MARKER}\n${JSON.stringify(data)}`;
+}
+
+function parseQuoData(notes: string | null): QuoCallData | null {
+  if (!notes?.startsWith(QUO_MARKER)) return null;
+  try {
+    return JSON.parse(notes.slice(QUO_MARKER.length).trim()) as QuoCallData;
+  } catch {
+    return null;
+  }
+}
+
 function mapConversation(page: NotionPage): BrandActivity {
   const properties = page.properties || {};
   const subject = propertyText(properties.Subject) || null;
+  const notes = propertyText(properties.Notes) || null;
   return {
     id: page.id,
     contactId: firstRelationId(properties["Follow-up Contact"]) || null,
@@ -39,7 +56,7 @@ function mapConversation(page: NotionPage): BrandActivity {
     subject,
     content: propertyText(properties.Content) || titleFromProperties(properties),
     sender: propertyText(properties.Sender) || null,
-    notes: propertyText(properties.Notes) || null,
+    notes,
     callResult: propertyText(properties["Call Result"]) || null,
     sourceUrl: propertyText(properties["Source URL"]) || null,
     threadId: propertyText(properties["Thread ID"]) || null,
@@ -51,6 +68,7 @@ function mapConversation(page: NotionPage): BrandActivity {
     createdAt:
       propertyDate(properties["Interaction At"]) || page.created_time || null,
     recordedAt: page.created_time || propertyDate(properties["Interaction At"]),
+    quo: parseQuoData(notes),
   };
 }
 
@@ -185,4 +203,8 @@ export function findConversationsByMessageId(messageId?: string | null) {
 
 export function findConversationsByThreadId(threadId?: string | null) {
   return findConversationsByText("Thread ID", threadId);
+}
+
+export function findQuoCallConversation(callId: string) {
+  return findConversationsByMessageId(`QUO_CALL:${callId}`);
 }
