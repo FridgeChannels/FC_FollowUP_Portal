@@ -20,6 +20,7 @@ declare namespace Cloudflare {
     QUO_API_KEY?: string;
     QUO_FROM_NUMBER?: string;
     DEV_CALL_PHONE?: string;
+    QUO_WEBHOOK_KEY?: string;
     QUO_WEBHOOK_SIGNING_SECRET?: string;
     QUO_WEBHOOK_SIGNING_SECRETS?: string;
   }

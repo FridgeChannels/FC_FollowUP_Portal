@@ -31,6 +31,7 @@ export type QuoCall = {
   aiHandled?: string | null;
   participants?: string[] | null;
   contactIds?: string[] | null;
+  hasVoicemail?: boolean | null;
   [key: string]: unknown;
 };
 

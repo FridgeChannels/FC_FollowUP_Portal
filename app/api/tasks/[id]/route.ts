@@ -120,6 +120,10 @@ export async function POST(request: Request, { params }: Params) {
         taskId: task.id,
         phone: dialPhoneForTask(task.contactPhone),
         contactId: task.contactId,
+        brandId: task.brandId,
+        brandName: task.brandName,
+        contactName: task.contactName,
+        channel: task.channel,
       });
       return Response.json(await taskPayload(id));
     }

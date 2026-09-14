@@ -7,6 +7,7 @@ import {
   DIAL_ATTEMPT_TTL_MS,
   findRecentQuoDialAttempt,
   recordQuoDialAttempt,
+  removeQuoDialAttempt,
 } from "./dial-attempts.ts";
 
 async function withStore<T>(run: () => Promise<T>) {
@@ -28,10 +29,15 @@ describe("Quo dial attempts", () => {
         taskId: "task-1",
         phone: "+1 972 900 0833",
         contactId: "contact-1",
+        brandId: "brand-1",
+        brandName: "Aurora Pantry",
+        contactName: "Maya Chen",
+        channel: "Phone",
       });
       assert.equal(saved.phone, "9729000833");
       const raw = JSON.parse(await readFile(process.env.QUO_DIAL_ATTEMPTS_PATH || "", "utf8"));
       assert.equal(raw.attempts[0].taskId, "task-1");
+      assert.equal(raw.attempts[0].brandName, "Aurora Pantry");
     });
   });
 
@@ -49,6 +55,16 @@ describe("Quo dial attempts", () => {
       const staleAt = new Date(Date.now() + DIAL_ATTEMPT_TTL_MS + 1000).toISOString();
       const matched = await findRecentQuoDialAttempt(["+19729000833"], staleAt);
       assert.equal(matched, null);
+    });
+  });
+
+  it("removes the local attempt after the call is linked", async () => {
+    await withStore(async () => {
+      await recordQuoDialAttempt({ taskId: "task-1", phone: "+19729000833" });
+      await recordQuoDialAttempt({ taskId: "task-2", phone: "+18207863604" });
+      await removeQuoDialAttempt("task-1");
+      assert.equal(await findRecentQuoDialAttempt(["+19729000833"]), null);
+      assert.equal((await findRecentQuoDialAttempt(["+18207863604"]))?.taskId, "task-2");
     });
   });
 });

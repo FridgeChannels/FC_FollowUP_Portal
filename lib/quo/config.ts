@@ -1,7 +1,15 @@
 import { env } from "cloudflare:workers";
 import { parseDevCallPhone } from "./dev-call-phone";
 
-function value(name: "QUO_API_KEY" | "QUO_FROM_NUMBER" | "QUO_WEBHOOK_SIGNING_SECRET" | "QUO_WEBHOOK_SIGNING_SECRETS" | "DEV_CALL_PHONE") {
+function value(
+  name:
+    | "QUO_API_KEY"
+    | "QUO_FROM_NUMBER"
+    | "QUO_WEBHOOK_KEY"
+    | "QUO_WEBHOOK_SIGNING_SECRET"
+    | "QUO_WEBHOOK_SIGNING_SECRETS"
+    | "DEV_CALL_PHONE",
+) {
   return env[name] || (typeof process !== "undefined" ? process.env[name] : undefined);
 }
 
@@ -22,7 +30,7 @@ export function dialPhoneForTask(contactPhone?: string | null) {
 }
 
 export function getQuoWebhookSigningSecret() {
-  return value("QUO_WEBHOOK_SIGNING_SECRET");
+  return value("QUO_WEBHOOK_KEY") || value("QUO_WEBHOOK_SIGNING_SECRET");
 }
 
 export function getQuoWebhookSigningSecrets() {

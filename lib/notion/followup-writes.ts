@@ -176,6 +176,7 @@ export async function createOutboundConversation(input: {
   interactionAt?: string | null;
   notes?: string;
   titleSuffix?: string;
+  direction?: "Inbound" | "Outbound";
   cpId?: string | null;
   cpAtInteraction?: string | null;
   extendedParameters?: string | null;
@@ -201,7 +202,7 @@ export async function createOutboundConversation(input: {
     "Conversation Record ID": { rich_text: richText(`PORTAL-${Date.now()}`) },
     "Follow-up Contact": { relation: [{ id: contact.id }] },
     Channel: { select: { name: input.channel } },
-    Direction: { select: { name: "Outbound" } },
+    Direction: { select: { name: input.direction || "Outbound" } },
     Subject: { rich_text: subject ? richText(subject) : [] },
     Content: { rich_text: richText(content) },
     Sender: { rich_text: input.sender ? richText(input.sender) : [] },
@@ -216,7 +217,7 @@ export async function createOutboundConversation(input: {
     properties["Message Status"] = { select: { name: input.messageStatus || "Pending" } };
   }
   if (input.callResult && CALL_RESULTS.has(input.callResult)) {
-    properties["Call Result"] = { select: { name: input.callResult } };
+    properties["Call Result"] = { rich_text: richText(input.callResult) };
   }
   if (input.interactionAt) {
     properties["Interaction At"] = { date: { start: input.interactionAt } };

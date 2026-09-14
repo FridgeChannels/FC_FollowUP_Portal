@@ -2,7 +2,7 @@ import type { BrandTask } from "../brand-list";
 import { findQuoCallConversation, serializeQuoCallData } from "./conversations";
 import { createOutboundConversation } from "./followup-writes";
 import { richText, updatePage } from "./client";
-import { listFollowupTasksForViewer, retrieveFollowupTask } from "./tasks";
+import { retrieveFollowupTask } from "./tasks";
 import type { QuoCall, QuoCallData } from "../quo/types";
 import { mergeQuoCallData, recordingsForQuoCall } from "../quo/data";
 import { findRecentQuoDialAttempt } from "../quo/dial-attempts";
@@ -19,9 +19,16 @@ export function callPhones(call?: QuoCall | null) {
 
 function callResult(call?: QuoCall | null) {
   if (!call) return null;
-  if (call.voicemail || !call.answeredAt && call.status === "completed") return "Voicemail";
-  if (call.answeredAt) return "Connected";
-  if (call.status === "completed") return "No Answer";
+  if (call.voicemail || call.hasVoicemail) return "Voicemail";
+  if (call.status === "answered" || call.answeredAt) return "Connected";
+  if (
+    call.status === "unanswered"
+    || call.status === "abandoned"
+    || call.status === "failed"
+    || (call.status === "completed" && !call.answeredAt)
+  ) {
+    return "No Answer";
+  }
   return null;
 }
 
@@ -41,25 +48,6 @@ function readableContent(data: QuoCallData) {
   }
   const result = callResult(data.call);
   return result ? `Quo call ${result}` : "Quo call activity received";
-}
-
-export async function findFollowupTaskForQuoCall(call: QuoCall) {
-  const phones = new Set(callPhones(call));
-  if (!phones.size) return null;
-  const tasks = await listFollowupTasksForViewer();
-  const candidates = tasks.filter((task) => {
-    if (task.channel !== "Phone" || !task.contactId || !task.contactPhone) return false;
-    return phones.has(normalizePhone(task.contactPhone));
-  });
-  if (!candidates.length) return null;
-  const open = candidates.filter((task) => task.status === "Pending" || task.status === "In Progress");
-  const pool = open.length ? open : candidates;
-  const callTime = new Date(call.createdAt || call.completedAt || Date.now()).getTime();
-  return [...pool].sort((left, right) => {
-    const leftTime = Math.abs(new Date(left.scheduledAt || 0).getTime() - callTime);
-    const rightTime = Math.abs(new Date(right.scheduledAt || 0).getTime() - callTime);
-    return leftTime - rightTime;
-  })[0] || null;
 }
 
 export async function resolveFollowupTaskForQuoWebhook(input: {
@@ -82,9 +70,7 @@ export async function resolveFollowupTaskForQuoWebhook(input: {
     if (task) return { task, existing: existing || null, matchedBy: "dial-attempt" as const };
   }
 
-  if (!input.call) return { task: null, existing: existing || null, matchedBy: null };
-  const task = await findFollowupTaskForQuoCall(input.call);
-  return { task, existing: existing || null, matchedBy: task ? "phone" as const : null };
+  return { task: null, existing: existing || null, matchedBy: null };
 }
 
 export async function upsertQuoCallActivity(input: {
@@ -107,7 +93,8 @@ export async function upsertQuoCallActivity(input: {
     Content: { rich_text: richText(content) },
     Notes: { rich_text: richText(serializeQuoCallData(data)) },
     "Message ID": { rich_text: richText(`QUO_CALL:${data.callId}`) },
-    "Call Result": result ? { select: { name: result } } : { select: null },
+    "Call Result": { rich_text: result ? richText(result) : [] },
+    Direction: { select: { name: "Inbound" } },
     "Interaction At": { date: { start: createdAt } },
     ...(recordings[0]?.url ? { "Source URL": { url: recordings[0].url } } : {}),
   } as Record<string, unknown>;
@@ -121,7 +108,7 @@ export async function upsertQuoCallActivity(input: {
       contactName: input.task.contactName || "Contact",
       channel: "Phone",
       content,
-      sender: input.task.ownerName || "Quo",
+      sender: input.task.contactName || input.task.contactPhone || "Contact",
       taskId: input.task.id,
       threadId: data.call?.conversationId ? `QUO_CONVERSATION:${data.call.conversationId}` : undefined,
       messageId: `QUO_CALL:${data.callId}`,
@@ -129,17 +116,11 @@ export async function upsertQuoCallActivity(input: {
       callResult: result,
       interactionAt: createdAt,
       notes: serializeQuoCallData(data),
-      titleSuffix: result || "Quo",
+      titleSuffix: "Inbound",
+      direction: "Inbound",
     });
   }
 
-  if (input.eventType === "call.completed" && data.call?.status === "completed") {
-    await updatePage(input.task.id, {
-      "Task Status": { status: { name: "Completed" } },
-      "Ended At": { date: { start: data.call.completedAt || createdAt } },
-      Notes: { rich_text: richText([input.task.notes, `Quo Call ID: ${data.callId}`].filter(Boolean).join("\n")) },
-    });
-  }
   return retrieveFollowupTask(input.task.id);
 }
 
