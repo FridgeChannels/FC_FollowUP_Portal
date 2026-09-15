@@ -1,5 +1,9 @@
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { queryFollowupClientPages } from "@/lib/notion/client";
+import {
+  attachBrandReplySignals,
+  listBrandReplySignals,
+} from "@/lib/notion/brand-reply-signals";
 import { listCheckpoints } from "@/lib/notion/cps";
 import { mapFollowupClientPages } from "@/lib/notion/followup-clients";
 import { ownerPageIdFromQueryParam } from "@/lib/notion/owner-filter";
@@ -22,7 +26,11 @@ export async function GET(request: Request) {
     const pages = await queryFollowupClientPages(
       ownerPageIdFromQueryParam(viewer.isAdmin, viewer.ownerId, ownerParam),
     );
-    const brands = await mapFollowupClientPages(pages);
+    const [mapped, replySignals] = await Promise.all([
+      mapFollowupClientPages(pages),
+      listBrandReplySignals().catch(() => new Map()),
+    ]);
+    const brands = attachBrandReplySignals(mapped, replySignals);
     return Response.json({
       brands,
       cps,

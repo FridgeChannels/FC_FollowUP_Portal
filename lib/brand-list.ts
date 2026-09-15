@@ -149,6 +149,9 @@ export type BrandListItem = {
   ownerId: string | null;
   ownerName: string | null;
   ownerEmail: string | null;
+  needsReply?: boolean;
+  replyPreview?: string | null;
+  replyUpdatedAt?: string | null;
 };
 
 export type BrandContact = {

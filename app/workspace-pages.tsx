@@ -495,6 +495,9 @@ function mergeBrandListItem(current: BrandListItem, next: BrandListItem): BrandL
     handlingMode: next.handlingMode,
     currentCp: next.currentCp,
     currentCpId: next.currentCpId,
+    needsReply: next.needsReply ?? current.needsReply,
+    replyPreview: next.replyPreview ?? current.replyPreview,
+    replyUpdatedAt: next.replyUpdatedAt ?? current.replyUpdatedAt,
   };
 }
 
@@ -607,9 +610,14 @@ export function BrandsPage() {
             c.name.toLowerCase().includes(query.toLowerCase()),
         )
         .sort((a, b) => {
-          const aTime = a.lastInteractionAt || "";
-          const bTime = b.lastInteractionAt || "";
-          return bTime.localeCompare(aTime) || a.name.localeCompare(b.name);
+          const replyRank = (item: BrandListItem) => (item.needsReply ? 1 : 0);
+          const aTime = a.replyUpdatedAt || a.lastInteractionAt || "";
+          const bTime = b.replyUpdatedAt || b.lastInteractionAt || "";
+          return (
+            replyRank(b) - replyRank(a) ||
+            bTime.localeCompare(aTime) ||
+            a.name.localeCompare(b.name)
+          );
         }),
     [brands, status, cp, owner, query, isAdmin],
   );
@@ -837,7 +845,7 @@ export function BrandsPage() {
                 {filtered.map((c) => (
                     <TableRow
                       key={c.id}
-                      className="cursor-pointer hover:bg-violet-50/30"
+                      className={`cursor-pointer hover:bg-violet-50/30 ${c.needsReply ? "bg-rose-50/40" : ""}`}
                       onClick={() => router.push(`/customers/${c.id}`)}
                     >
                       {isAdmin && (
@@ -862,7 +870,21 @@ export function BrandsPage() {
                             </AvatarFallback>
                           </Avatar>
                           <div className="min-w-0">
-                            <div className="truncate text-sm font-semibold">{c.name}</div>
+                            <div className="flex items-center gap-2 text-sm font-semibold">
+                              {c.needsReply ? (
+                                <span
+                                  className="size-2 shrink-0 rounded-full bg-rose-500"
+                                  aria-label="Reply needed"
+                                />
+                              ) : null}
+                              <span className="truncate">{c.name}</span>
+                            </div>
+                            {c.needsReply ? (
+                              <div className="mt-0.5 truncate text-xs font-medium text-rose-700">
+                                Reply needed
+                                {c.replyUpdatedAt ? ` · ${dateOnly(c.replyUpdatedAt)}` : ""}
+                              </div>
+                            ) : null}
                           </div>
                         </div>
                       </TableCell>
