@@ -1,6 +1,6 @@
 import { getFollowupClientDbId, getNotionApiKey, NOTION_VERSION } from "./config";
 import { ownerRelationFilter } from "./owner-filter";
-import { notionRetry } from "./rate-limit";
+import { notionRetry, runWithNotionLimit } from "./rate-limit";
 
 const NOTION_API = "https://api.notion.com/v1";
 
@@ -50,6 +50,10 @@ function notionHeaders() {
 }
 
 export async function notionFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  return runWithNotionLimit(() => notionFetchWithRetry<T>(path, init));
+}
+
+async function notionFetchWithRetry<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await notionRetry.fetchWithRetry(() => fetch(`${NOTION_API}${path}`, {
     ...init,
     headers: {

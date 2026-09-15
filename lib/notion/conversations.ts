@@ -13,6 +13,7 @@ import {
 } from "./client";
 import { getFollowupConversationDbId } from "./config";
 import { listCheckpoints } from "./cps";
+import { isRetryableNotionError } from "./rate-limit";
 import { parseQuoCallData } from "../quo/call-payload";
 
 const CONTACT_CONVERSATION_KEYS = ["Interactions", "Conversations", "Conversation Records"];
@@ -134,13 +135,12 @@ export async function listFollowupConversations(
   let pages: NotionPage[] = [];
   try {
     pages = await queryConversationsByContacts(contactIds);
-  } catch {
-    pages = [];
-  }
-  if (!pages.length) {
+  } catch (error) {
+    if (isRetryableNotionError(error)) throw error;
     try {
       pages = await listFromContactRelations(contactIds);
-    } catch {
+    } catch (fallbackError) {
+      if (isRetryableNotionError(fallbackError)) throw fallbackError;
       pages = [];
     }
   }

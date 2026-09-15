@@ -1,15 +1,6 @@
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import type { CreateBombInput } from "@/lib/bomb-list";
-import { createFollowupBomb, listFollowupBombs, listFollowupScenarios } from "@/lib/notion/bombs";
-import { listApplicableCheckpoints } from "@/lib/notion/cps";
-
-async function loadFormOptions() {
-  const [scenarios, cps] = await Promise.all([
-    listFollowupScenarios(),
-    listApplicableCheckpoints(),
-  ]);
-  return { scenarios, cps };
-}
+import { createFollowupBomb, listFollowupBombsCatalog } from "@/lib/notion/bombs";
 
 export async function GET(request: Request) {
   try {
@@ -17,8 +8,7 @@ export async function GET(request: Request) {
     if (!viewer.email) {
       return Response.json({ error: "Sign in required" }, { status: 401 });
     }
-    const [bombs, options] = await Promise.all([listFollowupBombs(), loadFormOptions()]);
-    return Response.json({ bombs, ...options });
+    return Response.json(await listFollowupBombsCatalog());
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
     return Response.json({ error: message }, { status: 500 });

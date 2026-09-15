@@ -1,4 +1,4 @@
-import type { BrandContact } from "../brand-list";
+import type { BrandActivity, BrandContact } from "../brand-list";
 import {
   createPage,
   firstRelationId,
@@ -334,12 +334,13 @@ async function toResult(
   target: ResolvedTarget,
   taskId: string,
   duplicate: boolean,
+  activities?: BrandActivity[],
 ): Promise<InboundReplyResult> {
   const task = await retrieveFollowupTask(taskId);
-  const activities = target.contactId
-    ? await listFollowupConversations([target.contactId])
-    : [];
-  const [annotated] = annotateTasksWithReplyInbox([task], activities);
+  const listed =
+    activities ??
+    (target.contactId ? await listFollowupConversations([target.contactId]) : []);
+  const [annotated] = annotateTasksWithReplyInbox([task], listed);
   return {
     duplicate,
     conversationId: conversation.id,
@@ -372,22 +373,25 @@ export async function ingestInboundReply(
     }
     throw error;
   }
-  const messageId = input.messageId?.trim() || `IN-${channel}-${Date.now()}`;
+  const providedMessageId = input.messageId?.trim() || "";
+  const messageId = providedMessageId || `IN-${channel}-${Date.now()}`;
 
-  const [duplicate] = await findConversationsByMessageId(messageId);
-  if (duplicate?.contactId) {
-    const target = await loadContactContext(duplicate.contactId);
-    const taskId =
-      duplicate.taskId ||
-      (await resolveReplyTask({
-        brandName: target.brandName,
-        brandOwnerId: target.brandOwnerId,
-        contactId: target.contactId,
-        contactName: target.contactName,
-        channel,
-        existingTaskId: input.taskId || undefined,
-      }));
-    return toResult(duplicate, target, taskId, true);
+  if (providedMessageId) {
+    const [duplicate] = await findConversationsByMessageId(messageId);
+    if (duplicate?.contactId) {
+      const target = await loadContactContext(duplicate.contactId);
+      const taskId =
+        duplicate.taskId ||
+        (await resolveReplyTask({
+          brandName: target.brandName,
+          brandOwnerId: target.brandOwnerId,
+          contactId: target.contactId,
+          contactName: target.contactName,
+          channel,
+          existingTaskId: input.taskId || undefined,
+        }));
+      return toResult(duplicate, target, taskId, true);
+    }
   }
 
   const target = await resolveInboundReplyTarget(input, channel);
@@ -426,6 +430,7 @@ export async function ingestInboundReply(
       target.contactId,
       channel,
       input.threadId?.trim() || outbound.threadId || target.existingThreadId,
+      activities,
     )
   ).threadId;
   const taskId = outboundTask.id;
@@ -482,6 +487,30 @@ export async function ingestInboundReply(
     target,
     taskId,
     false,
+    [
+      ...activities,
+      {
+        id: page.id,
+        contactId: target.contactId,
+        taskId,
+        channel,
+        direction: "Inbound",
+        status: channel === "Phone" ? null : "Received",
+        subject: subject || null,
+        content,
+        sender: sender || null,
+        notes: input.notes?.trim() || "渠道回复已入库，待人工处理。",
+        callResult: callResult || null,
+        sourceUrl: sourceUrl || null,
+        threadId,
+        messageId,
+        extendedParameters,
+        replyStatus: channel === "Phone" ? null : "Needs Reply",
+        cpId: null,
+        cpAtInteraction: target.currentCp || null,
+        createdAt: occurredAt,
+      },
+    ],
   );
 }
 

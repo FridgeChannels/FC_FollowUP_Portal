@@ -3,7 +3,7 @@ import {
   parseApplicableCp,
   type CurrentCpOption,
 } from "../brand-list";
-import { listCheckpoints, resolveCheckpoint } from "./cps";
+import { filterApplicableCheckpoints, listCheckpoints, resolveCheckpoint } from "./cps";
 import {
   BOMB_TARGET_ROLES,
   isBombChannel,
@@ -132,7 +132,7 @@ function mapBombPage(
   };
 }
 
-export async function listFollowupBombs() {
+export async function listFollowupBombsCatalog() {
   const [bombPages, templatePages, scenarioPages, checkpoints] = await Promise.all([
     queryDatabasePages(getFollowupBombDbId()),
     queryDatabasePages(getFollowupTemplateDbId()),
@@ -143,9 +143,17 @@ export async function listFollowupBombs() {
   const templates = new Map(templatePages.map((page) => [page.id, mapTemplate(page)]));
   const checkpointById = new Map(checkpoints.map((item) => [item.id, item]));
 
-  return bombPages
-    .map((page) => mapBombPage(page, titles, templatesForBomb(page, templates), checkpointById))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  return {
+    bombs: bombPages
+      .map((page) => mapBombPage(page, titles, templatesForBomb(page, templates), checkpointById))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    scenarios: scenarioPages.map(mapScenario).sort((a, b) => a.name.localeCompare(b.name)),
+    cps: filterApplicableCheckpoints(checkpoints),
+  };
+}
+
+export async function listFollowupBombs() {
+  return (await listFollowupBombsCatalog()).bombs;
 }
 
 export async function retrieveFollowupBomb(id: string): Promise<BombDetail> {

@@ -30,11 +30,12 @@ export async function resolveConversationThread(
   contactId: string,
   channel: string,
   preferredThreadId?: string | null,
+  existing?: BrandActivity[],
 ) {
-  const existing = await listFollowupConversations([contactId]);
+  const listed = existing ?? (await listFollowupConversations([contactId]));
   return {
     threadId:
-      pickContactChannelThreadId(existing, channel) ||
+      pickContactChannelThreadId(listed, channel) ||
       preferredThreadId?.trim() ||
       uniqueRecordId("THR", channel),
     messageId: uniqueRecordId("MSG", channel),
