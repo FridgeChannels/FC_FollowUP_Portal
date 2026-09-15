@@ -35,10 +35,18 @@ export default defineConfig(async ({ mode }) => {
     process.env.QUO_WEBHOOK_SIGNING_SECRET || loadedEnv.QUO_WEBHOOK_SIGNING_SECRET;
   const quoWebhookSigningSecrets =
     process.env.QUO_WEBHOOK_SIGNING_SECRETS || loadedEnv.QUO_WEBHOOK_SIGNING_SECRETS;
-  const devAllowedHosts = (process.env.DEV_ALLOWED_HOSTS || loadedEnv.DEV_ALLOWED_HOSTS || "")
-    .split(",")
-    .map((host) => host.trim())
-    .filter(Boolean);
+  const rawDevAllowedHosts =
+    process.env.DEV_ALLOWED_HOSTS || loadedEnv.DEV_ALLOWED_HOSTS || "";
+  // `true` / `*` / `all` disables Vite host checks (needed for reverse-proxy domains).
+  const allowAllDevHosts = ["true", "*", "all"].includes(
+    rawDevAllowedHosts.trim().toLowerCase(),
+  );
+  const devAllowedHosts = allowAllDevHosts
+    ? []
+    : rawDevAllowedHosts
+        .split(",")
+        .map((host) => host.trim())
+        .filter(Boolean);
   const localBindingConfig = {
     main: "vinext/server/fetch-handler",
     compatibility_flags: ["nodejs_compat"],
@@ -111,9 +119,18 @@ export default defineConfig(async ({ mode }) => {
     },
     server: {
       ...(managedLinux ? { host: "0.0.0.0" } : {}),
-      ...(managedLinux || devAllowedHosts.length
-        ? { allowedHosts: [...new Set([...(managedLinux ? ["terminal.local"] : []), ...devAllowedHosts])] }
-        : {}),
+      ...(allowAllDevHosts
+        ? { allowedHosts: true }
+        : managedLinux || devAllowedHosts.length
+          ? {
+              allowedHosts: [
+                ...new Set([
+                  ...(managedLinux ? ["terminal.local"] : []),
+                  ...devAllowedHosts,
+                ]),
+              ],
+            }
+          : {}),
       ...(isCodexSeatbeltSandbox ? { watch: { useFsEvents: false, usePolling: true } } : {}),
     },
     plugins: [
