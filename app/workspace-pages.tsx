@@ -126,6 +126,32 @@ export function Status({ value }: { value: string }) {
     </span>
   );
 }
+
+function formatInteractionDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function lastInteractionLabel(item: BrandListItem) {
+  const channel = item.lastInteractionChannel || "Interaction";
+  const outcome =
+    item.lastInteractionCallResult ||
+    (item.lastInteractionDirection === "Inbound"
+      ? "Reply"
+      : item.lastInteractionStatus === "Sent" ||
+          item.lastInteractionStatus === "Delivered" ||
+          item.lastInteractionStatus === "Completed"
+        ? "Sent"
+        : item.lastInteractionStatus || "");
+  return [channel, outcome].filter(Boolean).join(" · ");
+}
 export function PageHeader({
   eyebrow,
   title,
@@ -510,6 +536,7 @@ export function BrandsPage() {
     brandListFiltersFromSearch(searchParams),
   );
   const { q: query, status, cp, owner } = filters;
+  const effectiveStatus = isAdmin ? status : "all";
   const [brands, setBrands] = useState<BrandListItem[]>([]);
   const [ownerOptions, setOwnerOptions] = useState<Array<{ id: string; name: string }>>([]);
   const [selected, setSelected] = useState<string[]>([]);
@@ -600,7 +627,8 @@ export function BrandsPage() {
       brands
         .filter(
           (c) =>
-            (status === "all" || c.status === status) &&
+            (isAdmin || (c.status !== "Paused" && c.status !== "Completed")) &&
+            (effectiveStatus === "all" || c.status === effectiveStatus) &&
             (cp === "all" || c.currentCp === cp) &&
             (isAdmin
               ? owner === "all" ||
@@ -618,7 +646,7 @@ export function BrandsPage() {
             a.name.localeCompare(b.name)
           );
         }),
-    [brands, status, cp, owner, query, isAdmin],
+    [brands, effectiveStatus, cp, owner, query, isAdmin],
   );
   const owners = useMemo(() => {
     if (ownerOptions.length) return ownerOptions;
@@ -685,7 +713,7 @@ export function BrandsPage() {
     brandListMetadata({
       q: query || undefined,
       cp,
-      status,
+      status: effectiveStatus,
       owner,
       ownerName:
         owner !== "all" && owner !== "unassigned"
@@ -752,19 +780,21 @@ export function BrandsPage() {
               ))}
             </SelectContent>
           </Select>
-          <Select value={status} onValueChange={(value) => setListParam("status", value)}>
-            <SelectTrigger className="w-full sm:w-48">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All statuses</SelectItem>
-              {FOLLOW_UP_STATUSES.map((item) => (
-                <SelectItem key={item} value={item}>
-                  {item}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {isAdmin && (
+            <Select value={status} onValueChange={(value) => setListParam("status", value)}>
+              <SelectTrigger className="w-full sm:w-48">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All statuses</SelectItem>
+                {FOLLOW_UP_STATUSES.map((item) => (
+                  <SelectItem key={item} value={item}>
+                    {item}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
           {isAdmin && (
             <Select value={owner} onValueChange={(value) => setListParam("owner", value)}>
               <SelectTrigger className="w-full sm:w-44">
@@ -822,7 +852,7 @@ export function BrandsPage() {
                   <TableHead>Handling Mode</TableHead>
                   <TableHead>Last interaction</TableHead>
                   <TableHead className="whitespace-nowrap">Days since last interaction</TableHead>
-                  <TableHead className="whitespace-nowrap">Days since last reply</TableHead>
+                  <TableHead className="whitespace-nowrap pr-5">Days since last reply</TableHead>
                   {isAdmin && <TableHead>FC-Owner</TableHead>}
                 </TableRow>
               </TableHeader>
@@ -882,13 +912,24 @@ export function BrandsPage() {
                       <TableCell>
                         <HandlingMode value={c.handlingMode} />
                       </TableCell>
-                      <TableCell className="max-w-52 truncate text-xs text-slate-500">
-                        {c.lastInteractionAt ? dateOnly(c.lastInteractionAt) : "No interaction"}
+                      <TableCell className="max-w-60 text-xs text-slate-500">
+                        {c.lastInteractionAt ? (
+                          <div className="min-w-44">
+                            <div className="truncate font-semibold text-slate-700" title={lastInteractionLabel(c)}>
+                              {lastInteractionLabel(c)}
+                            </div>
+                            <time dateTime={c.lastInteractionAt} className="mt-0.5 block truncate font-mono text-[11px] text-slate-500">
+                              {formatInteractionDateTime(c.lastInteractionAt)}
+                            </time>
+                          </div>
+                        ) : (
+                          "No interaction"
+                        )}
                       </TableCell>
                       <TableCell className="text-xs tabular-nums text-slate-600">
                         {daysSince(c.lastInteractionAt)}
                       </TableCell>
-                      <TableCell className="text-xs tabular-nums text-slate-600">
+                      <TableCell className="pr-5 text-xs tabular-nums text-slate-600">
                         {daysSince(c.lastReplyAt)}
                       </TableCell>
                       {isAdmin && (

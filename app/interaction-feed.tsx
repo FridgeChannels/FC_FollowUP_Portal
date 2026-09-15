@@ -120,11 +120,15 @@ export function InteractionFeed({
   const customerId = customerIdProp || interactions[0]?.customerId;
   const customer = state.customers.find(item => item.id === customerId);
   const currentCp = currentCpProp || customer?.cp || "CP1";
-  const [selectedCp, setSelectedCp] = useState<CPCode>(initialCp || currentCp);
   const [selectedChannel, setSelectedChannel] = useState<Channel>(callerPhoneOnly ? "Phone" : initialChannel || "Email");
   const [bombOpen, setBombOpen] = useState(false);
   const [cancellingBombId, setCancellingBombId] = useState<string | null>(null);
-  const currentIndex = CP_CODES.indexOf(currentCp as (typeof CP_CODES)[number]);
+  const visibleCps = CP_CODES.slice(0, 3);
+  const selectedInitialCp = initialCp || currentCp;
+  const selectedCpIsVisible = visibleCps.includes(selectedInitialCp as (typeof visibleCps)[number]);
+  const [selectedCp, setSelectedCp] = useState<CPCode>(selectedCpIsVisible ? selectedInitialCp : visibleCps[visibleCps.length - 1]);
+  const displayCurrentCp = visibleCps.includes(currentCp as (typeof visibleCps)[number]) ? currentCp : visibleCps[visibleCps.length - 1];
+  const currentIndex = visibleCps.indexOf(displayCurrentCp as (typeof visibleCps)[number]);
   const cpInteractions = interactions.filter(item => !isChannelMessage(item) || belongsToCp(item, selectedCp));
   const planState = bombInstances ? { ...state, bombInstances, actions: actions ?? [], interactions: cpInteractions } : state;
   const activeChannel = callerPhoneOnly ? "Phone" : selectedChannel;
@@ -136,8 +140,8 @@ export function InteractionFeed({
 
   return <div className={maxHeight ? `${maxHeight} overflow-y-auto` : undefined}>
     <div className="px-5 py-4">
-      <div className="flex items-center">{CP_CODES.map((cp, index) => {
-        const current = cp === currentCp;
+      <div className="flex items-center">{visibleCps.map((cp, index) => {
+        const current = cp === displayCurrentCp;
         const completed = index < currentIndex;
         const selected = cp === selectedCp;
         const selectable = index <= currentIndex;
@@ -151,7 +155,7 @@ export function InteractionFeed({
             </div>
             <div className="mt-0.5 truncate text-[10px] text-slate-500">{current ? "Current" : completed ? "Completed" : "Upcoming"}</div>
           </button>
-          {index < CP_CODES.length - 1 && <span className="grid w-6 shrink-0 place-items-center" aria-hidden><ChevronRight className={`size-4 ${reached ? "text-emerald-500" : current ? "text-violet-400" : "text-slate-300"}`}/></span>}
+          {index < visibleCps.length - 1 && <span className="grid w-6 shrink-0 place-items-center" aria-hidden><ChevronRight className={`size-4 ${reached ? "text-emerald-500" : current ? "text-violet-400" : "text-slate-300"}`}/></span>}
         </Fragment>;
       })}</div>
     </div>

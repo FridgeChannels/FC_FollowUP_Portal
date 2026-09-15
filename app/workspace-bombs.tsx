@@ -133,7 +133,7 @@ function TemplateCard({ template, index }: { template: BombTemplateItem; index: 
 export function BombsPage() {
   const router = useRouter();
   const { can } = useWorkspace();
-  const [tab, setTab] = useState("Active");
+  const [tab, setTab] = useState<"Active" | "Draft" | "All">("Active");
   const [create, setCreate] = useState(false);
   const [bombs, setBombs] = useState<BombListItem[]>([]);
   const [scenarios, setScenarios] = useState<BombScenario[]>([]);
@@ -179,6 +179,16 @@ export function BombsPage() {
         eyebrow={loading ? "Loading" : `${bombs.length} records`}
         title="OmniReach"
       >
+        <Select value={tab} onValueChange={(value) => setTab(value as typeof tab)}>
+          <SelectTrigger className="w-44">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="Active">Active</SelectItem>
+            <SelectItem value="Draft">Draft</SelectItem>
+            <SelectItem value="All">All</SelectItem>
+          </SelectContent>
+        </Select>
         {can("editBomb") && (
           <Button onClick={() => setCreate(true)}>
             <Plus className="mr-2 size-4" />
@@ -186,17 +196,6 @@ export function BombsPage() {
           </Button>
         )}
       </PageHeader>
-      <div className="mb-4 flex gap-1">
-        {["Active", "Draft", "Archived", "All"].map((x) => (
-          <button
-            key={x}
-            onClick={() => setTab(x)}
-            className={`rounded-lg px-4 py-2 text-xs font-semibold ${tab === x ? "bg-slate-950 text-white" : "bg-white text-slate-500 hover:bg-slate-100"}`}
-          >
-            {x}
-          </button>
-        ))}
-      </div>
       <div className="overflow-hidden rounded-2xl bg-white">
         {error ? (
           <Empty className="py-24">

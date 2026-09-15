@@ -1,19 +1,29 @@
-import type { BrandListItem } from "../brand-list";
+import type { BrandActivity, BrandListItem } from "../brand-list";
 import {
   firstRelationId,
   propertyDate,
   propertyText,
   queryDatabasePages,
   retrievePage,
+  relationIds,
   titleFromProperties,
   type NotionPage,
 } from "./client";
 import { getFollowupConversationDbId } from "./config";
+import { listFollowupConversations } from "./conversations";
 
 export type BrandReplySignal = {
   preview: string;
   updatedAt: string | null;
 };
+
+export type BrandInteractionSignal = Pick<
+  BrandListItem,
+  | "lastInteractionChannel"
+  | "lastInteractionDirection"
+  | "lastInteractionStatus"
+  | "lastInteractionCallResult"
+>;
 
 function conversationPreview(page: NotionPage) {
   const properties = page.properties || {};
@@ -109,4 +119,47 @@ export function attachBrandReplySignals(
       replyUpdatedAt: signal.updatedAt,
     };
   });
+}
+
+function isCompletedInteraction(item: BrandActivity) {
+  if (!item.createdAt) return false;
+  if (item.direction === "Inbound") return true;
+  if (item.channel === "Phone") return !!item.callResult || item.status === "Completed";
+  return ["Sent", "Delivered", "Completed", "Received"].includes(item.status || "");
+}
+
+export async function listBrandInteractionSignals(pages: NotionPage[]) {
+  const signals = new Map<string, BrandInteractionSignal>();
+  await Promise.all(
+    pages.map(async (page) => {
+      const contactIds = relationIds(page.properties?.["Follow-up Contacts"]);
+      if (!contactIds.length) return;
+      try {
+        const latest = (await listFollowupConversations(contactIds)).find(isCompletedInteraction);
+        if (!latest) return;
+        signals.set(page.id, {
+          lastInteractionChannel: latest.channel,
+          lastInteractionDirection: latest.direction,
+          lastInteractionStatus: latest.status,
+          lastInteractionCallResult: latest.callResult,
+        });
+      } catch {
+        // The date rollup remains available if conversation metadata cannot be loaded.
+      }
+    }),
+  );
+  return signals;
+}
+
+export function attachBrandInteractionSignals(
+  brands: BrandListItem[],
+  signals: Map<string, BrandInteractionSignal>,
+) {
+  const byKey = new Map(
+    [...signals.entries()].map(([id, signal]) => [pageKey(id), signal]),
+  );
+  return brands.map((brand) => ({
+    ...brand,
+    ...(byKey.get(pageKey(brand.id)) || {}),
+  }));
 }

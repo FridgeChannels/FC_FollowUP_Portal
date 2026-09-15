@@ -175,6 +175,10 @@ export type BrandListItem = {
   status: string;
   handlingMode: HandlingMode | null;
   lastInteractionAt: string | null;
+  lastInteractionChannel: string | null;
+  lastInteractionDirection: "Inbound" | "Outbound" | null;
+  lastInteractionStatus: string | null;
+  lastInteractionCallResult: string | null;
   lastReplyAt: string | null;
   ownerId: string | null;
   ownerName: string | null;
