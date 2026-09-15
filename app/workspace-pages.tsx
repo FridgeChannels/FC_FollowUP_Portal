@@ -897,7 +897,7 @@ export function BrandsPage() {
                             {c.needsReply ? (
                               <div className="mt-0.5 truncate text-xs font-medium text-rose-700">
                                 Reply needed
-                                {c.replyUpdatedAt ? ` · ${dateOnly(c.replyUpdatedAt)}` : ""}
+                                {c.replyUpdatedAt ? ` · ${formatInteractionDateTime(c.replyUpdatedAt)}` : ""}
                               </div>
                             ) : null}
                           </div>

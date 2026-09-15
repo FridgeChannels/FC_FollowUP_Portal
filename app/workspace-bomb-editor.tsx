@@ -292,12 +292,24 @@ export function BombEditor({ bombId }: { bombId: string }) {
           })),
         }),
       });
-      const payload = (await response.json()) as { bomb?: BombDetail; error?: string };
+      const payload = (await response.json()) as {
+        bomb?: BombDetail;
+        cancelledTasks?: number;
+        error?: string;
+      };
       if (!response.ok) throw new Error(payload.error || "Failed to save OmniReach");
       if (!payload.bomb) throw new Error("OmniReach was not saved");
       setBomb(payload.bomb);
       setDraft(draftFromBomb(payload.bomb));
-      toast.success(status === "Active" && draft.status !== "Active" ? "OmniReach activated" : "OmniReach saved");
+      if (draft.status === "Active" && status !== "Active") {
+        toast.success(
+          payload.cancelledTasks
+            ? `OmniReach stopped; ${payload.cancelledTasks} scheduled task${payload.cancelledTasks === 1 ? "" : "s"} cancelled`
+            : "OmniReach stopped; no scheduled tasks to cancel",
+        );
+      } else {
+        toast.success(status === "Active" && draft.status !== "Active" ? "OmniReach activated" : "OmniReach saved");
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save OmniReach");
     } finally {
@@ -371,7 +383,7 @@ export function BombEditor({ bombId }: { bombId: string }) {
             disabled={saving}
             onClick={() => save(draft.status === "Active" ? "Draft" : "Active")}
           >
-            {draft.status === "Active" ? "Deactivate" : "Activate"}
+            {draft.status === "Active" ? "Stop OmniReach" : "Activate"}
           </Button>
           <Button disabled={!!errors.length || saving} onClick={() => save()}>
             <Save className="mr-2 size-4" />

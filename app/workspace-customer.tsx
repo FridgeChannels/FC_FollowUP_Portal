@@ -51,13 +51,14 @@ function asActivityChannel(value?: string | null): Channel | undefined {
 function asActionStatus(status?: string | null): ActionStatus {
   if (status === "In Progress") return "Sending";
   if (status === "Completed") return "Sent";
-  if (status === "Failed" || status === "Cancelled") return status;
+  if (status === "Failed") return "Failed";
+  if (status === "Cancelled" || status === "Canceled") return "Cancelled";
   return "Scheduled";
 }
 
 function asBombStatus(tasks: BrandTask[]): BombInstance["status"] {
   if (tasks.some((item) => item.status === "Pending" || item.status === "In Progress")) return "Running";
-  if (tasks.length && tasks.every((item) => item.status === "Cancelled")) return "Cancelled";
+  if (tasks.length && tasks.every((item) => item.status === "Cancelled" || item.status === "Canceled")) return "Cancelled";
   return "Completed";
 }
 
@@ -144,7 +145,7 @@ function toBombPlan(customerId: string, tasks: BrandTask[], activities: BrandAct
   for (const orphan of orphans) {
     const sameContact = [...groups.entries()].filter(([, group]) => group[0]?.contactId === orphan.contactId);
     const open = sameContact.filter(([, group]) => group.some(isOpenTask));
-    const active = sameContact.filter(([, group]) => !group.every((item) => item.status === "Cancelled"));
+    const active = sameContact.filter(([, group]) => !group.every((item) => item.status === "Cancelled" || item.status === "Canceled"));
     const match = closestTaskGroup(orphan, open.length ? open : active.length ? active : sameContact);
     if (match) match[1].push(orphan);
   }
@@ -361,6 +362,13 @@ export function BrandDetail({customerId}:{customerId:string}){
       applyRemote(payload.brand||null,payload.cps||[]);
       return payload.brand||null;
     });
+  const markTasksCancelled=(taskIds:string[])=>{
+    const cancelled=new Set(taskIds);
+    setRemote(previous=>previous?{
+      ...previous,
+      tasks:previous.tasks.map(task=>cancelled.has(task.id)?{...task,status:"Cancelled"}:task),
+    }:previous);
+  };
   useEffect(()=>{
     if(local)return;
     let cancelled=false;
@@ -450,7 +458,7 @@ export function BrandDetail({customerId}:{customerId:string}){
       <BrandContactList contacts={notionBacked&&remote?remote.contacts:c.contacts} canEdit={!notionBacked&&can("editBrand")} onAdd={()=>setContact(true)}/>
       <div className="flex flex-wrap gap-2 xl:flex-col xl:items-stretch">{can("reply")&&<Button variant="outline" disabled={notionBacked&&!c.contacts.length} onClick={()=>setReply(true)}><Send className="mr-2 size-4"/>Send message</Button>}{can("launch")&&<Button variant="outline" disabled={!notionBacked&&(!!c.activeBombId||c.status==="Bomb Running")} onClick={()=>setLaunch(true)}><Bomb className="mr-2 size-4"/>Launch OmniReach</Button>}{can("changeCP")&&<Button onClick={()=>setCP(true)}>Change CP</Button>}{notionBacked&&can("editBrand")&&<DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label="More follow-up actions" title="More follow-up actions"><MoreHorizontal className="size-5"/></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem disabled={saving||remote?.status==="Paused"||remote?.status==="Completed"} onSelect={()=>void updateFollowUpStatus("Paused")}>Pause FollowUp</DropdownMenuItem><DropdownMenuItem disabled={saving||remote?.status==="Completed"} onSelect={()=>void updateFollowUpStatus("Completed")}>Complete FollowUp</DropdownMenuItem></DropdownMenuContent></DropdownMenu>}</div>
     </section>
-    <div className={`grid gap-6 ${partnershipContext?"xl:grid-cols-[1fr_340px]":""}`}><section><h2 className="mb-3 font-bold">Brand activity</h2><div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">    <InteractionFeed key={`${c.id}-${currentCp}`} customerId={c.id} currentCp={currentCp} cpGoals={notionBacked?toCpGoals(remoteCps):undefined} interactions={interactions} contacts={c.contacts} bombInstances={bombPlan?.bombInstances} actions={bombPlan?.actions} canReviewCalls={callReviewDemo} onCancelBomb={async instance=>{if(!notionBacked){const result=cancelBomb(c.id,instance.id);if(!result.ok)throw new Error(result.message);toast.success(result.message);return;}const response=await fetch(`/api/brands/${c.id}/bombs/${instance.templateId}/cancel`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId:instance.targetContactId})});const payload=await response.json() as {cancelledTaskIds?:string[];error?:string};if(!response.ok)throw new Error(payload.error||"Unable to stop OmniReach");await refreshRemote();toast.success(`${payload.cancelledTaskIds?.length||0} remaining task${payload.cancelledTaskIds?.length===1?"":"s"} cancelled`);}} onSend={notionBacked?async (contactId,channel,content,taskId,threadId)=>{
+    <div className={`grid gap-6 ${partnershipContext?"xl:grid-cols-[1fr_340px]":""}`}><section><h2 className="mb-3 font-bold">Brand activity</h2><div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">    <InteractionFeed key={`${c.id}-${currentCp}`} customerId={c.id} currentCp={currentCp} cpGoals={notionBacked?toCpGoals(remoteCps):undefined} interactions={interactions} contacts={c.contacts} bombInstances={bombPlan?.bombInstances} actions={bombPlan?.actions} canReviewCalls={callReviewDemo} onCancelBomb={async instance=>{if(!notionBacked){const result=cancelBomb(c.id,instance.id);if(!result.ok)throw new Error(result.message);toast.success(result.message);return;}const response=await fetch(`/api/brands/${c.id}/bombs/${instance.templateId}/cancel`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId:instance.targetContactId})});const payload=await response.json() as {cancelledTaskIds?:string[];error?:string};if(!response.ok)throw new Error(payload.error||"Unable to stop OmniReach");markTasksCancelled(payload.cancelledTaskIds||[]);await refreshRemote();toast.success(`${payload.cancelledTaskIds?.length||0} remaining task${payload.cancelledTaskIds?.length===1?"":"s"} cancelled`);}} onSend={notionBacked?async (contactId,channel,content,taskId,threadId)=>{
     const response=await fetch(`/api/brands/${c.id}/messages`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId,channel,content,taskId,threadId})});
     const payload=await response.json() as {brand?:BrandDetail;cps?:CurrentCpOption[];error?:string};
     if(!response.ok||!payload.brand)throw new Error(payload.error||"Send failed");
@@ -507,6 +515,13 @@ function BrandContactList({contacts,canEdit,onAdd}:{contacts:DetailContact[];can
 }
 
 type LaunchStepCopy = { subject?: string; content?: string; callGoal?: string; script?: string };
+type LaunchPreviewTask = {
+  id: string;
+  templateId?: string;
+  channel: Channel;
+  scheduledAt: string;
+  content: string;
+};
 
 type LaunchBombOption = {id:string;name:string;version?:number;goal:string;cp?:string;status?:string;priority?:string|null;steps:Array<{id:string;channel:Channel;subject?:string;content:string;callGoal?:string;script?:string}>};
 
@@ -547,6 +562,7 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
   const [copies,setCopies]=useState<Record<string,LaunchStepCopy>>({});
   const [launchedInstanceId,setLaunchedInstanceId]=useState("");
   const [previewReady,setPreviewReady]=useState(false);
+  const [previewTasks,setPreviewTasks]=useState<LaunchPreviewTask[]>([]);
   const [launching,setLaunching]=useState(false);
   const localBombs=state.bombs.filter(b=>b.status==="Active"&&b.cp===c?.cp);
   const notionBombs=remoteBombs.filter(b=>b.status==="Active"&&(!currentCp||currentCp==="NONE"||!b.cp||b.cp.split(",").some(item=>item.trim()===currentCp)));
@@ -620,13 +636,41 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
   });
   const launched=!!launchedInstanceId||previewReady;
   const launchedInstance=launchedInstanceId?state.bombInstances.find(item=>item.id===launchedInstanceId):undefined;
-  return <Dialog open={open} onOpenChange={value=>{if(!value){setLaunchedInstanceId("");setPreviewReady(false);setLaunching(false);}onOpenChange(value)}}><DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-2xl"><DialogHeader><DialogTitle>{launched?"OmniReach launched · execution plan":"Launch OmniReach"}</DialogTitle><DialogDescription>{launched?(previewOnly?"This launch preview is read-only. The scheduling engine is not writing tasks yet.":"The system assigned this execution order and schedule. This plan is read-only."):"Review and edit each step’s copy for this launch only. The template is not changed. After confirmation, the system assigns timing and order based on channel availability and caller capacity. Any meaningful reply stops the run."}</DialogDescription></DialogHeader>
+  const remotePreviewState=previewOnly&&selected&&person&&previewTasks.length?{
+    ...state,
+    bombInstances:[{
+      id:"launch-preview",
+      customerId:customerId||"",
+      templateId:selected.id,
+      templateName:selected.name,
+      version:selected.version||1,
+      goal:selected.goal,
+      targetContactId:person.id,
+      cp:asCpCode(currentCp),
+      status:"Running" as const,
+      startedAt:previewTasks[0]?.scheduledAt||"",
+    }],
+    actions:previewTasks.map(task=>({
+      id:task.id,
+      bombInstanceId:"launch-preview",
+      customerId:customerId||"",
+      stepId:task.templateId||task.id,
+      channel:task.channel,
+      plannedDate:task.scheduledAt,
+      actualDate:task.scheduledAt,
+      status:"Scheduled" as const,
+      content:task.content,
+    })),
+    interactions:[],
+  }:null;
+  const remotePreviewContacts=person?[person]:targets;
+  return <Dialog open={open} onOpenChange={value=>{if(!value){setLaunchedInstanceId("");setPreviewReady(false);setPreviewTasks([]);setLaunching(false);}onOpenChange(value)}}><DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-2xl"><DialogHeader><DialogTitle>{launched?"OmniReach launched · execution plan":"Launch OmniReach"}</DialogTitle><DialogDescription>{launched?(previewOnly?"The tasks have been scheduled. This plan is read-only.":"The system assigned this execution order and schedule. This plan is read-only."):"Review and edit each step’s copy for this launch only. The template is not changed. After confirmation, the system assigns timing and order based on channel availability and caller capacity. Any meaningful reply stops the run."}</DialogDescription></DialogHeader>
     <div className="min-h-0 space-y-4 overflow-y-auto pr-1">
-      {launched&&<div className="rounded-xl bg-emerald-50 p-4"><div className="text-sm font-semibold text-emerald-900">{previewOnly?"Launch preview ready":"System assignment complete"}</div><p className="mt-1 text-xs text-emerald-800">{selected?`${selected.name}${selected.goal?` · ${selected.goal}`:""}`:launchedInstance?`${launchedInstance.templateName} · Version ${launchedInstance.version}`:"The order and timing below are informational only and cannot be edited."}</p>{previewOnly?<div className="mt-4 space-y-2">{selected?.steps.map((step,index)=><div key={step.id} className="rounded-lg bg-white/70 px-3 py-2 text-xs text-slate-700">{index+1}. {step.channel}{enforceSkip&&person&&!channelAvailable(person,step.channel)?" · skipped":""}</div>)}</div>:<div className="mt-4"><BombExecutionPlan state={state} instanceId={launchedInstanceId} contacts={targets} tone="success"/></div>}</div>}
+      {launched&&<div className="rounded-xl bg-emerald-50 p-4"><div className="text-sm font-semibold text-emerald-900">System assignment complete</div><p className="mt-1 text-xs text-emerald-800">{selected?`${selected.name}${selected.goal?` · ${selected.goal}`:""}`:launchedInstance?`${launchedInstance.templateName} · Version ${launchedInstance.version}`:"The order and timing below are informational only and cannot be edited."}</p><div className="mt-4">{previewOnly&&remotePreviewState?<BombExecutionPlan state={remotePreviewState} instanceId="launch-preview" contacts={remotePreviewContacts} tone="success"/>:<BombExecutionPlan state={state} instanceId={launchedInstanceId} contacts={targets} tone="success"/>}</div></div>}
       {!launched&&<>
-      <label className="text-sm font-medium">OmniReach<Select value={bombId} onValueChange={v=>{setBombId(v);setTarget("");}}><SelectTrigger className="mt-2 w-full"><SelectValue placeholder="Select an OmniReach"/></SelectTrigger><SelectContent>{(previewOnly?notionBombs:localBombs).map(b=><SelectItem key={b.id} value={b.id}>{previewOnly?`${b.name}${b.cp?` · ${b.cp}`:""}`:`${b.name} · V${"version" in b ? b.version : ""}`}</SelectItem>)}</SelectContent></Select></label>
+      <label className="text-sm font-medium">OmniReach<Select value={bombId} onValueChange={v=>{setBombId(v);setTarget("");setPreviewTasks([]);}}><SelectTrigger className="mt-2 w-full"><SelectValue placeholder="Select an OmniReach"/></SelectTrigger><SelectContent>{(previewOnly?notionBombs:localBombs).map(b=><SelectItem key={b.id} value={b.id}>{previewOnly?`${b.name}${b.cp?` · ${b.cp}`:""}`:`${b.name} · V${"version" in b ? b.version : ""}`}</SelectItem>)}</SelectContent></Select></label>
       {selected&&<>
-        <label className="text-sm font-medium">Launch for<Select value={target} onValueChange={setTarget}><SelectTrigger className="mt-2 w-full"><SelectValue placeholder="Select a KeyPerson"/></SelectTrigger><SelectContent>{targets.map(t=><SelectItem key={t.id} value={t.id}>{t.name} · {t.role}</SelectItem>)}</SelectContent></Select></label>
+        <label className="text-sm font-medium">Launch for<Select value={target} onValueChange={value=>{setTarget(value);setPreviewTasks([]);}}><SelectTrigger className="mt-2 w-full"><SelectValue placeholder="Select a KeyPerson"/></SelectTrigger><SelectContent>{targets.map(t=><SelectItem key={t.id} value={t.id}>{t.name} · {t.role}</SelectItem>)}</SelectContent></Select></label>
         {person&&<>
         <div className="rounded-xl bg-slate-50 p-4 text-sm"><b>{selected.goal}</b><p className="mt-1 text-xs text-slate-500">Edits apply only to this launch.</p>{unavailable.length>0&&<div className="mt-2 text-xs text-amber-700">Unavailable steps will be skipped: {[...new Set(unavailable)].join(", ")}</div>}</div>
         {selected.steps.map((s,index)=>{
@@ -643,7 +687,7 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
       </>}
       </>}
     </div>
-    <DialogFooter>{launched?<Button onClick={()=>onOpenChange(false)}>Done</Button>:<><Button variant="outline" onClick={()=>onOpenChange(false)}>Cancel</Button><Button disabled={launching||!selected||!person||incomplete||(!previewOnly&&(!!c?.activeBombId||c?.status==="Bomb Running"))} onClick={()=>{if(!selected||!person)return;if(previewOnly){if(!customerId)return;void (async ()=>{setLaunching(true);try{const response=await fetch(`/api/brands/${customerId}/launch`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({bombId:selected.id,contactId:person.id,copies})});const payload=await response.json() as {message?:string;error?:string};if(!response.ok)throw new Error(payload.error||"Launch failed");setPreviewReady(true);toast.success(payload.message||"OmniReach launched");onLaunched?.();}catch(error){toast.error(error instanceof Error?error.message:"Launch failed");}finally{setLaunching(false);}})();return;}if(!c)return;const r=launchBomb(c.id,selected.id,person.id,copies);show(r);if(r.ok&&r.id)setLaunchedInstanceId(r.id);}}>Launch OmniReach</Button></>}</DialogFooter>
+    <DialogFooter>{launched?<Button onClick={()=>onOpenChange(false)}>Done</Button>:<><Button variant="outline" onClick={()=>onOpenChange(false)}>Cancel</Button><Button disabled={launching||!selected||!person||incomplete||(!previewOnly&&(!!c?.activeBombId||c?.status==="Bomb Running"))} onClick={()=>{if(!selected||!person)return;if(previewOnly){if(!customerId)return;void (async ()=>{setLaunching(true);try{const response=await fetch(`/api/brands/${customerId}/launch`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({bombId:selected.id,contactId:person.id,copies})});const payload=await response.json() as {message?:string;scheduledTasks?:LaunchPreviewTask[];error?:string};if(!response.ok)throw new Error(payload.error||"Launch failed");setPreviewTasks(payload.scheduledTasks||[]);setPreviewReady(true);toast.success(payload.message||"OmniReach launched");onLaunched?.();}catch(error){toast.error(error instanceof Error?error.message:"Launch failed");}finally{setLaunching(false);}})();return;}if(!c)return;const r=launchBomb(c.id,selected.id,person.id,copies);show(r);if(r.ok&&r.id)setLaunchedInstanceId(r.id);}}>Launch OmniReach</Button></>}</DialogFooter>
   </DialogContent></Dialog>;
 }
 

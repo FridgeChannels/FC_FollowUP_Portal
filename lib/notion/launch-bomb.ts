@@ -28,6 +28,14 @@ export type LaunchStepCopy = {
   script?: string;
 };
 
+export type LaunchedBombTask = {
+  id: string;
+  templateId?: string;
+  channel: Channel;
+  scheduledAt: string;
+  content: string;
+};
+
 function todayDateOnly() {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Shanghai",
@@ -151,6 +159,7 @@ export async function launchFollowupBomb(input: {
     ownerOrConnector: contact.role,
     linkedinUrl: contact.linkedin,
   });
+  const scheduledTasks: LaunchedBombTask[] = [];
   for (const write of result.writes) {
     const template = bomb.templates.find((item) => item.id === write.templateId);
     const incoming = input.copies?.[write.templateId || ""];
@@ -189,6 +198,13 @@ export async function launchFollowupBomb(input: {
         notes: "Bomb 方案已排班，尚未实际发送。",
       });
     }
+    scheduledTasks.push({
+      id: task.id,
+      templateId: write.templateId,
+      channel: write.channel,
+      scheduledAt: write.scheduledAt,
+      content,
+    });
   }
 
   await markFollowupClientEngaged(input.brandId, {
@@ -199,6 +215,7 @@ export async function launchFollowupBomb(input: {
   return {
     scheduled: result.writes.length,
     unscheduled: result.unscheduled.length,
+    scheduledTasks,
     message: `${bomb.name} launched`,
   };
 }

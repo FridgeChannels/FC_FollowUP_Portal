@@ -101,7 +101,7 @@ export function BombExecutionPlan({
           <button type="button" className="w-full text-left" onClick={()=>setExpandedId(expanded?undefined:action.id)} aria-expanded={expanded}>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2"><ChannelIcon channel={action.channel} className="size-6"/><span className="text-sm font-semibold text-slate-950">{action.channel}</span>{isCurrent && <Badge className="bg-violet-600 text-[10px] text-white">Current</Badge>}</div>
-            <div className="flex items-center gap-2"><Badge variant={skipped ? "secondary" : isCurrent ? "default" : "outline"} className="text-[10px]">{hasInbound?"Replied":isCurrent ? "In progress" : action.status}</Badge><ChevronDown className={`size-4 text-slate-400 transition-transform ${expanded?"rotate-180":""}`}/></div>
+            <div className="flex items-center gap-2"><Badge variant={skipped ? "secondary" : isCurrent ? "default" : "outline"} className="text-[10px]">{skipped ? action.status : hasInbound ? "Replied" : isCurrent ? "In progress" : action.status}</Badge><ChevronDown className={`size-4 text-slate-400 transition-transform ${expanded?"rotate-180":""}`}/></div>
           </div>
           <time dateTime={action.actualDate} className="mt-1.5 block font-mono text-xs text-slate-500">{formatUtcTime(action.actualDate)}</time>
           <PlanPeople contact={contact} channel={action.channel} caller={skipped ? undefined : caller} action={action}/>

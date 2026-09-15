@@ -17,7 +17,7 @@
     "docker:logs": "docker compose logs -f portal",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "test:engine": "node --experimental-strip-types --test lib/scheduling-engine/engine.test.ts",
-    "test:quo": "node --experimental-strip-types --test lib/quo/*.test.ts lib/notion/rate-limit.test.ts lib/notion/conversation-thread.test.ts",
+    "test:quo": "node --experimental-strip-types --test lib/quo/*.test.ts lib/notion/rate-limit.test.ts lib/notion/conversation-thread.test.ts lib/notion/brand-reply-signals.test.ts",
     "test:variables": "node --experimental-strip-types --test lib/template-variables.test.ts",
     "simulate:replies": "node scripts/simulate-channel-replies.mjs",
     "simulate:replies:email": "node scripts/simulate-channel-replies.mjs --channel Email",

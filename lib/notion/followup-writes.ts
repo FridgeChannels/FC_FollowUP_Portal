@@ -12,7 +12,11 @@ import {
   isOpenTaskStatus,
 } from "./reply-inbox";
 import { pickReplyTaskForChannel } from "./reply-target";
-import { listFollowupTasks, retrieveFollowupTask } from "./tasks";
+import {
+  listFollowupTasks,
+  listFollowupTasksByBomb,
+  retrieveFollowupTask,
+} from "./tasks";
 
 const TASK_STATUSES = new Set(["Pending", "In Progress", "Completed", "Failed", "Cancelled"]);
 const CALL_RESULTS = new Set(["Connected", "No Answer", "Voicemail", "Declined", "Invalid Number"]);
@@ -239,6 +243,27 @@ export async function cancelUnsentBombSiblingTasks(task: BrandTask) {
     ),
   );
   return siblings;
+}
+
+export async function cancelScheduledBombTasks(bombId: string) {
+  const scheduled = (await listFollowupTasksByBomb(bombId)).filter(
+    (task) => task.status === "Pending",
+  );
+  if (!scheduled.length) return [];
+
+  const endedAt = new Date().toISOString();
+  await Promise.all(
+    scheduled.map((task) =>
+      updateFollowupTask(task.id, {
+        status: "Cancelled",
+        endedAt,
+        notes: [task.notes, "OmniReach 已停止，未执行的排班任务已取消。"]
+          .filter(Boolean)
+          .join("\n"),
+      }),
+    ),
+  );
+  return scheduled;
 }
 
 export async function cancelOpenBombTasks(input: {

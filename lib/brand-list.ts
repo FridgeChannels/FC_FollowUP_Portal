@@ -258,6 +258,16 @@ export type BrandActivity = {
   quo?: QuoCallData | null;
 };
 
+export function lastReplyAtFromActivities(
+  items: Array<Pick<BrandActivity, "direction" | "createdAt">>,
+) {
+  return items
+    .filter((item) => item.direction === "Inbound" && item.createdAt)
+    .map((item) => item.createdAt as string)
+    .sort()
+    .at(-1) || null;
+}
+
 export type BrandDetail = BrandListItem & {
   priority: string | null;
   notes: string | null;

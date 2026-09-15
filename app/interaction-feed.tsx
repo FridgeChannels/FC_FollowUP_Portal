@@ -52,6 +52,12 @@ function outboundStatus(item: Interaction) {
 
 function deliveryTiming(item: Interaction) {
   const taskStatus = outboundStatus(item);
+  if (taskStatus === "Cancelled" || taskStatus === "Canceled") {
+    return { label: "Cancelled", at: item.scheduledAt || item.createdAt };
+  }
+  if (taskStatus === "Failed") {
+    return { label: "Failed", at: item.createdAt };
+  }
   const sent = taskStatus === "Completed" || ["Sent", "Delivered", "Connected", "Completed"].includes(item.messageStatus || "");
   if (sent) return { label: "Sent", at: item.createdAt };
   const scheduled = taskStatus === "Pending" || taskStatus === "In Progress" || item.messageStatus === "Pending";
@@ -63,9 +69,10 @@ function SendStatusBadge({ status }: { status: string }) {
   const tone =
     status === "Sent" || status === "Delivered" || status === "Connected" || status === "Completed" ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-100"
     : status === "Failed" || status === "Declined" || status === "Invalid Number" ? "bg-rose-100 text-rose-800 hover:bg-rose-100"
+    : status === "Cancelled" || status === "Canceled" ? "bg-slate-100 text-slate-700 hover:bg-slate-100"
     : status === "Pending" || status === "In Progress" ? "bg-amber-100 text-amber-800 hover:bg-amber-100"
     : "bg-slate-100 text-slate-700 hover:bg-slate-100";
-  return <Badge className={`text-[10px] ${tone}`}>{status}</Badge>;
+  return <Badge className={`text-[10px] ${tone}`}>{status === "Canceled" ? "Cancelled" : status}</Badge>;
 }
 
 function isChannelMessage(item: Interaction) {
@@ -391,7 +398,7 @@ function ThreadMessages({
           </div>
           <time dateTime={item.createdAt} className="font-mono text-[11px] text-slate-500">{formatUtcTime(item.createdAt)}</time>
         </div>
-        {timing && <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-slate-500"><span className={timing.label === "Sent" ? "font-semibold text-emerald-700" : "font-semibold text-amber-700"}>{timing.label}</span><time dateTime={timing.at} className="font-mono text-[11px]">{formatUtcTime(timing.at)}</time></div>}
+        {timing && <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-slate-500"><span className={timing.label === "Sent" ? "font-semibold text-emerald-700" : timing.label === "Failed" ? "font-semibold text-rose-700" : timing.label === "Cancelled" ? "font-semibold text-slate-600" : "font-semibold text-amber-700"}>{timing.label}</span><time dateTime={timing.at} className="font-mono text-[11px]">{formatUtcTime(timing.at)}</time></div>}
         {!item.quo && <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{item.content}</p>}
         {item.quo ? <div className="mt-3">
           <QuoCallPanel

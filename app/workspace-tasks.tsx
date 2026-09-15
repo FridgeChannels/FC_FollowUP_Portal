@@ -450,14 +450,15 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
         {task.source === "inbox" && can("assignOwner") && <div className="mt-4"><label className="text-xs font-semibold text-slate-500">Assign FC-Owner</label><Select value={task.assigneeId || customer.ownerId || "unassigned"} onValueChange={value => { if (!task.remote) { show(assignBrand(customer.id, value)); return; } void (async () => { setSaving(true); try { const response = await fetch(`/api/brands/${customer.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ownerId: value === "unassigned" ? null : value }) }); const payload = await response.json() as { error?: string }; if (!response.ok) throw new Error(payload.error || "Assign failed"); applyTaskPayload(await fetch(`/api/tasks/${task.id}`).then(item => item.json())); toast.success("Owner assigned"); } catch (error) { toast.error(error instanceof Error ? error.message : "Assign failed"); } finally { setSaving(false); } })(); }}><SelectTrigger className="mt-2 w-full"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="unassigned">Unassigned</SelectItem>{(task.remote ? owners : humanAssignees).map(user => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}</SelectContent></Select></div>}
 
         {task.source === "inbox" && <div className="mt-5 grid gap-2">
-          {can("reply") && <Button variant="outline" className="justify-start" onClick={() => setSendMessage(true)}><Send className="mr-2 size-4"/>Send message</Button>}
-          {can("launch") && <Button variant="outline" className="justify-start" disabled={!task.remote && (!!customer.activeBombId || customer.status === "Bomb Running")} onClick={() => setLaunch(true)}><Bomb className="mr-2 size-4"/>Launch OmniReach</Button>}
-          {can("changeCP") && <Button variant="outline" className="justify-start" onClick={() => setChangeCP(true)}><Check className="mr-2 size-4"/>Change CP</Button>}
+          {can("reply") && state.currentRole !== "Admin" && <Button variant="outline" className="justify-start" onClick={() => setSendMessage(true)}><Send className="mr-2 size-4"/>Send message</Button>}
+          {can("launch") && state.currentRole !== "Admin" && <Button variant="outline" className="justify-start" disabled={!task.remote && (!!customer.activeBombId || customer.status === "Bomb Running")} onClick={() => setLaunch(true)}><Bomb className="mr-2 size-4"/>Launch OmniReach</Button>}
+          {can("changeCP") && state.currentRole !== "Admin" && <Button variant="outline" className="justify-start" onClick={() => setChangeCP(true)}><Check className="mr-2 size-4"/>Change CP</Button>}
           {can("reply") && !isDone(liveTask) && <Button variant="outline" className="justify-start" disabled={saving} onClick={() => { if (!task.remote) { show(resolveInbox(task.id)); return; } void (async () => { setSaving(true); try { const response = await fetch(`/api/tasks/${task.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "Completed" }) }); const payload = await response.json() as TaskPayload; if (!response.ok) throw new Error(payload.error || "Update failed"); applyTaskPayload(payload); toast.success("Task completed"); } catch (error) { toast.error(error instanceof Error ? error.message : "Update failed"); } finally { setSaving(false); } })(); }}><CheckCircle2 className="mr-2 size-4"/>End task</Button>}
         </div>}
       </aside>}
     </div>
 
+    {state.currentRole !== "Admin" && <>
     <LaunchBombDialog customerId={customer.id} open={launch} onOpenChange={setLaunch} contacts={task.remote ? customer.contacts : undefined} currentCp={remote?.brand?.currentCp} companyName={remote?.brand?.name || customer.name} productDescription={remote?.brand?.productDescription} matchedCategory={remote?.brand?.matchedCategory} previewOnly={task.remote}/>
     <ReplyDialog customerId={customer.id} open={sendMessage} onOpenChange={setSendMessage} contacts={task.remote ? customer.contacts : undefined} onSend={task.remote ? async (contactId, channel, content) => {
       const response = await fetch(`/api/brands/${customer.id}/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contactId, channel, content, taskId: task.id }) });
@@ -473,6 +474,7 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
       const nextResponse = await fetch(`/api/tasks/${task.id}`);
       applyTaskPayload(await nextResponse.json() as TaskPayload);
     } : undefined}/>
+    </>}
   </main>
   </div>;
 }
