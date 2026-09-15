@@ -80,7 +80,7 @@ type ResolvedTarget = {
   contactName: string;
   taskId?: string;
   existingThreadId?: string | null;
-  currentCp?: "CP1" | "CP2" | "CP3" | null;
+  currentCp?: "CP1" | "CP2" | "CP3" | "CP4" | "CP5" | "CP6" | null;
   currentCpId?: string | null;
   inferredSender?: string | null;
   outboundMessageId?: string | null;

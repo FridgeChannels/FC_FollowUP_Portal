@@ -24,6 +24,8 @@ import { InteractionFeed } from "./interaction-feed";
 import { ChannelIcon, ChannelOption } from "./channel-icon";
 import { skipUnavailableChannelsOnClient } from "@/lib/channel-availability";
 import { buildTemplateVariableContext, resolveLaunchStepCopy } from "@/lib/template-variables";
+import { CALL_REVIEW_DEMO_BRAND_NAME, CALL_REVIEW_DEMO_INTERACTION_ID, demoPhoneInteraction, isCallReviewManager } from "@/lib/call-review-metadata";
+import { useSession } from "./use-session";
 
 const show=(r:{ok:boolean;message:string})=>r.ok?toast.success(r.message):toast.error(r.message);
 const hasCjk=(value?:string|null)=>/[\u4e00-\u9fff]/.test(value||"");
@@ -38,7 +40,7 @@ const MESSAGE_CHANNELS:Channel[]=["Email","Phone","SMS","WhatsApp","LinkedIn"];
 const ACTIVITY_CHANNELS = new Set<Channel>(MESSAGE_CHANNELS);
 
 function asCpCode(value?: string | null): CPCode {
-  return value === "CP2" || value === "CP3" ? value : "CP1";
+  return ["NONE", "CP1", "CP2", "CP3", "CP4", "CP5", "CP6", "Nurture"].includes(value || "") ? value as CPCode : "CP1";
 }
 
 function asActivityChannel(value?: string | null): Channel | undefined {
@@ -226,6 +228,7 @@ function toInteractions(
   bombInstances: BombInstance[] = [],
 ): Interaction[] {
   const manualTaskIds = new Set(tasks.filter((item) => item.creationMethod === "Manual").map((item) => item.id));
+  const tasksById = new Map(tasks.map((item) => [item.id, item]));
   const resolved = activities.map((item) => ({
     item,
     cp: resolveActivityCp(item, tasks, activityInstanceIds, bombInstances),
@@ -267,7 +270,8 @@ function toInteractions(
     replyStatus: item.replyStatus || undefined,
     cp: (item.threadId ? threadInboundCp.get(item.threadId) : undefined) || cp || (item.threadId ? threadCp.get(item.threadId) : undefined) || (item.taskId ? taskCp.get(item.taskId) : undefined),
     messageStatus: item.status || undefined,
-    taskStatus: (item.taskId ? tasks.find((task) => task.id === item.taskId)?.status : undefined) || undefined,
+    taskStatus: (item.taskId ? tasksById.get(item.taskId)?.status : undefined) || undefined,
+    scheduledAt: (item.taskId ? tasksById.get(item.taskId)?.scheduledAt : undefined) || undefined,
     callResult: item.callResult || undefined,
     quo: item.quo || null,
   }));
@@ -276,7 +280,7 @@ function toInteractions(
 function toCpGoals(cps: CurrentCpOption[] = listCurrentCps()) {
   return Object.fromEntries(
     cps
-      .filter((item) => item.name === "CP1" || item.name === "CP2" || item.name === "CP3")
+      .filter((item) => /^CP[1-6]$/.test(item.name))
       .map((item) => [item.name, item.fullName]),
   ) as Partial<Record<CPCode, string>>;
 }
@@ -299,7 +303,8 @@ function toCustomerContacts(contacts: BrandContact[]): Contact[] {
 }
 
 export function BrandDetail({customerId}:{customerId:string}){
-  const {state,can,assignBrand}=useWorkspace();
+  const {state,can,assignBrand,cancelBomb}=useWorkspace();
+  const {user}=useSession();
   const router=useRouter(); const [launch,setLaunch]=useState(false); const [reply,setReply]=useState(false); const [cp,setCP]=useState(false); const [contact,setContact]=useState(false); const [ownerDraft,setOwnerDraft]=useState<string>();
   const cached=getCachedBrand(customerId);
   const [remote,setRemote]=useState<BrandDetail|null>(cached?{
@@ -340,7 +345,7 @@ export function BrandDetail({customerId}:{customerId:string}){
     setRemoteCps([]);
   },[customerId]);
   const isAdmin=state.currentRole==="Admin";
-  const manager=isAdmin||state.currentRole==="FC_Owner";
+  const manager=isAdmin||state.currentRole==="AccountManager";
   const local=state.customers.find(x=>x.id===customerId);
   const applyRemote=(brand:BrandDetail|null,cps:CurrentCpOption[]=[])=>{
     if(!brand){setRemote(null);setRemoteCps([]);return;}
@@ -398,7 +403,7 @@ export function BrandDetail({customerId}:{customerId:string}){
     ? (remote?.ownerId&&!owners.some(item=>item.id===remote.ownerId)
       ? [{id:remote.ownerId,name:remote.ownerName||"Current owner"},...owners]
       : owners)
-    : state.users.filter(u=>["Admin","FC_Owner"].includes(u.role)).map(u=>({id:u.id,name:u.name}));
+    : state.users.filter(u=>["Admin","AccountManager"].includes(u.role)).map(u=>({id:u.id,name:u.name}));
   const patchBrand=async (body:Record<string,unknown>)=>{
     const response=await fetch(`/api/brands/${c.id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     const payload=await response.json() as {brand?:BrandDetail;cps?:CurrentCpOption[];error?:string};
@@ -416,7 +421,9 @@ export function BrandDetail({customerId}:{customerId:string}){
   };
   const currentCp=notionBacked?asCpCode(remote?.currentCp):c.cp;
   const bombPlan=notionBacked?toBombPlan(c.id,remote?.tasks||[],remote?.activities||[]):undefined;
-  const interactions=(notionBacked?toInteractions(c.id,remote?.activities||[],bombPlan?.activityInstanceIds,remote?.tasks||[],bombPlan?.bombInstances||[]):state.interactions.filter(i=>i.customerId===c.id).map(i=>({...i,cp:i.cp||c.cp}))).sort((a,b)=>{
+  const callReviewDemo=isCallReviewManager(user?.email)&&c.name===CALL_REVIEW_DEMO_BRAND_NAME;
+  const baseInteractions=notionBacked?toInteractions(c.id,remote?.activities||[],bombPlan?.activityInstanceIds,remote?.tasks||[],bombPlan?.bombInstances||[]):state.interactions.filter(i=>i.customerId===c.id).map(i=>({...i,cp:i.cp||c.cp}));
+  const interactions=(callReviewDemo&&!baseInteractions.some(item=>item.id===CALL_REVIEW_DEMO_INTERACTION_ID)?[...baseInteractions,demoPhoneInteraction({customerId:c.id,contactId:c.contacts[0]?.id,cp:currentCp})]:baseInteractions).sort((a,b)=>{
     const aManual=a.direction==="Outbound"&&a.creationMethod==="Manual"?0:1;
     const bManual=b.direction==="Outbound"&&b.creationMethod==="Manual"?0:1;
     return aManual-bManual||b.createdAt.localeCompare(a.createdAt);
@@ -435,7 +442,7 @@ export function BrandDetail({customerId}:{customerId:string}){
       <BrandContactList contacts={notionBacked&&remote?remote.contacts:c.contacts} canEdit={!notionBacked&&can("editBrand")} onAdd={()=>setContact(true)}/>
       <div className="flex flex-wrap gap-2 xl:flex-col xl:items-stretch">{can("reply")&&<Button variant="outline" disabled={notionBacked&&!c.contacts.length} onClick={()=>setReply(true)}><Send className="mr-2 size-4"/>Send message</Button>}{can("launch")&&<Button variant="outline" disabled={!notionBacked&&(!!c.activeBombId||c.status==="Bomb Running")} onClick={()=>setLaunch(true)}><Bomb className="mr-2 size-4"/>Launch OmniReach</Button>}{can("changeCP")&&<Button onClick={()=>setCP(true)}>Change CP</Button>}</div>
     </section>
-    <div className={`grid gap-6 ${partnershipContext?"xl:grid-cols-[1fr_340px]":""}`}><section><h2 className="mb-3 font-bold">Brand activity</h2><div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">    <InteractionFeed key={`${c.id}-${currentCp}`} customerId={c.id} currentCp={currentCp} cpGoals={notionBacked?toCpGoals(remoteCps):undefined} interactions={interactions} contacts={c.contacts} bombInstances={bombPlan?.bombInstances} actions={bombPlan?.actions} onSend={notionBacked?async (contactId,channel,content,taskId,threadId)=>{
+    <div className={`grid gap-6 ${partnershipContext?"xl:grid-cols-[1fr_340px]":""}`}><section><h2 className="mb-3 font-bold">Brand activity</h2><div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">    <InteractionFeed key={`${c.id}-${currentCp}`} customerId={c.id} currentCp={currentCp} cpGoals={notionBacked?toCpGoals(remoteCps):undefined} interactions={interactions} contacts={c.contacts} bombInstances={bombPlan?.bombInstances} actions={bombPlan?.actions} canReviewCalls={callReviewDemo} onCancelBomb={async instance=>{if(!notionBacked){const result=cancelBomb(c.id,instance.id);if(!result.ok)throw new Error(result.message);toast.success(result.message);return;}const response=await fetch(`/api/brands/${c.id}/bombs/${instance.templateId}/cancel`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId:instance.targetContactId})});const payload=await response.json() as {cancelledTaskIds?:string[];error?:string};if(!response.ok)throw new Error(payload.error||"Unable to stop OmniReach");await refreshRemote();toast.success(`${payload.cancelledTaskIds?.length||0} remaining task${payload.cancelledTaskIds?.length===1?"":"s"} cancelled`);}} onSend={notionBacked?async (contactId,channel,content,taskId,threadId)=>{
     const response=await fetch(`/api/brands/${c.id}/messages`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId,channel,content,taskId,threadId})});
     const payload=await response.json() as {brand?:BrandDetail;cps?:CurrentCpOption[];error?:string};
     if(!response.ok||!payload.brand)throw new Error(payload.error||"Send failed");
@@ -658,18 +665,18 @@ export function ChangeCPDialog({customerId,open,onOpenChange,currentCp,cps,onSav
   const options=cps?.length?cps:listCurrentCps();
   const currentName=currentCp||c?.cp||"NONE";
   const [cpId,setCP]=useState(options.find(item=>item.name===currentName)?.id||options[0]?.id||"");
-  const [evidence,setEvidence]=useState("Latest contact interaction");
   const [note,setNote]=useState("");
   const [saving,setSaving]=useState(false);
   useEffect(()=>{
     if(!open)return;
     setCP(options.find(item=>item.name===currentName)?.id||options[0]?.id||"");
-    setEvidence("Latest contact interaction");
     setNote("");
   },[open,currentName,customerId]);
   const selected=options.find(item=>item.id===cpId);
   const stage=currentCpOption(selected?.name).criteria||state.cps.find(item=>item.code===selected?.name)?.criteria;
-  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent><DialogHeader><DialogTitle>Change Brand CP</DialogTitle><DialogDescription>CP never changes automatically. Review evidence and confirm.</DialogDescription></DialogHeader><Select value={cpId} onValueChange={setCP}><SelectTrigger className="w-full"><SelectValue/></SelectTrigger><SelectContent>{options.map(x=><SelectItem key={x.id} value={x.id}>{x.name} · {x.fullName||x.name}</SelectItem>)}</SelectContent></Select><div className="rounded-xl bg-violet-50 p-4 text-sm text-violet-900"><b>Exit criteria</b><p className="mt-1">{stage}</p></div><Input value={evidence} onChange={e=>setEvidence(e.target.value)} placeholder="Evidence"/><Textarea value={note} onChange={e=>setNote(e.target.value)} placeholder="Optional note"/><DialogFooter><Button variant="outline" onClick={()=>onOpenChange(false)}>Cancel</Button><Button disabled={!selected||selected.name===currentName||!evidence||saving} onClick={()=>{void (async ()=>{if(!selected)return;if(onSave){setSaving(true);try{await onSave(selected.id,evidence,note);toast.success(`Brand moved to ${selected.name}`);onOpenChange(false);}catch(error){toast.error(error instanceof Error?error.message:"Update failed");}finally{setSaving(false);}return;}const r=changeCP(customerId,selected.name as CPCode,evidence,note);show(r);if(r.ok)onOpenChange(false);})()}}>Move to {selected?.name||"CP"}</Button></DialogFooter></DialogContent></Dialog>;
+  const criteriaItems=(stage||"").split("\n").map(item=>item.trim()).filter(Boolean);
+  const evidence="Manually confirmed CP update";
+  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent><DialogHeader><DialogTitle>Change Brand CP</DialogTitle><DialogDescription>CP never changes automatically. Review the completion criteria and confirm.</DialogDescription></DialogHeader><Select value={cpId} onValueChange={setCP}><SelectTrigger className="w-full"><SelectValue/></SelectTrigger><SelectContent>{options.map(x=><SelectItem key={x.id} value={x.id}>{x.name} · {x.fullName||x.name}</SelectItem>)}</SelectContent></Select><div className="rounded-xl bg-violet-50 p-4 text-sm text-violet-900"><b>Completion Criteria</b><ol className="mt-2 list-decimal space-y-1 pl-5">{criteriaItems.map(item=><li key={item}>{item}</li>)}</ol></div><Textarea value={note} onChange={e=>setNote(e.target.value)} placeholder="Optional note"/><DialogFooter><Button variant="outline" onClick={()=>onOpenChange(false)}>Cancel</Button><Button disabled={!selected||selected.name===currentName||saving} onClick={()=>{void (async ()=>{if(!selected)return;if(onSave){setSaving(true);try{await onSave(selected.id,evidence,note);toast.success(`Brand moved to ${selected.name}`);onOpenChange(false);}catch(error){toast.error(error instanceof Error?error.message:"Update failed");}finally{setSaving(false);}return;}const r=changeCP(customerId,selected.name as CPCode,evidence,note);show(r);if(r.ok)onOpenChange(false);})()}}>Move to {selected?.name||"CP"}</Button></DialogFooter></DialogContent></Dialog>;
 }
 
 export function FollowUpDialog({customerId,open,onOpenChange}:{customerId:string;open:boolean;onOpenChange:(v:boolean)=>void}){const {state,createFollowUp}=useWorkspace();const [days,setDays]=useState("3");const [reason,setReason]=useState("");const [note,setNote]=useState("");return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent><DialogHeader><DialogTitle>Schedule follow-up</DialogTitle><DialogDescription>This creates a human reminder. Nothing is sent automatically.</DialogDescription></DialogHeader><Select value={days} onValueChange={setDays}><SelectTrigger className="w-full"><SelectValue/></SelectTrigger><SelectContent>{[["1","Tomorrow"],["3","In 3 days"],["5","In 5 days"],["7","In 7 days"]].map(x=><SelectItem key={x[0]} value={x[0]}>{x[1]}</SelectItem>)}</SelectContent></Select><Input value={reason} onChange={e=>setReason(e.target.value)} placeholder="Reason"/><Textarea value={note} onChange={e=>setNote(e.target.value)} placeholder="Note"/><DialogFooter><Button variant="outline" onClick={()=>onOpenChange(false)}>Cancel</Button><Button disabled={!reason.trim()} onClick={()=>{const r=createFollowUp(customerId,new Date(Date.parse(state.simulatedDate)+Number(days)*86400000).toISOString(),reason,note);show(r);if(r.ok)onOpenChange(false)}}>Schedule</Button></DialogFooter></DialogContent></Dialog>}

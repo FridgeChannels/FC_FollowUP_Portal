@@ -21,6 +21,8 @@ import { InteractionFeed } from "./interaction-feed";
 import { Status } from "./workspace-pages";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { devCallPhoneOnClient } from "@/lib/quo/dev-call-phone";
+import { CALL_REVIEW_CALLER_EMAIL, CALL_REVIEW_DEMO_INTERACTION_ID, CALL_REVIEW_DEMO_TASK_ID, demoPhoneInteraction, taskStatusForCallReview, type CallReviewMetadata, useCallReviewMetadata } from "@/lib/call-review-metadata";
+import { useSession } from "./use-session";
 
 type TaskType = "Call" | "Reply";
 type UnifiedTask = {
@@ -37,6 +39,8 @@ type UnifiedTask = {
   notes?: string | null;
   brandName?: string;
   contactPhone?: string | null;
+  templateId?: string | null;
+  cp?: Customer["cp"];
   remote?: boolean;
 };
 
@@ -48,11 +52,24 @@ type TaskPayload = {
   error?: string;
 };
 
+type CallScript = {
+  id: string;
+  name: string;
+  content: string;
+  status: string | null;
+};
+
 function asPriority(value?: string | null): UnifiedTask["priority"] {
   if (value === "P0" || value === "Urgent") return "Urgent";
   if (value === "P1" || value === "High") return "High";
   if (value === "P2" || value === "Low") return "Low";
   return "Normal";
+}
+
+function taskCp(value?: string | null): Customer["cp"] | undefined {
+  return ["CP1", "CP2", "CP3", "CP4", "CP5", "CP6"].includes(value || "")
+    ? value as Customer["cp"]
+    : undefined;
 }
 
 function fromNotionTask(task: BrandTask): UnifiedTask {
@@ -71,6 +88,8 @@ function fromNotionTask(task: BrandTask): UnifiedTask {
     notes: task.notes,
     brandName: task.brandName || undefined,
     contactPhone: task.contactPhone || undefined,
+    templateId: task.templateId,
+    cp: taskCp(task.sourceBombCp),
     remote: true,
   };
 }
@@ -78,6 +97,8 @@ function fromNotionTask(task: BrandTask): UnifiedTask {
 const show = (result: { ok: boolean; message: string }) => result.ok ? toast.success(result.message) : toast.error(result.message);
 const priorityRank: Record<UnifiedTask["priority"], number> = { Urgent: 0, High: 1, Normal: 2, Low: 3 };
 const isDone = (task: UnifiedTask) => isClosedTaskStatus(task.status);
+const taskWithCallReview = (task: UnifiedTask, review?: CallReviewMetadata) => review ? { ...task, status: taskStatusForCallReview(task.status, review) } : task;
+const CallReviewBadge = ({ review }: { review?: CallReviewMetadata }) => review ? <Badge className={review.status === "Qualified" ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-100" : "bg-rose-100 text-rose-800 hover:bg-rose-100"}>{review.status.toLowerCase()}</Badge> : null;
 const isDue = (task: UnifiedTask, now: string) => {
   if (isDone(task)) return false;
   if (task.source === "inbox" && task.status === "Waiting for Reply") return false;
@@ -86,6 +107,8 @@ const isDue = (task: UnifiedTask, now: string) => {
 
 export function TasksPage({ selectedId }: { selectedId?: string }) {
   const { state } = useWorkspace();
+  const { user } = useSession();
+  const { reviewsByTask } = useCallReviewMetadata();
   const router = useRouter();
   const manager = state.currentRole === "Admin";
   const [type, setType] = useState<TaskType | "All">(state.currentRole === "Caller" ? "Call" : "All");
@@ -116,7 +139,8 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
     return () => { cancelled = true; };
   }, [taskOwnerQuery]);
 
-  const allTasks = useMemo<UnifiedTask[]>(() => remoteTasks ?? [], [remoteTasks]);
+  const callerReviewDemo = user?.email.toLowerCase() === CALL_REVIEW_CALLER_EMAIL;
+  const allTasks = useMemo<UnifiedTask[]>(() => (remoteTasks ?? []).map(task => callerReviewDemo ? taskWithCallReview(task, reviewsByTask[task.id]) : task), [remoteTasks, callerReviewDemo, reviewsByTask]);
 
   const tasks = useMemo(() => {
     return allTasks.filter(task => {
@@ -153,20 +177,19 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
 
     <div className="mb-4 flex flex-col gap-3 rounded-2xl bg-white p-3 lg:flex-row lg:items-center">
       <div className="relative min-w-56 flex-1 lg:max-w-sm"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400"/><Input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search brand or task…" className="pl-9"/></div>
-      <Select value={type} onValueChange={value => setType(value as TaskType | "All")}><SelectTrigger className="w-full lg:w-40"><SelectValue/></SelectTrigger><SelectContent>{["All", "Call", "Reply"].map(value => <SelectItem key={value} value={value}>{value === "All" ? "All types" : value}</SelectItem>)}</SelectContent></Select>
+      {state.currentRole !== "Caller" && <Select value={type} onValueChange={value => setType(value as TaskType | "All")}><SelectTrigger className="w-full lg:w-40"><SelectValue/></SelectTrigger><SelectContent>{["All", "Call", "Reply"].map(value => <SelectItem key={value} value={value}>{value === "All" ? "All types" : value}</SelectItem>)}</SelectContent></Select>}
       {manager && <Select value={assignee} onValueChange={setAssignee}><SelectTrigger className="w-full lg:w-44"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">All FC-Owners</SelectItem><SelectItem value="unassigned">Unassigned</SelectItem>{state.users.map(user => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}</SelectContent></Select>}
       <Select value={status} onValueChange={value => setStatus(value as typeof status)}><SelectTrigger className="w-full lg:w-36"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="Open">Open</SelectItem><SelectItem value="Completed">Completed</SelectItem><SelectItem value="All">All statuses</SelectItem></SelectContent></Select>
     </div>
 
     <div className="overflow-hidden rounded-2xl bg-white">
-      {remoteLoading ? <div className="px-5 py-16 text-sm text-slate-500">Loading tasks…</div> : tasks.length ? <div className="overflow-x-auto"><Table><TableHeader><TableRow className="bg-slate-50"><TableHead className="min-w-56 pl-5">Brand</TableHead><TableHead>Type</TableHead><TableHead>Status</TableHead><TableHead>Due</TableHead></TableRow></TableHeader><TableBody>{tasks.map(task => {
+      {remoteLoading ? <div className="px-5 py-16 text-sm text-slate-500">Loading tasks…</div> : tasks.length ? <div className="overflow-x-auto"><Table><TableHeader><TableRow className="bg-slate-50"><TableHead className="min-w-56 pl-5">Brand</TableHead><TableHead>Status</TableHead><TableHead>Due</TableHead></TableRow></TableHeader><TableBody>{tasks.map(task => {
         const customer = state.customers.find(c => c.id === task.customerId);
         const overdue = isDue(task, state.simulatedDate);
         const Icon = task.type === "Call" ? Phone : MessageCircle;
         return <TableRow key={task.id} className={`cursor-pointer ${overdue ? "bg-amber-50/80 hover:bg-amber-50" : "hover:bg-violet-50/30"}`} onClick={() => router.push(`/tasks/${task.id}`)}>
           <TableCell className="pl-5"><div className="flex items-center gap-3"><span className={`grid size-9 shrink-0 place-items-center rounded-xl ${task.type === "Call" ? "bg-blue-100 text-blue-700" : "bg-violet-100 text-violet-700"}`}><Icon className="size-4"/></span><div className="text-sm font-semibold">{customer?.name || task.brandName || "Unknown brand"}</div></div></TableCell>
-          <TableCell><Badge variant="secondary" className="text-[10px]">{task.type}</Badge></TableCell>
-          <TableCell>{overdue ? <Status value="Due"/> : <Status value={task.status}/>}</TableCell>
+          <TableCell><div className="flex flex-wrap items-center gap-1.5">{overdue ? <Status value="Due"/> : <Status value={task.status}/>}<CallReviewBadge review={callerReviewDemo ? reviewsByTask[task.id] : undefined}/></div></TableCell>
           <TableCell className="whitespace-nowrap text-xs text-slate-500">{dateOnly(task.dueAt)}</TableCell>
         </TableRow>;
       })}</TableBody></Table></div> : <Empty className="py-24"><EmptyHeader><EmptyMedia variant="icon"><CheckCircle2/></EmptyMedia><EmptyTitle>All caught up</EmptyTitle><EmptyDescription>No tasks match these filters.</EmptyDescription></EmptyHeader></Empty>}
@@ -193,6 +216,8 @@ function toTaskContact(item: BrandContact): Contact {
 
 function TaskDetail({ task }: { task: UnifiedTask }) {
   const { state, can, resolveInbox, assignBrand, reassignCall } = useWorkspace();
+  const { user } = useSession();
+  const { reviewsByTask } = useCallReviewMetadata();
   const router = useRouter();
   const [launch, setLaunch] = useState(false);
   const [sendMessage, setSendMessage] = useState(false);
@@ -202,6 +227,8 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
   const [liveTask, setLiveTask] = useState(task);
   const [quoRefreshingCallId, setQuoRefreshingCallId] = useState<string | null>(null);
   const [remote, setRemote] = useState<{ customer: Customer; contact: Contact; timeline: Interaction[]; ownerName?: string; brand?: BrandDetail; cps?: CurrentCpOption[] } | null>(null);
+  const [callScript, setCallScript] = useState<CallScript | null>(null);
+  const [callScriptLoading, setCallScriptLoading] = useState(false);
   const applyTaskPayload = (payload: { task?: BrandTask; activities?: BrandActivity[]; brand?: BrandDetail | null; cps?: CurrentCpOption[] }) => {
     if (!payload.task) return;
     const item = payload.task;
@@ -223,7 +250,7 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
       id: item.brandId || payload.brand?.id || task.customerId,
       name: payload.brand?.name || item.brandName || task.brandName || "Untitled brand",
       initials: payload.brand?.initials || (item.brandName || "BR").slice(0, 2).toUpperCase(),
-      cp: payload.brand?.currentCp === "CP2" || payload.brand?.currentCp === "CP3" ? payload.brand.currentCp : "CP1",
+      cp: ["CP1", "CP2", "CP3", "CP4", "CP5", "CP6"].includes(payload.brand?.currentCp || "") ? payload.brand!.currentCp as Customer["cp"] : "CP1",
       status: (payload.brand?.status || "Ready") as Customer["status"],
       source: "Follow-up ClientDB",
       ownerId: payload.brand?.ownerId || item.brandOwnerId || undefined,
@@ -298,6 +325,25 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
     return () => { cancelled = true; };
   }, [task.remote, task.id]);
   useEffect(() => {
+    if (state.currentRole !== "Caller" || task.type !== "Call" || !task.remote || !liveTask.templateId) {
+      setCallScript(null);
+      setCallScriptLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setCallScriptLoading(true);
+    fetch(`/api/tasks/${task.id}/call-script`)
+      .then(async (response) => {
+        const payload = await response.json() as { script?: CallScript | null; error?: string };
+        if (!response.ok) throw new Error(payload.error || "Unable to load call scripts");
+        return payload.script || null;
+      })
+      .then((script) => { if (!cancelled) setCallScript(script); })
+      .catch(() => { if (!cancelled) setCallScript(null); })
+      .finally(() => { if (!cancelled) setCallScriptLoading(false); });
+    return () => { cancelled = true; };
+  }, [state.currentRole, task.id, task.remote, task.type, liveTask.templateId]);
+  useEffect(() => {
     if (!task.remote || task.type !== "Call" || isDone(liveTask)) return;
     let cancelled = false;
     let inFlight = false;
@@ -323,7 +369,11 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
   const partnershipContext=customer?.partnershipContext;
   const contact = localCustomer?.contacts.find(c => c.id === task.contactId) || localCustomer?.contacts[0] || remote?.contact;
   const callTask = liveTask.source === "call" ? state.callTasks.find(call => call.id === liveTask.id) : undefined;
-  const timeline = (remote?.timeline || state.interactions.filter(item => item.customerId === task.customerId).map(item => ({ ...item, cp: item.cp || customer?.cp }))).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const callerReviewDemo = user?.email.toLowerCase() === CALL_REVIEW_CALLER_EMAIL && task.id === CALL_REVIEW_DEMO_TASK_ID;
+  const taskReview = callerReviewDemo ? reviewsByTask[task.id] : undefined;
+  const reviewedTask = taskWithCallReview(liveTask, taskReview);
+  const baseTimeline = remote?.timeline || state.interactions.filter(item => item.customerId === task.customerId).map(item => ({ ...item, cp: item.cp || customer?.cp }));
+  const timeline = (callerReviewDemo && customer && !baseTimeline.some(item => item.id === CALL_REVIEW_DEMO_INTERACTION_ID) ? [...baseTimeline, demoPhoneInteraction({ customerId: customer.id, contactId: contact?.id, cp: liveTask.cp || customer.cp })] : [...baseTimeline]).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const refreshQuo = async (callId: string) => {
     if (!task.remote || quoRefreshingCallId) return;
     setQuoRefreshingCallId(callId);
@@ -343,28 +393,31 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
   };
   if (task.remote && !customer) return <main className="grid place-items-center bg-slate-50 text-sm text-slate-500">Loading task…</main>;
   if (!customer || !contact) return <main className="grid place-items-center bg-slate-50 text-sm text-slate-500">Brand context unavailable.</main>;
-  const humanAssignees = state.users.filter(user => user.role === "FC_Owner" || user.role === "Admin");
+  const humanAssignees = state.users.filter(user => user.role === "AccountManager" || user.role === "Admin");
   const callers = state.users.filter(user => user.role === "Caller");
+  const callerPhoneOnly = state.currentRole === "Caller";
+  const taskCpCode = liveTask.cp || customer.cp;
+  const callBrief = reviewedTask.type === "Call" ? <CallBrief embedded={callerPhoneOnly} script={callScript} scriptLoading={callScriptLoading} task={reviewedTask} contact={contact} completed={isDone(reviewedTask)} review={taskReview} onCallOpening={() => {
+    if (!task.remote) return;
+    void fetch(`/api/tasks/${task.id}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "quo-attempt" }),
+      keepalive: true,
+    }).catch(() => undefined);
+  }} /> : null;
 
   return <div className="mx-auto max-w-[1540px]">
     <button onClick={() => router.push("/tasks")} className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900"><ArrowLeft className="size-4"/>ReplyTask</button>
-    <main className="min-w-0 overflow-hidden rounded-2xl bg-slate-50">
-    <header className="flex flex-wrap items-start justify-between gap-4 bg-white px-5 py-4 lg:px-7">
-      <div><div className="flex flex-wrap items-center gap-2"><Badge variant="outline">{liveTask.type}</Badge>{isDue(liveTask, state.simulatedDate) ? <Status value="Due"/> : <Badge variant="secondary">{liveTask.status}</Badge>}<span className="text-xs text-slate-400">{dateOnly(liveTask.dueAt)}</span></div><h2 className="mt-2 text-xl font-bold">{customer.name}</h2><p className="mt-1 text-xs text-slate-500">{contact.name} · {contact.role} · {customer.cp} · {customer.status}</p></div>
-      <Button variant="outline" size="sm" disabled={!customer.id} onClick={() => router.push(`/customers/${encodeURIComponent(customer.id)}`)}>Brand profile</Button>
+    <main className="min-w-0 overflow-hidden rounded-2xl bg-white">
+    <header className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 bg-white px-5 py-4 lg:px-7">
+      <div><div className="flex flex-wrap items-center gap-2"><Badge variant="outline">{reviewedTask.type}</Badge>{isDue(reviewedTask, state.simulatedDate) ? <Status value="Due"/> : <Badge variant="secondary">{reviewedTask.status}</Badge>}<CallReviewBadge review={taskReview}/><span className="text-xs text-slate-400">{dateOnly(reviewedTask.dueAt)}</span></div><h2 className="mt-2 text-xl font-bold">{customer.name}</h2><p className="mt-1 text-xs text-slate-500">{contact.name} · {contact.role} · {customer.cp} · {customer.status}{callerPhoneOnly && <> · Account Manager: {remote?.ownerName || state.users.find(user => user.id === task.assigneeId)?.name || "Unassigned"}</>}</p></div>
+      {state.currentRole !== "Caller" && <Button variant="outline" size="sm" disabled={!customer.id} onClick={() => router.push(`/customers/${encodeURIComponent(customer.id)}`)}>Brand profile</Button>}
     </header>
 
-    <div className="grid lg:grid-cols-[minmax(0,1fr)_290px]">
+    <div className={callerPhoneOnly ? "grid" : "grid lg:grid-cols-[minmax(0,1fr)_290px]"}>
       <div className="min-w-0 p-5 lg:p-7">
-        {liveTask.type === "Call" ? <CallBrief task={liveTask} contact={contact} completed={isDone(liveTask)} onCallOpening={() => {
-          if (!task.remote) return;
-          void fetch(`/api/tasks/${task.id}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "quo-attempt" }),
-            keepalive: true,
-          }).catch(() => undefined);
-        }} /> : null}
+        {!callerPhoneOnly && callBrief}
         <section>
           <h3 className="mb-3 font-bold">Brand activity</h3>
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
@@ -376,6 +429,10 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
             contacts={customer.contacts}
             maxHeight="max-h-[640px]"
             initialChannel={liveTask.type === "Call" ? "Phone" : undefined}
+            initialCp={callerPhoneOnly ? taskCpCode : undefined}
+            callerPhoneOnly={callerPhoneOnly}
+            channelHeader={callerPhoneOnly ? callBrief : undefined}
+            channelHeaderCp={callerPhoneOnly ? taskCpCode : undefined}
             onRefreshQuo={task.remote ? refreshQuo : undefined}
             quoRefreshingCallId={quoRefreshingCallId}
           />
@@ -383,7 +440,7 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
         </section>
       </div>
 
-      <aside className="border-t border-slate-200 bg-white p-5 lg:border-l lg:border-t-0 lg:p-6">
+      {!callerPhoneOnly && <aside className="border-t border-slate-200 bg-white p-5 lg:border-l lg:border-t-0 lg:p-6">
         <div className="flex items-center gap-3"><Avatar><AvatarFallback className="bg-violet-100 font-bold text-violet-700">{customer.initials}</AvatarFallback></Avatar><div><b className="text-sm">{customer.name}</b><div className="text-xs text-slate-500">{state.cps.find(cp => cp.code === customer.cp)?.goal}</div></div></div>
         {(customer.cp === "CP3" || partnershipContext) && partnershipContext && <section className="mt-5 rounded-xl bg-emerald-50 p-4"><div className="text-[11px] font-semibold tracking-wide text-emerald-700">CP3 · Partnership context</div><div className="mt-2 text-sm font-bold text-emerald-950">{partnershipContext.headline}</div><p className="mt-2 text-xs leading-5 text-emerald-900">{partnershipContext.summary}</p><div className="mt-3 space-y-2">{partnershipContext.signals.map(signal=><div key={signal} className="rounded-lg bg-white/70 px-2.5 py-2 text-xs leading-5 text-slate-700">{signal}</div>)}</div></section>}
         <div className="mt-5 rounded-xl bg-slate-50 p-4"><div className="text-xs font-semibold uppercase tracking-wide text-slate-400">FC-Owner</div><div className="mt-2 flex items-center gap-2 text-sm font-semibold"><UserRound className="size-4"/>{remote?.ownerName || state.users.find(user => user.id === task.assigneeId)?.name || "Unassigned"}</div></div>
@@ -398,7 +455,7 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
           {can("changeCP") && <Button variant="outline" className="justify-start" onClick={() => setChangeCP(true)}><Check className="mr-2 size-4"/>Change CP</Button>}
           {can("reply") && !isDone(liveTask) && <Button variant="outline" className="justify-start" disabled={saving} onClick={() => { if (!task.remote) { show(resolveInbox(task.id)); return; } void (async () => { setSaving(true); try { const response = await fetch(`/api/tasks/${task.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "Completed" }) }); const payload = await response.json() as TaskPayload; if (!response.ok) throw new Error(payload.error || "Update failed"); applyTaskPayload(payload); toast.success("Task completed"); } catch (error) { toast.error(error instanceof Error ? error.message : "Update failed"); } finally { setSaving(false); } })(); }}><CheckCircle2 className="mr-2 size-4"/>End task</Button>}
         </div>}
-      </aside>
+      </aside>}
     </div>
 
     <LaunchBombDialog customerId={customer.id} open={launch} onOpenChange={setLaunch} contacts={task.remote ? customer.contacts : undefined} currentCp={remote?.brand?.currentCp} companyName={remote?.brand?.name || customer.name} productDescription={remote?.brand?.productDescription} matchedCategory={remote?.brand?.matchedCategory} previewOnly={task.remote}/>
@@ -420,13 +477,15 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
   </div>;
 }
 
-function CallBrief({ task, contact, completed, onCallOpening }: { task: UnifiedTask; contact: Contact; completed: boolean; onCallOpening: () => void }) {
+function CallBrief({ task, contact, completed, onCallOpening, embedded = false, script = null, scriptLoading = false, review }: { task: UnifiedTask; contact: Contact; completed: boolean; onCallOpening: () => void; embedded?: boolean; script?: CallScript | null; scriptLoading?: boolean; review?: CallReviewMetadata }) {
   const phone = (devCallPhoneOnClient() || contact.phone || task.contactPhone || "").trim();
   const quoDial = phone ? `openphone://dial?number=${encodeURIComponent(phone)}&action=call` : "";
-  return <section className="mb-6 rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
+  const callAction = completed ? <Button disabled className="bg-emerald-600 text-white hover:bg-emerald-600"><CheckCircle2 className="mr-2 size-4"/>Call completed</Button> : phone ? <Button asChild><a href={quoDial} onClick={onCallOpening}><Phone className="mr-2 size-4"/>Call with Quo</a></Button> : <Button disabled><Phone className="mr-2 size-4"/>Call with Quo</Button>;
+  return <section className={embedded ? "py-1" : "mb-6 rounded-2xl border border-blue-100 bg-blue-50/70 p-4"}>
     <div className="flex flex-wrap items-start justify-between gap-4">
-      <div className="min-w-0"><div className="text-[11px] font-semibold tracking-[.14em] text-blue-700">Caller brief</div><h3 className="mt-1 text-base font-bold text-blue-950">{task.summary || "Call this Contact"}</h3><p className="mt-1 text-sm text-blue-900">{contact.name} · {phone || "No phone number"}</p></div>
-      <div className="flex shrink-0 flex-wrap gap-2">{completed ? <Button disabled className="bg-emerald-600 text-white hover:bg-emerald-600"><CheckCircle2 className="mr-2 size-4"/>Call completed</Button> : phone ? <Button asChild><a href={quoDial} onClick={onCallOpening}><Phone className="mr-2 size-4"/>Call with Quo</a></Button> : <Button disabled><Phone className="mr-2 size-4"/>Call with Quo</Button>}</div>
+      <div className="min-w-0"><div className="text-[11px] font-semibold tracking-[.14em] text-blue-700">{embedded ? "Task Description" : "Caller brief"}</div><h3 className="mt-1 text-base font-bold text-blue-950">{task.summary || "Call this Contact"}</h3><p className="mt-1 text-sm text-blue-900">{contact.name} · {phone || "No phone number"}</p></div>
+      {!embedded && <div className="flex shrink-0 flex-wrap gap-2">{callAction}</div>}
     </div>
+    {embedded && <div className="mt-5 text-sm text-blue-950"><div className="text-xs font-semibold tracking-wide text-blue-700">Call script</div>{scriptLoading ? <p className="mt-2 text-sm text-blue-800">Loading call script…</p> : script ? <div className="mt-2"><div className="flex flex-wrap items-center gap-2 font-semibold"><span>{script.name}</span>{script.status && <Badge variant="outline" className="border-blue-200 bg-white/60 text-[10px] text-blue-800">{script.status}</Badge>}</div><p className="mt-1 whitespace-pre-wrap leading-6 text-blue-950/85">{script.content || "No content template configured."}</p></div> : <p className="mt-2 text-sm text-blue-800">No Call Script is linked to this task.</p>}{review?.recallRequested ? <p className="mt-4 text-xs font-semibold text-rose-700">Recall requested · Reassigned to Beril</p> : review?.status === "Qualified" ? <p className="mt-4 text-xs font-semibold text-emerald-700">Call review completed · qualified</p> : null}<div className="mt-5">{callAction}</div></div>}
   </section>;
 }

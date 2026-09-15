@@ -19,7 +19,7 @@ export function SettingsPage({ section }: { section?: string }) {
   const tabs = ["channels", "capacity", "permissions", "audit"];
   const permissionRows = [
     ["Admin", "Brands, Tasks, OmniReach, Settings", "All actions"],
-    ["FC_Owner", "Brands and assigned Tasks", "Reply, follow-up, CP and launch"],
+    ["AccountManager", "Brands and assigned Tasks", "Reply, follow-up, CP and launch"],
     ["Caller", "Assigned Call Tasks", "Submit call outcomes"],
   ];
 

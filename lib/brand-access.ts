@@ -24,7 +24,7 @@ export async function resolveBrandViewer(input: {
   if (!owner || owner.status !== "Active") {
     return {
       isAdmin: false,
-      role: "FC_Owner",
+      role: "AccountManager",
       email,
       ownerId: null,
       name: input.name || null,

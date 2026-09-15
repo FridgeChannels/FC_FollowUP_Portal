@@ -45,9 +45,9 @@ describe("taskQueryForViewer", () => {
     );
   });
 
-  it("scopes FC_Owner to their Owner relation", () => {
+  it("scopes AccountManager to their Owner relation", () => {
     assert.deepEqual(
-      taskQueryForViewer({ isAdmin: false, role: "FC_Owner", ownerId: "owner-1" }),
+      taskQueryForViewer({ isAdmin: false, role: "AccountManager", ownerId: "owner-1" }),
       { ownerPageId: "owner-1" },
     );
   });

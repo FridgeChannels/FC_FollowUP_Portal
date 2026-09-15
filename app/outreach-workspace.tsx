@@ -23,6 +23,7 @@ import { BrandDetail } from "./workspace-customer";
 import { TasksPage } from "./workspace-tasks";
 import { BombEditor, BombsPage } from "./workspace-bombs";
 import { useSession } from "./use-session";
+import { CALL_REVIEW_CALLER_EMAIL, taskStatusForCallReview, useCallReviewMetadata } from "@/lib/call-review-metadata";
 
 type Screen = "Brands" | "ReplyTask" | "OmniReach";
 const nav: { label: Screen; path: string; icon: typeof Users; cap: string; badge?: boolean }[] = [
@@ -32,7 +33,7 @@ const nav: { label: Screen; path: string; icon: typeof Users; cap: string; badge
 ];
 const roleHome: Record<Role, string> = {
   Admin: "/tasks",
-  "FC_Owner": "/customers",
+  "AccountManager": "/customers",
   Caller: "/tasks",
 };
 const isOmniReachPath = (path: string) => /^\/(omnireach|bombs)(\/|$)/i.test(path);
@@ -49,6 +50,7 @@ export default function OutreachWorkspace() {
   const pathname = usePathname();
   const { state, hydrated, can, setRole } = useWorkspace();
   const { user, loading: sessionLoading, signOut } = useSession();
+  const { reviewsByTask } = useCallReviewMetadata();
   const screen = routeScreen(pathname);
   const [remoteCounts, setRemoteCounts] = useState<{ open: number; needsReply: number } | null>(null);
   const taskCount = remoteCounts?.open ?? 0;
@@ -77,16 +79,19 @@ export default function OutreachWorkspace() {
       })
       .then((tasks) => {
         if (cancelled) return;
+        const visibleTasks = user?.email.toLowerCase() === CALL_REVIEW_CALLER_EMAIL
+          ? tasks.map((task) => ({ ...task, status: taskStatusForCallReview(task.status || "Pending", reviewsByTask[task.id]) }))
+          : tasks;
         setRemoteCounts({
-          open: tasks.filter((item) => item.inboxStatus === "Needs Reply" || (item.channel === "Phone" && !isClosedTaskStatus(item.status || ""))).length,
-          needsReply: tasks.filter((item) => item.inboxStatus === "Needs Reply").length,
+          open: visibleTasks.filter((item) => item.inboxStatus === "Needs Reply" || (item.channel === "Phone" && !isClosedTaskStatus(item.status || ""))).length,
+          needsReply: visibleTasks.filter((item) => item.inboxStatus === "Needs Reply").length,
         });
       })
       .catch(() => {
         if (!cancelled) setRemoteCounts({ open: 0, needsReply: 0 });
       });
     return () => { cancelled = true; };
-  }, [sessionLoading, user, pathname]);
+  }, [sessionLoading, user, pathname, reviewsByTask]);
 
   useEffect(() => {
     if (sessionLoading || !user) return;
@@ -99,7 +104,7 @@ export default function OutreachWorkspace() {
       return;
     }
     if (pathname.startsWith("/inbox") || pathname.startsWith("/call-tasks")) {
-      router.replace(state.currentRole === "FC_Owner" ? "/customers" : pathname.replace(/^\/(inbox|call-tasks)/, "/tasks"));
+      router.replace(state.currentRole === "AccountManager" ? "/customers" : pathname.replace(/^\/(inbox|call-tasks)/, "/tasks"));
       return;
     }
     if (/^\/bombs(\/|$)/i.test(pathname)) {
@@ -143,7 +148,7 @@ export default function OutreachWorkspace() {
   return <SidebarProvider defaultOpen>
     <Sidebar collapsible="icon" className="border-r-0">
       <SidebarHeader className="border-b border-white/8 px-3 py-4"><button onClick={() => router.push(roleHome[state.currentRole])} className="flex items-center gap-3 px-1 text-left"><span className="grid size-9 shrink-0 place-items-center rounded-xl bg-violet-500 text-white shadow-[0_8px_24px_rgb(113_106_255/35%)]"><Zap className="size-4 fill-current"/></span><span className="min-w-0 group-data-[collapsible=icon]:hidden"><span className="block truncate text-sm font-bold text-white">Outreach Control</span><span className="block truncate text-[11px] text-slate-400">FC Operations</span></span></button></SidebarHeader>
-      <SidebarContent className="px-2 py-3"><SidebarGroup><SidebarGroupLabel className="text-[10px] uppercase tracking-[.16em] text-slate-500">Workspace</SidebarGroupLabel><SidebarGroupContent><SidebarMenu>{nav.filter(item => can(item.cap)).map(item => { const count = item.label === "Brands" && state.currentRole === "FC_Owner" ? replyCount : item.badge ? taskCount : 0; return <SidebarMenuItem key={item.path}><SidebarMenuButton tooltip={item.label} isActive={screen === item.label} onClick={() => router.push(item.path)} className={`h-10 rounded-lg px-3 text-[13px] font-medium ${item.label === "Brands" ? "data-[active=true]:bg-blue-500" : item.label === "ReplyTask" ? "data-[active=true]:bg-violet-500" : "data-[active=true]:bg-amber-500"} data-[active=true]:text-white`}><item.icon/><span>{item.label}</span>{count>0 && <span className={`ml-auto rounded-md px-1.5 py-0.5 text-[10px] group-data-[collapsible=icon]:hidden ${item.label === "Brands" ? "bg-rose-500/20 text-rose-200" : "bg-amber-400/20 text-amber-200"}`}>{count}</span>}</SidebarMenuButton></SidebarMenuItem>})}</SidebarMenu></SidebarGroupContent></SidebarGroup></SidebarContent>
+      <SidebarContent className="px-2 py-3"><SidebarGroup><SidebarGroupLabel className="text-[10px] uppercase tracking-[.16em] text-slate-500">Workspace</SidebarGroupLabel><SidebarGroupContent><SidebarMenu>{nav.filter(item => can(item.cap)).map(item => { const count = item.label === "Brands" && state.currentRole === "AccountManager" ? replyCount : item.badge ? taskCount : 0; return <SidebarMenuItem key={item.path}><SidebarMenuButton tooltip={item.label} isActive={screen === item.label} onClick={() => router.push(item.path)} className={`h-10 rounded-lg px-3 text-[13px] font-medium ${item.label === "Brands" ? "data-[active=true]:bg-blue-500" : item.label === "ReplyTask" ? "data-[active=true]:bg-violet-500" : "data-[active=true]:bg-amber-500"} data-[active=true]:text-white`}><item.icon/><span>{item.label}</span>{count>0 && <span className={`ml-auto rounded-md px-1.5 py-0.5 text-[10px] group-data-[collapsible=icon]:hidden ${item.label === "Brands" ? "bg-rose-500/20 text-rose-200" : "bg-amber-400/20 text-amber-200"}`}>{count}</span>}</SidebarMenuButton></SidebarMenuItem>})}</SidebarMenu></SidebarGroupContent></SidebarGroup></SidebarContent>
       <SidebarFooter className="border-t border-white/8 p-3">
         <DropdownMenu><DropdownMenuTrigger asChild><button className="mt-2 flex w-full items-center gap-3 rounded-xl bg-white/[.04] p-2 text-left"><Avatar className="size-8"><AvatarFallback className="bg-violet-200 text-xs font-bold text-violet-800">{accountInitials(user.name, user.email)}</AvatarFallback></Avatar><span className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden"><span className="block truncate text-xs font-semibold text-white">{displayName}</span><span className="block truncate text-[10px] text-slate-400">{user.role}</span></span><ChevronDown className="size-3 text-slate-500 group-data-[collapsible=icon]:hidden"/></button></DropdownMenuTrigger><DropdownMenuContent side="right" align="end" className="w-64"><DropdownMenuLabel className="space-y-0.5 font-normal"><span className="block truncate text-sm font-semibold">{displayName}</span><span className="block truncate text-xs text-muted-foreground">{user.email}</span></DropdownMenuLabel><DropdownMenuSeparator/><DropdownMenuItem onClick={async () => { await signOut(); router.replace("/login"); }}> <LogOut className="size-4"/>Sign out</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
       </SidebarFooter>

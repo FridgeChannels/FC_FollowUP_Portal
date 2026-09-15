@@ -103,6 +103,7 @@ export async function mapFollowupClientPage(
     status: propertyText(properties["Follow-up Status"]),
     handlingMode: asHandlingMode(propertyText(properties["Handling Mode"])),
     lastInteractionAt: rollupDate(properties["Last Interaction At"]),
+    lastReplyAt: rollupDate(properties["Last Reply At"]),
     ownerId: owner?.id || ownerId || null,
     ownerName: owner?.name || null,
     ownerEmail: owner?.account || null,

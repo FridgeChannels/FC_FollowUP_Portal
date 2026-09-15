@@ -12,7 +12,6 @@ import {
   ChevronRight,
   CircleAlert,
   MessageCircle,
-  MoreHorizontal,
   PhoneCall,
   Search,
   Upload,
@@ -40,12 +39,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import {
   Empty,
   EmptyDescription,
@@ -77,7 +70,7 @@ const show = (r: { ok: boolean; message: string }) =>
   r.ok ? toast.success(r.message) : toast.error(r.message);
 export function CP({ value }: { value: string }) {
   const tone =
-    { NONE: "bg-slate-50 text-slate-600", CP1: "ui-cp-1", CP2: "ui-cp-2", CP3: "ui-cp-3" }[value] ||
+    { NONE: "bg-slate-50 text-slate-600", Nurture: "bg-slate-100 text-slate-700", CP1: "ui-cp-1", CP2: "ui-cp-2", CP3: "ui-cp-3", CP4: "bg-amber-50 text-amber-700", CP5: "bg-sky-50 text-sky-700", CP6: "bg-rose-50 text-rose-700" }[value] ||
     "ui-cp-1";
   return (
     <Badge
@@ -501,12 +494,18 @@ function mergeBrandListItem(current: BrandListItem, next: BrandListItem): BrandL
   };
 }
 
+function daysSince(value: string | null) {
+  if (!value) return "—";
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) return "—";
+  return String(Math.max(0, Math.floor((Date.now() - timestamp) / 86_400_000)));
+}
+
 export function BrandsPage() {
   const { state, can } = useWorkspace();
   const router = useRouter();
   const searchParams = useSearchParams();
   const isAdmin = state.currentRole === "Admin";
-  const manager = isAdmin || state.currentRole === "FC_Owner";
   const [filters, setFilters] = useState<BrandListFilters>(() =>
     brandListFiltersFromSearch(searchParams),
   );
@@ -682,21 +681,6 @@ export function BrandsPage() {
   const pauseSelected = () => {
     void runBulkUpdate(selected, () => ({ status: "Paused" }), "Outreach paused");
   };
-  const toggleOutreach = async (brand: BrandListItem) => {
-    if (busy) return;
-    const paused = brand.status === "Paused";
-    setBusy(true);
-    try {
-      applyBrandUpdate(
-        await patchBrandListItem(brand.id, { status: paused ? "Ready" : "Paused" }),
-      );
-      toast.success(paused ? "Outreach resumed" : "Outreach paused");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Update failed");
-    } finally {
-      setBusy(false);
-    }
-  };
   usePageMetadata(
     brandListMetadata({
       q: query || undefined,
@@ -837,8 +821,9 @@ export function BrandsPage() {
                   <TableHead>Status</TableHead>
                   <TableHead>Handling Mode</TableHead>
                   <TableHead>Last interaction</TableHead>
+                  <TableHead className="whitespace-nowrap">Days since last interaction</TableHead>
+                  <TableHead className="whitespace-nowrap">Days since last reply</TableHead>
                   {isAdmin && <TableHead>FC-Owner</TableHead>}
-                  {manager && <TableHead />}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -900,37 +885,15 @@ export function BrandsPage() {
                       <TableCell className="max-w-52 truncate text-xs text-slate-500">
                         {c.lastInteractionAt ? dateOnly(c.lastInteractionAt) : "No interaction"}
                       </TableCell>
+                      <TableCell className="text-xs tabular-nums text-slate-600">
+                        {daysSince(c.lastInteractionAt)}
+                      </TableCell>
+                      <TableCell className="text-xs tabular-nums text-slate-600">
+                        {daysSince(c.lastReplyAt)}
+                      </TableCell>
                       {isAdmin && (
                         <TableCell className="whitespace-nowrap text-xs">
                           {c.ownerName || "Unassigned"}
-                        </TableCell>
-                      )}
-                      {manager && (
-                        <TableCell onClick={(e) => e.stopPropagation()}>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon-sm">
-                                <MoreHorizontal className="size-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem
-                                onClick={() =>
-                                  router.push(`/customers/${c.id}`)
-                                }
-                              >
-                                Open Brand
-                              </DropdownMenuItem>
-                              {isAdmin && can("editBrand") && (
-                                <DropdownMenuItem
-                                  disabled={busy}
-                                  onClick={() => void toggleOutreach(c)}
-                                >
-                                  {c.status === "Paused" ? "Resume" : "Pause"} outreach
-                                </DropdownMenuItem>
-                              )}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
                         </TableCell>
                       )}
                     </TableRow>
@@ -1090,7 +1053,7 @@ function AddBrandDialog({
 }) {
   const { state, createBrand } = useWorkspace();
   const humans = state.users.filter(
-    (u) => u.role === "FC_Owner" || u.role === "Admin",
+    (u) => u.role === "AccountManager" || u.role === "Admin",
   );
   const [name, setName] = useState("");
   const [source, setSource] = useState("Manual");

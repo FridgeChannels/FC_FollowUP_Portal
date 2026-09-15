@@ -241,6 +241,29 @@ export async function cancelUnsentBombSiblingTasks(task: BrandTask) {
   return siblings;
 }
 
+export async function cancelOpenBombTasks(input: {
+  brandId: string;
+  bombId: string;
+  contactId: string;
+}) {
+  const tasks = (await listFollowupTasks([input.contactId])).filter((task) =>
+    task.brandId === input.brandId &&
+    task.sourceBombId === input.bombId &&
+    isOpenTaskStatus(task.status),
+  );
+  const endedAt = new Date().toISOString();
+  await Promise.all(
+    tasks.map((task) =>
+      updateFollowupTask(task.id, {
+        status: "Cancelled",
+        endedAt,
+        notes: [task.notes, "OmniReach 已由用户中止，未执行任务已取消。"].filter(Boolean).join("\n"),
+      }),
+    ),
+  );
+  return tasks;
+}
+
 export async function updateFollowupTask(
   pageId: string,
   patch: {

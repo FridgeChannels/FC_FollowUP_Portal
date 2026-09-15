@@ -8,11 +8,11 @@ describe("parseOwnerRole", () => {
     assert.equal(parseOwnerRole("管理员"), "Admin");
   });
 
-  it("maps Owner / FC_Owner to FC_Owner", () => {
-    assert.equal(parseOwnerRole("Owner"), "FC_Owner");
-    assert.equal(parseOwnerRole("FC_Owner"), "FC_Owner");
-    assert.equal(parseOwnerRole("FC-Owner"), "FC_Owner");
-    assert.equal(parseOwnerRole("fc_owner"), "FC_Owner");
+  it("maps Owner / AccountManager to AccountManager", () => {
+    assert.equal(parseOwnerRole("Owner"), "AccountManager");
+    assert.equal(parseOwnerRole("AccountManager"), "AccountManager");
+    assert.equal(parseOwnerRole("FC-Owner"), "AccountManager");
+    assert.equal(parseOwnerRole("fc_owner"), "AccountManager");
   });
 
   it("maps Caller to Caller", () => {
@@ -26,15 +26,15 @@ describe("parseOwnerRole", () => {
 });
 
 describe("ownerRoleFromRecord", () => {
-  it("defaults empty Role to FC_Owner", () => {
-    assert.equal(ownerRoleFromRecord(""), "FC_Owner");
+  it("defaults empty Role to AccountManager", () => {
+    assert.equal(ownerRoleFromRecord(""), "AccountManager");
   });
 });
 
 describe("isAdminRole", () => {
   it("is true only for Admin", () => {
     assert.equal(isAdminRole("Admin"), true);
-    assert.equal(isAdminRole("FC_Owner"), false);
+    assert.equal(isAdminRole("AccountManager"), false);
     assert.equal(isAdminRole("Caller"), false);
   });
 });

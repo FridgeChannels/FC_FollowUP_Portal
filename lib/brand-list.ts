@@ -11,8 +11,8 @@ export const FOLLOW_UP_STATUSES = [
 
 export const HANDLING_MODES = ["Automated", "Human"] as const;
 
-export const CURRENT_CPS = ["NONE", "CP1", "CP2", "CP3"] as const;
-export const APPLICABLE_CPS = ["CP1", "CP2", "CP3"] as const;
+export const CURRENT_CPS = ["NONE", "CP1", "CP2", "CP3", "CP4", "CP5", "CP6", "Nurture"] as const;
+export const APPLICABLE_CPS = ["CP1", "CP2", "CP3", "CP4", "CP5", "CP6"] as const;
 
 export type FollowUpStatus = (typeof FOLLOW_UP_STATUSES)[number];
 export type HandlingMode = (typeof HANDLING_MODES)[number];
@@ -32,9 +32,9 @@ export const CURRENT_CP_DICTIONARY: Record<CurrentCp, CurrentCpOption> = {
   NONE: {
     id: "NONE",
     name: "NONE",
-    fullName: "No CP Completed",
+    fullName: "Not Started",
     definition: "No checkpoint has been completed yet.",
-    criteria: "None of the checkpoints have met their full completion standard.",
+    criteria: "No checkpoint has been completed yet.",
     evidence: "None",
   },
   CP1: {
@@ -43,7 +43,7 @@ export const CURRENT_CP_DICTIONARY: Record<CurrentCp, CurrentCpOption> = {
     fullName: "Post-Tap Brand Experience Delivered",
     definition: "The brand-customized post-tap experience is complete and has been delivered for the Connector or Owner to try.",
     criteria:
-      "Brand Customized Post-tap is complete; the Connector or Owner has received the FC product; they can tap and access the brand experience.",
+      "The customized post-tap brand experience has been completed and is ready for the client to tap and experience at any time.\nThe brand's internal team has received the physical FC product.",
     evidence: "Experience link, test record, recipient, delivery date",
   },
   CP2: {
@@ -51,7 +51,8 @@ export const CURRENT_CP_DICTIONARY: Record<CurrentCp, CurrentCpOption> = {
     name: "CP2",
     fullName: "Sample Delivered to Owner",
     definition: "The correct Owner has been identified, received the sample, and has the contact details needed to move forward.",
-    criteria: "Correct Owner identified; Owner received the sample; Owner Fire Cover Complete.",
+    criteria:
+      "The correct Owner has been identified.\nThe Owner has personally confirmed receipt of the sample.\nThe Owner's contact information across all five OmniReach channels has been collected as completely as possible.",
     evidence: "Owner identity, contact details, intro record, receipt or confirmation",
   },
   CP3: {
@@ -60,8 +61,32 @@ export const CURRENT_CP_DICTIONARY: Record<CurrentCp, CurrentCpOption> = {
     fullName: "Owner Input & Plan Review Completed",
     definition: "The Owner's business objective and required inputs have been collected, and a client-specific plan is ready for review.",
     criteria:
-      "Business Objective confirmed; required workflows, facts, and constraints recorded; AI generated a client-specific plan; FC completed human review; the plan is complete enough to enter Review.",
+      "The Owner has submitted the required information through the form, and the FC Activation Plan Review Meeting has been scheduled.\nThe FC Activation Plan has been completed.\nThe FC Activation Plan Review Meeting has been completed in full with the Owner.",
     evidence: "Guided Input record, plan version, FC Review record",
+  },
+  CP4: {
+    id: "CP4", name: "CP4", fullName: "Plan Confirmed & Paid",
+    definition: "The current plan has been confirmed and payment is complete.",
+    criteria: "The current plan has been confirmed.\nPayment has been received or successfully confirmed by the finance team.",
+    evidence: "Confirmed plan, payment receipt, or finance confirmation",
+  },
+  CP5: {
+    id: "CP5", name: "CP5", fullName: "Fulfillment Delivered",
+    definition: "The approved product has been completed, tested, and delivered.",
+    criteria: "The physical product design has been completed.\nThe client has approved the final design.\nProduction has been completed.\nThe technical setup has been completed and successfully tested.\nDistribution preparations have been completed.\nThe product has been delivered.",
+    evidence: "Approved design, production record, test result, and delivery confirmation",
+  },
+  CP6: {
+    id: "CP6", name: "CP6", fullName: "Scale",
+    definition: "Performance has been reviewed and the expanded scope is active.",
+    criteria: "Measurement and performance review have been completed.\nThe expanded scope has been confirmed.\nPayment for the expanded scope has been completed.",
+    evidence: "Performance review, confirmed expanded scope, and payment confirmation",
+  },
+  Nurture: {
+    id: "Nurture", name: "Nurture", fullName: "Nurture",
+    definition: "The partnership is on hold while remaining a potential future fit.",
+    criteria: "The brand has been internally assessed and confirmed by FC as a fit for the FC3.0 ICP.\nThe partnership is temporarily on hold due to insufficient budget, a lack of strategic alignment, timing constraints, low internal priority, or similar reasons.\nThe reason for pausing has been documented.\nThe date of the next follow-up has been recorded.",
+    evidence: "ICP assessment, pause reason, and next follow-up date",
   },
 };
 
@@ -94,7 +119,7 @@ export function parseCurrentCp(value?: string | null): CurrentCp | null {
   ) {
     return "NONE";
   }
-  const short = upper.match(/^CP([123])\b/);
+  const short = upper.match(/^CP([1-6])\b/);
   if (short) return `CP${short[1]}` as CurrentCp;
   if (normalized.includes("post-tap") || normalized.includes("post tap")) return "CP1";
   if (normalized.includes("sample delivered")) return "CP2";
@@ -105,6 +130,10 @@ export function parseCurrentCp(value?: string | null): CurrentCp | null {
   ) {
     return "CP3";
   }
+  if (normalized.includes("plan confirmed") || normalized.includes("paid")) return "CP4";
+  if (normalized.includes("fulfillment") || normalized.includes("delivered")) return "CP5";
+  if (normalized.includes("scale") || normalized.includes("expanded scope")) return "CP6";
+  if (normalized.includes("nurture")) return "Nurture";
   return null;
 }
 
@@ -114,7 +143,7 @@ export function currentCpOption(value?: string | null): CurrentCpOption {
 
 export function parseApplicableCp(value?: string | null): ApplicableCp | null {
   const parsed = parseCurrentCp(value);
-  return parsed && parsed !== "NONE" ? parsed : null;
+  return parsed && parsed !== "NONE" && parsed !== "Nurture" ? parsed : null;
 }
 
 export function resolveApplicableCp(values: string[]): ApplicableCp | null {
@@ -146,6 +175,7 @@ export type BrandListItem = {
   status: string;
   handlingMode: HandlingMode | null;
   lastInteractionAt: string | null;
+  lastReplyAt: string | null;
   ownerId: string | null;
   ownerName: string | null;
   ownerEmail: string | null;

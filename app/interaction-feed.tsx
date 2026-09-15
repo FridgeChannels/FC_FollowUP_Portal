@@ -1,10 +1,12 @@
 "use client";
 
-import { Fragment, useState } from "react";
-import { Bomb, ChevronRight, UserRound } from "lucide-react";
+import { Fragment, useState, type ReactNode } from "react";
+import { Bomb, CheckCircle2, ChevronRight, RotateCcw, UserRound } from "lucide-react";
+import { toast } from "sonner";
+import { useCallReviewMetadata } from "@/lib/call-review-metadata";
 import { BombInstance, Channel, Contact, CPCode, CP_CODES, Interaction, ScheduledAction } from "@/lib/outreach-domain";
 import { BombExecutionPlan, formatUtcTime } from "./bomb-plan";
-import { BrandReplyBox, ChannelSendBox } from "./brand-reply-box";
+import { BrandReplyBox } from "./brand-reply-box";
 import { ChannelIcon } from "./channel-icon";
 import { QuoCallPanel } from "./quo-call-panel";
 import { useWorkspace } from "./workspace-store";
@@ -29,14 +31,14 @@ function threadKey(item: Interaction) {
   return item.threadId || [item.contactId || "", item.channel || "", item.taskId || item.id].join(":");
 }
 
-function sourceLabel(item: Interaction): "Human" | "OmniReach" | null {
+function sourceLabel(item: Interaction, bombInstances: BombInstance[]): string | null {
   if (item.direction === "Inbound") return null;
   if (item.creationMethod === "Manual") return "Human";
-  if (item.bombInstanceId || item.creationMethod === "Automated") return "OmniReach";
+  if (item.bombInstanceId || item.creationMethod === "Automated") return bombInstances.find(instance => instance.id === item.bombInstanceId)?.templateName || "OmniReach";
   return null;
 }
 
-function SourceBadge({ source }: { source: "Human" | "OmniReach" }) {
+function SourceBadge({ source }: { source: string }) {
   return (
     <Badge className={source === "Human" ? "bg-violet-100 text-[10px] text-violet-800 hover:bg-violet-100" : "bg-blue-100 text-[10px] text-blue-800 hover:bg-blue-100"}>
       {source}
@@ -46,6 +48,15 @@ function SourceBadge({ source }: { source: "Human" | "OmniReach" }) {
 
 function outboundStatus(item: Interaction) {
   return item.taskStatus || null;
+}
+
+function deliveryTiming(item: Interaction) {
+  const taskStatus = outboundStatus(item);
+  const sent = taskStatus === "Completed" || ["Sent", "Delivered", "Connected", "Completed"].includes(item.messageStatus || "");
+  if (sent) return { label: "Sent", at: item.createdAt };
+  const scheduled = taskStatus === "Pending" || taskStatus === "In Progress" || item.messageStatus === "Pending";
+  if (scheduled) return { label: "Scheduled", at: item.scheduledAt || item.createdAt };
+  return null;
 }
 
 function SendStatusBadge({ status }: { status: string }) {
@@ -75,9 +86,15 @@ export function InteractionFeed({
   actions,
   maxHeight,
   onSend,
+  onCancelBomb,
   initialChannel,
+  initialCp,
+  callerPhoneOnly,
+  channelHeader,
+  channelHeaderCp,
   onRefreshQuo,
   quoRefreshingCallId,
+  canReviewCalls = false,
 }: {
   interactions: Interaction[];
   contacts: Contact[];
@@ -88,21 +105,31 @@ export function InteractionFeed({
   bombInstances?: BombInstance[];
   actions?: ScheduledAction[];
   onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string) => Promise<void>;
+  onCancelBomb?: (instance: BombInstance) => Promise<void>;
   initialChannel?: Channel;
+  initialCp?: CPCode;
+  callerPhoneOnly?: boolean;
+  channelHeader?: ReactNode;
+  channelHeaderCp?: CPCode;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
+  canReviewCalls?: boolean;
 }) {
   const { state } = useWorkspace();
+  const { reviews, reviewCall } = useCallReviewMetadata();
   const customerId = customerIdProp || interactions[0]?.customerId;
   const customer = state.customers.find(item => item.id === customerId);
   const currentCp = currentCpProp || customer?.cp || "CP1";
-  const [selectedCp, setSelectedCp] = useState<CPCode>(currentCp);
-  const [selectedChannel, setSelectedChannel] = useState<Channel>(initialChannel || "Email");
+  const [selectedCp, setSelectedCp] = useState<CPCode>(initialCp || currentCp);
+  const [selectedChannel, setSelectedChannel] = useState<Channel>(callerPhoneOnly ? "Phone" : initialChannel || "Email");
   const [bombOpen, setBombOpen] = useState(false);
-  const currentIndex = CP_CODES.indexOf(currentCp);
+  const [cancellingBombId, setCancellingBombId] = useState<string | null>(null);
+  const currentIndex = CP_CODES.indexOf(currentCp as (typeof CP_CODES)[number]);
   const cpInteractions = interactions.filter(item => !isChannelMessage(item) || belongsToCp(item, selectedCp));
   const planState = bombInstances ? { ...state, bombInstances, actions: actions ?? [], interactions: cpInteractions } : state;
-  const channelMessages = cpInteractions.filter(item => isChannelMessage(item) && item.channel === selectedChannel);
+  const activeChannel = callerPhoneOnly ? "Phone" : selectedChannel;
+  const visibleChannels: Channel[] = callerPhoneOnly ? ["Phone"] : CHANNELS;
+  const channelMessages = cpInteractions.filter(item => isChannelMessage(item) && item.channel === activeChannel);
   const bombsForCp = planState.bombInstances
     .filter(item => item.customerId === customerId && item.cp === selectedCp)
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
@@ -131,9 +158,9 @@ export function InteractionFeed({
 
     <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 px-5 py-3">
       <div className="flex flex-wrap gap-1.5">
-        {CHANNELS.map(channel => {
+        {visibleChannels.map(channel => {
           const count = interactions.filter(item => isChannelMessage(item) && item.channel === channel && belongsToCp(item, selectedCp)).length;
-          const selected = channel === selectedChannel;
+          const selected = channel === activeChannel;
           return <button key={channel} type="button" aria-pressed={selected} onClick={() => setSelectedChannel(channel)} className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${selected ? "bg-violet-600 text-white" : "bg-slate-50 text-slate-600 hover:bg-slate-100"}`}>
             <ChannelIcon channel={channel} className="size-4" alt=""/>
             {channel}
@@ -141,17 +168,24 @@ export function InteractionFeed({
           </button>;
         })}
       </div>
-      {bombsForCp.length > 0 && <Button size="sm" variant="outline" onClick={() => setBombOpen(true)}><Bomb className="mr-1.5 size-3.5"/>OmniReach execution plan</Button>}
+      {!callerPhoneOnly && bombsForCp.length > 0 && <Button size="sm" variant="outline" onClick={() => setBombOpen(true)}><Bomb className="mr-1.5 size-3.5"/>OmniReach execution plan</Button>}
     </div>
 
+    {channelHeader && (!channelHeaderCp || selectedCp === channelHeaderCp) && <div className="px-5 pt-5">{channelHeader}</div>}
     <ChannelTranscript
-      customerId={customerId}
       messages={channelMessages}
       contacts={contacts}
-      channel={selectedChannel}
+      channel={activeChannel}
+      bombInstances={planState.bombInstances}
       onSend={onSend}
       onRefreshQuo={onRefreshQuo}
       quoRefreshingCallId={quoRefreshingCallId}
+      callReviews={reviews}
+      canReviewCalls={canReviewCalls}
+      onReviewCall={(interactionId, taskId, status) => {
+        reviewCall({ interactionId, taskId, status });
+        toast.success(status === "Qualified" ? "Call marked as qualified" : "Call marked as unqualified and reopened for Beril");
+      }}
     />
 
     <Dialog open={bombOpen} onOpenChange={setBombOpen}>
@@ -164,10 +198,19 @@ export function InteractionFeed({
           {bombsForCp.map(instance => (
             <div key={instance.id} className="rounded-xl border border-slate-200 p-4">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <div className="text-sm font-bold">{instance.templateName} · V{instance.version}</div>
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                  <div className="text-sm font-bold">{instance.templateName} · V{instance.version}</div>
                   {instance.cp && <Badge variant="outline" className="text-[10px]">{instance.cp}</Badge>}
                   <Badge className={instance.status === "Running" ? "bg-violet-100 text-violet-800" : "bg-slate-100 text-slate-700"}>{instance.status}</Badge>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  {instance.status === "Running" && onCancelBomb && <Button size="sm" variant="outline" disabled={cancellingBombId === instance.id} className="border-rose-200 text-rose-700 hover:bg-rose-50 hover:text-rose-800" onClick={async () => {
+                    if (!window.confirm(`Stop ${instance.templateName}? All remaining scheduled tasks will be cancelled.`)) return;
+                    setCancellingBombId(instance.id);
+                    try { await onCancelBomb(instance); setBombOpen(false); }
+                    catch (error) { toast.error(error instanceof Error ? error.message : "Unable to stop OmniReach"); }
+                    finally { setCancellingBombId(null); }
+                  }}>{cancellingBombId === instance.id ? "Stopping…" : "Stop OmniReach"}</Button>}
                 </div>
               </div>
               <BombExecutionPlan state={planState} instanceId={instance.id} contacts={contacts} onSend={onSend}/>
@@ -180,21 +223,27 @@ export function InteractionFeed({
 }
 
 function ChannelTranscript({
-  customerId,
   messages,
   contacts,
   channel,
+  bombInstances,
   onSend,
   onRefreshQuo,
   quoRefreshingCallId,
+  callReviews,
+  canReviewCalls,
+  onReviewCall,
 }: {
-  customerId?: string;
   messages: Interaction[];
   contacts: Contact[];
   channel: Channel;
+  bombInstances: BombInstance[];
   onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
+  callReviews: ReturnType<typeof useCallReviewMetadata>["reviews"];
+  canReviewCalls: boolean;
+  onReviewCall: (interactionId: string, taskId: string | undefined, status: "Qualified" | "Unqualified") => void;
 }) {
   const contactGroups = groupByContact(messages, contacts);
   return <div>
@@ -203,11 +252,10 @@ function ChannelTranscript({
     ) : (
       <div className="divide-y">
         {contactGroups.map(group => (
-          <ContactThreads key={group.contact?.id || "unknown"} group={group} replyPool={messages} channel={channel} onSend={onSend} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId}/>
+          <ContactThreads key={group.contact?.id || "unknown"} group={group} replyPool={messages} channel={channel} bombInstances={bombInstances} onSend={onSend} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId} callReviews={callReviews} canReviewCalls={canReviewCalls} onReviewCall={onReviewCall}/>
         ))}
       </div>
     )}
-    {channel === "Phone" ? null : <ChannelSendBox customerId={customerId} channel={channel} contacts={contacts} interactions={messages} onSend={onSend}/>}
   </div>;
 }
 
@@ -243,16 +291,24 @@ function ContactThreads({
   group,
   replyPool,
   channel,
+  bombInstances,
   onSend,
   onRefreshQuo,
   quoRefreshingCallId,
+  callReviews,
+  canReviewCalls,
+  onReviewCall,
 }: {
   group: { contact?: Contact; messages: Interaction[] };
   replyPool: Interaction[];
   channel: Channel;
+  bombInstances: BombInstance[];
   onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
+  callReviews: ReturnType<typeof useCallReviewMetadata>["reviews"];
+  canReviewCalls: boolean;
+  onReviewCall: (interactionId: string, taskId: string | undefined, status: "Qualified" | "Unqualified") => void;
 }) {
   const endpoint = group.contact ? contactPoint(group.contact, channel) : undefined;
   const threads = groupByThread(group.messages);
@@ -272,7 +328,7 @@ function ContactThreads({
     </div>
     <div className="space-y-6">
       {threads.map(thread => (
-        <ThreadMessages key={threadKey(thread[0])} thread={thread} replyPool={replyPool} contact={group.contact} channel={channel} endpoint={endpoint} onSend={onSend} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId}/>
+        <ThreadMessages key={threadKey(thread[0])} thread={thread} replyPool={replyPool} contact={group.contact} channel={channel} endpoint={endpoint} bombInstances={bombInstances} onSend={onSend} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId} callReviews={callReviews} canReviewCalls={canReviewCalls} onReviewCall={onReviewCall}/>
       ))}
     </div>
   </section>;
@@ -284,23 +340,31 @@ function ThreadMessages({
   contact,
   channel,
   endpoint,
+  bombInstances,
   onSend,
   onRefreshQuo,
   quoRefreshingCallId,
+  callReviews,
+  canReviewCalls,
+  onReviewCall,
 }: {
   thread: Interaction[];
   replyPool: Interaction[];
   contact?: Contact;
   channel: Channel;
   endpoint?: string;
+  bombInstances: BombInstance[];
   onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
+  callReviews: ReturnType<typeof useCallReviewMetadata>["reviews"];
+  canReviewCalls: boolean;
+  onReviewCall: (interactionId: string, taskId: string | undefined, status: "Qualified" | "Unqualified") => void;
 }) {
   return <div className="space-y-3">
     {thread.map(item => {
       const inbound = item.direction === "Inbound";
-      const source = sourceLabel(item);
+      const source = sourceLabel(item, bombInstances);
       const phoneCall = channel === "Phone";
       const who = inbound
         ? phoneCall
@@ -309,17 +373,21 @@ function ThreadMessages({
         : `To ${endpoint || contact?.name || "Contact"}`;
       const callId = item.quo?.callId;
       const canRefresh = !!callId && !callId.startsWith("ACsim") && !!onRefreshQuo;
+      const timing = !inbound && !phoneCall ? deliveryTiming(item) : null;
+      const callReview = phoneCall ? callReviews[item.id] : undefined;
       return <article key={item.id} className={`rounded-xl p-4 ${inbound ? "bg-rose-50/80" : "bg-slate-50"}`}>
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
             <div className="text-xs font-semibold text-slate-900">{who}</div>
             {inbound && !phoneCall ? <Badge className="bg-rose-600 text-[10px] text-white hover:bg-rose-600">This is a reply</Badge> : <Badge variant="secondary" className="text-[10px]">{item.direction || "Outbound"}</Badge>}
             {source && <SourceBadge source={source}/>}
-            {!inbound && (outboundStatus(item) ? <SendStatusBadge status={outboundStatus(item)!}/> : <Badge variant="outline" className="text-[10px] text-slate-500">No send status</Badge>)}
+            {!inbound && !timing && (outboundStatus(item) ? <SendStatusBadge status={outboundStatus(item)!}/> : <Badge variant="outline" className="text-[10px] text-slate-500">No send status</Badge>)}
             {phoneCall && item.callResult ? <SendStatusBadge status={item.callResult}/> : null}
+            {callReview ? <Badge className={callReview.status === "Qualified" ? "bg-emerald-100 text-[10px] text-emerald-800 hover:bg-emerald-100" : "bg-rose-100 text-[10px] text-rose-800 hover:bg-rose-100"}>{callReview.status.toLowerCase()}</Badge> : null}
           </div>
           <time dateTime={item.createdAt} className="font-mono text-[11px] text-slate-500">{formatUtcTime(item.createdAt)}</time>
         </div>
+        {timing && <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-slate-500"><span className={timing.label === "Sent" ? "font-semibold text-emerald-700" : "font-semibold text-amber-700"}>{timing.label}</span><time dateTime={timing.at} className="font-mono text-[11px]">{formatUtcTime(timing.at)}</time></div>}
         {!item.quo && <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{item.content}</p>}
         {item.quo ? <div className="mt-3">
           <QuoCallPanel
@@ -329,6 +397,7 @@ function ThreadMessages({
             onRefresh={canRefresh ? () => onRefreshQuo?.(callId!) : undefined}
           />
         </div> : null}
+        {phoneCall && item.quo && canReviewCalls && !callReview ? <div className="mt-4 flex flex-wrap gap-2"><Button size="sm" className="bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => onReviewCall(item.id, item.taskId, "Qualified")}><CheckCircle2 className="mr-1.5 size-3.5"/>Mark as Qualified</Button><Button size="sm" className="bg-rose-600 text-white hover:bg-rose-700" onClick={() => onReviewCall(item.id, item.taskId, "Unqualified")}><RotateCcw className="mr-1.5 size-3.5"/>Unqualified &amp; Recall</Button></div> : null}
         {inbound && !phoneCall && contact && (
           <BrandReplyBox
             customerId={item.customerId}

@@ -1,15 +1,16 @@
 import type { QuoCallData } from "./quo/types";
 
-export type Role = "Admin" | "FC_Owner" | "Caller";
+export type Role = "Admin" | "AccountManager" | "Caller";
 export type Channel = "Email" | "SMS" | "WhatsApp" | "LinkedIn" | "Phone";
-export type CPCode = "CP1" | "CP2" | "CP3";
-export const CP_CODES: CPCode[] = ["CP1", "CP2", "CP3"];
+export type NumericCPCode = "CP1" | "CP2" | "CP3" | "CP4" | "CP5" | "CP6";
+export type CPCode = "NONE" | NumericCPCode | "Nurture";
+export const CP_CODES: NumericCPCode[] = ["CP1", "CP2", "CP3", "CP4", "CP5", "CP6"];
 
-export function interactionCpCode(value?: string | null): CPCode | null {
+export function interactionCpCode(value?: string | null): NumericCPCode | null {
   const raw = (value || "").trim().toUpperCase();
-  if (raw === "CP1" || raw === "CP2" || raw === "CP3") return raw;
-  const match = raw.match(/^CP([123])/);
-  return match ? (`CP${match[1]}` as CPCode) : null;
+  if (/^CP[1-6]$/.test(raw)) return raw as NumericCPCode;
+  const match = raw.match(/^CP([1-6])/);
+  return match ? (`CP${match[1]}` as NumericCPCode) : null;
 }
 export type CustomerStatus = "Ready" | "Bomb Running" | "Waiting for Reply" | "Human Handling" | "Paused" | "Closed";
 export type ActionStatus = "Scheduled" | "Sending" | "Sent" | "Delivered" | "Failed" | "Cancelled" | "Skipped" | "Completed";
@@ -45,7 +46,7 @@ export type Interaction = {
   id: string; customerId: string; contactId?: string; bombInstanceId?: string; cp?: CPCode; type: "Message" | "Phone" | "Bomb" | "CP" | "Follow-up" | "Human" | "System";
   channel?: Channel; direction?: "Inbound" | "Outbound"; title: string; content: string; createdAt: string; outcome?: CallOutcome; recording?: string;
   creationMethod?: "Automated" | "Manual"; threadId?: string; taskId?: string; replyStatus?: "Needs Reply" | "Replied";
-  messageStatus?: string; taskStatus?: string; callResult?: string;
+  messageStatus?: string; taskStatus?: string; scheduledAt?: string; callResult?: string;
   quo?: QuoCallData | null;
 };
 export type InboxItem = {
@@ -85,9 +86,11 @@ export const visibleOpenTaskCount = (state: WorkspaceState) => {
 
 export const roleCapabilities: Record<Role, string[]> = {
   Admin: ["dashboard","customers","tasks","inbox","calls","bombs","workflow","analytics","reply","launch","changeCP","editBrand","assignOwner","manageCalls","editBomb","editWorkflow","audit","importBrands"],
-  "FC_Owner": ["dashboard","customers","bombs","reply","launch","changeCP","editBrand","createCall","editBomb"],
+  "AccountManager": ["dashboard","customers","bombs","reply","launch","changeCP","editBrand","createCall","editBomb"],
   Caller: ["tasks","calls"],
 };
+
+export const normalizeRole = (value: unknown): Role => value === "Admin" || value === "Caller" || value === "AccountManager" ? value : "AccountManager";
 
 const at = (day: string, time = "09:00:00") => `${day}T${time.length === 5 ? `${time}:00` : time}.000Z`;
 export const addDays = (iso: string, days: number) => { const d = new Date(iso); d.setUTCDate(d.getUTCDate()+days); return d.toISOString(); };
@@ -109,7 +112,7 @@ export function createSeedState(): WorkspaceState {
   const today = at("2026-09-11");
   const users: User[] = [
     {id:"u_sarah",name:"Sarah Chen",initials:"SC",role:"Admin"},
-    {id:"u_mike",name:"Mike Ross",initials:"MR",role:"FC_Owner"},
+    {id:"u_mike",name:"Mike Ross",initials:"MR",role:"AccountManager"},
     {id:"u_alex",name:"Alex Morgan",initials:"AM",role:"Caller",dailyCapacity:6,workingDays:[1,2,3,4,5]},
     {id:"u_priya",name:"Priya Shah",initials:"PS",role:"Caller",dailyCapacity:6,workingDays:[1,2,3,4,5]},
     {id:"u_jordan",name:"Jordan Lee",initials:"JL",role:"Caller",dailyCapacity:6,workingDays:[1,2,3,4,5]},
@@ -183,9 +186,14 @@ export function createSeedState(): WorkspaceState {
     {id:"call_olive",customerId:"c_olive",contactId:"ct_olive_liam",bombInstanceId:"bi_olive",scheduledActionId:"a_o2",callerId:"u_alex",scheduledDate:addDays(today,-1),priority:"Normal",goal:"Confirm interest",script:"Ask whether timing has changed.",status:"Completed",outcome:"No Answer",recordingStatus:"Unavailable"},
   ];
   const cps: CPStage[] = [
-    {code:"CP1",name:"Post-Tap Brand Experience Delivered",goal:"Post-Tap Brand Experience Delivered",criteria:"Brand Customized Post-tap is complete; the Connector or Owner has received the FC product; they can tap and access the brand experience.",color:"violet"},
-    {code:"CP2",name:"Sample Delivered to Owner",goal:"Sample Delivered to Owner",criteria:"Correct Owner identified; Owner received the sample; Owner Fire Cover Complete.",color:"blue"},
-    {code:"CP3",name:"Owner Input & Plan Review Completed",goal:"Owner Input & Plan Review Completed",criteria:"Business Objective confirmed; required workflows, facts, and constraints recorded; AI generated a client-specific plan; FC completed human review; the plan is complete enough to enter Review.",color:"emerald"},
+    {code:"NONE",name:"Not Started",goal:"Not Started",criteria:"No checkpoint has been completed yet.",color:"slate"},
+    {code:"CP1",name:"Post-Tap Brand Experience Delivered",goal:"Post-Tap Brand Experience Delivered",criteria:"The customized post-tap brand experience has been completed and is ready for the client to tap and experience at any time.\nThe brand's internal team has received the physical FC product.",color:"violet"},
+    {code:"CP2",name:"Sample Delivered to Owner",goal:"Sample Delivered to Owner",criteria:"The correct Owner has been identified.\nThe Owner has personally confirmed receipt of the sample.\nThe Owner's contact information across all five OmniReach channels has been collected as completely as possible.",color:"blue"},
+    {code:"CP3",name:"Owner Input & Plan Review Completed",goal:"Owner Input & Plan Review Completed",criteria:"The Owner has submitted the required information through the form, and the FC Activation Plan Review Meeting has been scheduled.\nThe FC Activation Plan has been completed.\nThe FC Activation Plan Review Meeting has been completed in full with the Owner.",color:"emerald"},
+    {code:"CP4",name:"Plan Confirmed & Paid",goal:"Plan Confirmed & Paid",criteria:"The current plan has been confirmed.\nPayment has been received or successfully confirmed by the finance team.",color:"amber"},
+    {code:"CP5",name:"Fulfillment Delivered",goal:"Fulfillment Delivered",criteria:"The physical product design has been completed.\nThe client has approved the final design.\nProduction has been completed.\nThe technical setup has been completed and successfully tested.\nDistribution preparations have been completed.\nThe product has been delivered.",color:"sky"},
+    {code:"CP6",name:"Scale",goal:"Scale",criteria:"Measurement and performance review have been completed.\nThe expanded scope has been confirmed.\nPayment for the expanded scope has been completed.",color:"rose"},
+    {code:"Nurture",name:"Nurture",goal:"Nurture",criteria:"The brand has been internally assessed and confirmed by FC as a fit for the FC3.0 ICP.\nThe partnership is temporarily on hold due to insufficient budget, a lack of strategic alignment, timing constraints, low internal priority, or similar reasons.\nThe reason for pausing has been documented.\nThe date of the next follow-up has been recorded.",color:"slate"},
   ];
   const integrations: ChannelIntegration[] = [
     {channel:"Email",status:"Connected",account:"sales@fridgechannel.com"},{channel:"SMS",status:"Connected",account:"+1 415 555 0100"},{channel:"WhatsApp",status:"Needs Attention",account:"FC Outreach"},{channel:"LinkedIn",status:"Disconnected",account:"No account"},{channel:"Phone",status:"Connected",account:"Quo workspace"},

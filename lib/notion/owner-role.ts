@@ -1,4 +1,4 @@
-export const PORTAL_ROLES = ["Admin", "FC_Owner", "Caller"] as const;
+export const PORTAL_ROLES = ["Admin", "AccountManager", "Caller"] as const;
 export type PortalRole = (typeof PORTAL_ROLES)[number];
 
 export function parseOwnerRole(value?: string | null): PortalRole | null {
@@ -15,13 +15,13 @@ export function parseOwnerRole(value?: string | null): PortalRole | null {
     raw === "fcowner" ||
     raw === "fc_owners"
   ) {
-    return "FC_Owner";
+    return "AccountManager";
   }
   return null;
 }
 
 export function ownerRoleFromRecord(value?: string | null): PortalRole {
-  return parseOwnerRole(value) || "FC_Owner";
+  return parseOwnerRole(value) || "AccountManager";
 }
 
 export function isAdminRole(role?: PortalRole | null) {
