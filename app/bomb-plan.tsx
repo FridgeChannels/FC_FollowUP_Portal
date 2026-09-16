@@ -38,6 +38,27 @@ export const formatUtcTime = (iso: string) => {
   return `${value("year")}-${value("month")}-${value("day")} ${value("hour")}:${value("minute")}:${value("second")} UTC`;
 };
 
+/** Scheduled At display in America/New_York (date-only → that civil day). */
+export const formatEasternDateTime = (iso: string) => {
+  const raw = iso.trim();
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(raw)
+    ? new Date(`${raw}T12:00:00.000Z`)
+    : new Date(raw);
+  if (Number.isNaN(date.getTime())) return raw;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return `${raw} (ET date)`;
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find(part => part.type === type)?.value || "";
+  return `${value("year")}-${value("month")}-${value("day")} ${value("hour")}:${value("minute")} ET`;
+};
+
 const initials = (name: string) => name.split(/\s+/).map(part => part[0]).join("").slice(0, 2).toUpperCase();
 
 const contactPoint = (contact: Contact, channel: Channel) => {
@@ -116,7 +137,7 @@ export function BombExecutionPlan({
             <div className="flex items-center gap-2"><ChannelIcon channel={action.channel} className="size-6"/><span className="text-sm font-semibold text-slate-950">{action.channel}</span>{isCurrent && <Badge className="bg-violet-600 text-[10px] text-white">Current</Badge>}</div>
             <div className="flex items-center gap-2"><Badge variant={skipped ? "secondary" : isCurrent ? "default" : "outline"} className="text-[10px]">{skipped ? action.status : hasInbound ? "Replied" : isCurrent ? "In progress" : action.status}</Badge><ChevronDown className={`size-4 text-slate-400 transition-transform ${expanded?"rotate-180":""}`}/></div>
           </div>
-          <time dateTime={action.actualDate} className="mt-1.5 block font-mono text-xs text-slate-500">{formatUtcTime(action.actualDate)}</time>
+          <time dateTime={action.actualDate} className="mt-1.5 block font-mono text-xs text-slate-500">{formatEasternDateTime(action.actualDate)}</time>
           <PlanPeople contact={contact} channel={action.channel} caller={skipped ? undefined : caller} action={action}/>
           {skipped && <p className="mt-2 text-xs text-amber-800">{action.note || "Channel unavailable"}</p>}
           </button>

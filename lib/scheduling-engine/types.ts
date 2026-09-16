@@ -58,6 +58,13 @@ export type ScheduleRequest = {
   preferredStartDate: string;
   latestDate?: string;
   maxHorizonDays?: number;
+  /** Clock used for same-day alignment; defaults to real now. */
+  now?: string | Date;
+  /**
+   * Test mode: schedule from now every 5 minutes on the same ET day,
+   * ignoring work window, holidays, Daily Max, and client-per-day limits.
+   */
+  testMode?: boolean;
   creationMethod: CreationMethod;
   clients: ClientSelection[];
 };
@@ -72,6 +79,8 @@ export type ExistingTask = {
 
 export type ScheduleSnapshot = {
   dailyMax: Partial<Record<Channel, number>>;
+  /** Minutes between same-channel sends; missing/invalid → 5. */
+  timeInterval?: Partial<Record<Channel, number>>;
   existingTasks: ExistingTask[];
 };
 

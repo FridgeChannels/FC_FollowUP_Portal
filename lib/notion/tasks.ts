@@ -693,7 +693,7 @@ export async function listExistingTasksForSchedule(): Promise<ExistingTask[]> {
   return pages.flatMap((page) => {
     const properties = page.properties || {};
     const channel = propertyText(properties.Channel);
-    const scheduledAt = propertyDate(properties["Scheduled At"])?.slice(0, 10);
+    const scheduledAt = propertyDate(properties["Scheduled At"]) || null;
     const status = propertyText(properties["Task Status"]) as TaskStatus | null;
     const contactId = firstRelationId(properties["Follow-up Contact"]) || null;
     const clientId = contactId ? brandByContact.get(contactId) : null;

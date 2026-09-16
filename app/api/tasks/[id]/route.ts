@@ -1,40 +1,24 @@
-import type { CurrentCpOption } from "@/lib/brand-list";
-import { listCheckpoints } from "@/lib/notion/cps";
 import { canAssignBrandOwner, canViewTask, canWriteTask } from "@/lib/brand-access";
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
-import { retrievePage } from "@/lib/notion/client";
-import { listConversationsByIds, listFollowupConversations } from "@/lib/notion/conversations";
-import { mapFollowupClientDetail } from "@/lib/notion/followup-clients";
 import { updateFollowupTask } from "@/lib/notion/followup-writes";
-import { annotateTasksWithReplyInbox } from "@/lib/notion/reply-inbox";
+import {
+  buildCallerTaskDetailPayload,
+  buildTaskDetailPayload,
+} from "@/lib/notion/task-detail";
 import { retrieveFollowupTask } from "@/lib/notion/tasks";
 import { dialPhoneForTask } from "@/lib/quo/config";
 import { recordQuoDialAttempt } from "@/lib/quo/dial-attempts";
 
 type Params = { params: Promise<{ id: string }> };
 
-function loadCurrentCps(): Promise<CurrentCpOption[]> {
-  return listCheckpoints();
+function useLitePayload(viewer: { role: string }, request: Request) {
+  if (viewer.role === "Caller") return true;
+  const url = new URL(request.url);
+  return url.searchParams.get("lite") === "1";
 }
 
-async function taskPayload(id: string) {
-  const task = await retrieveFollowupTask(id);
-  const [byIds, byContact, brand, cps] = await Promise.all([
-    listConversationsByIds(task.conversationIds),
-    task.contactId ? listFollowupConversations([task.contactId]) : Promise.resolve([]),
-    task.brandId
-      ? retrievePage(task.brandId).then(mapFollowupClientDetail).catch(() => null)
-      : Promise.resolve(null),
-    loadCurrentCps(),
-  ]);
-  const seen = new Set<string>();
-  const activities = [...byIds, ...byContact].filter((item) => {
-    if (seen.has(item.id)) return false;
-    seen.add(item.id);
-    return true;
-  });
-  const [annotated] = annotateTasksWithReplyInbox([task], activities);
-  return { task: annotated || task, activities, brand, cps };
+async function taskPayload(id: string, lite: boolean) {
+  return lite ? buildCallerTaskDetailPayload(id) : buildTaskDetailPayload(id);
 }
 
 export async function GET(request: Request, { params }: Params) {
@@ -44,7 +28,8 @@ export async function GET(request: Request, { params }: Params) {
       return Response.json({ error: "Sign in required" }, { status: 401 });
     }
     const { id } = await params;
-    const payload = await taskPayload(id);
+    const lite = useLitePayload(viewer, request);
+    const payload = await taskPayload(id, lite);
     if (!canViewTask(viewer, payload.task)) {
       return Response.json({ error: "You do not have access to this task" }, { status: 403 });
     }
@@ -87,7 +72,7 @@ export async function PATCH(request: Request, { params }: Params) {
         ? new Date().toISOString()
         : undefined,
     });
-    return Response.json(await taskPayload(id));
+    return Response.json(await taskPayload(id, useLitePayload(viewer, request)));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
     const status = message.includes("404") ? 404 : 500;
@@ -124,7 +109,7 @@ export async function POST(request: Request, { params }: Params) {
       contactName: task.contactName,
       channel: task.channel,
     });
-    return Response.json(await taskPayload(id));
+    return Response.json(await taskPayload(id, useLitePayload(viewer, request)));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
     const status = message.includes("404") ? 404 : 500;

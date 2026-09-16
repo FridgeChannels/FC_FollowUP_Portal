@@ -21,7 +21,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { DEFAULT_TASK_PAGE_SIZE } from "@/lib/notion/owner-filter";
 import { ChangeCPDialog, LaunchBombDialog, LaunchOmniReachButton, ReplyDialog, ACTIVE_OMNIREACH_BLOCK_REASON } from "./workspace-customer";
 import { InteractionFeed } from "./interaction-feed";
-import { PhoneTaskBoard } from "./phone-task-board";
+import { callScriptFromConversations, PhoneTaskBoard } from "./phone-task-board";
 import { Status } from "./workspace-pages";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { devCallPhoneOnClient } from "@/lib/quo/dev-call-phone";
@@ -55,13 +55,6 @@ type TaskPayload = {
   brand?: BrandDetail | null;
   cps?: CurrentCpOption[];
   error?: string;
-};
-
-type CallScript = {
-  id: string;
-  name: string;
-  content: string;
-  status: string | null;
 };
 
 function asPriority(value?: string | null): UnifiedTask["priority"] {
@@ -138,7 +131,6 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [detailTask, setDetailTask] = useState<UnifiedTask | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
 
   useEffect(() => {
     setType(state.currentRole === "Caller" ? "Call" : "All");
@@ -254,41 +246,21 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
   const selectedFromList = selectedId ? allTasks.find(task => task.id === selectedId) : undefined;
   const selectedTask = selectedFromList || detailTask || undefined;
 
+  // Deep-link / refresh: mount TaskDetail immediately with a stub (no second full-page fetch).
   useEffect(() => {
     if (!selectedId) {
       setDetailTask(null);
-      setDetailLoading(false);
       return;
     }
     if (selectedFromList) {
       setDetailTask(null);
-      setDetailLoading(false);
       return;
     }
-    if (remoteLoading) return;
-    let cancelled = false;
-    setDetailLoading(true);
-    fetch(`/api/tasks/${selectedId}`)
-      .then(async response => {
-        const payload = await response.json() as { task?: BrandTask; error?: string };
-        if (!response.ok || !payload.task) throw new Error(payload.error || "Task not found");
-        return fromNotionTask(payload.task);
-      })
-      .then(task => {
-        if (!cancelled) setDetailTask(taskWithCallReview(task, reviewFromNotion(task)));
-      })
-      .catch(() => {
-        if (!cancelled) setDetailTask(null);
-      })
-      .finally(() => {
-        if (!cancelled) setDetailLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [selectedId, selectedFromList, remoteLoading]);
+    setDetailTask((prev) => (prev?.id === selectedId ? prev : stubTaskFromId(selectedId, state.currentRole)));
+  }, [selectedId, selectedFromList, state.currentRole]);
 
   if (selectedId) {
-    if ((remoteLoading || detailLoading) && !selectedTask) return <div className="grid min-h-[60vh] place-items-center text-sm text-slate-500">Loading task…</div>;
-    if (!selectedTask) return <div className="grid min-h-[60vh] place-items-center"><div className="text-center"><CheckCircle2 className="mx-auto mb-3 size-8 text-slate-300"/><h1 className="font-bold">Task not found</h1><Button variant="link" onClick={() => router.push("/tasks")}>Back to ReplyTask</Button></div></div>;
+    if (!selectedTask) return <div className="grid min-h-[60vh] place-items-center text-sm text-slate-500">Loading task…</div>;
     return <TaskDetail task={selectedTask}/>;
   }
 
@@ -344,6 +316,101 @@ function toTaskContact(item: BrandContact): Contact {
   };
 }
 
+function stubTaskFromId(id: string, role: string): UnifiedTask {
+  const isCaller = role === "Caller";
+  return {
+    id,
+    source: isCaller ? "call" : "inbox",
+    type: isCaller ? "Call" : "Reply",
+    customerId: "",
+    dueAt: "",
+    status: "Pending",
+    priority: "Normal",
+    summary: "Loading…",
+    remote: true,
+    callReviewStatus: null,
+  };
+}
+
+function shellFromTask(task: UnifiedTask): {
+  customer: Customer;
+  contact: Contact;
+  timeline: Interaction[];
+  ownerName?: string;
+  brand?: BrandDetail;
+  cps?: CurrentCpOption[];
+} {
+  const phone = task.contactPhone || undefined;
+  const contact: Contact = {
+    id: task.contactId || "unknown",
+    name: "KeyPerson",
+    role: "Other",
+    phone,
+    preferredChannel: "Phone",
+    emailValid: false,
+    phoneValid: !!phone,
+  };
+  const name = task.brandName || "Untitled brand";
+  const customer: Customer = {
+    id: task.customerId || task.id,
+    name,
+    initials: name.slice(0, 2).toUpperCase(),
+    cp: "CP1",
+    status: "Ready",
+    source: "Follow-up ClientDB",
+    contacts: [contact],
+    createdAt: "",
+    updatedAt: "",
+  };
+  return { customer, contact, timeline: [] };
+}
+
+const QUO_POLL_INTERVAL_MS = 10_000;
+const QUO_POLL_WINDOW_MS = 3 * 60_000;
+
+function taskPollUrl(taskId: string) {
+  return `/api/tasks/${encodeURIComponent(taskId)}?lite=1`;
+}
+
+function timelineQuoCallId(timeline: Interaction[]) {
+  return timeline.find((item) => item.quo?.callId)?.quo?.callId;
+}
+
+function quoArtifactsMissing(timeline: Interaction[], callId: string) {
+  return !timeline.some((item) => {
+    const quo = item.quo;
+    if (!quo || quo.callId !== callId) return false;
+    const hasRecording = !!(quo.recordings?.length || quo.call?.recordings?.length || quo.call?.media?.some((media) => !!media.url));
+    const hasSummary = !!(quo.summary?.summary?.length);
+    const hasTranscript = !!(quo.transcript?.dialogue?.length);
+    return hasRecording && hasSummary && hasTranscript;
+  });
+}
+
+function shouldPollCallTask(input: {
+  remote: boolean;
+  type: UnifiedTask["type"];
+  status: string;
+  callReviewStatus?: CallReviewStatus | null;
+  timeline: Interaction[];
+  taskId: string;
+  quoPollUntil: number;
+}) {
+  if (!input.remote || input.type !== "Call") return false;
+
+  const awaitingReview = input.callReviewStatus === "Awaiting Review";
+  const callId = timelineQuoCallId(input.timeline);
+  if (awaitingReview && callId && !callId.startsWith("ACsim") && quoArtifactsMissing(input.timeline, callId)) {
+    return true;
+  }
+
+  if (Date.now() >= input.quoPollUntil) return false;
+  if (input.timeline.some((item) => item.taskId === input.taskId && item.quo)) return false;
+  if (input.callReviewStatus) return false;
+  if (isClosedTaskStatus(input.status)) return false;
+  return true;
+}
+
 function TaskDetail({ task }: { task: UnifiedTask }) {
   const { state, can, resolveInbox, assignBrand, reassignCall } = useWorkspace();
   const { user } = useSession();
@@ -355,24 +422,30 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
   const [owners, setOwners] = useState<Array<{id:string;name:string}>>([]);
   const [liveTask, setLiveTask] = useState(task);
   const [quoRefreshingCallId, setQuoRefreshingCallId] = useState<string | null>(null);
+  const [quoPollUntil, setQuoPollUntil] = useState(0);
   const autoRefreshedQuoCallId = useRef<string | null>(null);
-  const [remote, setRemote] = useState<{ customer: Customer; contact: Contact; timeline: Interaction[]; ownerName?: string; brand?: BrandDetail; cps?: CurrentCpOption[] } | null>(null);
-  const [callScript, setCallScript] = useState<CallScript | null>(null);
-  const [callScriptLoading, setCallScriptLoading] = useState(false);
+  const [remote, setRemote] = useState<{ customer: Customer; contact: Contact; timeline: Interaction[]; ownerName?: string; brand?: BrandDetail; cps?: CurrentCpOption[] } | null>(
+    () => (task.remote ? shellFromTask(task) : null),
+  );
+  const [detailHydrated, setDetailHydrated] = useState(false);
   const applyTaskPayload = (payload: { task?: BrandTask; activities?: BrandActivity[]; brand?: BrandDetail | null; cps?: CurrentCpOption[] }) => {
     if (!payload.task) return;
     const item = payload.task;
     const brandContacts = (payload.brand?.contacts || []).map(toTaskContact);
     const matched = brandContacts.find(entry => entry.id === item.contactId) || brandContacts[0];
     const phone = matched?.phone || item.contactPhone || undefined;
-    const contact = matched
+    const preferredChannel =
+      item.channel === "Phone" || item.channel === "Email" || item.channel === "SMS" || item.channel === "WhatsApp" || item.channel === "LinkedIn"
+        ? (item.channel as Contact["preferredChannel"])
+        : ("Email" as const);
+    const contact: Contact = matched
       ? { ...matched, phone, phoneValid: matched.phoneValid || !!phone }
       : {
       id: item.contactId || "unknown",
       name: item.contactName || "KeyPerson",
-      role: "Other" as const,
+      role: "Other",
       phone,
-      preferredChannel: item.channel === "Phone" || item.channel === "Email" || item.channel === "SMS" || item.channel === "WhatsApp" || item.channel === "LinkedIn" ? item.channel : "Email",
+      preferredChannel,
       emailValid: false,
       phoneValid: !!phone,
     };
@@ -425,10 +498,21 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
     }));
     setRemote({ customer, contact, timeline, ownerName: item.ownerName || payload.brand?.ownerName || undefined, brand: payload.brand || undefined, cps: payload.cps });
     setLiveTask(fromNotionTask(item));
+    setDetailHydrated(true);
   };
-  useEffect(() => { setLiveTask(task); autoRefreshedQuoCallId.current = null; }, [task]);
   useEffect(() => {
-    if (!task.remote) { setRemote(null); return; }
+    setLiveTask(task);
+    autoRefreshedQuoCallId.current = null;
+    if (task.remote && !detailHydrated) setRemote(shellFromTask(task));
+  }, [task, detailHydrated]);
+  useEffect(() => {
+    if (!task.remote) {
+      setRemote(null);
+      setDetailHydrated(true);
+      return;
+    }
+    setRemote(shellFromTask(task));
+    setDetailHydrated(false);
     let cancelled = false;
     fetch(`/api/tasks/${task.id}`)
       .then(async response => {
@@ -437,9 +521,12 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
         return payload;
       })
       .then(payload => { if (!cancelled) applyTaskPayload(payload); })
-      .catch(() => { if (!cancelled) setRemote(null); });
+      .catch(() => {
+        if (cancelled) return;
+        setDetailHydrated(true);
+      });
     return () => { cancelled = true; };
-  }, [task.id, task.remote, task.customerId, task.brandName]);
+  }, [task.id, task.remote]);
   useEffect(() => {
     if (!task.remote || !can("assignOwner")) return;
     let cancelled = false;
@@ -454,46 +541,37 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
     return () => { cancelled = true; };
   }, [task.remote, task.id]);
   useEffect(() => {
-    if (state.currentRole !== "Caller" || task.type !== "Call" || !task.remote || !liveTask.templateId) {
-      setCallScript(null);
-      setCallScriptLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setCallScriptLoading(true);
-    fetch(`/api/tasks/${task.id}/call-script`)
-      .then(async (response) => {
-        const payload = await response.json() as { script?: CallScript | null; error?: string };
-        if (!response.ok) throw new Error(payload.error || "Unable to load call scripts");
-        return payload.script || null;
-      })
-      .then((script) => { if (!cancelled) setCallScript(script); })
-      .catch(() => { if (!cancelled) setCallScript(null); })
-      .finally(() => { if (!cancelled) setCallScriptLoading(false); });
-    return () => { cancelled = true; };
-  }, [state.currentRole, task.id, task.remote, task.type, liveTask.templateId]);
-  useEffect(() => {
-    const awaitingReview = liveTask.callReviewStatus === "Awaiting Review";
-    if (!task.remote || task.type !== "Call" || (isDone(liveTask) && !awaitingReview)) return;
+    if (!task.remote || task.type !== "Call") return;
     let cancelled = false;
     let inFlight = false;
     const poll = async () => {
       if (cancelled || inFlight) return;
+      const timeline = remote?.timeline || [];
+      if (!shouldPollCallTask({
+        remote: !!task.remote,
+        type: task.type,
+        status: liveTask.status,
+        callReviewStatus: liveTask.callReviewStatus,
+        timeline,
+        taskId: task.id,
+        quoPollUntil,
+      })) return;
       inFlight = true;
       try {
-        const response = await fetch(`/api/tasks/${task.id}`);
+        const response = await fetch(taskPollUrl(task.id));
         if (!response.ok) return;
         const payload = await response.json() as TaskPayload;
         if (!cancelled) applyTaskPayload(payload);
       } catch {
-        // The Quo webhook may still be processing; the next poll retries safely.
+        // Quo webhook may still be processing; next tick retries.
       } finally {
         inFlight = false;
       }
     };
-    const interval = window.setInterval(() => { void poll(); }, 10000);
+    void poll();
+    const interval = window.setInterval(() => { void poll(); }, QUO_POLL_INTERVAL_MS);
     return () => { cancelled = true; window.clearInterval(interval); };
-  }, [task.id, task.remote, task.type, liveTask.status, liveTask.callReviewStatus]);
+  }, [task.id, task.remote, task.type, liveTask.status, liveTask.callReviewStatus, quoPollUntil, remote?.timeline]);
   const localCustomer = state.customers.find(c => c.id === task.customerId);
   const customer = localCustomer || remote?.customer;
   const partnershipContext=customer?.partnershipContext;
@@ -509,10 +587,12 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
     });
     const payload = await response.json() as TaskPayload;
     if (!response.ok) throw new Error(payload.error || "Unable to save call review");
-    applyTaskPayload(await fetch(`/api/tasks/${task.id}`).then(item => item.json()) as TaskPayload);
+    applyTaskPayload(await fetch(taskPollUrl(task.id)).then(item => item.json()) as TaskPayload);
   };
   const baseTimeline = remote?.timeline || state.interactions.filter(item => item.customerId === task.customerId).map(item => ({ ...item, cp: item.cp || customer?.cp }));
   const timeline = [...baseTimeline].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const callScript = callScriptFromConversations(timeline, liveTask.id);
+  const callScriptLoading = task.remote && !detailHydrated;
   const refreshQuo = async (callId: string, options?: { silent?: boolean }) => {
     if (!task.remote || quoRefreshingCallId) return;
     setQuoRefreshingCallId(callId);
@@ -520,7 +600,7 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
       const response = await fetch(`/api/tasks/${task.id}/quo?callId=${encodeURIComponent(callId)}`);
       const payload = await response.json() as { data?: import("@/lib/quo/types").QuoCallData | null; errors?: string[]; error?: string };
       if (!response.ok) throw new Error(payload.error || "Unable to refresh Quo data");
-      const next = await fetch(`/api/tasks/${task.id}`);
+      const next = await fetch(taskPollUrl(task.id));
       applyTaskPayload(await next.json() as TaskPayload);
       if (options?.silent) return;
       if (payload.errors?.length) toast.warning(`Quo refresh completed with ${payload.errors.length} unavailable section${payload.errors.length === 1 ? "" : "s"}`);
@@ -532,26 +612,17 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
     }
   };
   useEffect(() => {
-    if (!task.remote || liveTask.callReviewStatus !== "Awaiting Review") return;
-    const callId = remote?.timeline.find((item) => item.quo?.callId)?.quo?.callId;
+    if (!task.remote || liveTask.callReviewStatus !== "Awaiting Review" || !remote?.timeline.length) return;
+    const callId = timelineQuoCallId(remote.timeline);
     if (!callId || callId.startsWith("ACsim")) return;
     if (autoRefreshedQuoCallId.current === callId) return;
-    const missingArtifacts = !remote.timeline.some((item) => {
-      const quo = item.quo;
-      if (!quo || quo.callId !== callId) return false;
-      const hasRecording = !!(quo.recordings?.length || quo.call?.recordings?.length || quo.call?.media?.some((media) => !!media.url));
-      const hasSummary = !!(quo.summary?.summary?.length);
-      const hasTranscript = !!(quo.transcript?.dialogue?.length);
-      return hasRecording && hasSummary && hasTranscript;
-    });
-    if (!missingArtifacts) return;
+    if (!quoArtifactsMissing(remote.timeline, callId)) return;
     autoRefreshedQuoCallId.current = callId;
     const timer = window.setTimeout(() => {
       void refreshQuo(callId, { silent: true });
     }, 2500);
     return () => window.clearTimeout(timer);
   }, [task.remote, liveTask.callReviewStatus, remote?.timeline]);
-  if (task.remote && !customer) return <main className="grid place-items-center bg-slate-50 text-sm text-slate-500">Loading task…</main>;
   if (!customer || !contact) return <main className="grid place-items-center bg-slate-50 text-sm text-slate-500">Brand context unavailable.</main>;
   const humanAssignees = state.users.filter(user => user.role === "AccountManager" || user.role === "Admin");
   const callers = state.users.filter(user => user.role === "Caller");
@@ -563,6 +634,7 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
   ];
   const onCallOpening = () => {
     if (!task.remote) return;
+    setQuoPollUntil(Date.now() + QUO_POLL_WINDOW_MS);
     void fetch(`/api/tasks/${task.id}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -628,11 +700,11 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
               contacts={customer.contacts}
               phoneTasks={callerPhoneTasks}
               timeline={timeline}
-              activeScript={callScript}
-              activeScriptLoading={callScriptLoading}
+              scriptsLoading={callScriptLoading}
               quoRefreshingCallId={quoRefreshingCallId}
               onRefreshQuo={task.remote ? refreshQuo : undefined}
               onSelectTask={(taskId) => router.push(`/tasks/${encodeURIComponent(taskId)}`)}
+              onCallOpening={onCallOpening}
               showDial
             />
           </div>
@@ -699,7 +771,7 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
   </div>;
 }
 
-function CallBrief({ task, contact, completed, onCallOpening, script = null, scriptLoading = false, review }: { task: UnifiedTask; contact: Contact; completed: boolean; onCallOpening: () => void; script?: CallScript | null; scriptLoading?: boolean; review?: CallReviewView }) {
+function CallBrief({ task, contact, completed, onCallOpening, script = null, scriptLoading = false, review }: { task: UnifiedTask; contact: Contact; completed: boolean; onCallOpening: () => void; script?: ReturnType<typeof callScriptFromConversations>; scriptLoading?: boolean; review?: CallReviewView }) {
   const phone = (devCallPhoneOnClient() || contact.phone || task.contactPhone || "").trim();
   const cancelled = isCancelledTaskStatus(task.status);
   const failed = task.status === "Failed";
@@ -722,7 +794,7 @@ function CallBrief({ task, contact, completed, onCallOpening, script = null, scr
       <div className="flex shrink-0 flex-wrap gap-2">{callAction}</div>
     </div>
     {(scriptLoading || script || review) && <div className="mt-4 text-sm text-blue-950">
-      {scriptLoading ? <p className="text-sm text-blue-800">Loading call script…</p> : script ? <div><div className="flex flex-wrap items-center gap-2 font-semibold"><span>{script.name}</span>{script.status && <Badge variant="outline" className="border-blue-200 bg-white/60 text-[10px] text-blue-800">{script.status}</Badge>}</div><p className="mt-1 whitespace-pre-wrap leading-6 text-blue-950/85">{script.content || "No content template configured."}</p></div> : null}
+      {scriptLoading ? <p className="text-sm text-blue-800">Loading call script…</p> : script ? <p className="whitespace-pre-wrap leading-6 text-blue-950/85">{script.content || "No call content yet."}</p> : null}
       {review?.recallRequested ? <p className="mt-3 text-xs font-semibold text-rose-700">Recall requested · Reassigned to Beril</p>
         : review?.status === "Qualified" ? <p className="mt-3 text-xs font-semibold text-emerald-700">Call review completed · qualified</p>
         : review?.status === "Awaiting Review" ? <p className="mt-3 text-xs font-semibold text-amber-800">Connected · awaiting Account Manager review</p>

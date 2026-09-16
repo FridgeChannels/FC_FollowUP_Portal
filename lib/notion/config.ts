@@ -115,6 +115,14 @@ export function skipUnavailableChannels() {
   );
 }
 
+/** Local/test: schedule from now every 5 minutes same day; ignore work window & capacity. */
+export function isScheduleTestMode() {
+  const raw =
+    env.SCHEDULE_TEST_MODE ||
+    (typeof process !== "undefined" ? process.env.SCHEDULE_TEST_MODE : undefined);
+  return raw != null && /^(1|true|yes|on)$/i.test(String(raw).trim());
+}
+
 export function getReplyIngestToken() {
   return (
     env.REPLY_INGEST_TOKEN ||

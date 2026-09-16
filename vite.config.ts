@@ -25,6 +25,8 @@ export default defineConfig(async ({ mode }) => {
   const adminEmails = process.env.ADMIN_EMAILS || loadedEnv.ADMIN_EMAILS;
   const skipUnavailableChannels =
     process.env.SKIP_UNAVAILABLE_CHANNELS || loadedEnv.SKIP_UNAVAILABLE_CHANNELS;
+  const scheduleTestMode =
+    process.env.SCHEDULE_TEST_MODE || loadedEnv.SCHEDULE_TEST_MODE;
   const replyIngestToken =
     process.env.REPLY_INGEST_TOKEN || loadedEnv.REPLY_INGEST_TOKEN || "local-reply-ingest";
   const quoApiKey = process.env.QUO_API_KEY || loadedEnv.QUO_API_KEY;
@@ -65,6 +67,7 @@ export default defineConfig(async ({ mode }) => {
       ...(skipUnavailableChannels
         ? { SKIP_UNAVAILABLE_CHANNELS: skipUnavailableChannels }
         : {}),
+      ...(scheduleTestMode ? { SCHEDULE_TEST_MODE: scheduleTestMode } : {}),
       REPLY_INGEST_TOKEN: replyIngestToken,
       ...(quoApiKey ? { QUO_API_KEY: quoApiKey } : {}),
       ...(quoFromNumber ? { QUO_FROM_NUMBER: quoFromNumber } : {}),

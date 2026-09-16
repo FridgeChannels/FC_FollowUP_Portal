@@ -2,6 +2,12 @@ import { FOLLOW_UP_STATUSES, HANDLING_MODES, type BrandActivity, type BrandTask 
 import { conversationCpRelation, resolveCheckpoint } from "./cps";
 import { createPage, propertyText, retrievePage, richText, updatePage } from "./client";
 import { getFollowupConversationDbId, getFollowupTaskDbId } from "./config";
+import {
+  easternDateOnly,
+  easternDateTimeIso,
+  easternMinuteOfDayCeil,
+} from "../scheduling-engine/calendar";
+import { notionScheduledAtProperty } from "./scheduled-at";
 import { pickContactChannelThreadId } from "./conversation-thread";
 import { listFollowupConversations } from "./conversations";
 import { asExtendedParameters } from "./extended-parameters";
@@ -403,7 +409,7 @@ export async function createFollowupTask(input: {
     "Follow-up Contact": { relation: [{ id: input.contactId }] },
     Owner: { relation: [{ id: input.ownerId }] },
     "Creation Method": { select: { name: input.creationMethod } },
-    "Scheduled At": { date: { start: input.scheduledAt } },
+    "Scheduled At": notionScheduledAtProperty(input.scheduledAt),
     Priority: { select: { name: input.priority } },
     Channel: { select: { name: input.channel } },
     "Task Status": { status: { name: "Pending" } },
@@ -421,13 +427,9 @@ export async function createFollowupTask(input: {
   return createPage(getFollowupTaskDbId(), properties);
 }
 
-function todayDateOnly() {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Shanghai",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date());
+function scheduledAtNow() {
+  const now = new Date();
+  return easternDateTimeIso(easternDateOnly(now), easternMinuteOfDayCeil(now));
 }
 
 function pickThreadCp(
@@ -494,7 +496,7 @@ export async function createHumanOutbound(input: {
     contactName: input.contactName,
     ownerId,
     channel: input.channel,
-    scheduledAt: todayDateOnly(),
+    scheduledAt: scheduledAtNow(),
     priority: "P0",
     creationMethod: "Manual",
     notes: isReply
@@ -613,7 +615,7 @@ export async function resolveReplyTask(input: {
     contactName: input.contactName,
     ownerId,
     channel: input.channel,
-    scheduledAt: todayDateOnly(),
+    scheduledAt: scheduledAtNow(),
     priority: "P0",
     creationMethod: "Manual",
     notes: "客户回复待处理，尚未人工回复。",

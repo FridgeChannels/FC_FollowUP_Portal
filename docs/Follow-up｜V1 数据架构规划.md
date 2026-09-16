@@ -258,7 +258,7 @@ Follow-up TaskDB 只负责按日排班与任务分配，记录由谁在哪个工
 | Owner | Person | 是 | 实际执行负责人 |
 | Creation Method | Select | 是 | Automated / Manual，记录任务创建时的来源 |
 | Template | Relation | 否 | 可选关联 Follow-up TemplateDB；纯人工任务可以留空 |
-| Scheduled At | Date | 是 | 计划执行日期，仅记录到天，不设置小时和分钟；任务按日期排序，不限定按周执行 |
+| Scheduled At | Date | 是 | 计划发送时刻（精确到分钟的 datetime，时区 America/New_York）；历史仅到天的值按当日 09:00 ET 参与间隔计算 |
 | Priority | Select | 否 | P0 / P1 / P2；相同时间窗口内用于决定处理顺序 |
 | Channel | Select | 是 | Email / LinkedIn / SMS / WhatsApp / Phone |
 | Task Status | Status | 是 | 任务当前状态；选项见 6.3 |
@@ -557,6 +557,7 @@ Follow-up TemplateDB
 | Channel Capacity | Title | 是 | 配置记录标题，直接使用渠道名称 |
 | Channel | Select | 是 | Email / LinkedIn / SMS / WhatsApp / Phone |
 | Daily Max | Number | 是 | 该渠道每个工作日允许排入的最大任务数量；设置为 0 表示暂停该渠道 |
+| Time interval | Number | 否 | 同渠道两次发送的最小间隔（分钟）；缺失或非法时排班引擎回退为 5 |
 | Notes | Text | 否 | 容量设置、调整原因和补充说明；备注内容必须使用中文 |
 | Created At | Created time | 自动 | 系统自动记录创建时间 |
 | Last Edited At | Last edited time | 自动 | 系统自动记录最后修改时间 |
@@ -605,7 +606,8 @@ Phone
 
 例如，计划于 2026-09-16 发送 WhatsApp，但实际于 2026-09-17 10:42 才发送：
 
-- Follow-up Task 的 Scheduled At 只写入计划执行日期：2026-09-16，不设置小时和分钟。
+- Follow-up Task 的 Scheduled At 写入计划发送时刻（datetime，America/New_York），例如 2026-09-16 14:10 ET。
+- Notion TaskDB 的 `Scheduled At` 属性需开启 **Include time**，否则界面只显示日期。
 - Conversation Record 在 Message Status 为 Pending 时，Interaction At 留空。
 - 实际发送后，Message Status 更新为 Sent，Interaction At 写入实际发送时间：2026-09-17 10:42。
 - Follow-up Task 的 Task Status 更新为 Completed，Ended At 写入任务实际结束时间：2026-09-17 10:42。

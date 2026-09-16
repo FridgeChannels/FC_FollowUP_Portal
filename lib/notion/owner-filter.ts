@@ -97,7 +97,6 @@ export function taskQueryForViewer(
   if (viewer.role === "Caller") {
     return {
       channel: "Phone",
-      ownerPageId: viewer.ownerId || undefined,
       statusScope,
     };
   }

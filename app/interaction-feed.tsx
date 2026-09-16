@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { callReviewsFromTasks, type CallReviewStatus } from "@/lib/call-review-metadata";
 import type { BrandTask } from "@/lib/brand-list";
 import { BombInstance, Channel, Contact, CPCode, CP_CODES, Interaction, ScheduledAction } from "@/lib/outreach-domain";
-import { BombExecutionPlan, formatUtcDate, formatUtcTime } from "./bomb-plan";
+import { BombExecutionPlan, formatEasternDateTime, formatUtcDate, formatUtcTime } from "./bomb-plan";
 import { BrandReplyBox, inboundNeedsComposer } from "./brand-reply-box";
 import { ChannelIcon } from "./channel-icon";
 import { PhoneTaskBoard } from "./phone-task-board";
@@ -478,7 +478,7 @@ function ThreadMessages({
           </div>
           <time dateTime={item.createdAt} className="font-mono text-[11px] text-slate-500">{formatUtcTime(item.createdAt)}</time>
         </div>
-        {timing && <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-slate-500"><span className={timing.label === "Completed" ? "font-semibold text-emerald-700" : timing.label === "Failed" ? "font-semibold text-rose-700" : timing.label === "Cancelled" ? "font-semibold text-slate-600" : "font-semibold text-amber-700"}>{timing.label}</span><time dateTime={timing.at} className="font-mono text-[11px]">{timing.label === "Cancelled" || timing.label === "Pending" || timing.label === "In Progress" ? formatUtcDate(timing.at) : formatUtcTime(timing.at)}</time></div>}
+        {timing && <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-slate-500"><span className={timing.label === "Completed" ? "font-semibold text-emerald-700" : timing.label === "Failed" ? "font-semibold text-rose-700" : timing.label === "Cancelled" ? "font-semibold text-slate-600" : "font-semibold text-amber-700"}>{timing.label}</span><time dateTime={timing.at} className="font-mono text-[11px]">{timing.label === "Cancelled" ? formatUtcDate(timing.at) : timing.label === "Pending" || timing.label === "In Progress" ? formatEasternDateTime(timing.at) : formatUtcTime(timing.at)}</time></div>}
         {!item.quo && <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{item.content}</p>}
         {item.quo ? <div className="mt-3">
           <QuoCallPanel

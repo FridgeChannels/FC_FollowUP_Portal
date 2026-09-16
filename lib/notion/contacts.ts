@@ -117,6 +117,12 @@ export async function listFollowupContacts(
   });
 }
 
+/** Single Follow-up Contact — used by Caller lite task detail. */
+export async function retrieveFollowupContact(contactId: string): Promise<BrandContact> {
+  const page = await retrievePage(contactId);
+  return mapFollowupContact(page);
+}
+
 /** Contact page ids only — skips Key Person retrieves used on the detail shell. */
 export async function listFollowupContactIds(
   clientPageId: string,

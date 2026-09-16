@@ -59,10 +59,10 @@ describe("parseTaskStatusScope", () => {
 });
 
 describe("taskQueryForViewer", () => {
-  it("queries assigned Phone + open tasks for Caller by default", () => {
+  it("queries Phone + open tasks for Caller by default (all owners)", () => {
     assert.deepEqual(
       taskQueryForViewer({ isAdmin: false, role: "Caller", ownerId: "caller-1" }),
-      { channel: "Phone", ownerPageId: "caller-1", statusScope: "open" },
+      { channel: "Phone", statusScope: "open" },
     );
   });
 
@@ -82,10 +82,9 @@ describe("taskQueryForViewer", () => {
 });
 
 describe("taskListFilter", () => {
-  it("filters Caller lists by Owner, Channel Phone, and open status", () => {
-    assert.deepEqual(taskListFilter({ channel: "Phone", ownerPageId: "caller-1" }), {
+  it("filters Caller lists by Channel Phone and open status", () => {
+    assert.deepEqual(taskListFilter({ channel: "Phone" }), {
       and: [
-        { property: "Owner", relation: { contains: "caller-1" } },
         { property: "Channel", select: { equals: "Phone" } },
         taskStatusFilter("open"),
       ],
@@ -93,11 +92,9 @@ describe("taskListFilter", () => {
   });
 
   it("omits status when scope is all", () => {
-    assert.deepEqual(taskListFilter({ channel: "Phone", ownerPageId: "caller-1", statusScope: "all" }), {
-      and: [
-        { property: "Owner", relation: { contains: "caller-1" } },
-        { property: "Channel", select: { equals: "Phone" } },
-      ],
+    assert.deepEqual(taskListFilter({ channel: "Phone", statusScope: "all" }), {
+      property: "Channel",
+      select: { equals: "Phone" },
     });
   });
 

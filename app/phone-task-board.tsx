@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { CheckCircle2, ChevronDown, ChevronRight, Phone, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { callReviewsFromTasks, type CallReviewStatus } from "@/lib/call-review-metadata";
@@ -30,6 +30,28 @@ export type PhoneBoardScript = {
   content: string;
   status: string | null;
 };
+
+/** Call script copy comes from Follow-up ConversationDB Content (not TemplateDB). */
+export function callScriptFromConversations(
+  timeline: Interaction[],
+  taskId: string,
+): PhoneBoardScript | null {
+  const outbound = timeline
+    .filter((item) =>
+      item.taskId === taskId
+      && item.channel === "Phone"
+      && !item.quo
+      && item.direction !== "Inbound"
+      && !!item.content?.trim())
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  if (!outbound?.content) return null;
+  return {
+    id: outbound.id,
+    name: outbound.title || "Call script",
+    content: outbound.content,
+    status: outbound.taskStatus || null,
+  };
+}
 
 function isDone(status: string) {
   return isClosedTaskStatus(status);
@@ -74,8 +96,7 @@ export function PhoneTaskBoard({
   contacts,
   timeline,
   activeTaskId,
-  activeScript = null,
-  activeScriptLoading = false,
+  scriptsLoading = false,
   headerContactName,
   showChannelTab = true,
   canReviewCalls = false,
@@ -83,14 +104,14 @@ export function PhoneTaskBoard({
   onRefreshQuo,
   quoRefreshingCallId,
   onSelectTask,
+  onCallOpening,
   showDial = true,
 }: {
   phoneTasks: PhoneBoardTask[];
   contacts: Contact[];
   timeline: Interaction[];
   activeTaskId?: string | null;
-  activeScript?: PhoneBoardScript | null;
-  activeScriptLoading?: boolean;
+  scriptsLoading?: boolean;
   headerContactName?: string;
   showChannelTab?: boolean;
   canReviewCalls?: boolean;
@@ -98,10 +119,9 @@ export function PhoneTaskBoard({
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
   onSelectTask?: (taskId: string) => void;
+  onCallOpening?: () => void;
   showDial?: boolean;
 }) {
-  const [scriptsByTask, setScriptsByTask] = useState<Record<string, PhoneBoardScript | null>>({});
-  const [scriptsLoading, setScriptsLoading] = useState(false);
   const [reviewingTaskId, setReviewingTaskId] = useState<string | null>(null);
   const reviews = callReviewsFromTasks(phoneTasks);
 
@@ -116,41 +136,6 @@ export function PhoneTaskBoard({
     () => new Set(tasks.filter((item) => !isDone(item.status)).map((item) => item.id)),
     [tasks],
   );
-
-  useEffect(() => {
-    const remoteIds = tasks
-      .filter((item) => item.remote !== false && item.templateId && item.id !== activeTaskId)
-      .map((item) => item.id);
-    if (!remoteIds.length) {
-      setScriptsByTask({});
-      setScriptsLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setScriptsLoading(true);
-    Promise.all(remoteIds.map(async (taskId) => {
-      try {
-        const response = await fetch(`/api/tasks/${taskId}/call-script`);
-        const payload = await response.json() as { script?: PhoneBoardScript | null };
-        return [taskId, response.ok ? (payload.script || null) : null] as const;
-      } catch {
-        return [taskId, null] as const;
-      }
-    })).then((entries) => {
-      if (!cancelled) setScriptsByTask(Object.fromEntries(entries));
-    }).finally(() => {
-      if (!cancelled) setScriptsLoading(false);
-    });
-    return () => { cancelled = true; };
-  }, [tasks, activeTaskId]);
-
-  const scriptFallback = (taskId: string): PhoneBoardScript | null => {
-    const outbound = timeline
-      .filter((item) => item.taskId === taskId && item.channel === "Phone" && !item.quo && item.content?.trim())
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
-    if (!outbound?.content) return null;
-    return { id: `fallback:${taskId}`, name: "Call script", content: outbound.content, status: outbound.taskStatus || null };
-  };
 
   const handleReview = async (taskId: string, status: CallReviewStatus) => {
     if (!onPersistCallReview) {
@@ -172,10 +157,8 @@ export function PhoneTaskBoard({
     {tasks.length ? tasks.map((item) => {
       const taskContact = contacts.find((entry) => entry.id === item.contactId) || contacts[0];
       const active = !!activeTaskId && item.id === activeTaskId;
-      const script = active ? activeScript : (scriptsByTask[item.id] || scriptFallback(item.id));
-      const scriptLoading = active
-        ? activeScriptLoading
-        : (scriptsLoading && !!item.templateId && !scriptsByTask[item.id] && !scriptFallback(item.id));
+      const script = callScriptFromConversations(timeline, item.id);
+      const scriptLoading = scriptsLoading && !script;
       const review = reviews[item.id];
       const quoResults = timeline.filter((entry) => {
         if (!entry.quo) return false;
@@ -200,12 +183,16 @@ export function PhoneTaskBoard({
         onReview={(status) => void handleReview(item.id, status)}
         onCallOpening={() => {
           if (item.remote === false) return;
-          void fetch(`/api/tasks/${item.id}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "quo-attempt" }),
-            keepalive: true,
-          }).catch(() => undefined);
+          if (onCallOpening) {
+            onCallOpening();
+          } else {
+            void fetch(`/api/tasks/${item.id}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ action: "quo-attempt" }),
+              keepalive: true,
+            }).catch(() => undefined);
+          }
           if (!active && onSelectTask) onSelectTask(item.id);
         }}
       />;
@@ -295,17 +282,13 @@ function PhoneTaskBlock({
         onClick={() => setScriptOpen((open) => !open)}
         aria-expanded={scriptOpen}
       >
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className={`text-xs font-semibold tracking-wide ${active ? "text-blue-700" : "text-slate-500"}`}>Call script</span>
-          {script?.name ? <span className="truncate text-sm font-semibold text-slate-900">{script.name}</span> : null}
-          {script?.status ? <Badge variant="outline" className="text-[10px]">{script.status}</Badge> : null}
-        </div>
+        <span className={`text-xs font-semibold tracking-wide ${active ? "text-blue-700" : "text-slate-500"}`}>Call script</span>
         {scriptOpen ? <ChevronDown className="size-4 shrink-0 text-slate-500"/> : <ChevronRight className="size-4 shrink-0 text-slate-500"/>}
       </button>
       {scriptOpen && <div className="border-t border-slate-100 px-4 pb-4 pt-3 text-sm text-slate-800">
         {scriptLoading ? <p className="text-slate-500">Loading call script…</p>
-          : script ? <p className="whitespace-pre-wrap leading-6 text-slate-700">{script.content || "No content template configured."}</p>
-          : <p className="text-slate-500">No Call Script is linked to this task.</p>}
+          : script ? <p className="whitespace-pre-wrap leading-6 text-slate-700">{script.content || "No call content yet."}</p>
+          : <p className="text-slate-500">No call content yet.</p>}
         {reviewStatus === "Unqualified" ? <p className="mt-3 text-xs font-semibold text-rose-700">Recall requested · Reassigned to Beril</p>
           : reviewStatus === "Qualified" ? <p className="mt-3 text-xs font-semibold text-emerald-700">Call review completed · qualified</p>
           : reviewStatus === "Awaiting Review" ? <p className="mt-3 text-xs font-semibold text-amber-800">Connected · awaiting Account Manager review</p>

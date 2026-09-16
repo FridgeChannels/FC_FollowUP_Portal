@@ -1,5 +1,21 @@
-export { addCalendarDays, firstWorkingDayOnOrAfter, isWorkingDay } from "./calendar.ts";
-export { availableOn, createCapacityBoard, dailyMaxFor, occupiesCapacity } from "./capacity.ts";
+export {
+  addCalendarDays,
+  easternDateOnly,
+  easternDateTimeIso,
+  firstUsBusinessDayOnOrAfter,
+  firstWorkingDayOnOrAfter,
+  isUsBusinessDay,
+  isUsFederalHoliday,
+  isWorkingDay,
+  parseScheduledAt,
+} from "./calendar.ts";
+export {
+  availableOn,
+  createCapacityBoard,
+  dailyMaxFor,
+  occupiesCapacity,
+  timeIntervalFor,
+} from "./capacity.ts";
 export { commitSchedule, previewSchedule } from "./plan.ts";
 export { resolveTaskPriority, sortCandidates } from "./priority.ts";
 export type {

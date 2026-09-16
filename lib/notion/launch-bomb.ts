@@ -1,4 +1,5 @@
 import type { BrandContact } from "../brand-list";
+import { easternDateOnly } from "../scheduling-engine/calendar";
 import { commitSchedule } from "../scheduling-engine";
 import type {
   Channel,
@@ -14,7 +15,8 @@ import {
   resolveOutboundFields,
 } from "../template-variables";
 import { retrieveFollowupBomb } from "./bombs";
-import { listChannelDailyMax } from "./capacity";
+import { listChannelCapacityConfig } from "./capacity";
+import { isScheduleTestMode } from "./config";
 import {
   firstRelationId,
   propertyText,
@@ -46,15 +48,6 @@ export type LaunchPlanStep = {
   content: string;
   status: "Pending";
 };
-
-function todayDateOnly() {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Shanghai",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date());
-}
 
 function asChannel(value?: string | null): Channel | null {
   return value && CHANNELS.includes(value as Channel) ? (value as Channel) : null;
@@ -152,11 +145,11 @@ export async function launchFollowupBomb(input: {
   const relatedContactIds = relationIds(page.properties?.["Follow-up Contacts"]);
   const priority = propertyText(page.properties?.Priority) || null;
 
-  const [brand, contacts, bomb, dailyMax, existingTasks, company, relatedHasActive] = await Promise.all([
+  const [brand, contacts, bomb, capacity, existingTasks, company, relatedHasActive] = await Promise.all([
     input.brand ? Promise.resolve(input.brand) : mapFollowupClientPage(page),
     listFollowupContacts(page.id, relatedContactIds),
     retrieveFollowupBomb(input.bombId),
-    listChannelDailyMax(),
+    listChannelCapacityConfig(),
     listExistingTasksForSchedule(),
     resolveLaunchCompany(page),
     relatedContactIds.length
@@ -190,8 +183,9 @@ export async function launchFollowupBomb(input: {
 
   const result = commitSchedule({
     request: {
-      preferredStartDate: todayDateOnly(),
+      preferredStartDate: easternDateOnly(),
       creationMethod: "Automated",
+      testMode: isScheduleTestMode(),
       clients: [{
         clientId: brand.id,
         ownerId: brand.ownerId,
@@ -205,7 +199,11 @@ export async function launchFollowupBomb(input: {
         }],
       }],
     },
-    snapshot: { dailyMax, existingTasks },
+    snapshot: {
+      dailyMax: capacity.dailyMax,
+      timeInterval: capacity.timeInterval,
+      existingTasks,
+    },
   });
 
   if (result.needsReview.length && !result.writes.length) {
