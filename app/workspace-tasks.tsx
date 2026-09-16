@@ -132,17 +132,29 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
   const [query, setQuery] = useState("");
   const [remoteTasks, setRemoteTasks] = useState<UnifiedTask[] | null>(null);
   const [remoteLoading, setRemoteLoading] = useState(true);
+  const [detailTask, setDetailTask] = useState<UnifiedTask | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   useEffect(() => {
     setType(state.currentRole === "Caller" ? "Call" : "All");
     setAssignee("all");
   }, [state.currentRole]);
 
-  const taskOwnerQuery = manager && assignee === "unassigned" ? "?owner=unassigned" : "";
+  const taskListQuery = useMemo(() => {
+    const params = new URLSearchParams();
+    if (manager && assignee === "unassigned") params.set("owner", "unassigned");
+    params.set(
+      "status",
+      status === "Completed" ? "completed" : status === "All" ? "all" : "open",
+    );
+    const value = params.toString();
+    return value ? `?${value}` : "";
+  }, [manager, assignee, status]);
+
   useEffect(() => {
     let cancelled = false;
     setRemoteLoading(true);
-    fetch(`/api/tasks${taskOwnerQuery}`)
+    fetch(`/api/tasks${taskListQuery}`)
       .then(async response => {
         const payload = await response.json() as { tasks?: BrandTask[]; error?: string };
         if (!response.ok) throw new Error(payload.error || "Failed to load tasks");
@@ -152,7 +164,7 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
       .catch(() => { if (!cancelled) setRemoteTasks([]); })
       .finally(() => { if (!cancelled) setRemoteLoading(false); });
     return () => { cancelled = true; };
-  }, [taskOwnerQuery]);
+  }, [taskListQuery]);
 
   const allTasks = useMemo<UnifiedTask[]>(() => (remoteTasks ?? []).map(task => taskWithCallReview(task, reviewFromNotion(task))), [remoteTasks]);
 
@@ -176,10 +188,43 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
     });
   }, [allTasks, state, query, type, assignee, status]);
 
-  const selectedTask = selectedId ? allTasks.find(task => task.id === selectedId) : undefined;
+  const selectedFromList = selectedId ? allTasks.find(task => task.id === selectedId) : undefined;
+  const selectedTask = selectedFromList || detailTask || undefined;
+
+  useEffect(() => {
+    if (!selectedId) {
+      setDetailTask(null);
+      setDetailLoading(false);
+      return;
+    }
+    if (selectedFromList) {
+      setDetailTask(null);
+      setDetailLoading(false);
+      return;
+    }
+    if (remoteLoading) return;
+    let cancelled = false;
+    setDetailLoading(true);
+    fetch(`/api/tasks/${selectedId}`)
+      .then(async response => {
+        const payload = await response.json() as { task?: BrandTask; error?: string };
+        if (!response.ok || !payload.task) throw new Error(payload.error || "Task not found");
+        return fromNotionTask(payload.task);
+      })
+      .then(task => {
+        if (!cancelled) setDetailTask(taskWithCallReview(task, reviewFromNotion(task)));
+      })
+      .catch(() => {
+        if (!cancelled) setDetailTask(null);
+      })
+      .finally(() => {
+        if (!cancelled) setDetailLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [selectedId, selectedFromList, remoteLoading]);
 
   if (selectedId) {
-    if (remoteLoading && !selectedTask) return <div className="grid min-h-[60vh] place-items-center text-sm text-slate-500">Loading task…</div>;
+    if ((remoteLoading || detailLoading) && !selectedTask) return <div className="grid min-h-[60vh] place-items-center text-sm text-slate-500">Loading task…</div>;
     if (!selectedTask) return <div className="grid min-h-[60vh] place-items-center"><div className="text-center"><CheckCircle2 className="mx-auto mb-3 size-8 text-slate-300"/><h1 className="font-bold">Task not found</h1><Button variant="link" onClick={() => router.push("/tasks")}>Back to ReplyTask</Button></div></div>;
     return <TaskDetail task={selectedTask}/>;
   }
