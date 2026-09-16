@@ -12,7 +12,7 @@ export async function POST(request: Request, { params }: Params) {
     if (!viewer.email) return Response.json({ error: "Sign in required" }, { status: 401 });
 
     const { id, bombId } = await params;
-    const body = (await request.json()) as { contactId?: string };
+    const body = (await request.json()) as { contactId?: string; omniReachRunId?: string };
     if (!body.contactId) return Response.json({ error: "A KeyPerson is required" }, { status: 400 });
 
     const page = await retrievePage(id);
@@ -20,12 +20,20 @@ export async function POST(request: Request, { params }: Params) {
     if (!canWriteBrand(viewer, brand)) return Response.json({ error: "You do not have access to this brand" }, { status: 403 });
 
     const detail = await mapFollowupClientDetail(page);
+    const runId = body.omniReachRunId?.trim() || null;
     const matchingTasks = detail.tasks.filter((task) =>
-      task.contactId === body.contactId && task.sourceBombId === bombId,
+      task.contactId === body.contactId &&
+      task.sourceBombId === bombId &&
+      (!runId || task.omniReachRunId === runId),
     );
     if (!matchingTasks.length) return Response.json({ error: "OmniReach execution plan not found" }, { status: 404 });
 
-    const cancelled = await cancelOpenBombTasks({ brandId: id, bombId, contactId: body.contactId });
+    const cancelled = await cancelOpenBombTasks({
+      brandId: id,
+      bombId,
+      contactId: body.contactId,
+      omniReachRunId: runId,
+    });
     return Response.json({ cancelledTaskIds: cancelled.map((task) => task.id) });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";

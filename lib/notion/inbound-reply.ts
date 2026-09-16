@@ -28,18 +28,13 @@ import { resolveCurrentContactForBrand, resolveReplyTargetByBrandName, resolveRe
 import { retrieveFollowupTask } from "./tasks";
 import { interactionCpCode } from "../outreach-domain";
 import { ExtendedParametersError, asExtendedParameters } from "./extended-parameters";
+import { InboundReplyError } from "./inbound-errors";
+import { allocateReplyDueAt, replyDueAtProperty, REPLY_DUE_PROPERTY } from "./reply-due";
+
+export { InboundReplyError };
 
 const CHANNELS = new Set(["Email", "LinkedIn", "SMS", "WhatsApp", "Phone"]);
 const CALL_RESULTS = new Set(["Connected", "No Answer", "Voicemail", "Declined", "Invalid Number"]);
-
-export class InboundReplyError extends Error {
-  status: number;
-
-  constructor(message: string, status: number) {
-    super(message);
-    this.status = status;
-  }
-}
 
 export type InboundReplyInput = {
   channel?: string;
@@ -464,6 +459,13 @@ export async function ingestInboundReply(
   if (channel !== "Phone") {
     properties["Message Status"] = { select: { name: "Received" } };
     properties["Reply Status"] = { select: { name: "Needs Reply" } };
+    try {
+      properties[REPLY_DUE_PROPERTY] = replyDueAtProperty(
+        await allocateReplyDueAt({ occurredAt, channel }),
+      );
+    } catch {
+      // Capacity lookup failed — still ingest; brands list falls back to Interaction At.
+    }
   }
   if (callResult) {
     properties["Call Result"] = { rich_text: richText(callResult) };

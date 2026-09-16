@@ -55,6 +55,7 @@ function mapConversation(page: NotionPage): BrandActivity {
     createdAt:
       propertyDate(properties["Interaction At"]) || page.created_time || null,
     recordedAt: page.created_time || propertyDate(properties["Interaction At"]),
+    replyDueAt: propertyDate(properties["Reply Due At"]) || null,
     quo: parseQuoCallData(extendedParameters),
   };
 }

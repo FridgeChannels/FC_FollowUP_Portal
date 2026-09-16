@@ -10,6 +10,13 @@ export function isOpenTaskStatus(status?: string | null) {
   return status === "Pending" || status === "In Progress";
 }
 
+/** Brand already has an OmniReach run with open Follow-up Tasks. */
+export function brandHasActiveOmniReach(
+  tasks: Array<{ sourceBombId?: string | null; status?: string | null }>,
+) {
+  return tasks.some((task) => !!task.sourceBombId && isOpenTaskStatus(task.status));
+}
+
 function activityTime(item: BrandActivity) {
   return item.recordedAt || item.createdAt || "";
 }

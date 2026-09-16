@@ -18,6 +18,8 @@ export async function POST(request: Request, { params }: Params) {
       contactId?: string;
       channel?: string;
       content?: string;
+      object?: string;
+      subject?: string;
       taskId?: string;
       threadId?: string;
     };
@@ -31,13 +33,19 @@ export async function POST(request: Request, { params }: Params) {
     if (!contact) {
       return Response.json({ error: "Contact not found on this brand" }, { status: 400 });
     }
+    const channel = body.channel || "";
+    const object = (body.object ?? body.subject)?.trim() || "";
+    if (channel === "Email" && !object) {
+      return Response.json({ error: "object (email subject) is required for Email" }, { status: 400 });
+    }
     await createHumanOutbound({
       brandName: brand.name,
       brandOwnerId: brand.ownerId,
       contactId: contact.id,
       contactName: contact.name,
-      channel: body.channel || "",
+      channel,
       content: body.content || "",
+      subject: channel === "Email" ? object : undefined,
       sender: viewer.email,
       existingTaskId: body.taskId,
       threadId: body.threadId,

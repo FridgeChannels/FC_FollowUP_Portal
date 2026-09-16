@@ -60,10 +60,22 @@ async function resolveRelatedTitle(
   if (!pageId) return "";
   const cached = cache.get(pageId);
   if (cached !== undefined) return cached;
-  const page = await retrievePage(pageId);
-  const title = titleFromProperties(page.properties);
-  cache.set(pageId, title);
-  return title;
+  try {
+    const page = await retrievePage(pageId);
+    const title = titleFromProperties(page.properties);
+    cache.set(pageId, title);
+    return title;
+  } catch {
+    cache.set(pageId, "");
+    return "";
+  }
+}
+
+async function resolveFollowupExhibition(page: NotionPage) {
+  const exhibitionId = firstRelationId(page.properties?.["Follow-up Exhibition"]);
+  if (!exhibitionId) return null;
+  const title = await resolveRelatedTitle(exhibitionId, new Map());
+  return title || null;
 }
 
 async function resolveOwner(
@@ -141,10 +153,11 @@ async function resolveBombMeta(pageId: string) {
 
 export async function mapFollowupClientDetail(page: NotionPage): Promise<BrandDetail> {
   const properties = page.properties || {};
-  const [brand, contacts, company] = await Promise.all([
+  const [brand, contacts, company, followupExhibition] = await Promise.all([
     mapFollowupClientPage(page),
     listFollowupContacts(page.id, relationIds(properties["Follow-up Contacts"])),
     resolveClientCompany(firstRelationId(properties.Client)),
+    resolveFollowupExhibition(page),
   ]);
   const cpMeta =
     (brand.currentCpId ? await resolveCheckpoint(brand.currentCpId) : null) ||
@@ -165,6 +178,7 @@ export async function mapFollowupClientDetail(page: NotionPage): Promise<BrandDe
     name: company.companyName || brand.name,
     productDescription: company.productDescription,
     matchedCategory: company.matchedCategory,
+    followupExhibition,
     priority: propertyText(properties.Priority) || null,
     notes: propertyText(properties.Notes) || null,
     createdAt: page.created_time || properties["Created At"]?.created_time || null,

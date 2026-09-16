@@ -23,7 +23,7 @@ import { BrandDetail } from "./workspace-customer";
 import { TasksPage } from "./workspace-tasks";
 import { BombEditor, BombsPage } from "./workspace-bombs";
 import { useSession } from "./use-session";
-import { CALL_REVIEW_CALLER_EMAIL, taskStatusForCallReview, useCallReviewMetadata } from "@/lib/call-review-metadata";
+import { taskStatusForCallReview } from "@/lib/call-review-metadata";
 
 type Screen = "Brands" | "ReplyTask" | "OmniReach";
 const nav: { label: Screen; path: string; icon: typeof Users; cap: string; badge?: boolean }[] = [
@@ -50,7 +50,6 @@ export default function OutreachWorkspace() {
   const pathname = usePathname();
   const { state, hydrated, can, setRole } = useWorkspace();
   const { user, loading: sessionLoading, signOut } = useSession();
-  const { reviewsByTask } = useCallReviewMetadata();
   const screen = routeScreen(pathname);
   const [remoteCounts, setRemoteCounts] = useState<{ open: number; needsReply: number } | null>(null);
   const taskCount = remoteCounts?.open ?? 0;
@@ -79,9 +78,13 @@ export default function OutreachWorkspace() {
       })
       .then((tasks) => {
         if (cancelled) return;
-        const visibleTasks = user?.email.toLowerCase() === CALL_REVIEW_CALLER_EMAIL
-          ? tasks.map((task) => ({ ...task, status: taskStatusForCallReview(task.status || "Pending", reviewsByTask[task.id]) }))
-          : tasks;
+        const visibleTasks = tasks.map((task) => ({
+          ...task,
+          status: taskStatusForCallReview(
+            task.status || "Pending",
+            task.callReviewStatus ? { status: task.callReviewStatus } : undefined,
+          ),
+        }));
         setRemoteCounts({
           open: visibleTasks.filter((item) => item.inboxStatus === "Needs Reply" || (item.channel === "Phone" && !isClosedTaskStatus(item.status || ""))).length,
           needsReply: visibleTasks.filter((item) => item.inboxStatus === "Needs Reply").length,
@@ -91,7 +94,7 @@ export default function OutreachWorkspace() {
         if (!cancelled) setRemoteCounts({ open: 0, needsReply: 0 });
       });
     return () => { cancelled = true; };
-  }, [sessionLoading, user, pathname, reviewsByTask]);
+  }, [sessionLoading, user, pathname]);
 
   useEffect(() => {
     if (sessionLoading || !user) return;

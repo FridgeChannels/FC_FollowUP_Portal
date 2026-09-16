@@ -83,4 +83,19 @@ describe("template variable engine", () => {
     assert.equal(resolved.subject, "For Oxyfresh");
     assert.equal(resolved.content, "Hello Melissa Gulbranson");
   });
+
+  it("replaces Follow-up-Exhibition from Follow-up ClientDB", () => {
+    const withExhibition = buildTemplateVariableContext({
+      companyName: "Oxyfresh",
+      followupExhibition: "Expo West 2026",
+    });
+    assert.equal(
+      resolveTemplateVariables("Met at {{Follow-up-Exhibition}}", withExhibition),
+      "Met at Expo West 2026",
+    );
+    assert.equal(
+      resolveTemplateVariables("Met at {{Follow-up Exhibition}}", withExhibition),
+      "Met at Expo West 2026",
+    );
+  });
 });

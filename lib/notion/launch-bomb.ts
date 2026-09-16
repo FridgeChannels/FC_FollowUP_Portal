@@ -14,11 +14,11 @@ import {
   resolveOutboundFields,
 } from "../template-variables";
 import { retrieveFollowupBomb } from "./bombs";
-import { skipUnavailableChannels } from "./config";
 import { listChannelDailyMax } from "./capacity";
 import { retrievePage } from "./client";
 import { mapFollowupClientDetail } from "./followup-clients";
 import { createFollowupTask, createOutboundConversation, markFollowupClientEngaged } from "./followup-writes";
+import { brandHasActiveOmniReach } from "./reply-inbox";
 import { listExistingTasksForSchedule } from "./tasks";
 
 export type LaunchStepCopy = {
@@ -100,16 +100,23 @@ export async function launchFollowupBomb(input: {
   if (!contact) throw new Error("Contact not found on this brand");
   if (!brand.ownerId) throw new Error("Client has no Owner assigned; tasks cannot be created");
   if (bomb.status !== "Active") throw new Error("Only Active OmniReach can be launched");
+  if (brandHasActiveOmniReach(brand.tasks)) {
+    throw new Error("This Brand already has an active OmniReach");
+  }
 
-  const enforceReachable = skipUnavailableChannels();
+  // Never create send tasks for channels without usable contact info.
   const selectedChannels = bomb.templates
     .map((item) => {
       const channel = asChannel(item.channel);
       if (!channel) return null;
-      if (enforceReachable && !channelReachable(contact, channel)) return null;
+      if (!channelReachable(contact, channel)) return null;
       return { channel, templateId: item.id, reachable: true };
     })
     .filter((item): item is { channel: Channel; templateId: string } => !!item);
+
+  if (!selectedChannels.length) {
+    throw new Error("No reachable channels for this KeyPerson; nothing to launch");
+  }
 
   const result = commitSchedule({
     request: {
@@ -142,6 +149,7 @@ export async function launchFollowupBomb(input: {
     companyName: brand.name,
     productDescription: brand.productDescription,
     matchedCategory: brand.matchedCategory,
+    followupExhibition: brand.followupExhibition,
     hasContact: true,
     contactName: contact.name,
     contactTitle: contact.title,
@@ -151,6 +159,7 @@ export async function launchFollowupBomb(input: {
     ownerOrConnector: contact.role,
     linkedinUrl: contact.linkedin,
   });
+  const omniReachRunId = crypto.randomUUID();
   for (const write of result.writes) {
     const template = bomb.templates.find((item) => item.id === write.templateId);
     const incoming = input.copies?.[write.templateId || ""];
@@ -172,7 +181,8 @@ export async function launchFollowupBomb(input: {
       creationMethod: write.creationMethod,
       templateId: write.templateId,
       sourceBombId: input.bombId,
-      notes: `由 Bomb 排班生成，尚未实际发送。方案：${bomb.name}。`,
+      omniReachRunId,
+      notes: `由 OmniReach 排班生成，尚未实际发送。方案：${bomb.name}。`,
     });
     if (content) {
       await createOutboundConversation({
@@ -186,14 +196,14 @@ export async function launchFollowupBomb(input: {
         taskId: task.id,
         cpId: brand.currentCpId,
         cpAtInteraction: interactionCpCode(brand.currentCp),
-        notes: "Bomb 方案已排班，尚未实际发送。",
+        notes: "OmniReach 方案已排班，尚未实际发送。",
       });
     }
   }
 
   await markFollowupClientEngaged(input.brandId, {
     handlingMode: "Automated",
-    note: "已发起 Bomb。",
+    note: "已发起 OmniReach。",
   });
 
   return {

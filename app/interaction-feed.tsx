@@ -3,11 +3,13 @@
 import { Fragment, useState, type ReactNode } from "react";
 import { Bomb, CheckCircle2, ChevronRight, RotateCcw, UserRound } from "lucide-react";
 import { toast } from "sonner";
-import { useCallReviewMetadata } from "@/lib/call-review-metadata";
+import { callReviewsFromTasks, type CallReviewStatus } from "@/lib/call-review-metadata";
+import type { BrandTask } from "@/lib/brand-list";
 import { BombInstance, Channel, Contact, CPCode, CP_CODES, Interaction, ScheduledAction } from "@/lib/outreach-domain";
 import { BombExecutionPlan, formatUtcTime } from "./bomb-plan";
 import { BrandReplyBox } from "./brand-reply-box";
 import { ChannelIcon } from "./channel-icon";
+import { PhoneTaskBoard } from "./phone-task-board";
 import { QuoCallPanel } from "./quo-call-panel";
 import { useWorkspace } from "./workspace-store";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -95,6 +97,8 @@ export function InteractionFeed({
   onRefreshQuo,
   quoRefreshingCallId,
   canReviewCalls = false,
+  tasks = [],
+  onPersistCallReview,
 }: {
   interactions: Interaction[];
   contacts: Contact[];
@@ -114,9 +118,35 @@ export function InteractionFeed({
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
   canReviewCalls?: boolean;
+  tasks?: Array<Pick<BrandTask, "id" | "channel" | "title" | "status" | "contactId" | "contactPhone" | "templateId" | "scheduledAt" | "callReviewStatus"> & { remote?: boolean }>;
+  onPersistCallReview?: (taskId: string, status: CallReviewStatus) => Promise<void>;
 }) {
   const { state } = useWorkspace();
-  const { reviews, reviewCall } = useCallReviewMetadata();
+  const notionReviews = callReviewsFromTasks(tasks);
+  const [reviewingTaskId, setReviewingTaskId] = useState<string | null>(null);
+  const resolveReview = (taskId?: string | null) => {
+    if (!taskId) return undefined;
+    return notionReviews[taskId];
+  };
+  const handleReviewCall = async (_interactionId: string, taskId: string | undefined, status: CallReviewStatus) => {
+    if (!taskId) {
+      toast.error("This call is not linked to a Follow-up Task");
+      return;
+    }
+    if (!onPersistCallReview) {
+      toast.error("Call review requires a Follow-up Task backed by Notion");
+      return;
+    }
+    setReviewingTaskId(taskId);
+    try {
+      await onPersistCallReview(taskId, status);
+      toast.success(status === "Qualified" ? "Call marked as qualified" : "Call marked as unqualified and reopened for Beril");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to save call review");
+    } finally {
+      setReviewingTaskId(null);
+    }
+  };
   const customerId = customerIdProp || interactions[0]?.customerId;
   const customer = state.customers.find(item => item.id === customerId);
   const currentCp = currentCpProp || customer?.cp || "CP1";
@@ -137,6 +167,20 @@ export function InteractionFeed({
   const bombsForCp = planState.bombInstances
     .filter(item => item.customerId === customerId && item.cp === selectedCp)
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  const phoneTasks = tasks
+    .filter((item) => item.channel === "Phone")
+    .map((item) => ({
+      id: item.id,
+      title: item.title,
+      status: item.status || "Pending",
+      dueAt: item.scheduledAt,
+      contactId: item.contactId,
+      contactPhone: item.contactPhone,
+      templateId: item.templateId,
+      callReviewStatus: item.callReviewStatus,
+      remote: item.remote !== false,
+    }));
+  const usePhoneTaskBoard = activeChannel === "Phone" && phoneTasks.length > 0;
 
   return <div className={maxHeight ? `${maxHeight} overflow-y-auto` : undefined}>
     <div className="px-5 py-4">
@@ -163,7 +207,9 @@ export function InteractionFeed({
     <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 px-5 py-3">
       <div className="flex flex-wrap gap-1.5">
         {visibleChannels.map(channel => {
-          const count = interactions.filter(item => isChannelMessage(item) && item.channel === channel && belongsToCp(item, selectedCp)).length;
+          const count = channel === "Phone" && phoneTasks.length
+            ? phoneTasks.length
+            : interactions.filter(item => isChannelMessage(item) && item.channel === channel && belongsToCp(item, selectedCp)).length;
           const selected = channel === activeChannel;
           return <button key={channel} type="button" aria-pressed={selected} onClick={() => setSelectedChannel(channel)} className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${selected ? "bg-violet-600 text-white" : "bg-slate-50 text-slate-600 hover:bg-slate-100"}`}>
             <ChannelIcon channel={channel} className="size-4" alt=""/>
@@ -176,6 +222,19 @@ export function InteractionFeed({
     </div>
 
     {channelHeader && (!channelHeaderCp || selectedCp === channelHeaderCp) && <div className="px-5 pt-5">{channelHeader}</div>}
+    {usePhoneTaskBoard ? (
+      <PhoneTaskBoard
+        phoneTasks={phoneTasks}
+        contacts={contacts}
+        timeline={cpInteractions}
+        showChannelTab={false}
+        canReviewCalls={canReviewCalls}
+        onPersistCallReview={onPersistCallReview}
+        onRefreshQuo={onRefreshQuo}
+        quoRefreshingCallId={quoRefreshingCallId}
+        showDial={false}
+      />
+    ) : (
     <ChannelTranscript
       messages={channelMessages}
       contacts={contacts}
@@ -184,13 +243,12 @@ export function InteractionFeed({
       onSend={onSend}
       onRefreshQuo={onRefreshQuo}
       quoRefreshingCallId={quoRefreshingCallId}
-      callReviews={reviews}
+      resolveReview={resolveReview}
       canReviewCalls={canReviewCalls}
-      onReviewCall={(interactionId, taskId, status) => {
-        reviewCall({ interactionId, taskId, status });
-        toast.success(status === "Qualified" ? "Call marked as qualified" : "Call marked as unqualified and reopened for Beril");
-      }}
+      reviewingTaskId={reviewingTaskId}
+      onReviewCall={handleReviewCall}
     />
+    )}
 
     <Dialog open={bombOpen} onOpenChange={setBombOpen}>
       <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-2xl">
@@ -234,8 +292,9 @@ function ChannelTranscript({
   onSend,
   onRefreshQuo,
   quoRefreshingCallId,
-  callReviews,
+  resolveReview,
   canReviewCalls,
+  reviewingTaskId,
   onReviewCall,
 }: {
   messages: Interaction[];
@@ -245,9 +304,10 @@ function ChannelTranscript({
   onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
-  callReviews: ReturnType<typeof useCallReviewMetadata>["reviews"];
+  resolveReview: (taskId?: string | null) => { status: CallReviewStatus; recallRequested?: boolean } | undefined;
   canReviewCalls: boolean;
-  onReviewCall: (interactionId: string, taskId: string | undefined, status: "Qualified" | "Unqualified") => void;
+  reviewingTaskId: string | null;
+  onReviewCall: (interactionId: string, taskId: string | undefined, status: CallReviewStatus) => void | Promise<void>;
 }) {
   const contactGroups = groupByContact(messages, contacts);
   return <div>
@@ -256,7 +316,7 @@ function ChannelTranscript({
     ) : (
       <div className="divide-y">
         {contactGroups.map(group => (
-          <ContactThreads key={group.contact?.id || "unknown"} group={group} replyPool={messages} channel={channel} bombInstances={bombInstances} onSend={onSend} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId} callReviews={callReviews} canReviewCalls={canReviewCalls} onReviewCall={onReviewCall}/>
+          <ContactThreads key={group.contact?.id || "unknown"} group={group} replyPool={messages} channel={channel} bombInstances={bombInstances} onSend={onSend} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId} resolveReview={resolveReview} canReviewCalls={canReviewCalls} reviewingTaskId={reviewingTaskId} onReviewCall={onReviewCall}/>
         ))}
       </div>
     )}
@@ -299,8 +359,9 @@ function ContactThreads({
   onSend,
   onRefreshQuo,
   quoRefreshingCallId,
-  callReviews,
+  resolveReview,
   canReviewCalls,
+  reviewingTaskId,
   onReviewCall,
 }: {
   group: { contact?: Contact; messages: Interaction[] };
@@ -310,9 +371,10 @@ function ContactThreads({
   onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
-  callReviews: ReturnType<typeof useCallReviewMetadata>["reviews"];
+  resolveReview: (taskId?: string | null) => { status: CallReviewStatus; recallRequested?: boolean } | undefined;
   canReviewCalls: boolean;
-  onReviewCall: (interactionId: string, taskId: string | undefined, status: "Qualified" | "Unqualified") => void;
+  reviewingTaskId: string | null;
+  onReviewCall: (interactionId: string, taskId: string | undefined, status: CallReviewStatus) => void | Promise<void>;
 }) {
   const endpoint = group.contact ? contactPoint(group.contact, channel) : undefined;
   const threads = groupByThread(group.messages);
@@ -332,7 +394,7 @@ function ContactThreads({
     </div>
     <div className="space-y-6">
       {threads.map(thread => (
-        <ThreadMessages key={threadKey(thread[0])} thread={thread} replyPool={replyPool} contact={group.contact} channel={channel} endpoint={endpoint} bombInstances={bombInstances} onSend={onSend} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId} callReviews={callReviews} canReviewCalls={canReviewCalls} onReviewCall={onReviewCall}/>
+        <ThreadMessages key={threadKey(thread[0])} thread={thread} replyPool={replyPool} contact={group.contact} channel={channel} endpoint={endpoint} bombInstances={bombInstances} onSend={onSend} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId} resolveReview={resolveReview} canReviewCalls={canReviewCalls} reviewingTaskId={reviewingTaskId} onReviewCall={onReviewCall}/>
       ))}
     </div>
   </section>;
@@ -348,8 +410,9 @@ function ThreadMessages({
   onSend,
   onRefreshQuo,
   quoRefreshingCallId,
-  callReviews,
+  resolveReview,
   canReviewCalls,
+  reviewingTaskId,
   onReviewCall,
 }: {
   thread: Interaction[];
@@ -361,9 +424,10 @@ function ThreadMessages({
   onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
-  callReviews: ReturnType<typeof useCallReviewMetadata>["reviews"];
+  resolveReview: (taskId?: string | null) => { status: CallReviewStatus; recallRequested?: boolean } | undefined;
   canReviewCalls: boolean;
-  onReviewCall: (interactionId: string, taskId: string | undefined, status: "Qualified" | "Unqualified") => void;
+  reviewingTaskId: string | null;
+  onReviewCall: (interactionId: string, taskId: string | undefined, status: CallReviewStatus) => void | Promise<void>;
 }) {
   return <div className="space-y-3">
     {thread.map(item => {
@@ -378,7 +442,7 @@ function ThreadMessages({
       const callId = item.quo?.callId;
       const canRefresh = !!callId && !callId.startsWith("ACsim") && !!onRefreshQuo;
       const timing = !inbound && !phoneCall ? deliveryTiming(item) : null;
-      const callReview = phoneCall ? callReviews[item.id] : undefined;
+      const callReview = phoneCall ? resolveReview(item.taskId) : undefined;
       return <article key={item.id} className={`rounded-xl p-4 ${inbound ? "bg-rose-50/80" : "bg-slate-50"}`}>
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
@@ -401,7 +465,7 @@ function ThreadMessages({
             onRefresh={canRefresh ? () => onRefreshQuo?.(callId!) : undefined}
           />
         </div> : null}
-        {phoneCall && item.quo && canReviewCalls && !callReview ? <div className="mt-4 flex flex-wrap gap-2"><Button size="sm" className="bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => onReviewCall(item.id, item.taskId, "Qualified")}><CheckCircle2 className="mr-1.5 size-3.5"/>Mark as Qualified</Button><Button size="sm" className="bg-rose-600 text-white hover:bg-rose-700" onClick={() => onReviewCall(item.id, item.taskId, "Unqualified")}><RotateCcw className="mr-1.5 size-3.5"/>Unqualified &amp; Recall</Button></div> : null}
+        {phoneCall && item.quo && canReviewCalls && !callReview ? <div className="mt-4 flex flex-wrap gap-2"><Button size="sm" className="bg-emerald-600 text-white hover:bg-emerald-700" disabled={reviewingTaskId===item.taskId} onClick={() => void onReviewCall(item.id, item.taskId, "Qualified")}><CheckCircle2 className="mr-1.5 size-3.5"/>{reviewingTaskId===item.taskId?"Saving…":"Mark as Qualified"}</Button><Button size="sm" className="bg-rose-600 text-white hover:bg-rose-700" disabled={reviewingTaskId===item.taskId} onClick={() => void onReviewCall(item.id, item.taskId, "Unqualified")}><RotateCcw className="mr-1.5 size-3.5"/>{reviewingTaskId===item.taskId?"Saving…":"Unqualified & Recall"}</Button></div> : null}
         {inbound && !phoneCall && contact && (
           <BrandReplyBox
             customerId={item.customerId}

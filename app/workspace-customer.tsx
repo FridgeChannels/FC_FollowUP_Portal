@@ -9,7 +9,7 @@ import { useWorkspace } from "./workspace-store";
 import { cacheBrandItem, getCachedBrand } from "@/lib/brand-list-cache";
 import { currentCpOption, FOLLOW_UP_STATUSES, HANDLING_MODES, listCurrentCps, type BrandActivity, type BrandContact, type BrandDetail, type BrandTask, type CurrentCpOption } from "@/lib/brand-list";
 import type { BombDetail, BombListItem } from "@/lib/bomb-list";
-import { ActionStatus, BombInstance, Channel, Contact, CPCode, Customer, dateOnly, Interaction, ScheduledAction, interactionCpCode, uid } from "@/lib/outreach-domain";
+import { ActionStatus, BombInstance, Channel, Contact, CPCode, Customer, dateOnly, Interaction, ScheduledAction, WorkspaceState, interactionCpCode, uid } from "@/lib/outreach-domain";
 import { brandDetailMetadata } from "@/lib/page-metadata";
 import { usePageMetadata } from "./use-page-metadata";
 import { BombExecutionPlan } from "./bomb-plan";
@@ -21,16 +21,64 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { InteractionFeed } from "./interaction-feed";
 import { ChannelIcon, ChannelOption } from "./channel-icon";
-import { skipUnavailableChannelsOnClient } from "@/lib/channel-availability";
 import { buildTemplateVariableContext, resolveLaunchStepCopy } from "@/lib/template-variables";
-import { CALL_REVIEW_DEMO_BRAND_NAME, CALL_REVIEW_DEMO_INTERACTION_ID, demoPhoneInteraction, isCallReviewManager } from "@/lib/call-review-metadata";
-import { useSession } from "./use-session";
+import { brandHasActiveOmniReach } from "@/lib/notion/reply-inbox";
+import { cn } from "@/lib/utils";
 
 const show=(r:{ok:boolean;message:string})=>r.ok?toast.success(r.message):toast.error(r.message);
 const hasCjk=(value?:string|null)=>/[\u4e00-\u9fff]/.test(value||"");
 const displayNote=(value?:string|null)=>value&&!hasCjk(value)?value:undefined;
+export const ACTIVE_OMNIREACH_BLOCK_REASON =
+  "This Brand already has an active OmniReach. Stop it before launching another.";
+
+export function LaunchOmniReachButton({
+  disabled,
+  disabledReason,
+  className,
+  onClick,
+}: {
+  disabled?: boolean;
+  disabledReason?: string;
+  className?: string;
+  onClick?: () => void;
+}) {
+  const reason = disabled ? disabledReason : undefined;
+  const button = (
+    <Button
+      variant="outline"
+      className={cn(className, reason && "pointer-events-none")}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      <Bomb className="mr-2 size-4" />
+      Launch OmniReach
+    </Button>
+  );
+  if (!reason) return button;
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            className={cn(
+              "inline-flex",
+              className?.includes("justify-start") || className?.includes("w-full") ? "w-full [&>button]:w-full" : "xl:w-full xl:[&>button]:w-full",
+            )}
+            onClick={() => toast.message(reason)}
+          >
+            {button}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-xs text-left">
+          {reason}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
 const CP=({value}:{value:string})=><Badge variant="outline" className="rounded-md bg-white font-mono text-[11px] font-bold">{value}</Badge>;
 const Status=({value}:{value:string})=><Badge className={value.includes("Bomb")||value.includes("OmniReach")?"bg-blue-100 text-blue-700":value.includes("Human")||value.includes("Reply")?"bg-violet-100 text-violet-700":value.includes("Due")?"bg-amber-100 text-amber-700":"bg-slate-100 text-slate-700"}>{value === "Bomb Running" ? "OmniReach Running" : value}</Badge>;
 function BadgeSelect({value,options,onChange,disabled}:{value:string;options:readonly string[];onChange:(value:string)=>void;disabled?:boolean}){
@@ -66,7 +114,8 @@ function bombNoteName(notes?: string | null) {
 }
 
 function isBombGenerated(task: BrandTask) {
-  return (task.notes || "").includes("由 Bomb 排班生成");
+  const notes = task.notes || "";
+  return notes.includes("由 OmniReach 排班生成") || notes.includes("由 Bomb 排班生成");
 }
 
 function isOpenTask(task: BrandTask) {
@@ -110,8 +159,15 @@ function toBombPlan(customerId: string, tasks: BrandTask[], activities: BrandAct
   for (const task of tasks) {
     if (!task.contactId) continue;
     const named = bombNoteName(task.notes);
+    if (task.omniReachRunId) {
+      const key = `run:${task.omniReachRunId}`;
+      const list = groups.get(key) || [];
+      list.push(task);
+      groups.set(key, list);
+      continue;
+    }
     if (task.sourceBombId) {
-      const key = `${task.sourceBombId}:${task.contactId}`;
+      const key = `bomb:${task.sourceBombId}:${task.contactId}`;
       const list = groups.get(key) || [];
       list.push(task);
       groups.set(key, list);
@@ -183,6 +239,8 @@ function toBombPlan(customerId: string, tasks: BrandTask[], activities: BrandAct
       for (const activity of related) activityInstanceIds[activity.id] = instanceId;
       const conversation = sentContentForTask(task, related);
       const scheduled = task.scheduledAt || conversation?.createdAt || startedAt;
+      const subject = conversation?.subject?.trim();
+      const body = typeof conversation?.content === "string" ? conversation.content : "";
       actions.push({
         id: task.id,
         bombInstanceId: instanceId,
@@ -192,13 +250,37 @@ function toBombPlan(customerId: string, tasks: BrandTask[], activities: BrandAct
         plannedDate: scheduled,
         actualDate: scheduled,
         status: asActionStatus(task.status),
-        content: typeof conversation?.content === "string" ? conversation.content : "",
+        content: subject && body ? `Subject: ${subject}\n\n${body}` : subject || body,
         note: displayNote(task.notes),
       });
     }
   }
 
   return { bombInstances, actions, activityInstanceIds };
+}
+
+function planWorkspaceFromBombPlan(
+  plan: { bombInstances: BombInstance[]; actions: ScheduledAction[] },
+): WorkspaceState {
+  return {
+    version: 5,
+    simulatedDate: new Date().toISOString(),
+    currentRole: "AccountManager",
+    currentUserId: "",
+    users: [],
+    customers: [],
+    bombs: [],
+    bombInstances: plan.bombInstances,
+    actions: plan.actions,
+    interactions: [],
+    inbox: [],
+    followUps: [],
+    callTasks: [],
+    audit: [],
+    cps: [],
+    integrations: [],
+    scenarios: [],
+  };
 }
 
 function isManualActivity(item: BrandActivity, manualTaskIds: Set<string>) {
@@ -263,7 +345,7 @@ function toInteractions(
     createdAt: item.createdAt || "",
     creationMethod: isManualActivity(item, manualTaskIds)
       ? "Manual"
-      : activityInstanceIds[item.id] || /Bomb/.test(item.notes || "")
+      : activityInstanceIds[item.id] || /OmniReach|Bomb/.test(item.notes || "")
         ? "Automated"
         : undefined,
     threadId: item.threadId || undefined,
@@ -305,7 +387,6 @@ function toCustomerContacts(contacts: BrandContact[]): Contact[] {
 
 export function BrandDetail({customerId}:{customerId:string}){
   const {state,can,assignBrand,cancelBomb}=useWorkspace();
-  const {user}=useSession();
   const router=useRouter(); const [launch,setLaunch]=useState(false); const [reply,setReply]=useState(false); const [cp,setCP]=useState(false); const [contact,setContact]=useState(false); const [ownerDraft,setOwnerDraft]=useState<string>();
   const cached=getCachedBrand(customerId);
   const [remote,setRemote]=useState<BrandDetail|null>(cached?{
@@ -318,6 +399,7 @@ export function BrandDetail({customerId}:{customerId:string}){
     currentCpDefinition:null,
     productDescription:null,
     matchedCategory:null,
+    followupExhibition:null,
     contacts:[],
     tasks:[],
     activities:[],
@@ -339,6 +421,7 @@ export function BrandDetail({customerId}:{customerId:string}){
       currentCpDefinition:null,
       productDescription:null,
       matchedCategory:null,
+      followupExhibition:null,
       contacts:[],
       tasks:[],
       activities:[],
@@ -429,9 +512,8 @@ export function BrandDetail({customerId}:{customerId:string}){
   };
   const currentCp=notionBacked?asCpCode(remote?.currentCp):c.cp;
   const bombPlan=notionBacked?toBombPlan(c.id,remote?.tasks||[],remote?.activities||[]):undefined;
-  const callReviewDemo=isCallReviewManager(user?.email)&&c.name===CALL_REVIEW_DEMO_BRAND_NAME;
-  const baseInteractions=notionBacked?toInteractions(c.id,remote?.activities||[],bombPlan?.activityInstanceIds,remote?.tasks||[],bombPlan?.bombInstances||[]):state.interactions.filter(i=>i.customerId===c.id).map(i=>({...i,cp:i.cp||c.cp}));
-  const interactions=(callReviewDemo&&!baseInteractions.some(item=>item.id===CALL_REVIEW_DEMO_INTERACTION_ID)?[...baseInteractions,demoPhoneInteraction({customerId:c.id,contactId:c.contacts[0]?.id,cp:currentCp})]:baseInteractions).sort((a,b)=>{
+  const hasActiveOmniReach=notionBacked?brandHasActiveOmniReach(remote?.tasks||[]):!!(c.activeBombId||c.status==="Bomb Running");
+  const interactions=(notionBacked?toInteractions(c.id,remote?.activities||[],bombPlan?.activityInstanceIds,remote?.tasks||[],bombPlan?.bombInstances||[]):state.interactions.filter(i=>i.customerId===c.id).map(i=>({...i,cp:i.cp||c.cp}))).sort((a,b)=>{
     const aManual=a.direction==="Outbound"&&a.creationMethod==="Manual"?0:1;
     const bManual=b.direction==="Outbound"&&b.creationMethod==="Manual"?0:1;
     return aManual-bManual||b.createdAt.localeCompare(a.createdAt);
@@ -448,17 +530,22 @@ export function BrandDetail({customerId}:{customerId:string}){
         <div className="flex items-start gap-4"><Avatar className="size-14"><AvatarFallback className="bg-violet-100 font-bold text-violet-700">{c.initials}</AvatarFallback></Avatar><div className="min-w-0"><h1 className="text-2xl font-bold tracking-tight">{c.name}</h1><div className="mt-2 flex flex-wrap gap-2"><CP value={notionBacked&&remote?remote.currentCp:c.cp}/>{notionBacked&&remote?.status?(can("editBrand")?<BadgeSelect value={remote.status} options={FOLLOW_UP_STATUSES} disabled={saving} onChange={value=>{void patchBrand({status:value}).then(()=>toast.success("Status updated")).catch(error=>toast.error(error instanceof Error?error.message:"Update failed"));}}/>:<Status value={remote.status}/>):(c.status?<Status value={c.status}/>:null)}{notionBacked&&can("editBrand")?<BadgeSelect value={remote?.handlingMode||""} options={HANDLING_MODES} disabled={saving} onChange={value=>{void patchBrand({handlingMode:value}).then(()=>toast.success("Handling Mode updated")).catch(error=>toast.error(error instanceof Error?error.message:"Update failed"));}}/>:notionBacked&&remote?.handlingMode?<Status value={remote.handlingMode}/>:null}</div><p className="mt-3 text-sm font-medium text-slate-700">{summary}</p>{notionBacked&&<p className="mt-1 text-xs text-slate-500">{currentCpOption(remote?.currentCp).name} · {currentCpOption(remote?.currentCp).fullName}</p>}{notionBacked&&displayNote(remote?.notes)&&<p className="mt-2 text-sm leading-6 text-slate-600">{displayNote(remote?.notes)}</p>}<div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500"><span>Latest: {remote?.lastInteractionAt?dateOnly(remote.lastInteractionAt):last?.title||"No activity"}</span>{!notionBacked&&<span>Source: {c.source}</span>}<span>FC-Owner: {remote?.ownerName||state.users.find(u=>u.id===c.ownerId)?.name||"Unassigned"}</span>{notionBacked&&remote?.createdAt&&<span>Created: {dateOnly(remote.createdAt)}</span>}</div>{can("assignOwner")&&<div className="mt-3 flex flex-wrap items-center gap-2"><Select value={ownerDraft??c.ownerId??"unassigned"} onValueChange={setOwnerDraft}><SelectTrigger size="sm" className="w-44"><SelectValue placeholder="Select owner"/></SelectTrigger><SelectContent><SelectItem value="unassigned">Unassigned</SelectItem>{ownerChoices.map(u=><SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent></Select><Button size="sm" disabled={saving||(ownerDraft??c.ownerId??"unassigned")===(c.ownerId||"unassigned")} onClick={()=>void handleAssign()}>Assign</Button></div>}</div></div>
       </div>
       <BrandContactList contacts={notionBacked&&remote?remote.contacts:c.contacts} canEdit={!notionBacked&&can("editBrand")} onAdd={()=>setContact(true)}/>
-      <div className="flex flex-wrap gap-2 xl:flex-col xl:items-stretch">{can("reply")&&<Button variant="outline" disabled={notionBacked&&!c.contacts.length} onClick={()=>setReply(true)}><Send className="mr-2 size-4"/>Send message</Button>}{can("launch")&&<Button variant="outline" disabled={!notionBacked&&(!!c.activeBombId||c.status==="Bomb Running")} onClick={()=>setLaunch(true)}><Bomb className="mr-2 size-4"/>Launch OmniReach</Button>}{can("changeCP")&&<Button onClick={()=>setCP(true)}>Change CP</Button>}{notionBacked&&can("editBrand")&&<DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label="More follow-up actions" title="More follow-up actions"><MoreHorizontal className="size-5"/></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem disabled={saving||remote?.status==="Paused"||remote?.status==="Completed"} onSelect={()=>void updateFollowUpStatus("Paused")}>Pause FollowUp</DropdownMenuItem><DropdownMenuItem disabled={saving||remote?.status==="Completed"} onSelect={()=>void updateFollowUpStatus("Completed")}>Complete FollowUp</DropdownMenuItem></DropdownMenuContent></DropdownMenu>}</div>
+      <div className="flex flex-wrap gap-2 xl:flex-col xl:items-stretch">{can("reply")&&<Button variant="outline" disabled={notionBacked&&!c.contacts.length} onClick={()=>setReply(true)}><Send className="mr-2 size-4"/>Send message</Button>}{can("launch")&&<LaunchOmniReachButton className="xl:w-full" disabled={hasActiveOmniReach} disabledReason={ACTIVE_OMNIREACH_BLOCK_REASON} onClick={()=>setLaunch(true)}/>}{can("changeCP")&&<Button onClick={()=>setCP(true)}>Change CP</Button>}{notionBacked&&can("editBrand")&&<DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label="More follow-up actions" title="More follow-up actions"><MoreHorizontal className="size-5"/></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem disabled={saving||remote?.status==="Paused"||remote?.status==="Completed"} onSelect={()=>void updateFollowUpStatus("Paused")}>Pause FollowUp</DropdownMenuItem><DropdownMenuItem disabled={saving||remote?.status==="Completed"} onSelect={()=>void updateFollowUpStatus("Completed")}>Complete FollowUp</DropdownMenuItem></DropdownMenuContent></DropdownMenu>}</div>
     </section>
-    <div className={`grid gap-6 ${partnershipContext?"xl:grid-cols-[1fr_340px]":""}`}><section><h2 className="mb-3 font-bold">Brand activity</h2><div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">    <InteractionFeed key={`${c.id}-${currentCp}`} customerId={c.id} currentCp={currentCp} cpGoals={notionBacked?toCpGoals(remoteCps):undefined} interactions={interactions} contacts={c.contacts} bombInstances={bombPlan?.bombInstances} actions={bombPlan?.actions} canReviewCalls={callReviewDemo} onCancelBomb={async instance=>{if(!notionBacked){const result=cancelBomb(c.id,instance.id);if(!result.ok)throw new Error(result.message);toast.success(result.message);return;}const response=await fetch(`/api/brands/${c.id}/bombs/${instance.templateId}/cancel`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId:instance.targetContactId})});const payload=await response.json() as {cancelledTaskIds?:string[];error?:string};if(!response.ok)throw new Error(payload.error||"Unable to stop OmniReach");await refreshRemote();toast.success(`${payload.cancelledTaskIds?.length||0} remaining task${payload.cancelledTaskIds?.length===1?"":"s"} cancelled`);}} onSend={notionBacked?async (contactId,channel,content,taskId,threadId)=>{
+    <div className={`grid gap-6 ${partnershipContext?"xl:grid-cols-[1fr_340px]":""}`}><section><h2 className="mb-3 font-bold">Brand activity</h2><div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">    <InteractionFeed key={`${c.id}-${currentCp}`} customerId={c.id} currentCp={currentCp} cpGoals={notionBacked?toCpGoals(remoteCps):undefined} interactions={interactions} contacts={c.contacts} bombInstances={bombPlan?.bombInstances} actions={bombPlan?.actions} canReviewCalls={notionBacked&&can("reply")} tasks={remote?.tasks||[]} onPersistCallReview={notionBacked?async (taskId,status)=>{
+    const response=await fetch(`/api/tasks/${taskId}/call-review`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status})});
+    const payload=await response.json() as {error?:string};
+    if(!response.ok)throw new Error(payload.error||"Unable to save call review");
+    await refreshRemote();
+  }:undefined} onCancelBomb={async instance=>{if(!notionBacked){const result=cancelBomb(c.id,instance.id);if(!result.ok)throw new Error(result.message);toast.success(result.message);return;}const response=await fetch(`/api/brands/${c.id}/bombs/${instance.templateId}/cancel`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId:instance.targetContactId,omniReachRunId:instance.id.startsWith("run:")?instance.id.slice(4):undefined})});const payload=await response.json() as {cancelledTaskIds?:string[];error?:string};if(!response.ok)throw new Error(payload.error||"Unable to stop OmniReach");await refreshRemote();toast.success(`${payload.cancelledTaskIds?.length||0} remaining task${payload.cancelledTaskIds?.length===1?"":"s"} cancelled`);}} onSend={notionBacked?async (contactId,channel,content,taskId,threadId)=>{
     const response=await fetch(`/api/brands/${c.id}/messages`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId,channel,content,taskId,threadId})});
     const payload=await response.json() as {brand?:BrandDetail;cps?:CurrentCpOption[];error?:string};
     if(!response.ok||!payload.brand)throw new Error(payload.error||"Send failed");
     applyRemote(payload.brand,payload.cps||remoteCps);
   }:undefined}/></div></section>
     {(c.cp==="CP3"||partnershipContext)&&partnershipContext&&<aside><section className="rounded-2xl bg-emerald-50 p-5"><div className="text-xs font-semibold tracking-wide text-emerald-700">CP3 · Partnership context</div><h2 className="mt-2 font-bold text-emerald-950">{partnershipContext.headline}</h2><p className="mt-2 text-sm leading-6 text-emerald-900">{partnershipContext.summary}</p><div className="mt-4 space-y-2">{partnershipContext.signals.map(signal=><div key={signal} className="rounded-lg bg-white/70 px-3 py-2 text-xs leading-5 text-slate-700">{signal}</div>)}</div><div className="mt-3 text-[11px] text-emerald-700">Updated {dateOnly(partnershipContext.updatedAt)}</div></section></aside>}</div>
-  <LaunchBombDialog customerId={c.id} open={launch} onOpenChange={setLaunch} contacts={notionBacked?c.contacts:undefined} currentCp={notionBacked&&remote?remote.currentCp:undefined} companyName={c.name} productDescription={notionBacked?remote?.productDescription:undefined} matchedCategory={notionBacked?remote?.matchedCategory:undefined} previewOnly={notionBacked} onLaunched={notionBacked?()=>{void refreshRemote()}:undefined}/><ReplyDialog customerId={c.id} open={reply} onOpenChange={setReply} contacts={notionBacked?c.contacts:undefined} onSend={notionBacked?async (contactId,channel,content)=>{
-    const response=await fetch(`/api/brands/${c.id}/messages`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId,channel,content})});
+  <LaunchBombDialog customerId={c.id} open={launch} onOpenChange={setLaunch} contacts={notionBacked?c.contacts:undefined} currentCp={notionBacked&&remote?remote.currentCp:undefined} companyName={c.name} productDescription={notionBacked?remote?.productDescription:undefined} matchedCategory={notionBacked?remote?.matchedCategory:undefined} followupExhibition={notionBacked?remote?.followupExhibition:undefined} previewOnly={notionBacked} hasActiveOmniReach={hasActiveOmniReach} onLaunched={notionBacked?()=>{void refreshRemote()}:undefined}/><ReplyDialog customerId={c.id} open={reply} onOpenChange={setReply} contacts={notionBacked?c.contacts:undefined} onSend={notionBacked?async (contactId,channel,content,object)=>{
+    const response=await fetch(`/api/brands/${c.id}/messages`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId,channel,content,object})});
     const payload=await response.json() as {brand?:BrandDetail;cps?:CurrentCpOption[];error?:string};
     if(!response.ok||!payload.brand)throw new Error(payload.error||"Send failed");
     applyRemote(payload.brand,payload.cps||remoteCps);
@@ -537,7 +624,7 @@ function bombDetailToLaunch(detail: BombDetail): LaunchBombOption {
   };
 }
 
-export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentCp,companyName,productDescription,matchedCategory,previewOnly,onLaunched}:{customerId?:string;open:boolean;onOpenChange:(v:boolean)=>void;contacts?:Contact[];currentCp?:string;companyName?:string;productDescription?:string|null;matchedCategory?:string|null;previewOnly?:boolean;onLaunched?:()=>void}){
+export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentCp,companyName,productDescription,matchedCategory,followupExhibition,previewOnly,hasActiveOmniReach,onLaunched}:{customerId?:string;open:boolean;onOpenChange:(v:boolean)=>void;contacts?:Contact[];currentCp?:string;companyName?:string;productDescription?:string|null;matchedCategory?:string|null;followupExhibition?:string|null;previewOnly?:boolean;hasActiveOmniReach?:boolean;onLaunched?:()=>void}){
   const {state,launchBomb}=useWorkspace();
   const c=state.customers.find(x=>x.id===customerId);
   const [remoteBombs,setRemoteBombs]=useState<BombListItem[]>([]);
@@ -547,6 +634,7 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
   const [copies,setCopies]=useState<Record<string,LaunchStepCopy>>({});
   const [launchedInstanceId,setLaunchedInstanceId]=useState("");
   const [previewReady,setPreviewReady]=useState(false);
+  const [launchPlan,setLaunchPlan]=useState<{instanceId:string;state:WorkspaceState}|null>(null);
   const [launching,setLaunching]=useState(false);
   const localBombs=state.bombs.filter(b=>b.status==="Active"&&b.cp===c?.cp);
   const notionBombs=remoteBombs.filter(b=>b.status==="Active"&&(!currentCp||currentCp==="NONE"||!b.cp||b.cp.split(",").some(item=>item.trim()===currentCp)));
@@ -557,6 +645,7 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
     companyName:companyName||c?.name,
     productDescription,
     matchedCategory,
+    followupExhibition,
     hasContact:!!person,
     contactName:person?.name,
     contactTitle:person?.title,
@@ -599,6 +688,9 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
     setCopies({});
     setRemoteDetail(undefined);
     setRemoteBombs([]);
+    setLaunchPlan(null);
+    setPreviewReady(false);
+    setLaunchedInstanceId("");
   },[open]);
   useEffect(()=>{
     if(!selected||!person){setCopies({});return;}
@@ -607,64 +699,74 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
       next[s.id]=resolveLaunchStepCopy({subject:s.subject,content:s.content,callGoal:s.callGoal,script:s.script},templateContext);
     });
     setCopies(next);
-  },[selected,target,companyName,productDescription,matchedCategory]);
+  },[selected,target,companyName,productDescription,matchedCategory,followupExhibition]);
   const updateCopy=(id:string,patch:Partial<LaunchStepCopy>)=>setCopies(prev=>({...prev,[id]:{...prev[id],...patch}}));
-  const enforceSkip=skipUnavailableChannelsOnClient();
-  const unavailable=enforceSkip&&selected&&person?selected.steps.filter(s=>!channelAvailable(person,s.channel)).map(s=>s.channel):[];
-  const incomplete=selected?.steps.some(s=>{
+  const unavailable=selected&&person
+    ? selected.steps.filter((s)=>!channelAvailable(person,s.channel)).map((s)=>s.channel)
+    : [];
+  const incomplete=selected?.steps.some((s)=>{
+    if(person&&!channelAvailable(person,s.channel))return false;
     const copy=copies[s.id];
     if(!copy)return true;
     if(s.channel==="Email")return !copy.subject?.trim()||!copy.content?.trim();
     if(s.channel==="Phone")return !copy.callGoal?.trim()||!copy.script?.trim();
     return !copy.content?.trim();
   });
-  const launched=!!launchedInstanceId||previewReady;
+  const hasReachableStep=!!selected&&!!person&&selected.steps.some((s)=>channelAvailable(person,s.channel));
+  const launched=!!launchedInstanceId||previewReady||!!launchPlan;
   const launchedInstance=launchedInstanceId?state.bombInstances.find(item=>item.id===launchedInstanceId):undefined;
-  return <Dialog open={open} onOpenChange={value=>{if(!value){setLaunchedInstanceId("");setPreviewReady(false);setLaunching(false);}onOpenChange(value)}}><DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-2xl"><DialogHeader><DialogTitle>{launched?"OmniReach launched · execution plan":"Launch OmniReach"}</DialogTitle><DialogDescription>{launched?(previewOnly?"This launch preview is read-only. The scheduling engine is not writing tasks yet.":"The system assigned this execution order and schedule. This plan is read-only."):"Review and edit each step’s copy for this launch only. The template is not changed. After confirmation, the system assigns timing and order based on channel availability and caller capacity. Any meaningful reply stops the run."}</DialogDescription></DialogHeader>
+  const resultPlanState=launchPlan?.state || state;
+  const resultPlanInstanceId=launchPlan?.instanceId || launchedInstanceId;
+  return <Dialog open={open} onOpenChange={value=>{if(!value){setLaunchedInstanceId("");setPreviewReady(false);setLaunchPlan(null);setLaunching(false);}onOpenChange(value)}}><DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-2xl"><DialogHeader><DialogTitle>{launched?"OmniReach launched · execution plan":"Launch OmniReach"}</DialogTitle><DialogDescription>{launched?"The system assigned this execution order and schedule. This plan is read-only.":"Review and edit each step’s copy for this launch only. The template is not changed. After confirmation, the system assigns timing and order based on channel availability and caller capacity. Any meaningful reply stops the run."}</DialogDescription></DialogHeader>
     <div className="min-h-0 space-y-4 overflow-y-auto pr-1">
-      {launched&&<div className="rounded-xl bg-emerald-50 p-4"><div className="text-sm font-semibold text-emerald-900">{previewOnly?"Launch preview ready":"System assignment complete"}</div><p className="mt-1 text-xs text-emerald-800">{selected?`${selected.name}${selected.goal?` · ${selected.goal}`:""}`:launchedInstance?`${launchedInstance.templateName} · Version ${launchedInstance.version}`:"The order and timing below are informational only and cannot be edited."}</p>{previewOnly?<div className="mt-4 space-y-2">{selected?.steps.map((step,index)=><div key={step.id} className="rounded-lg bg-white/70 px-3 py-2 text-xs text-slate-700">{index+1}. {step.channel}{enforceSkip&&person&&!channelAvailable(person,step.channel)?" · skipped":""}</div>)}</div>:<div className="mt-4"><BombExecutionPlan state={state} instanceId={launchedInstanceId} contacts={targets} tone="success"/></div>}</div>}
+      {!launched&&hasActiveOmniReach&&<div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">This Brand already has an active OmniReach. Stop it before launching another.</div>}
+      {launched&&<div className="rounded-xl bg-emerald-50 p-4"><div className="text-sm font-semibold text-emerald-900">System assignment complete</div><p className="mt-1 text-xs text-emerald-800">{selected?`${selected.name}${selected.goal?` · ${selected.goal}`:""}`:launchedInstance?`${launchedInstance.templateName} · Version ${launchedInstance.version}`:"The order and timing below are informational only and cannot be edited."}{person?` · ${person.name}`:""}</p><div className="mt-4 rounded-xl border border-emerald-100 bg-white p-4">{resultPlanInstanceId?<BombExecutionPlan state={resultPlanState} instanceId={resultPlanInstanceId} contacts={targets} tone="success"/>:<div className="text-xs text-slate-500">Execution plan is loading…</div>}</div></div>}
       {!launched&&<>
       <label className="text-sm font-medium">OmniReach<Select value={bombId} onValueChange={v=>{setBombId(v);setTarget("");}}><SelectTrigger className="mt-2 w-full"><SelectValue placeholder="Select an OmniReach"/></SelectTrigger><SelectContent>{(previewOnly?notionBombs:localBombs).map(b=><SelectItem key={b.id} value={b.id}>{previewOnly?`${b.name}${b.cp?` · ${b.cp}`:""}`:`${b.name} · V${"version" in b ? b.version : ""}`}</SelectItem>)}</SelectContent></Select></label>
       {selected&&<>
         <label className="text-sm font-medium">Launch for<Select value={target} onValueChange={setTarget}><SelectTrigger className="mt-2 w-full"><SelectValue placeholder="Select a KeyPerson"/></SelectTrigger><SelectContent>{targets.map(t=><SelectItem key={t.id} value={t.id}>{t.name} · {t.role}</SelectItem>)}</SelectContent></Select></label>
         {person&&<>
-        <div className="rounded-xl bg-slate-50 p-4 text-sm"><b>{selected.goal}</b><p className="mt-1 text-xs text-slate-500">Edits apply only to this launch.</p>{unavailable.length>0&&<div className="mt-2 text-xs text-amber-700">Unavailable steps will be skipped: {[...new Set(unavailable)].join(", ")}</div>}</div>
+        <div className="rounded-xl bg-slate-50 p-4 text-sm"><b>{selected.goal}</b><p className="mt-1 text-xs text-slate-500">Edits apply only to this launch.</p>{unavailable.length>0&&<div className="mt-2 text-xs text-amber-700">No contact info for: {[...new Set(unavailable)].join(", ")}. These channels are disabled and will not create send tasks.</div>}</div>
         {selected.steps.map((s,index)=>{
           const copy=copies[s.id]||{};
-          const skipped=enforceSkip&&!!person&&!channelAvailable(person,s.channel);
-          return <div key={s.id} className={`rounded-xl bg-slate-50 p-4 ${skipped?"opacity-60":""}`}>
-            <div className="mb-3 flex items-center justify-between gap-2"><div className="flex items-center gap-2"><span className="grid size-7 place-items-center rounded-md bg-slate-50 text-xs font-bold text-violet-600">{index+1}</span><ChannelOption channel={s.channel}/></div><span className="text-xs text-slate-500">System will schedule this step{skipped?" · will skip":""}</span></div>
-            {s.channel==="Email"&&<div className="grid gap-2"><Input value={copy.subject||""} onChange={e=>updateCopy(s.id,{subject:e.target.value})} placeholder="Email subject"/><Textarea className="min-h-24" value={copy.content||""} onChange={e=>updateCopy(s.id,{content:e.target.value})} placeholder="Email body"/></div>}
-            {s.channel==="Phone"&&<div className="grid gap-2"><Input value={copy.callGoal||""} onChange={e=>updateCopy(s.id,{callGoal:e.target.value})} placeholder="Call goal"/><Textarea className="min-h-24" value={copy.script||""} onChange={e=>updateCopy(s.id,{script:e.target.value})} placeholder="Suggested script"/></div>}
-            {s.channel!=="Email"&&s.channel!=="Phone"&&<Textarea className="min-h-24" value={copy.content||""} onChange={e=>updateCopy(s.id,{content:e.target.value})} placeholder={`${s.channel} content`}/>}
+          const disabled=!!person&&!channelAvailable(person,s.channel);
+          return <div key={s.id} className={`rounded-xl bg-slate-50 p-4 ${disabled?"pointer-events-none opacity-50":""}`} aria-disabled={disabled||undefined}>
+            <div className="mb-3 flex items-center justify-between gap-2"><div className="flex items-center gap-2"><span className={`grid size-7 place-items-center rounded-md bg-slate-50 text-xs font-bold ${disabled?"text-slate-400":"text-violet-600"}`}>{index+1}</span><ChannelOption channel={s.channel}/></div><span className={`text-xs ${disabled?"font-medium text-slate-400":"text-slate-500"}`}>{disabled?"Unavailable · no contact info":"System will schedule this step"}</span></div>
+            {s.channel==="Email"&&<div className="grid gap-2"><Input value={copy.subject||""} onChange={e=>updateCopy(s.id,{subject:e.target.value})} placeholder="Email subject" disabled={disabled}/><Textarea className="min-h-24" value={copy.content||""} onChange={e=>updateCopy(s.id,{content:e.target.value})} placeholder="Email body" disabled={disabled}/></div>}
+            {s.channel==="Phone"&&<div className="grid gap-2"><Input value={copy.callGoal||""} onChange={e=>updateCopy(s.id,{callGoal:e.target.value})} placeholder="Call goal" disabled={disabled}/><Textarea className="min-h-24" value={copy.script||""} onChange={e=>updateCopy(s.id,{script:e.target.value})} placeholder="Suggested script" disabled={disabled}/></div>}
+            {s.channel!=="Email"&&s.channel!=="Phone"&&<Textarea className="min-h-24" value={copy.content||""} onChange={e=>updateCopy(s.id,{content:e.target.value})} placeholder={`${s.channel} content`} disabled={disabled}/>}
           </div>;
         })}
         </>}
       </>}
       </>}
     </div>
-    <DialogFooter>{launched?<Button onClick={()=>onOpenChange(false)}>Done</Button>:<><Button variant="outline" onClick={()=>onOpenChange(false)}>Cancel</Button><Button disabled={launching||!selected||!person||incomplete||(!previewOnly&&(!!c?.activeBombId||c?.status==="Bomb Running"))} onClick={()=>{if(!selected||!person)return;if(previewOnly){if(!customerId)return;void (async ()=>{setLaunching(true);try{const response=await fetch(`/api/brands/${customerId}/launch`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({bombId:selected.id,contactId:person.id,copies})});const payload=await response.json() as {message?:string;error?:string};if(!response.ok)throw new Error(payload.error||"Launch failed");setPreviewReady(true);toast.success(payload.message||"OmniReach launched");onLaunched?.();}catch(error){toast.error(error instanceof Error?error.message:"Launch failed");}finally{setLaunching(false);}})();return;}if(!c)return;const r=launchBomb(c.id,selected.id,person.id,copies);show(r);if(r.ok&&r.id)setLaunchedInstanceId(r.id);}}>Launch OmniReach</Button></>}</DialogFooter>
+    <DialogFooter>{launched?<Button onClick={()=>onOpenChange(false)}>Done</Button>:<><Button variant="outline" onClick={()=>onOpenChange(false)}>Cancel</Button><Button disabled={launching||!selected||!person||!hasReachableStep||incomplete||!!hasActiveOmniReach||(!previewOnly&&(!!c?.activeBombId||c?.status==="Bomb Running"))} onClick={()=>{if(!selected||!person)return;if(previewOnly){if(!customerId)return;void (async ()=>{setLaunching(true);try{const response=await fetch(`/api/brands/${customerId}/launch`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({bombId:selected.id,contactId:person.id,copies})});const payload=await response.json() as {message?:string;error?:string};if(!response.ok)throw new Error(payload.error||"Launch failed");const brandResponse=await fetch(`/api/brands/${customerId}`);const brandPayload=await brandResponse.json() as {brand?:BrandDetail;cps?:CurrentCpOption[];error?:string};if(!brandResponse.ok||!brandPayload.brand)throw new Error(brandPayload.error||"Launch succeeded but failed to load execution plan");const plan=toBombPlan(customerId,brandPayload.brand.tasks,brandPayload.brand.activities);const instanceId=`${selected.id}:${person.id}`;const instance=plan.bombInstances.find((item)=>item.id===instanceId)||plan.bombInstances.find((item)=>item.templateId===selected.id&&item.targetContactId===person.id)||plan.bombInstances[0];if(!instance)throw new Error("Launch succeeded but no execution plan steps were found");setLaunchPlan({instanceId:instance.id,state:planWorkspaceFromBombPlan(plan)});setPreviewReady(true);toast.success(payload.message||"OmniReach launched");onLaunched?.();}catch(error){toast.error(error instanceof Error?error.message:"Launch failed");}finally{setLaunching(false);}})();return;}if(!c)return;const r=launchBomb(c.id,selected.id,person.id,copies);show(r);if(r.ok&&r.id)setLaunchedInstanceId(r.id);}}>Launch OmniReach</Button></>}</DialogFooter>
   </DialogContent></Dialog>;
 }
 
-export function ReplyDialog({customerId,open,onOpenChange,contacts,onSend}:{customerId:string;open:boolean;onOpenChange:(v:boolean)=>void;contacts?:Contact[];onSend?:(contactId:string,channel:Channel,content:string)=>Promise<void>}){
+export function ReplyDialog({customerId,open,onOpenChange,contacts,onSend}:{customerId:string;open:boolean;onOpenChange:(v:boolean)=>void;contacts?:Contact[];onSend?:(contactId:string,channel:Channel,content:string,object?:string)=>Promise<void>}){
   const {state,sendHumanReply}=useWorkspace();
   const local=state.customers.find(x=>x.id===customerId);
   const people=contacts||local?.contacts||[];
   const [contactId,setContact]=useState(people[0]?.id||"");
   const [channel,setChannel]=useState<Channel>(people[0]?.preferredChannel||"Email");
+  const [object,setObject]=useState("");
   const [content,setContent]=useState("");
   const [saving,setSaving]=useState(false);
   useEffect(()=>{
     if(!open)return;
     setContact(people[0]?.id||"");
     setChannel(people[0]?.preferredChannel||"Email");
+    setObject("");
     setContent("");
   },[open,customerId]);
   const contact=people.find(x=>x.id===contactId)||people[0];
   const available=MESSAGE_CHANNELS.filter(ch=>contact&&channelAvailable(contact,ch));
   const effective=available.includes(channel)?channel:available[0];
-  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent><DialogHeader><DialogTitle>Send message</DialogTitle><DialogDescription>Choose Email, Phone, SMS, WhatsApp, or LinkedIn. An active OmniReach will stop before this human message is sent.</DialogDescription></DialogHeader><div className="grid grid-cols-2 gap-3"><Select value={contact?.id} onValueChange={setContact}><SelectTrigger className="w-full"><SelectValue/></SelectTrigger><SelectContent>{people.map(x=><SelectItem key={x.id} value={x.id}>{x.name}</SelectItem>)}</SelectContent></Select><Select value={effective} onValueChange={v=>setChannel(v as Channel)}><SelectTrigger className="w-full"><SelectValue/></SelectTrigger><SelectContent>{MESSAGE_CHANNELS.map(x=><SelectItem key={x} value={x} disabled={!contact||!channelAvailable(contact,x)}><ChannelOption channel={x}/></SelectItem>)}</SelectContent></Select></div><Textarea className="min-h-32" value={content} onChange={e=>setContent(e.target.value)} placeholder="Write a reply…"/><DialogFooter><Button variant="outline" onClick={()=>onOpenChange(false)}>Cancel</Button><Button disabled={!contact||!content.trim()||!effective||saving} onClick={()=>{void (async ()=>{if(!contact||!effective)return;if(onSend){setSaving(true);try{await onSend(contact.id,effective,content);toast.success("Message saved as pending");setContent("");onOpenChange(false);}catch(error){toast.error(error instanceof Error?error.message:"Send failed");}finally{setSaving(false);}return;}const r=sendHumanReply(customerId,contact.id,effective,content);show(r);if(r.ok){setContent("");onOpenChange(false);}})()}}><Send className="mr-2 size-4"/>Send</Button></DialogFooter></DialogContent></Dialog>;
+  const emailNeedsObject=effective==="Email";
+  const canSubmit=!!contact&&!!content.trim()&&!!effective&&(!emailNeedsObject||!!object.trim())&&!saving;
+  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent><DialogHeader><DialogTitle>Send message</DialogTitle><DialogDescription>Choose Email, Phone, SMS, WhatsApp, or LinkedIn. An active OmniReach will stop before this human message is sent.</DialogDescription></DialogHeader><div className="grid grid-cols-2 gap-3"><Select value={contact?.id} onValueChange={setContact}><SelectTrigger className="w-full"><SelectValue/></SelectTrigger><SelectContent>{people.map(x=><SelectItem key={x.id} value={x.id}>{x.name}</SelectItem>)}</SelectContent></Select><Select value={effective} onValueChange={v=>setChannel(v as Channel)}><SelectTrigger className="w-full"><SelectValue/></SelectTrigger><SelectContent>{MESSAGE_CHANNELS.map(x=><SelectItem key={x} value={x} disabled={!contact||!channelAvailable(contact,x)}><ChannelOption channel={x}/></SelectItem>)}</SelectContent></Select></div>{emailNeedsObject?<Input value={object} onChange={e=>setObject(e.target.value)} placeholder="Object (email subject)"/>:null}<Textarea className="min-h-32" value={content} onChange={e=>setContent(e.target.value)} placeholder="Write a reply…"/><DialogFooter><Button variant="outline" onClick={()=>onOpenChange(false)}>Cancel</Button><Button disabled={!canSubmit} onClick={()=>{void (async ()=>{if(!contact||!effective)return;if(emailNeedsObject&&!object.trim()){toast.error("Object is required for Email");return;}if(onSend){setSaving(true);try{await onSend(contact.id,effective,content,emailNeedsObject?object.trim():undefined);toast.success("Message saved as pending");setObject("");setContent("");onOpenChange(false);}catch(error){toast.error(error instanceof Error?error.message:"Send failed");}finally{setSaving(false);}return;}const r=sendHumanReply(customerId,contact.id,effective,emailNeedsObject&&object.trim()?`Subject: ${object.trim()}\n\n${content}`:content);show(r);if(r.ok){setObject("");setContent("");onOpenChange(false);}})()}}><Send className="mr-2 size-4"/>Send</Button></DialogFooter></DialogContent></Dialog>;
 }
 
 export function ChangeCPDialog({customerId,open,onOpenChange,currentCp,cps,onSave}:{customerId:string;open:boolean;onOpenChange:(v:boolean)=>void;currentCp?:string;cps?:CurrentCpOption[];onSave?:(currentCpId:string,evidence:string,note:string)=>Promise<void>}){

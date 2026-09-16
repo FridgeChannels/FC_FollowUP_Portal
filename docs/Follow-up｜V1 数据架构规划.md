@@ -262,6 +262,9 @@ Follow-up TaskDB 只负责按日排班与任务分配，记录由谁在哪个工
 | Priority | Select | 否 | P0 / P1 / P2；相同时间窗口内用于决定处理顺序 |
 | Channel | Select | 是 | Email / LinkedIn / SMS / WhatsApp / Phone |
 | Task Status | Status | 是 | 任务当前状态；选项见 6.3 |
+| Source Bomb | Relation | 否 | 关联生成该任务的 OmniReach（Follow-up BombDB）模板；非 OmniReach 任务可留空 |
+| OmniReach Run Id | Text | 否 | 同一次 Launch 生成的所有 Task 共享同一 UUID；用于区分停后再启的多次执行；Plan 按此字段分组 |
+| Call Review Status | Select | 否 | 仅 Phone Task；`Qualified` / `Unqualified`；Account Manager 评审通话后写入；Qualified 时 Task Status→Completed，Unqualified 时 Task Status→Pending、Owner→Beril、Priority→P0 |
 | Interactions | Relation | 否 | 关联实际产生的 Interaction |
 | Ended At | Date | 否 | 任务变为 Completed、Failed 或 Cancelled 时写入 |
 | Notes | Text | 否 | 记录失败、取消或渠道不可用等原因；备注内容必须使用中文 |
@@ -286,7 +289,16 @@ Cancelled
 - **Failed**：联系方式缺失、渠道不可用、发送失败或拨打失败等导致任务未成功执行；具体原因写入中文 Notes。
 - **Cancelled**：因客户回复、人工接管或计划调整而不再需要执行；具体原因写入中文 Notes。
 
-### 6.4 Creation Method
+### 6.4 Call Review Status
+
+仅 Phone 任务使用。Account Manager 在 Portal 审阅通话后写入：
+
+- **Qualified**：通话合格；同时将 Task Status 设为 Completed，并写入 Ended At。
+- **Unqualified**：通话不合格、需召回；同时将 Task Status 设为 Pending、Owner 改派给 Beril（`beril@fridgechannels.com`）、Priority 设为 P0。
+
+该字段写在 TaskDB（不是 ConversationDB），因为评审结论驱动的是任务闭环与召回改派，而不是单条消息内容。
+
+### 6.5 Creation Method
 
 ```
 Automated
@@ -298,7 +310,7 @@ Manual
 - **Automated**：任务由系统按照排班和渠道可用性自动创建。
 - **Manual**：任务由 Owner 或其他团队成员人工创建。
 
-### 6.5 Channel
+### 6.6 Channel
 
 ```
 Email
@@ -352,6 +364,7 @@ Phone
 | Sender | Text | 否 | 发件账号、发送号码、LinkedIn 账号或拨打人 |
 | Message Status | Select | 否 | Pending / Sent / Received / Failed；Phone 可留空 |
 | Reply Status | Select | 否 | 仅 Inbound：Needs Reply / Replied。表示这封客户来信是否已人工回复 |
+| Reply Due At | Date | 否 | 仅 Inbound 且 Needs Reply：最晚应人工回复的时间。由排班容量逻辑在入库时写入：默认 Interaction At + 24 小时（落到工作日）；若该日渠道 Daily Max 已满，则顺延到最近有剩余带宽的工作日。Phone 或不需要回复的记录留空 |
 | CP | Relation | 否 | 关联 FC3.0 CheckPoint DB，记录该条消息发送或收到当时客户所处的 CP。用于还原当时阶段，禁止用客户当前 CP 回填历史消息 |
 | Call Result | Select | 否 | Connected / No Answer / Voicemail / Declined / Invalid Number；仅 Phone 使用 |
 | Source URL | URL | 否 | 打开原始渠道会话或消息的链接 |
@@ -417,14 +430,14 @@ Conversation 的 `CP` 是 Relation，关联 **FC3.0 CheckPoint DB** 中的一条
 
 ### 7.7 Portal Brand activity
 
-Brand activity 按以下结构展示，Bomb 执行计划不是对话的唯一骨架：
+Brand activity 按以下结构展示，OmniReach 执行计划不是对话的唯一骨架：
 
 1. **CP 选项卡**（CP1 / CP2 / CP3）：客户生命周期阶段，仅可查看已到达或当前阶段。
 2. **渠道选项卡**（Email / LinkedIn / SMS / WhatsApp / Phone）。
-3. **联系人 / Thread**：同一联系人、同一渠道、同一场对话共用 Thread ID，完整展示 Bomb 发出、客户回复、人工跟进。
-4. **Bomb execution plan**：独立按钮打开，不塞进对话时间线当唯一结构。
+3. **联系人 / Thread**：同一联系人、同一渠道、同一场对话共用 Thread ID，完整展示 OmniReach 发出、客户回复、人工跟进。
+4. **OmniReach execution plan**：独立按钮打开，不塞进对话时间线当唯一结构。
 
-每条消息展示发给谁 / 谁回复、时间、人工或 Bomb。回复框挂在仍为 `Needs Reply` 的 Inbound 下。
+每条消息展示发给谁 / 谁回复、时间、人工或 OmniReach。回复框挂在仍为 `Needs Reply` 的 Inbound 下。
 
 ### 7.8 Call Result
 

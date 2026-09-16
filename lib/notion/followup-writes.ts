@@ -226,6 +226,7 @@ export async function cancelUnsentBombSiblingTasks(task: BrandTask) {
     item.id !== task.id &&
     item.sourceBombId === task.sourceBombId &&
     item.contactId === task.contactId &&
+    (!task.omniReachRunId || item.omniReachRunId === task.omniReachRunId) &&
     isOpenTaskStatus(item.status),
   );
   const endedAt = new Date().toISOString();
@@ -245,10 +246,12 @@ export async function cancelOpenBombTasks(input: {
   brandId: string;
   bombId: string;
   contactId: string;
+  omniReachRunId?: string | null;
 }) {
   const tasks = (await listFollowupTasks([input.contactId])).filter((task) =>
     task.brandId === input.brandId &&
     task.sourceBombId === input.bombId &&
+    (!input.omniReachRunId || task.omniReachRunId === input.omniReachRunId) &&
     isOpenTaskStatus(task.status),
   );
   const endedAt = new Date().toISOString();
@@ -261,6 +264,10 @@ export async function cancelOpenBombTasks(input: {
       }),
     ),
   );
+  await markFollowupClientEngaged(input.brandId, {
+    handlingMode: "Human",
+    note: "OmniReach 已中止，跟进方式改为 Human。",
+  });
   return tasks;
 }
 
@@ -271,6 +278,8 @@ export async function updateFollowupTask(
     ownerId?: string | null;
     notes?: string | null;
     endedAt?: string | null;
+    priority?: string | null;
+    callReviewStatus?: "Qualified" | "Unqualified" | null;
   },
 ) {
   const properties: Record<string, unknown> = {};
@@ -291,6 +300,14 @@ export async function updateFollowupTask(
   if (patch.endedAt !== undefined) {
     properties["Ended At"] = patch.endedAt ? { date: { start: patch.endedAt } } : { date: null };
   }
+  if (patch.priority !== undefined) {
+    properties.Priority = patch.priority ? { select: { name: patch.priority } } : { select: null };
+  }
+  if (patch.callReviewStatus !== undefined) {
+    properties["Call Review Status"] = patch.callReviewStatus
+      ? { select: { name: patch.callReviewStatus } }
+      : { select: null };
+  }
   if (!Object.keys(properties).length) throw new Error("No task fields to update");
   return updatePage(pageId, properties);
 }
@@ -306,6 +323,7 @@ export async function createFollowupTask(input: {
   creationMethod: string;
   templateId?: string;
   sourceBombId?: string;
+  omniReachRunId?: string;
   notes?: string;
 }) {
   const properties: Record<string, unknown> = {
@@ -326,6 +344,9 @@ export async function createFollowupTask(input: {
   }
   if (input.sourceBombId) {
     properties["Source Bomb"] = { relation: [{ id: input.sourceBombId }] };
+  }
+  if (input.omniReachRunId) {
+    properties["OmniReach Run Id"] = { rich_text: richText(input.omniReachRunId) };
   }
   return createPage(getFollowupTaskDbId(), properties);
 }
@@ -383,6 +404,7 @@ export async function createHumanOutbound(input: {
   contactName: string;
   channel: string;
   content: string;
+  subject?: string | null;
   sender?: string | null;
   existingTaskId?: string;
   threadId?: string | null;
@@ -393,6 +415,9 @@ export async function createHumanOutbound(input: {
   const threadActivities = isReply ? await listFollowupConversations([input.contactId]) : [];
   const ownerId = input.brandOwnerId;
   if (!ownerId) throw new Error("Owner is required to create a follow-up task");
+  if (input.channel === "Email" && !input.subject?.trim()) {
+    throw new Error("object (email subject) is required for Email");
+  }
   const created = await createFollowupTask({
     brandName: input.brandName,
     contactId: input.contactId,
@@ -420,6 +445,7 @@ export async function createHumanOutbound(input: {
     contactName: input.contactName,
     channel: input.channel,
     content: input.content,
+    subject: input.subject,
     sender: input.sender,
     taskId,
     threadId: input.threadId,

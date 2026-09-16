@@ -210,7 +210,14 @@ async function mapTaskPage(page: NotionPage, caches: TaskCaches): Promise<BrandT
     conversationIds: relationIds(properties.Conversations),
     templateId: firstRelationId(properties.Template) || null,
     sourceBombId: firstRelationId(properties["Source Bomb"]) || null,
+    omniReachRunId: propertyText(properties["OmniReach Run Id"]) || null,
+    callReviewStatus: asCallReviewStatus(propertyText(properties["Call Review Status"])),
   };
+}
+
+function asCallReviewStatus(value?: string | null): BrandTask["callReviewStatus"] {
+  if (value === "Qualified" || value === "Unqualified") return value;
+  return null;
 }
 
 function sortTasks(tasks: BrandTask[]) {

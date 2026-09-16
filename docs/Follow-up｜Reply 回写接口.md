@@ -1,9 +1,13 @@
 # Reply 回写
 
-渠道适配器把客户回复写入 `FC3.0-Follow-up-ConversationDB`。不要把 Gmail 等原始 webhook 直接交给 Portal。
+渠道适配器把**已发出 Follow-up Task 上的客户回复**写入 `FC3.0-Follow-up-ConversationDB`。不要把 Gmail 等原始 webhook 直接交给 Portal。
+
+客户先联系、无对应已发任务 → 使用 [`POST /api/inbound`](./Follow-up｜Inbound%20回写接口.md)。
+
+**Notion 前置：** ConversationDB 需有 Date 属性 `Reply Due At`（详见 Inbound 文档）。入库 Needs Reply 时会自动写入最晚应回复时间。
 
 ```
-POST /api/replies
+POST https://followup-portal.fridgechannels.com/api/replies
 Authorization: Bearer <REPLY_INGEST_TOKEN>
 ```
 
@@ -49,8 +53,9 @@ Authorization: Bearer <REPLY_INGEST_TOKEN>
 写入后：
 
 - `Direction = Inbound`，`Message Status = Received`，`Reply Status = Needs Reply`
+- 写入 `Reply Due At`（最晚应回复时间）：默认收到后 24 小时内的工作日时刻；若当日渠道 Daily Max 已满，顺延到最近有剩余容量的工作日
 - 挂到该 Outbound 的 Task / Thread
-- 同 Bomb 未发出渠道任务改为 `Cancelled`
+- 同 OmniReach 未发出渠道任务改为 `Cancelled`
 - 客户 `Follow-up Status = In Progress`，`Handling Mode = Human`
 
 新建 `201`，同一 `messageId` 再提交 `200` + `duplicate: true`。

@@ -11,10 +11,12 @@ import {
 } from "./client";
 import { getFollowupConversationDbId } from "./config";
 import { listFollowupConversations } from "./conversations";
+import { REPLY_DUE_PROPERTY } from "./reply-due";
 
 export type BrandReplySignal = {
   preview: string;
-  updatedAt: string | null;
+  /** Reply Due At (fallback Interaction At for legacy rows). */
+  dueAt: string | null;
 };
 
 export type BrandInteractionSignal = Pick<
@@ -35,9 +37,10 @@ function conversationPreview(page: NotionPage) {
   );
 }
 
-function conversationTime(page: NotionPage) {
+function conversationDueAt(page: NotionPage) {
   const properties = page.properties || {};
   return (
+    propertyDate(properties[REPLY_DUE_PROPERTY]) ||
     propertyDate(properties["Interaction At"]) ||
     page.created_time ||
     null
@@ -78,13 +81,15 @@ export async function listBrandReplySignals() {
     const brandId = await resolveBrandId(contactId, contactCache);
     if (!brandId) continue;
 
-    const updatedAt = conversationTime(page);
+    const dueAt = conversationDueAt(page);
     const existing = signals.get(brandId);
-    if (existing && (existing.updatedAt || "") >= (updatedAt || "")) continue;
+    // Prefer the earliest due (most urgent) for the brand list badge.
+    if (existing?.dueAt && dueAt && existing.dueAt <= dueAt) continue;
+    if (existing?.dueAt && !dueAt) continue;
 
     signals.set(brandId, {
       preview: conversationPreview(page),
-      updatedAt,
+      dueAt,
     });
   }
 
@@ -109,6 +114,7 @@ export function attachBrandReplySignals(
         ...brand,
         needsReply: false,
         replyPreview: null,
+        replyDueAt: null,
         replyUpdatedAt: null,
       };
     }
@@ -116,7 +122,8 @@ export function attachBrandReplySignals(
       ...brand,
       needsReply: true,
       replyPreview: signal.preview,
-      replyUpdatedAt: signal.updatedAt,
+      replyDueAt: signal.dueAt,
+      replyUpdatedAt: signal.dueAt,
     };
   });
 }

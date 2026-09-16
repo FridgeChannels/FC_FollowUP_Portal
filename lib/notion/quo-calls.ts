@@ -110,6 +110,9 @@ export async function upsertQuoCallActivity(input: {
   } as Record<string, unknown>;
 
   if (existing) {
+    if (!existing.taskId && input.task.id) {
+      properties["Follow-up Task"] = { relation: [{ id: input.task.id }] };
+    }
     await updatePage(existing.id, properties);
   } else {
     const checkpoint = await brandCheckpoint(input.task);

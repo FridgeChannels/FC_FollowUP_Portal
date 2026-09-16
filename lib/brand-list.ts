@@ -185,7 +185,10 @@ export type BrandListItem = {
   ownerEmail: string | null;
   needsReply?: boolean;
   replyPreview?: string | null;
+  /** @deprecated Prefer replyDueAt — kept as alias for list cache merges. */
   replyUpdatedAt?: string | null;
+  /** Latest time this Needs Reply inbound should be answered (Reply Due At). */
+  replyDueAt?: string | null;
 };
 
 export type BrandContact = {
@@ -226,8 +229,10 @@ export type BrandTask = {
   conversationIds: string[];
   templateId: string | null;
   sourceBombId: string | null;
+  omniReachRunId?: string | null;
   sourceBombName?: string | null;
   sourceBombCp?: string | null;
+  callReviewStatus?: "Qualified" | "Unqualified" | null;
   contactPhone?: string | null;
   inboxStatus?: "Needs Reply" | null;
   preview?: string | null;
@@ -255,6 +260,7 @@ export type BrandActivity = {
   cpAtInteraction: "CP1" | "CP2" | "CP3" | null;
   createdAt: string | null;
   recordedAt?: string | null;
+  replyDueAt?: string | null;
   quo?: QuoCallData | null;
 };
 
@@ -267,6 +273,7 @@ export type BrandDetail = BrandListItem & {
   currentCpDefinition: string | null;
   productDescription: string | null;
   matchedCategory: string | null;
+  followupExhibition: string | null;
   contacts: BrandContact[];
   tasks: BrandTask[];
   activities: BrandActivity[];

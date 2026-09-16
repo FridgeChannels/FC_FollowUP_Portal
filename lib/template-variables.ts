@@ -11,6 +11,7 @@ export const templateVariables: TemplateVariable[] = [
   { key: "company_name", label: "Company name", category: "Company", description: "ClientDB → Company Name" },
   { key: "product_description", label: "Product description", category: "Company", description: "ClientDB → Product Description" },
   { key: "Matched Category", label: "Matched category", category: "Company", description: "ClientDB → Matched Category" },
+  { key: "Follow-up-Exhibition", label: "Follow-up Exhibition", category: "Company", description: "Follow-up ClientDB → Follow-up Exhibition" },
   { key: "contact_name", label: "Contact name", category: "Contact", description: "KeyPersonDB → name" },
   { key: "contact_title", label: "Title", category: "Contact", description: "KeyPersonDB → Title" },
   { key: "contact_role", label: "Contact role", category: "Contact", description: "KeyPersonDB → Contact Role" },
@@ -24,6 +25,7 @@ export type TemplateVariableSource = {
   companyName?: string | null;
   productDescription?: string | null;
   matchedCategory?: string | null;
+  followupExhibition?: string | null;
   contactName?: string | null;
   contactTitle?: string | null;
   contactRole?: string | null;
@@ -71,6 +73,7 @@ export function buildTemplateVariableContext(source: TemplateVariableSource): Te
     company_name: source.companyName?.trim() || "",
     product_description: source.productDescription?.trim() || "",
     "Matched Category": source.matchedCategory?.trim() || "",
+    "Follow-up-Exhibition": source.followupExhibition?.trim() || "",
   };
   const hasContact = source.hasContact === true || [
     source.contactName,

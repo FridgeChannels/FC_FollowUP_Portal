@@ -516,7 +516,8 @@ function mergeBrandListItem(current: BrandListItem, next: BrandListItem): BrandL
     currentCpId: next.currentCpId,
     needsReply: next.needsReply ?? current.needsReply,
     replyPreview: next.replyPreview ?? current.replyPreview,
-    replyUpdatedAt: next.replyUpdatedAt ?? current.replyUpdatedAt,
+    replyDueAt: next.replyDueAt ?? current.replyDueAt,
+    replyUpdatedAt: next.replyDueAt ?? next.replyUpdatedAt ?? current.replyDueAt ?? current.replyUpdatedAt,
   };
 }
 
@@ -638,10 +639,12 @@ export function BrandsPage() {
         )
         .sort((a, b) => {
           const replyRank = (item: BrandListItem) => (item.needsReply ? 1 : 0);
-          const aTime = a.replyUpdatedAt || a.lastInteractionAt || "";
-          const bTime = b.replyUpdatedAt || b.lastInteractionAt || "";
+          const aTime = a.replyDueAt || a.replyUpdatedAt || a.lastInteractionAt || "";
+          const bTime = b.replyDueAt || b.replyUpdatedAt || b.lastInteractionAt || "";
           return (
             replyRank(b) - replyRank(a) ||
+            // Among Reply needed: earliest due first
+            (a.needsReply && b.needsReply ? aTime.localeCompare(bTime) : 0) ||
             bTime.localeCompare(aTime) ||
             a.name.localeCompare(b.name)
           );
@@ -897,7 +900,9 @@ export function BrandsPage() {
                             {c.needsReply ? (
                               <div className="mt-0.5 truncate text-xs font-medium text-rose-700">
                                 Reply needed
-                                {c.replyUpdatedAt ? ` · ${dateOnly(c.replyUpdatedAt)}` : ""}
+                                {(c.replyDueAt || c.replyUpdatedAt)
+                                  ? ` · ${dateOnly(c.replyDueAt || c.replyUpdatedAt || "")}`
+                                  : ""}
                               </div>
                             ) : null}
                           </div>
