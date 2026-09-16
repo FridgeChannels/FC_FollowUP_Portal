@@ -1,4 +1,4 @@
-import type { BrandActivity, BrandListItem } from "../brand-list";
+import { lastReplyAtFromActivities, type BrandActivity, type BrandListItem } from "../brand-list";
 import {
   firstRelationId,
   propertyDate,
@@ -25,6 +25,7 @@ export type BrandInteractionSignal = Pick<
   | "lastInteractionDirection"
   | "lastInteractionStatus"
   | "lastInteractionCallResult"
+  | "lastReplyAt"
 >;
 
 function conversationPreview(page: NotionPage) {
@@ -142,13 +143,16 @@ export async function listBrandInteractionSignals(pages: NotionPage[]) {
       const contactIds = relationIds(page.properties?.["Follow-up Contacts"]);
       if (!contactIds.length) return;
       try {
-        const latest = (await listFollowupConversations(contactIds)).find(isCompletedInteraction);
-        if (!latest) return;
+        const conversations = await listFollowupConversations(contactIds);
+        const latest = conversations.find(isCompletedInteraction);
+        const lastReplyAt = lastReplyAtFromActivities(conversations);
+        if (!latest && !lastReplyAt) return;
         signals.set(page.id, {
-          lastInteractionChannel: latest.channel,
-          lastInteractionDirection: latest.direction,
-          lastInteractionStatus: latest.status,
-          lastInteractionCallResult: latest.callResult,
+          lastInteractionChannel: latest?.channel ?? null,
+          lastInteractionDirection: latest?.direction ?? null,
+          lastInteractionStatus: latest?.status ?? null,
+          lastInteractionCallResult: latest?.callResult ?? null,
+          lastReplyAt,
         });
       } catch {
         // The date rollup remains available if conversation metadata cannot be loaded.
@@ -165,8 +169,13 @@ export function attachBrandInteractionSignals(
   const byKey = new Map(
     [...signals.entries()].map(([id, signal]) => [pageKey(id), signal]),
   );
-  return brands.map((brand) => ({
-    ...brand,
-    ...(byKey.get(pageKey(brand.id)) || {}),
-  }));
+  return brands.map((brand) => {
+    const signal = byKey.get(pageKey(brand.id));
+    if (!signal) return brand;
+    return {
+      ...brand,
+      ...signal,
+      lastReplyAt: signal.lastReplyAt || brand.lastReplyAt,
+    };
+  });
 }

@@ -13,6 +13,11 @@ type NotionRollup = {
   array?: Array<{ type?: string; date?: NotionDate; title?: NotionRichText[] }>;
 };
 
+type NotionFormula = {
+  type?: string;
+  date?: NotionDate;
+};
+
 export type NotionProperty = {
   type?: string;
   title?: NotionRichText[];
@@ -25,6 +30,7 @@ export type NotionProperty = {
   url?: string | null;
   phone_number?: string | null;
   date?: NotionDate;
+  formula?: NotionFormula | null;
   relation?: Array<{ id: string }>;
   rollup?: NotionRollup;
   created_time?: string;
@@ -118,8 +124,19 @@ export function rollupDate(property?: NotionProperty) {
   const rollup = property?.rollup;
   if (!rollup) return null;
   if (rollup.date?.start) return rollup.date.start;
-  const nested = rollup.array?.find((item) => item.date?.start)?.date?.start;
-  return nested || null;
+  const dates = (rollup.array || [])
+    .map((item) => item.date?.start)
+    .filter((value): value is string => !!value)
+    .sort();
+  return dates.at(-1) || null;
+}
+
+export function notionDate(property?: NotionProperty) {
+  if (!property) return null;
+  if (property.type === "date") return property.date?.start || null;
+  if (property.type === "formula") return property.formula?.date?.start || null;
+  if (property.type === "rollup") return rollupDate(property);
+  return propertyDate(property);
 }
 
 export async function queryDatabasePages(

@@ -2,6 +2,7 @@ import type { UpdateBombInput } from "@/lib/bomb-list";
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { retrieveFollowupBomb, updateFollowupBomb, listFollowupScenarios } from "@/lib/notion/bombs";
 import { listApplicableCheckpoints } from "@/lib/notion/cps";
+import { cancelScheduledBombTasks } from "@/lib/notion/followup-writes";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -40,8 +41,14 @@ export async function PATCH(request: Request, { params }: Params) {
     }
     const { id } = await params;
     const body = (await request.json()) as UpdateBombInput;
+    const current = await retrieveFollowupBomb(id);
     const bomb = await updateFollowupBomb(id, body);
-    return Response.json({ bomb });
+    const stopped =
+      current.status === "Active" &&
+      body.status !== undefined &&
+      body.status !== "Active";
+    const cancelledTasks = stopped ? await cancelScheduledBombTasks(id) : [];
+    return Response.json({ bomb, cancelledTasks: cancelledTasks.length });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
     const status = message.includes("404") || message.includes("object_not_found") ? 404 : 400;

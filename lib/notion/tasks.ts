@@ -252,6 +252,16 @@ export async function listFollowupTasks(contactIds: string[]): Promise<BrandTask
   return sortTasks(tasks);
 }
 
+export async function listFollowupTasksByBomb(bombId: string): Promise<BrandTask[]> {
+  const pages = await queryTaskPages({
+    property: "Source Bomb",
+    relation: { contains: bombId },
+  });
+  const caches = emptyCaches();
+  const tasks = await Promise.all(pages.map((page) => mapTaskPage(page, caches)));
+  return sortTasks(tasks);
+}
+
 export async function listFollowupTasksForViewer(query: TaskListQuery = {}) {
   let pages: NotionPage[] = [];
   try {
