@@ -260,6 +260,47 @@ function toBombPlan(customerId: string, tasks: BrandTask[], activities: BrandAct
   return { bombInstances, actions, activityInstanceIds };
 }
 
+function launchPlanFromApiSteps(input: {
+  customerId: string;
+  bombId: string;
+  bombName: string;
+  contactId: string;
+  omniReachRunId: string;
+  steps: Array<{
+    taskId: string;
+    channel: string;
+    scheduledAt: string;
+    templateId?: string;
+    content: string;
+  }>;
+}) {
+  const instanceId = `run:${input.omniReachRunId}`;
+  const startedAt = input.steps.map((step) => step.scheduledAt).filter(Boolean).sort()[0] || "";
+  const bombInstances: BombInstance[] = [{
+    id: instanceId,
+    customerId: input.customerId,
+    templateId: input.bombId,
+    templateName: input.bombName,
+    version: 1,
+    goal: "",
+    targetContactId: input.contactId,
+    status: "Running",
+    startedAt,
+  }];
+  const actions: ScheduledAction[] = input.steps.map((step) => ({
+    id: step.taskId,
+    bombInstanceId: instanceId,
+    customerId: input.customerId,
+    stepId: step.templateId || step.taskId,
+    channel: (asActivityChannel(step.channel) || "Email") as Channel,
+    plannedDate: step.scheduledAt,
+    actualDate: step.scheduledAt,
+    status: "Scheduled",
+    content: step.content,
+  }));
+  return { instanceId, state: planWorkspaceFromBombPlan({ bombInstances, actions }) };
+}
+
 function planWorkspaceFromBombPlan(
   plan: { bombInstances: BombInstance[]; actions: ScheduledAction[] },
 ): WorkspaceState {
@@ -353,7 +394,6 @@ function toInteractions(
     taskId: item.taskId || undefined,
     replyStatus: item.replyStatus || undefined,
     cp: (item.threadId ? threadInboundCp.get(item.threadId) : undefined) || cp || (item.threadId ? threadCp.get(item.threadId) : undefined) || (item.taskId ? taskCp.get(item.taskId) : undefined),
-    messageStatus: item.status || undefined,
     taskStatus: (item.taskId ? tasksById.get(item.taskId)?.status : undefined) || undefined,
     scheduledAt: (item.taskId ? tasksById.get(item.taskId)?.scheduledAt : undefined) || undefined,
     callResult: item.callResult || undefined,
@@ -632,22 +672,20 @@ export function BrandDetail({customerId}:{customerId:string}){
     const payload=await response.json() as {error?:string};
     if(!response.ok)throw new Error(payload.error||"Unable to save call review");
     await refreshBrandAndActivities();
-  }:undefined} onCancelBomb={async instance=>{if(!notionBacked){const result=cancelBomb(c.id,instance.id);if(!result.ok)throw new Error(result.message);toast.success(result.message);return;}const response=await fetch(`/api/brands/${c.id}/bombs/${instance.templateId}/cancel`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId:instance.targetContactId,omniReachRunId:instance.id.startsWith("run:")?instance.id.slice(4):undefined})});const payload=await response.json() as {cancelledTaskIds?:string[];error?:string};if(!response.ok)throw new Error(payload.error||"Unable to stop OmniReach");await refreshBrandAndActivities();toast.success(`${payload.cancelledTaskIds?.length||0} remaining task${payload.cancelledTaskIds?.length===1?"":"s"} cancelled`);}} onSend={notionBacked?async (contactId,channel,content,taskId,threadId)=>{
+  }:undefined} onCancelBomb={async instance=>{if(!notionBacked){const result=cancelBomb(c.id,instance.id);if(!result.ok)throw new Error(result.message);toast.success(result.message);return;}const response=await fetch(`/api/brands/${c.id}/bombs/${instance.templateId}/cancel`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId:instance.targetContactId,omniReachRunId:instance.id.startsWith("run:")?instance.id.slice(4):undefined})});const payload=await response.json() as {cancelledTaskIds?:string[];error?:string};if(!response.ok)throw new Error(payload.error||"Unable to stop OmniReach");const cancelled=new Set(payload.cancelledTaskIds||[]);if(cancelled.size){setRemote(prev=>prev?{...prev,tasks:prev.tasks.map(task=>cancelled.has(task.id)?{...task,status:"Cancelled"}:task),handlingMode:prev.handlingMode==="Human"?prev.handlingMode:"Human"}:prev);}toast.success(`${payload.cancelledTaskIds?.length||0} remaining task${payload.cancelledTaskIds?.length===1?"":"s"} cancelled`);void Promise.all([refreshRemote(),fetchActivitiesPage(null,"replace")]);}} onSend={notionBacked?async (contactId,channel,content,taskId,threadId)=>{
     const response=await fetch(`/api/brands/${c.id}/messages`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId,channel,content,taskId,threadId})});
-    const payload=await response.json() as {brand?:BrandDetail;cps?:CurrentCpOption[];error?:string};
-    if(!response.ok||!payload.brand)throw new Error(payload.error||"Send failed");
-    applyRemote(payload.brand,payload.cps||remoteCps);
-    await fetchActivitiesPage(null,"replace");
+    const payload=await response.json() as {error?:string};
+    if(!response.ok)throw new Error(payload.error||"Send failed");
+    await Promise.all([refreshRemote(),fetchActivitiesPage(null,"replace")]);
   }:undefined}/>
   {notionBacked&&activitiesHasMore&&activitiesCursor&&(remote?.activities.length||0)>=ACTIVITY_PAGE_SIZE?<div className="border-t border-slate-100 p-3"><Button variant="outline" size="sm" className="w-full" disabled={activitiesLoadingMore||activitiesLoading} onClick={loadMoreActivities}>{activitiesLoadingMore?<span className="inline-flex items-center gap-2"><Spinner className="size-3.5"/>Loading…</span>:"Load more activity"}</Button></div>:null}
   </div></section>
     {(c.cp==="CP3"||partnershipContext)&&partnershipContext&&<aside><section className="rounded-2xl bg-emerald-50 p-5"><div className="text-xs font-semibold tracking-wide text-emerald-700">CP3 · Partnership context</div><h2 className="mt-2 font-bold text-emerald-950">{partnershipContext.headline}</h2><p className="mt-2 text-sm leading-6 text-emerald-900">{partnershipContext.summary}</p><div className="mt-4 space-y-2">{partnershipContext.signals.map(signal=><div key={signal} className="rounded-lg bg-white/70 px-3 py-2 text-xs leading-5 text-slate-700">{signal}</div>)}</div><div className="mt-3 text-[11px] text-emerald-700">Updated {dateOnly(partnershipContext.updatedAt)}</div></section></aside>}</div>
   <LaunchBombDialog customerId={c.id} open={launch} onOpenChange={setLaunch} contacts={notionBacked?c.contacts:undefined} currentCp={notionBacked&&remote?remote.currentCp:undefined} companyName={c.name} productDescription={notionBacked?remote?.productDescription:undefined} matchedCategory={notionBacked?remote?.matchedCategory:undefined} followupExhibition={notionBacked?remote?.followupExhibition:undefined} previewOnly={notionBacked} hasActiveOmniReach={hasActiveOmniReach} onLaunched={notionBacked?()=>{void refreshBrandAndActivities()}:undefined}/><ReplyDialog customerId={c.id} open={reply} onOpenChange={setReply} contacts={notionBacked?c.contacts:undefined} onSend={notionBacked?async (contactId,channel,content,object)=>{
     const response=await fetch(`/api/brands/${c.id}/messages`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId,channel,content,object})});
-    const payload=await response.json() as {brand?:BrandDetail;cps?:CurrentCpOption[];error?:string};
-    if(!response.ok||!payload.brand)throw new Error(payload.error||"Send failed");
-    applyRemote(payload.brand,payload.cps||remoteCps);
-    await fetchActivitiesPage(null,"replace");
+    const payload=await response.json() as {error?:string};
+    if(!response.ok)throw new Error(payload.error||"Send failed");
+    await Promise.all([refreshRemote(),fetchActivitiesPage(null,"replace")]);
   }:undefined}/><ChangeCPDialog customerId={c.id} open={cp} onOpenChange={setCP} currentCp={notionBacked&&remote?remote.currentCp:undefined} cps={notionBacked?remoteCps:undefined} onSave={notionBacked?async (currentCpId,evidence,note)=>{await patchBrand({currentCpId,evidence,note});}:undefined}/><ContactDialog customerId={c.id} open={contact} onOpenChange={setContact}/></div>;
 }
 
@@ -840,7 +878,7 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
       </>}
       </>}
     </div>
-    <DialogFooter>{launched?<Button onClick={()=>onOpenChange(false)}>Done</Button>:<><Button variant="outline" onClick={()=>onOpenChange(false)}>Cancel</Button><Button disabled={launching||!selected||!person||!hasReachableStep||incomplete||!!hasActiveOmniReach||(!previewOnly&&(!!c?.activeBombId||c?.status==="Bomb Running"))} onClick={()=>{if(!selected||!person)return;if(previewOnly){if(!customerId)return;void (async ()=>{setLaunching(true);try{const response=await fetch(`/api/brands/${customerId}/launch`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({bombId:selected.id,contactId:person.id,copies})});const payload=await response.json() as {message?:string;error?:string};if(!response.ok)throw new Error(payload.error||"Launch failed");const brandResponse=await fetch(`/api/brands/${customerId}`);const brandPayload=await brandResponse.json() as {brand?:BrandDetail;cps?:CurrentCpOption[];error?:string};if(!brandResponse.ok||!brandPayload.brand)throw new Error(brandPayload.error||"Launch succeeded but failed to load execution plan");const activitiesResponse=await fetch(`/api/brands/${customerId}/activities?limit=100`);const activitiesPayload=await activitiesResponse.json() as {activities?:BrandActivity[];error?:string};if(activitiesResponse.ok&&activitiesPayload.activities)brandPayload.brand.activities=activitiesPayload.activities;const plan=toBombPlan(customerId,brandPayload.brand.tasks,brandPayload.brand.activities);const instanceId=`${selected.id}:${person.id}`;const instance=plan.bombInstances.find((item)=>item.id===instanceId)||plan.bombInstances.find((item)=>item.templateId===selected.id&&item.targetContactId===person.id)||plan.bombInstances[0];if(!instance)throw new Error("Launch succeeded but no execution plan steps were found");setLaunchPlan({instanceId:instance.id,state:planWorkspaceFromBombPlan(plan)});setPreviewReady(true);toast.success(payload.message||"OmniReach launched");onLaunched?.();}catch(error){toast.error(error instanceof Error?error.message:"Launch failed");}finally{setLaunching(false);}})();return;}if(!c)return;const r=launchBomb(c.id,selected.id,person.id,copies);show(r);if(r.ok&&r.id)setLaunchedInstanceId(r.id);}}>Launch OmniReach</Button></>}</DialogFooter>
+    <DialogFooter>{launched?<Button onClick={()=>onOpenChange(false)}>Done</Button>:<><Button variant="outline" onClick={()=>onOpenChange(false)}>Cancel</Button><Button disabled={launching||!selected||!person||!hasReachableStep||incomplete||!!hasActiveOmniReach||(!previewOnly&&(!!c?.activeBombId||c?.status==="Bomb Running"))} onClick={()=>{if(!selected||!person)return;if(previewOnly){if(!customerId)return;void (async ()=>{setLaunching(true);try{const response=await fetch(`/api/brands/${customerId}/launch`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({bombId:selected.id,contactId:person.id,copies})});const payload=await response.json() as {message?:string;error?:string;omniReachRunId?:string;bombId?:string;bombName?:string;contactId?:string;steps?:Array<{taskId:string;channel:string;scheduledAt:string;templateId?:string;content:string}>};if(!response.ok)throw new Error(payload.error||"Launch failed");if(!payload.omniReachRunId||!payload.steps?.length)throw new Error("Launch succeeded but no execution plan steps were returned");const plan=launchPlanFromApiSteps({customerId,bombId:payload.bombId||selected.id,bombName:payload.bombName||selected.name,contactId:payload.contactId||person.id,omniReachRunId:payload.omniReachRunId,steps:payload.steps});setLaunchPlan(plan);setPreviewReady(true);toast.success(payload.message||"OmniReach launched");onLaunched?.();}catch(error){toast.error(error instanceof Error?error.message:"Launch failed");}finally{setLaunching(false);}})();return;}if(!c)return;const r=launchBomb(c.id,selected.id,person.id,copies);show(r);if(r.ok&&r.id)setLaunchedInstanceId(r.id);}}>Launch OmniReach</Button></>}</DialogFooter>
   </DialogContent></Dialog>;
 }
 

@@ -48,7 +48,6 @@ export async function GET(request: Request) {
       taskId: task?.id || outbound?.taskId || null,
       taskChannel: task?.channel || outbound?.channel || null,
       taskStatus: task?.status || null,
-      messageStatus: outbound?.status || null,
       threadId: outbound?.threadId || threadId || null,
       outboundMessageId: outbound?.messageId || null,
       sourceBombName: task?.sourceBombName || null,

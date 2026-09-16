@@ -260,6 +260,10 @@ export function BombsPage() {
                           ),
                         )}
                       </div>
+                    ) : b.templateCount > 0 ? (
+                      <span className="text-xs text-slate-500">
+                        {b.templateCount} template{b.templateCount === 1 ? "" : "s"}
+                      </span>
                     ) : (
                       <span className="text-xs text-slate-400">No templates</span>
                     )}

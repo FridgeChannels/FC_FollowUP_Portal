@@ -159,14 +159,14 @@ curl -sS -X POST "http://127.0.0.1:5173/api/inbound" \
   }'
 ```
 
-`content` 可省略，空则写入 `Inbound call`。Phone 不写 `Message Status` / `Reply Status`。
+`content` 可省略，空则写入 `Inbound call`。Phone 不写 `Reply Status`。
 
 ---
 
 ## 写入后行为
 
 - `Direction = Inbound`
-- 非 Phone：`Message Status = Received`，`Reply Status = Needs Reply`
+- 非 Phone：`Reply Status = Needs Reply`
 - 非 Phone：写入 `Reply Due At`（默认 Interaction At + 24h 工作日；渠道容量满则顺延）
 - `Follow-up Task` **留空**
 - 客户 `Follow-up Status = In Progress`（若尚不是），`Handling Mode = Human`

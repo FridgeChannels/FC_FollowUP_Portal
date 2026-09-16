@@ -42,7 +42,8 @@ function mapConversation(
     taskId: firstRelationId(properties["Follow-up Task"]) || null,
     channel: propertyText(properties.Channel) || null,
     direction: asDirection(propertyText(properties.Direction)),
-    status: propertyText(properties["Message Status"]) || null,
+    // Send state lives on Follow-up Task Status; ConversationDB no longer has Message Status.
+    status: null,
     subject,
     content: propertyText(properties.Content) || titleFromProperties(properties),
     sender: propertyText(properties.Sender) || null,

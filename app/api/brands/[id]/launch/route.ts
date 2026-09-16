@@ -13,7 +13,8 @@ export async function POST(request: Request, { params }: Params) {
       return Response.json({ error: "Sign in required" }, { status: 401 });
     }
     const { id } = await params;
-    const brand = await mapFollowupClientPage(await retrievePage(id));
+    const page = await retrievePage(id);
+    const brand = await mapFollowupClientPage(page);
     if (!canWriteBrand(viewer, brand)) {
       return Response.json({ error: "You do not have access to this brand" }, { status: 403 });
     }
@@ -31,6 +32,8 @@ export async function POST(request: Request, { params }: Params) {
       contactId: body.contactId,
       copies: body.copies,
       sender: viewer.email,
+      page,
+      brand,
     });
     return Response.json(result);
   } catch (error) {

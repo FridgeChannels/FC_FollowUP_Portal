@@ -1,7 +1,8 @@
 import { canWriteBrand } from "@/lib/brand-access";
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
-import { retrievePage } from "@/lib/notion/client";
-import { mapFollowupClientDetail, mapFollowupClientPage } from "@/lib/notion/followup-clients";
+import { firstRelationId, relationIds, retrievePage, titleFromProperties } from "@/lib/notion/client";
+import { listFollowupContactIds } from "@/lib/notion/contacts";
+import { mapFollowupClientPage } from "@/lib/notion/followup-clients";
 import { createHumanOutbound, markFollowupClientEngaged } from "@/lib/notion/followup-writes";
 import { interactionCpCode } from "@/lib/outreach-domain";
 
@@ -23,26 +24,45 @@ export async function POST(request: Request, { params }: Params) {
       taskId?: string;
       threadId?: string;
     };
+    const contactId = body.contactId?.trim() || "";
+    if (!contactId) {
+      return Response.json({ error: "contactId is required" }, { status: 400 });
+    }
+
     const page = await retrievePage(id);
     const brand = await mapFollowupClientPage(page);
     if (!canWriteBrand(viewer, brand)) {
       return Response.json({ error: "You do not have access to this brand" }, { status: 403 });
     }
-    const detail = await mapFollowupClientDetail(page);
-    const contact = detail.contacts.find((item) => item.id === body.contactId);
-    if (!contact) {
+
+    const relatedContactIds = relationIds(page.properties?.["Follow-up Contacts"]);
+    let contactAllowed = relatedContactIds.includes(contactId);
+    if (!contactAllowed) {
+      const contactIds = await listFollowupContactIds(id, relatedContactIds);
+      contactAllowed = contactIds.includes(contactId);
+    }
+    if (!contactAllowed) {
       return Response.json({ error: "Contact not found on this brand" }, { status: 400 });
     }
+
+    const contactPage = await retrievePage(contactId);
+    const contactClientId = firstRelationId(contactPage.properties?.["Follow-up Client"]);
+    if (contactClientId && contactClientId !== id) {
+      return Response.json({ error: "Contact not found on this brand" }, { status: 400 });
+    }
+    const contactName = titleFromProperties(contactPage.properties) || "Contact";
+
     const channel = body.channel || "";
     const object = (body.object ?? body.subject)?.trim() || "";
     if (channel === "Email" && !object) {
       return Response.json({ error: "object (email subject) is required for Email" }, { status: 400 });
     }
-    await createHumanOutbound({
+
+    const created = await createHumanOutbound({
       brandName: brand.name,
       brandOwnerId: brand.ownerId,
-      contactId: contact.id,
-      contactName: contact.name,
+      contactId,
+      contactName,
       channel,
       content: body.content || "",
       subject: channel === "Email" ? object : undefined,
@@ -52,9 +72,17 @@ export async function POST(request: Request, { params }: Params) {
       cpId: brand.currentCpId,
       cpAtInteraction: interactionCpCode(brand.currentCp),
     });
-    await markFollowupClientEngaged(id, { note: "已发送人工消息。" });
+
+    await markFollowupClientEngaged(id, {
+      note: "已发送人工消息。",
+      knownStatus: brand.status,
+      knownHandlingMode: brand.handlingMode,
+    });
+
     return Response.json({
-      brand: await mapFollowupClientDetail(await retrievePage(id)),
+      ok: true,
+      taskId: created.taskId,
+      conversationId: created.conversationId,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";

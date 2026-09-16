@@ -55,15 +55,6 @@ function mapTemplate(page: NotionPage): BombTemplateItem {
   };
 }
 
-function templatesForBomb(
-  page: NotionPage,
-  templates: Map<string, BombTemplateItem>,
-) {
-  return relationIds(page.properties?.Templates)
-    .map((id) => templates.get(id))
-    .filter((item): item is BombTemplateItem => !!item);
-}
-
 function bombCpCode(properties: NotionPage["properties"]) {
   return parseApplicableCp(propertyText(properties?.CP) || propertyText(properties?.["Applicable CP"]));
 }
@@ -111,6 +102,7 @@ function mapBombPage(
   const checkpoint = relationId ? checkpoints.get(relationId) : null;
   const cp = checkpoint?.name || bombCpCode(properties);
   const scenarioId = firstRelationId(properties.Scenario);
+  const relatedTemplateCount = relationIds(properties.Templates).length;
 
   return {
     id: page.id,
@@ -126,30 +118,72 @@ function mapBombPage(
     channels: orderedBombChannels(
       templates.map((item) => item.channel).filter((item): item is string => !!item),
     ),
-    templateCount: templates.length,
+    templateCount: templates.length || relatedTemplateCount,
     lastEditedAt:
       page.last_edited_time || properties["Last Edited At"]?.last_edited_time || null,
   };
 }
 
+type BombsCatalog = {
+  bombs: BombListItem[];
+  scenarios: BombScenario[];
+  cps: CurrentCpOption[];
+};
+
+let bombsCatalogCache: { at: number; value: BombsCatalog } | null = null;
+let scenariosCache: { at: number; items: BombScenario[] } | null = null;
+const BOMBS_CATALOG_CACHE_MS = 30_000;
+const SCENARIOS_CACHE_MS = 60_000;
+
+function invalidateBombsCatalogCache() {
+  bombsCatalogCache = null;
+}
+
+async function listTemplatesForBomb(bombId: string, templateIds: string[]) {
+  if (!templateIds.length) return [] as NotionPage[];
+  const pages = await queryDatabasePages(getFollowupTemplateDbId(), {
+    property: "OmniReach",
+    relation: { contains: bombId },
+  });
+  const byId = new Map(pages.map((page) => [page.id, page]));
+  const missing = templateIds.filter((pageId) => !byId.has(pageId));
+  if (missing.length) {
+    const retrieved = await Promise.all(
+      missing.map((pageId) => retrievePage(pageId).catch(() => null)),
+    );
+    for (const page of retrieved) {
+      if (page) byId.set(page.id, page);
+    }
+  }
+  return templateIds
+    .map((pageId) => byId.get(pageId))
+    .filter((page): page is NotionPage => !!page);
+}
+
 export async function listFollowupBombsCatalog() {
-  const [bombPages, templatePages, scenarioPages, checkpoints] = await Promise.all([
+  if (bombsCatalogCache && Date.now() - bombsCatalogCache.at < BOMBS_CATALOG_CACHE_MS) {
+    return bombsCatalogCache.value;
+  }
+  // List page only needs bomb + scenario titles + CP options.
+  // Skip the full Template DB scan (largest payload) — channels enrich on detail/launch.
+  const [bombPages, scenarioPages, checkpoints] = await Promise.all([
     queryDatabasePages(getFollowupBombDbId()),
-    queryDatabasePages(getFollowupTemplateDbId()),
     queryDatabasePages(getFollowupScenarioDbId()),
     listCheckpoints(),
   ]);
   const titles = titleMap(scenarioPages);
-  const templates = new Map(templatePages.map((page) => [page.id, mapTemplate(page)]));
   const checkpointById = new Map(checkpoints.map((item) => [item.id, item]));
 
-  return {
+  const value: BombsCatalog = {
     bombs: bombPages
-      .map((page) => mapBombPage(page, titles, templatesForBomb(page, templates), checkpointById))
+      .map((page) => mapBombPage(page, titles, [], checkpointById))
       .sort((a, b) => a.name.localeCompare(b.name)),
     scenarios: scenarioPages.map(mapScenario).sort((a, b) => a.name.localeCompare(b.name)),
     cps: filterApplicableCheckpoints(checkpoints),
   };
+  bombsCatalogCache = { at: Date.now(), value };
+  scenariosCache = { at: Date.now(), items: value.scenarios };
+  return value;
 }
 
 export async function listFollowupBombs() {
@@ -161,23 +195,18 @@ export async function retrieveFollowupBomb(id: string): Promise<BombDetail> {
   const properties = page.properties || {};
   const scenarioId = firstRelationId(properties.Scenario);
   const templateIds = relationIds(properties.Templates);
-  const [scenarioPage, templatePages] = await Promise.all([
+  const [scenarioPage, templatePages, cp] = await Promise.all([
     scenarioId ? retrievePage(scenarioId).catch(() => null) : Promise.resolve(null),
-    Promise.all(templateIds.map((pageId) => retrievePage(pageId).catch(() => null))),
+    listTemplatesForBomb(id, templateIds),
+    bombCpRefFromPage(properties),
   ]);
 
   const titles = new Map<string, string>();
-  const cps = [await bombCpRefFromPage(properties)].filter(
-    (item): item is BombCpRef => !!item,
-  );
+  const cps = [cp].filter((item): item is BombCpRef => !!item);
   if (scenarioPage) {
     titles.set(scenarioPage.id, titleFromProperties(scenarioPage.properties));
   }
-  const templates = new Map(
-    templatePages
-      .filter((item): item is NotionPage => !!item)
-      .map((item) => [item.id, mapTemplate(item)]),
-  );
+  const templates = new Map(templatePages.map((item) => [item.id, mapTemplate(item)]));
   const orderedTemplates = templateIds
     .map((pageId) => templates.get(pageId))
     .filter((item): item is BombTemplateItem => !!item);
@@ -207,8 +236,13 @@ function mapScenario(page: NotionPage): BombScenario {
 }
 
 export async function listFollowupScenarios() {
+  if (scenariosCache && Date.now() - scenariosCache.at < SCENARIOS_CACHE_MS) {
+    return scenariosCache.items;
+  }
   const pages = await queryDatabasePages(getFollowupScenarioDbId());
-  return pages.map(mapScenario).sort((a, b) => a.name.localeCompare(b.name));
+  const items = pages.map(mapScenario).sort((a, b) => a.name.localeCompare(b.name));
+  scenariosCache = { at: Date.now(), items };
+  return items;
 }
 
 function templateProperties(bombId: string, bombName: string, input: BombTemplateInput) {
@@ -259,6 +293,8 @@ export async function createFollowupBomb(input: CreateBombInput) {
     await createBombTemplate(page.id, name, input.template);
   }
 
+  invalidateBombsCatalogCache();
+  scenariosCache = null;
   return retrieveFollowupBomb(page.id);
 }
 
@@ -312,5 +348,7 @@ export async function updateFollowupBomb(id: string, input: UpdateBombInput) {
 
   if (!Object.keys(properties).length) throw new Error("No OmniReach fields to update");
   await updatePage(id, properties);
+  invalidateBombsCatalogCache();
+  scenariosCache = null;
   return retrieveFollowupBomb(id);
 }

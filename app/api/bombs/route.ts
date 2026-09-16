@@ -4,11 +4,14 @@ import { createFollowupBomb, listFollowupBombsCatalog } from "@/lib/notion/bombs
 
 export async function GET(request: Request) {
   try {
-    const viewer = await viewerFromRequest(request);
+    const [viewer, catalog] = await Promise.all([
+      viewerFromRequest(request),
+      listFollowupBombsCatalog(),
+    ]);
     if (!viewer.email) {
       return Response.json({ error: "Sign in required" }, { status: 401 });
     }
-    return Response.json(await listFollowupBombsCatalog());
+    return Response.json(catalog);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
     return Response.json({ error: message }, { status: 500 });

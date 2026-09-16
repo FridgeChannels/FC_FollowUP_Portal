@@ -12,6 +12,7 @@ import {
 import { getFollowupConversationDbId } from "./config";
 import { listFollowupConversations } from "./conversations";
 import { REPLY_DUE_PROPERTY } from "./reply-due";
+import { listFollowupTasks } from "./tasks";
 
 export type BrandReplySignal = {
   preview: string;
@@ -138,11 +139,25 @@ export function attachBrandReplySignals(
   });
 }
 
-function isCompletedInteraction(item: BrandActivity) {
+function isCompletedInteraction(
+  item: BrandActivity,
+  taskStatusById: Map<string, string | null>,
+) {
   if (!item.createdAt) return false;
   if (item.direction === "Inbound") return true;
-  if (item.channel === "Phone") return !!item.callResult || item.status === "Completed";
-  return ["Sent", "Delivered", "Completed", "Received"].includes(item.status || "");
+  const taskStatus = item.taskId ? taskStatusById.get(item.taskId) ?? null : null;
+  if (item.channel === "Phone") {
+    return !!item.callResult || taskStatus === "Completed";
+  }
+  return taskStatus === "Completed";
+}
+
+function interactionStatusLabel(
+  item: BrandActivity,
+  taskStatusById: Map<string, string | null>,
+) {
+  if (item.direction === "Inbound") return null;
+  return (item.taskId ? taskStatusById.get(item.taskId) : null) || null;
 }
 
 export async function listBrandInteractionSignals(pages: NotionPage[]) {
@@ -152,14 +167,18 @@ export async function listBrandInteractionSignals(pages: NotionPage[]) {
       const contactIds = relationIds(page.properties?.["Follow-up Contacts"]);
       if (!contactIds.length) return;
       try {
-        const conversations = await listFollowupConversations(contactIds);
-        const latest = conversations.find(isCompletedInteraction);
+        const [conversations, tasks] = await Promise.all([
+          listFollowupConversations(contactIds),
+          listFollowupTasks(contactIds),
+        ]);
+        const taskStatusById = new Map(tasks.map((task) => [task.id, task.status]));
+        const latest = conversations.find((item) => isCompletedInteraction(item, taskStatusById));
         const lastReplyAt = lastReplyAtFromActivities(conversations);
         if (!latest && !lastReplyAt) return;
         signals.set(page.id, {
           lastInteractionChannel: latest?.channel ?? null,
           lastInteractionDirection: latest?.direction ?? null,
-          lastInteractionStatus: latest?.status ?? null,
+          lastInteractionStatus: latest ? interactionStatusLabel(latest, taskStatusById) : null,
           lastInteractionCallResult: latest?.callResult ?? null,
           lastReplyAt,
         });

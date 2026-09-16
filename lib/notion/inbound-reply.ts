@@ -457,7 +457,6 @@ export async function ingestInboundReply(
   const cp = await conversationCpRelation(target.currentCpId || target.currentCp);
   if (cp) properties.CP = cp;
   if (channel !== "Phone") {
-    properties["Message Status"] = { select: { name: "Received" } };
     properties["Reply Status"] = { select: { name: "Needs Reply" } };
     try {
       properties[REPLY_DUE_PROPERTY] = replyDueAtProperty(

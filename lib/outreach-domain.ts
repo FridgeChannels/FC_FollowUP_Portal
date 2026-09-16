@@ -46,7 +46,7 @@ export type Interaction = {
   id: string; customerId: string; contactId?: string; bombInstanceId?: string; cp?: CPCode; type: "Message" | "Phone" | "Bomb" | "CP" | "Follow-up" | "Human" | "System";
   channel?: Channel; direction?: "Inbound" | "Outbound"; title: string; content: string; createdAt: string; outcome?: CallOutcome; recording?: string;
   creationMethod?: "Automated" | "Manual"; threadId?: string; taskId?: string; replyStatus?: "Needs Reply" | "Replied";
-  messageStatus?: string; taskStatus?: string; scheduledAt?: string; callResult?: string;
+  taskStatus?: string; scheduledAt?: string; callResult?: string;
   quo?: QuoCallData | null;
 };
 export type InboxItem = {

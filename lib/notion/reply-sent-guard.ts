@@ -1,15 +1,6 @@
 import type { BrandActivity, BrandTask } from "../brand-list";
 
 export const SENT_TASK_STATUSES = new Set(["Completed"]);
-export const SENT_MESSAGE_STATUSES = new Set(["Sent"]);
-
-export function outboundMessageIsSent(item: Pick<BrandActivity, "direction" | "status" | "callResult" | "channel">) {
-  if (item.direction !== "Outbound") return false;
-  if ((item.channel || "") === "Phone") {
-    return SENT_MESSAGE_STATUSES.has(item.status || "") || !!item.callResult;
-  }
-  return SENT_MESSAGE_STATUSES.has(item.status || "");
-}
 
 export function taskIsSent(status?: string | null) {
   return SENT_TASK_STATUSES.has(status || "");

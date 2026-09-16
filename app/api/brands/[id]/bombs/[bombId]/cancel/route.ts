@@ -1,7 +1,8 @@
 import { canWriteBrand } from "@/lib/brand-access";
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
-import { retrievePage } from "@/lib/notion/client";
-import { mapFollowupClientDetail, mapFollowupClientPage } from "@/lib/notion/followup-clients";
+import { relationIds, retrievePage } from "@/lib/notion/client";
+import { listFollowupContactIds } from "@/lib/notion/contacts";
+import { mapFollowupClientPage } from "@/lib/notion/followup-clients";
 import { cancelOpenBombTasks } from "@/lib/notion/followup-writes";
 
 type Params = { params: Promise<{ id: string; bombId: string }> };
@@ -13,28 +14,37 @@ export async function POST(request: Request, { params }: Params) {
 
     const { id, bombId } = await params;
     const body = (await request.json()) as { contactId?: string; omniReachRunId?: string };
-    if (!body.contactId) return Response.json({ error: "A KeyPerson is required" }, { status: 400 });
+    const contactId = body.contactId?.trim() || "";
+    if (!contactId) return Response.json({ error: "A KeyPerson is required" }, { status: 400 });
 
     const page = await retrievePage(id);
     const brand = await mapFollowupClientPage(page);
-    if (!canWriteBrand(viewer, brand)) return Response.json({ error: "You do not have access to this brand" }, { status: 403 });
+    if (!canWriteBrand(viewer, brand)) {
+      return Response.json({ error: "You do not have access to this brand" }, { status: 403 });
+    }
 
-    const detail = await mapFollowupClientDetail(page);
+    const related = relationIds(page.properties?.["Follow-up Contacts"]);
+    let allowed = related.includes(contactId);
+    if (!allowed) {
+      allowed = (await listFollowupContactIds(id, related)).includes(contactId);
+    }
+    if (!allowed) {
+      return Response.json({ error: "Contact not found on this brand" }, { status: 400 });
+    }
+
     const runId = body.omniReachRunId?.trim() || null;
-    const matchingTasks = detail.tasks.filter((task) =>
-      task.contactId === body.contactId &&
-      task.sourceBombId === bombId &&
-      (!runId || task.omniReachRunId === runId),
-    );
-    if (!matchingTasks.length) return Response.json({ error: "OmniReach execution plan not found" }, { status: 404 });
-
-    const cancelled = await cancelOpenBombTasks({
+    const result = await cancelOpenBombTasks({
       brandId: id,
       bombId,
-      contactId: body.contactId,
+      contactId,
       omniReachRunId: runId,
+      knownStatus: brand.status,
+      knownHandlingMode: brand.handlingMode,
     });
-    return Response.json({ cancelledTaskIds: cancelled.map((task) => task.id) });
+    if (!result.matched) {
+      return Response.json({ error: "OmniReach execution plan not found" }, { status: 404 });
+    }
+    return Response.json({ cancelledTaskIds: result.cancelledTaskIds });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
     return Response.json({ error: message }, { status: 500 });

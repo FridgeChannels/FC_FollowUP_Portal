@@ -148,27 +148,13 @@ function formatInteractionDateTime(value: string) {
   }).format(date);
 }
 
-function formatInteractionDate(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  }).format(date);
-}
-
 function lastInteractionLabel(item: BrandListItem) {
   const channel = item.lastInteractionChannel || "Interaction";
   const outcome =
     item.lastInteractionCallResult ||
     (item.lastInteractionDirection === "Inbound"
       ? "Reply"
-      : item.lastInteractionStatus === "Sent" ||
-          item.lastInteractionStatus === "Delivered" ||
-          item.lastInteractionStatus === "Completed"
-        ? "Sent"
-        : item.lastInteractionStatus || "");
+      : item.lastInteractionStatus || "");
   return [channel, outcome].filter(Boolean).join(" · ");
 }
 export function PageHeader({
@@ -588,11 +574,18 @@ function mergeBrandListItem(current: BrandListItem, next: BrandListItem): BrandL
   };
 }
 
+/** Calendar days between the event's local date and today (not rolling 24h windows). */
 function daysSince(value: string | null) {
   if (!value) return "—";
-  const timestamp = Date.parse(value);
-  if (Number.isNaN(timestamp)) return "—";
-  return String(Math.max(0, Math.floor((Date.now() - timestamp) / 86_400_000)));
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const startOfEventDay = new Date(date);
+  startOfEventDay.setHours(0, 0, 0, 0);
+  return String(
+    Math.max(0, Math.round((startOfToday.getTime() - startOfEventDay.getTime()) / 86_400_000)),
+  );
 }
 
 export function BrandsPage() {
@@ -1064,7 +1057,7 @@ export function BrandsPage() {
                               <div className="mt-0.5 truncate text-xs font-medium text-rose-700">
                                 Reply needed
                                 {(c.replyDueAt || c.replyUpdatedAt)
-                                  ? ` · ${formatInteractionDate(c.replyDueAt || c.replyUpdatedAt || "")}`
+                                  ? ` · ${formatInteractionDateTime(c.replyDueAt || c.replyUpdatedAt || "")}`
                                   : ""}
                               </div>
                             ) : null}

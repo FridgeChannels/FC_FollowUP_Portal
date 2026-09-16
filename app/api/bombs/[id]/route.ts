@@ -16,12 +16,15 @@ async function loadFormOptions() {
 
 export async function GET(request: Request, { params }: Params) {
   try {
-    const viewer = await viewerFromRequest(request);
+    const { id } = await params;
+    const [viewer, bomb, options] = await Promise.all([
+      viewerFromRequest(request),
+      retrieveFollowupBomb(id),
+      loadFormOptions(),
+    ]);
     if (!viewer.email) {
       return Response.json({ error: "Sign in required" }, { status: 401 });
     }
-    const { id } = await params;
-    const [bomb, options] = await Promise.all([retrieveFollowupBomb(id), loadFormOptions()]);
     return Response.json({ bomb, ...options });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";

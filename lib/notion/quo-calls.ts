@@ -125,7 +125,6 @@ export async function upsertQuoCallActivity(input: {
       sender: input.task.contactName || input.task.contactPhone || "Contact",
       taskId: input.task.id,
       messageId: `QUO_CALL:${data.callId}`,
-      messageStatus: null,
       callResult: result,
       interactionAt: createdAt,
       notes: "Quo 通话回写。",

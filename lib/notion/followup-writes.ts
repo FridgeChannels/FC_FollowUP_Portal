@@ -14,6 +14,7 @@ import {
 } from "./reply-inbox";
 import { pickReplyTaskForChannel } from "./reply-target";
 import {
+  listContactBombTasksLite,
   listFollowupTasks,
   listFollowupTasksByBomb,
   retrieveFollowupTask,
@@ -116,12 +117,34 @@ export async function updateFollowupClient(
 
 export async function markFollowupClientEngaged(
   pageId: string,
-  options?: { handlingMode?: "Automated" | "Human"; note?: string },
+  options?: {
+    handlingMode?: "Automated" | "Human";
+    note?: string;
+    knownStatus?: string | null;
+    knownHandlingMode?: string | null;
+  },
 ) {
-  const page = await retrievePage(pageId);
-  const properties = page.properties || {};
-  const currentStatus = propertyText(properties["Follow-up Status"]);
-  const currentMode = propertyText(properties["Handling Mode"]);
+  const knownStatus = options?.knownStatus;
+  const knownMode = options?.knownHandlingMode;
+  const canSkipRetrieve =
+    knownStatus !== undefined &&
+    (options?.handlingMode === undefined || knownMode !== undefined);
+
+  let currentStatus = knownStatus ?? null;
+  let currentMode = knownMode ?? null;
+  let existingNotes: string | null = null;
+  let page = null as Awaited<ReturnType<typeof retrievePage>> | null;
+
+  if (!canSkipRetrieve) {
+    page = await retrievePage(pageId);
+    const properties = page.properties || {};
+    currentStatus = propertyText(properties["Follow-up Status"]);
+    currentMode = propertyText(properties["Handling Mode"]);
+    existingNotes = propertyText(properties.Notes) || null;
+  } else if (knownStatus === "In Progress" && (!options?.handlingMode || knownMode === options.handlingMode)) {
+    return null;
+  }
+
   const extras: string[] = [];
   const patch: {
     status?: string | null;
@@ -139,8 +162,13 @@ export async function markFollowupClientEngaged(
   }
   if (!extras.length) return page;
 
+  if (existingNotes === null && page === null) {
+    page = await retrievePage(pageId);
+    existingNotes = propertyText(page.properties?.Notes) || null;
+  }
+
   patch.notes = [
-    propertyText(properties.Notes) || null,
+    existingNotes,
     options?.note || null,
     ...extras,
   ]
@@ -160,7 +188,6 @@ export async function createOutboundConversation(input: {
   taskId?: string;
   threadId?: string | null;
   messageId?: string | null;
-  messageStatus?: string | null;
   callResult?: string | null;
   interactionAt?: string | null;
   notes?: string;
@@ -169,25 +196,30 @@ export async function createOutboundConversation(input: {
   cpId?: string | null;
   cpAtInteraction?: string | null;
   extendedParameters?: string | null;
+  existingConversations?: BrandActivity[];
 }) {
   if (!CHANNELS.has(input.channel)) throw new Error("Invalid channel");
   const content = input.content.trim();
   if (!content) throw new Error("Message content is required");
 
-  const contact = await retrievePage(input.contactId);
-  const suffix = input.titleSuffix || (input.messageStatus === null ? input.channel : "Pending");
+  const suffix = input.titleSuffix || "Pending";
   const title = `${input.brandName} — ${input.contactName} — ${input.channel} — ${suffix}`;
   const subject =
     input.subject?.trim() ||
     (input.channel === "Email" ? content.split("\n")[0].slice(0, 120) : "");
-  const thread = await resolveConversationThread(contact.id, input.channel, input.threadId);
+  const thread = await resolveConversationThread(
+    input.contactId,
+    input.channel,
+    input.threadId,
+    input.existingConversations,
+  );
   if (input.messageId?.trim()) {
     thread.messageId = input.messageId.trim();
   }
   const properties: Record<string, unknown> = {
     "Conversation Record": { title: richText(title) },
     "Conversation Record ID": { rich_text: richText(`PORTAL-${Date.now()}`) },
-    "Follow-up Contact": { relation: [{ id: contact.id }] },
+    "Follow-up Contact": { relation: [{ id: input.contactId }] },
     Channel: { select: { name: input.channel } },
     Direction: { select: { name: input.direction || "Outbound" } },
     Subject: { rich_text: subject ? richText(subject) : [] },
@@ -199,9 +231,6 @@ export async function createOutboundConversation(input: {
   };
   if (input.taskId) {
     properties["Follow-up Task"] = { relation: [{ id: input.taskId }] };
-  }
-  if (input.messageStatus !== null) {
-    properties["Message Status"] = { select: { name: input.messageStatus || "Pending" } };
   }
   if (input.callResult && CALL_RESULTS.has(input.callResult)) {
     properties["Call Result"] = { rich_text: richText(input.callResult) };
@@ -273,28 +302,43 @@ export async function cancelOpenBombTasks(input: {
   bombId: string;
   contactId: string;
   omniReachRunId?: string | null;
+  knownStatus?: string | null;
+  knownHandlingMode?: string | null;
 }) {
-  const tasks = (await listFollowupTasks([input.contactId])).filter((task) =>
-    task.brandId === input.brandId &&
+  const listed = await listContactBombTasksLite(input.contactId);
+  const matching = listed.filter((task) =>
     task.sourceBombId === input.bombId &&
-    (!input.omniReachRunId || task.omniReachRunId === input.omniReachRunId) &&
-    isOpenTaskStatus(task.status),
+    (!input.omniReachRunId || task.omniReachRunId === input.omniReachRunId),
   );
+  if (!matching.length) {
+    return { matched: false as const, cancelledTaskIds: [] as string[] };
+  }
+
+  const open = matching.filter((task) => isOpenTaskStatus(task.status));
   const endedAt = new Date().toISOString();
-  await Promise.all(
-    tasks.map((task) =>
-      updateFollowupTask(task.id, {
-        status: "Cancelled",
-        endedAt,
-        notes: [task.notes, "OmniReach 已由用户中止，未执行任务已取消。"].filter(Boolean).join("\n"),
-      }),
-    ),
-  );
+  if (open.length) {
+    await Promise.all(
+      open.map((task) =>
+        updateFollowupTask(task.id, {
+          status: "Cancelled",
+          endedAt,
+          notes: [task.notes, "OmniReach 已由用户中止，未执行任务已取消。"].filter(Boolean).join("\n"),
+        }),
+      ),
+    );
+  }
+
   await markFollowupClientEngaged(input.brandId, {
     handlingMode: "Human",
     note: "OmniReach 已中止，跟进方式改为 Human。",
+    knownStatus: input.knownStatus,
+    knownHandlingMode: input.knownHandlingMode,
   });
-  return tasks;
+
+  return {
+    matched: true as const,
+    cancelledTaskIds: open.map((task) => task.id),
+  };
 }
 
 export async function updateFollowupTask(
@@ -438,7 +482,7 @@ export async function createHumanOutbound(input: {
   cpAtInteraction?: string | null;
 }) {
   const isReply = !!(input.threadId?.trim() || input.existingTaskId);
-  const threadActivities = isReply ? await listFollowupConversations([input.contactId]) : [];
+  const threadActivities = await listFollowupConversations([input.contactId]);
   const ownerId = input.brandOwnerId;
   if (!ownerId) throw new Error("Owner is required to create a follow-up task");
   if (input.channel === "Email" && !input.subject?.trim()) {
@@ -477,32 +521,46 @@ export async function createHumanOutbound(input: {
     threadId: input.threadId,
     cpId: threadCp?.cpId || input.cpId,
     cpAtInteraction: threadCp?.cpAtInteraction || input.cpAtInteraction,
-    extendedParameters: pickThreadExtendedParameters(threadActivities, {
-      channel: input.channel,
-      threadId: input.threadId,
-      taskId: input.existingTaskId,
-    }),
+    extendedParameters: isReply
+      ? pickThreadExtendedParameters(threadActivities, {
+          channel: input.channel,
+          threadId: input.threadId,
+          taskId: input.existingTaskId,
+        })
+      : null,
+    existingConversations: threadActivities,
     notes: isReply
       ? "人工追加回复，尚未实际发送。"
       : "人工消息，尚未实际发送。",
   });
-  await linkConversationToTask(page.id, taskId);
-  await markInboundsReplied({
-    contactId: input.contactId,
-    channel: input.channel,
-    taskId: input.existingTaskId,
-    threadId: input.threadId,
+  // New task has no Conversations yet; conversation already links Follow-up Task on create.
+  await updatePage(taskId, {
+    Conversations: { relation: [{ id: page.id }] },
   });
-  return page;
+  if (isReply) {
+    await markInboundsReplied(
+      {
+        contactId: input.contactId,
+        channel: input.channel,
+        taskId: input.existingTaskId,
+        threadId: input.threadId,
+      },
+      threadActivities,
+    );
+  }
+  return { conversationId: page.id, taskId };
 }
 
-export async function markInboundsReplied(input: {
-  contactId: string;
-  channel: string;
-  taskId?: string | null;
-  threadId?: string | null;
-}) {
-  const activities = await listFollowupConversations([input.contactId]);
+export async function markInboundsReplied(
+  input: {
+    contactId: string;
+    channel: string;
+    taskId?: string | null;
+    threadId?: string | null;
+  },
+  existingActivities?: BrandActivity[],
+) {
+  const activities = existingActivities ?? (await listFollowupConversations([input.contactId]));
   const targets = activities.filter((item) => {
     if (item.direction !== "Inbound") return false;
     if (item.replyStatus === "Replied") return false;
@@ -511,6 +569,7 @@ export async function markInboundsReplied(input: {
     if (input.taskId && item.taskId) return item.taskId === input.taskId;
     return false;
   });
+  if (!targets.length) return;
   await Promise.all(
     targets.map((item) =>
       updatePage(item.id, {

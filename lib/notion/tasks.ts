@@ -512,6 +512,68 @@ export async function listFollowupTasks(
   return sortTasks(tasks);
 }
 
+/** Open Source-Bomb tasks for a brand — property scan only, no Contact/Owner hydrate. */
+export async function hasOpenOmniReachTasks(contactIds: string[]): Promise<boolean> {
+  if (!contactIds.length) return false;
+  let pages: NotionPage[] = [];
+  try {
+    pages = await queryTasksByContacts(contactIds);
+  } catch {
+    pages = [];
+  }
+  if (!pages.length) {
+    try {
+      pages = await listFromContactRelations(contactIds);
+    } catch {
+      pages = [];
+    }
+  }
+  return pages.some((page) => {
+    const properties = page.properties || {};
+    const status = propertyText(properties["Task Status"]);
+    const sourceBombId = firstRelationId(properties["Source Bomb"]);
+    return !!sourceBombId && (status === "Pending" || status === "In Progress");
+  });
+}
+
+export type ContactBombTaskLite = {
+  id: string;
+  status: string | null;
+  notes: string | null;
+  sourceBombId: string | null;
+  omniReachRunId: string | null;
+  contactId: string | null;
+};
+
+/** Property-only task rows for a contact — used by Stop OmniReach. */
+export async function listContactBombTasksLite(contactId: string): Promise<ContactBombTaskLite[]> {
+  if (!contactId) return [];
+  let pages: NotionPage[] = [];
+  try {
+    pages = await queryTasksByContacts([contactId]);
+  } catch {
+    pages = [];
+  }
+  if (!pages.length) {
+    try {
+      pages = await listFromContactRelations([contactId]);
+    } catch {
+      pages = [];
+    }
+  }
+  return pages.map((page) => {
+    const properties = page.properties || {};
+    return {
+      id: page.id,
+      status: propertyText(properties["Task Status"]) || null,
+      notes: propertyText(properties.Notes) || null,
+      sourceBombId: firstRelationId(properties["Source Bomb"]) || null,
+      omniReachRunId: propertyText(properties["OmniReach Run Id"]) || null,
+      contactId: firstRelationId(properties["Follow-up Contact"]) || null,
+    };
+  });
+}
+
 export async function listFollowupTasksByBomb(bombId: string): Promise<BrandTask[]> {
   const pages = await queryTaskPages({
     property: "Source Bomb",
@@ -599,17 +661,47 @@ const TASK_STATUSES = new Set<TaskStatus>([
 ]);
 
 export async function listExistingTasksForSchedule(): Promise<ExistingTask[]> {
-  const pages = await queryTaskPages();
-  const tasks = await mapTaskPages(pages);
-  return tasks.flatMap((task) => {
-    const channel = task.channel;
-    const scheduledAt = task.scheduledAt?.slice(0, 10);
-    const status = task.status as TaskStatus | null;
-    if (!task.brandId || !scheduledAt || !status || !TASK_STATUSES.has(status)) return [];
+  // Capacity only cares about non-cancelled tasks; skip Cancelled to shrink the scan.
+  const pages = await queryTaskPages({
+    property: "Task Status",
+    status: { does_not_equal: "Cancelled" },
+  });
+
+  const brandByContact = new Map<string, string | null>();
+  const contactIds = [
+    ...new Set(
+      pages
+        .map((page) => firstRelationId(page.properties?.["Follow-up Contact"]) || null)
+        .filter((id): id is string => !!id),
+    ),
+  ];
+
+  await Promise.all(
+    contactIds.map(async (contactId) => {
+      try {
+        const contact = await retrievePage(contactId);
+        brandByContact.set(
+          contactId,
+          firstRelationId(contact.properties?.["Follow-up Client"]) || null,
+        );
+      } catch {
+        brandByContact.set(contactId, null);
+      }
+    }),
+  );
+
+  return pages.flatMap((page) => {
+    const properties = page.properties || {};
+    const channel = propertyText(properties.Channel);
+    const scheduledAt = propertyDate(properties["Scheduled At"])?.slice(0, 10);
+    const status = propertyText(properties["Task Status"]) as TaskStatus | null;
+    const contactId = firstRelationId(properties["Follow-up Contact"]) || null;
+    const clientId = contactId ? brandByContact.get(contactId) : null;
+    if (!clientId || !scheduledAt || !status || !TASK_STATUSES.has(status)) return [];
     if (!channel || !CHANNELS.includes(channel as Channel)) return [];
     return [{
-      clientId: task.brandId,
-      contactId: task.contactId || undefined,
+      clientId,
+      contactId: contactId || undefined,
       channel: channel as Channel,
       scheduledAt,
       status,

@@ -3,7 +3,6 @@ import { describe, it } from "node:test";
 import type { BrandActivity, BrandTask } from "../brand-list.ts";
 import {
   evaluateSentOutbound,
-  outboundMessageIsSent,
   pickOutboundCandidate,
   taskIsSent,
 } from "./reply-sent-guard.ts";
@@ -14,7 +13,7 @@ const outbound = (patch: Partial<BrandActivity>): BrandActivity => ({
   taskId: "t1",
   channel: "Email",
   direction: "Outbound",
-  status: "Pending",
+  status: null,
   subject: null,
   content: "hello",
   sender: null,
@@ -55,22 +54,13 @@ const task = (status: string): BrandTask => ({
 });
 
 describe("reply sent guard", () => {
-  it("requires Message Status Sent and Task Status Completed", () => {
-    assert.equal(outboundMessageIsSent(outbound({ status: "Pending" })), false);
-    assert.equal(outboundMessageIsSent(outbound({ status: "Sent" })), true);
+  it("uses Task Status Completed as the sent gate", () => {
     assert.equal(taskIsSent("In Progress"), false);
     assert.equal(taskIsSent("Completed"), true);
   });
 
-  it("treats Phone outbound as sent when Call Result exists", () => {
-    assert.equal(
-      outboundMessageIsSent(outbound({ channel: "Phone", status: null, callResult: "Connected" })),
-      true,
-    );
-  });
-
-  it("accepts outbound regardless of Message Status when the task is Completed", () => {
-    const pending = outbound({ status: "Pending" });
+  it("accepts outbound when the linked task is Completed", () => {
+    const pending = outbound({ status: null });
     const result = evaluateSentOutbound({
       channel: "Email",
       activities: [pending],
@@ -80,10 +70,10 @@ describe("reply sent guard", () => {
     if (result.ok) assert.equal(result.outbound.id, pending.id);
   });
 
-  it("rejects sent outbound when the task is still In Progress", () => {
+  it("rejects outbound when the task is still In Progress", () => {
     const result = evaluateSentOutbound({
       channel: "Email",
-      activities: [outbound({ status: "Sent" })],
+      activities: [outbound({})],
       task: task("In Progress"),
     });
     assert.equal(result.ok, false);
@@ -91,27 +81,16 @@ describe("reply sent guard", () => {
     assert.match(result.error, /Task Status must be Completed/);
   });
 
-  it("accepts sent outbound on a completed task", () => {
-    const message = outbound({ status: "Sent" });
-    const result = evaluateSentOutbound({
-      channel: "Email",
-      activities: [message],
-      task: task("Completed"),
-    });
-    assert.equal(result.ok, true);
-    if (result.ok) assert.equal(result.outbound.id, message.id);
-  });
-
   it("prefers inReplyTo outbound over later messages", () => {
-    const first = outbound({ id: "old", messageId: "msg-1", status: "Sent", createdAt: "2026-09-13T00:00:00.000Z" });
-    const later = outbound({ id: "new", messageId: "msg-2", status: "Pending", createdAt: "2026-09-15T00:00:00.000Z" });
+    const first = outbound({ id: "old", messageId: "msg-1", createdAt: "2026-09-13T00:00:00.000Z" });
+    const later = outbound({ id: "new", messageId: "msg-2", createdAt: "2026-09-15T00:00:00.000Z" });
     const picked = pickOutboundCandidate([later, first], { channel: "Email", inReplyToMessageId: "msg-1" });
     assert.equal(picked?.id, "old");
   });
 
   it("prefers the outbound that matches both task and thread", () => {
-    const oldBomb = outbound({ id: "old", taskId: "t-old", threadId: "thr-shared", status: "Sent" });
-    const newBomb = outbound({ id: "new", taskId: "t-new", threadId: "thr-shared", status: "Pending" });
+    const oldBomb = outbound({ id: "old", taskId: "t-old", threadId: "thr-shared" });
+    const newBomb = outbound({ id: "new", taskId: "t-new", threadId: "thr-shared" });
     const picked = pickOutboundCandidate([oldBomb, newBomb], {
       channel: "Email",
       taskId: "t-new",
