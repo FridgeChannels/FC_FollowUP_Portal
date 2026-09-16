@@ -216,7 +216,7 @@ async function mapTaskPage(page: NotionPage, caches: TaskCaches): Promise<BrandT
 }
 
 function asCallReviewStatus(value?: string | null): BrandTask["callReviewStatus"] {
-  if (value === "Qualified" || value === "Unqualified") return value;
+  if (value === "Awaiting Review" || value === "Qualified" || value === "Unqualified") return value;
   return null;
 }
 

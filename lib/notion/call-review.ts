@@ -28,7 +28,7 @@ export async function applyCallReview(input: {
   if (task.channel !== "Phone") {
     throw new CallReviewError("Call review is only valid for Phone tasks", 400);
   }
-  if (task.callReviewStatus) {
+  if (task.callReviewStatus === "Qualified" || task.callReviewStatus === "Unqualified") {
     throw new CallReviewError(`This Phone task is already marked ${task.callReviewStatus}`, 409);
   }
 

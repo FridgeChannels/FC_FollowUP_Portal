@@ -1,7 +1,7 @@
 import type { BrandTask } from "../brand-list";
 import { findQuoCallConversation } from "./conversations";
 import { serializeQuoCallData } from "../quo/call-payload";
-import { createOutboundConversation } from "./followup-writes";
+import { createOutboundConversation, updateFollowupTask } from "./followup-writes";
 import { firstRelationId, retrievePage, richText, updatePage } from "./client";
 import { retrieveFollowupTask } from "./tasks";
 import type { QuoCall, QuoCallData } from "../quo/types";
@@ -137,7 +137,30 @@ export async function upsertQuoCallActivity(input: {
     });
   }
 
+  if (result === "Connected") {
+    await markPhoneTaskAwaitingReview(input.task);
+  }
+
   return retrieveFollowupTask(input.task.id);
+}
+
+async function markPhoneTaskAwaitingReview(task: BrandTask) {
+  if (task.channel !== "Phone") return;
+  if (task.callReviewStatus === "Qualified") return;
+  if (task.status === "Cancelled" || task.status === "Failed") return;
+  if (task.callReviewStatus === "Awaiting Review" && task.status === "Completed") return;
+
+  const now = new Date().toISOString();
+  const note =
+    task.callReviewStatus === "Unqualified"
+      ? "召回通话已接通（Connected），任务进入待评审。"
+      : "通话已接通（Connected），任务进入待评审。";
+  await updateFollowupTask(task.id, {
+    callReviewStatus: "Awaiting Review",
+    status: "Completed",
+    endedAt: now,
+    notes: [task.notes?.trim() || null, note].filter(Boolean).join("\n"),
+  });
 }
 
 export function quoDataFromActivity(activity: { quo?: QuoCallData | null }) {

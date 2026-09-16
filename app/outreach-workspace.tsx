@@ -116,7 +116,7 @@ export default function OutreachWorkspace() {
     }
     const brandDetail = /^\/customers\/[^/]+/.test(pathname);
     if (brandDetail) {
-      if (!can("customers") && !can("tasks")) router.replace(roleHome[state.currentRole]);
+      if (!can("customers")) router.replace(roleHome[state.currentRole]);
       return;
     }
     const capability = screen === "Brands" ? "customers" : screen === "ReplyTask" ? "tasks" : screen === "OmniReach" ? "bombs" : screen.toLowerCase();

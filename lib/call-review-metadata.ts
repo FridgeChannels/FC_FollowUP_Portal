@@ -1,6 +1,6 @@
 export const CALL_REVIEW_CALLER_EMAIL = "beril@fridgechannels.com";
 
-export type CallReviewStatus = "Qualified" | "Unqualified";
+export type CallReviewStatus = "Awaiting Review" | "Qualified" | "Unqualified";
 
 export type CallReviewMetadata = {
   interactionId?: string;

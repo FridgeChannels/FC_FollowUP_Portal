@@ -232,7 +232,7 @@ export type BrandTask = {
   omniReachRunId?: string | null;
   sourceBombName?: string | null;
   sourceBombCp?: string | null;
-  callReviewStatus?: "Qualified" | "Unqualified" | null;
+  callReviewStatus?: "Awaiting Review" | "Qualified" | "Unqualified" | null;
   contactPhone?: string | null;
   inboxStatus?: "Needs Reply" | null;
   preview?: string | null;

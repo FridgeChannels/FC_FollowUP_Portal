@@ -101,6 +101,7 @@ function asCall(resource: JsonObject, context: JsonObject | null): QuoCall | nul
   if (resource.hasVoicemail === true) call.hasVoicemail = true;
   if (typeof resource.duration === "number") call.duration = resource.duration;
   if (Array.isArray(resource.recordings)) call.recordings = resource.recordings as QuoRecording[];
+  if (Array.isArray(resource.media)) call.media = resource.media as QuoCall["media"];
   return call;
 }
 
@@ -117,12 +118,18 @@ function asTranscript(resource: JsonObject, callId: string): QuoTranscript {
 }
 
 function asSummary(resource: JsonObject, callId: string): QuoSummary {
+  const summaryValue = resource.summary;
+  const summary = Array.isArray(summaryValue)
+    ? summaryValue as string[]
+    : typeof summaryValue === "string" && summaryValue.trim()
+      ? [summaryValue.trim()]
+      : null;
   return {
     ...resource,
     object: text(resource.object) || "callSummary",
     callId,
     status: text(resource.processingStatus, resource.status),
-    summary: Array.isArray(resource.summary) ? resource.summary as string[] : null,
+    summary,
     nextSteps: Array.isArray(resource.nextSteps) ? resource.nextSteps as string[] : null,
     jobs: Array.isArray(resource.jobs) ? resource.jobs as QuoSummary["jobs"] : null,
   };
@@ -151,11 +158,25 @@ export function callDataFromQuoWebhook(event: JsonObject): QuoCallData | null {
   if (!callId) return null;
   const call = asCall(resource, context);
   const nestedRecordings = Array.isArray(resource.recordings) ? resource.recordings as QuoRecording[] : [];
+  const mediaRecordings = Array.isArray(resource.media)
+    ? (resource.media as Array<{ url?: string | null; type?: string | null; duration?: number | null }>)
+      .filter((item) => typeof item?.url === "string" && !!item.url.trim())
+      .map((item, index) => ({
+        id: `media-${index + 1}`,
+        url: item.url || null,
+        type: item.type || null,
+        duration: typeof item.duration === "number" ? item.duration : null,
+        startTime: text(resource.createdAt),
+        status: text(resource.status),
+      } satisfies QuoRecording))
+    : [];
   const recordings = nestedRecordings.length
     ? nestedRecordings
-    : type === "call.recording.completed" && text(resource.url)
-      ? [resource as QuoRecording]
-      : [];
+    : mediaRecordings.length
+      ? mediaRecordings
+      : type === "call.recording.completed" && text(resource.url)
+        ? [resource as QuoRecording]
+        : [];
   const data: QuoCallData = {
     callId,
     call,

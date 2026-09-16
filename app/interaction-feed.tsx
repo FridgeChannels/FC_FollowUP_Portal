@@ -187,7 +187,7 @@ export function InteractionFeed({
       callReviewStatus: item.callReviewStatus,
       remote: item.remote !== false,
     }));
-  const usePhoneTaskBoard = activeChannel === "Phone" && phoneTasks.length > 0;
+  const usePhoneTaskBoard = !callerPhoneOnly && activeChannel === "Phone" && phoneTasks.length > 0;
 
   return <div className={maxHeight ? `${maxHeight} overflow-y-auto` : undefined}>
     <div className="px-5 py-4">

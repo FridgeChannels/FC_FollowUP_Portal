@@ -304,7 +304,7 @@ export async function updateFollowupTask(
     notes?: string | null;
     endedAt?: string | null;
     priority?: string | null;
-    callReviewStatus?: "Qualified" | "Unqualified" | null;
+    callReviewStatus?: "Awaiting Review" | "Qualified" | "Unqualified" | null;
   },
 ) {
   const properties: Record<string, unknown> = {};

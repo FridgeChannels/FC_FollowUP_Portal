@@ -264,7 +264,7 @@ Follow-up TaskDB 只负责按日排班与任务分配，记录由谁在哪个工
 | Task Status | Status | 是 | 任务当前状态；选项见 6.3 |
 | Source Bomb | Relation | 否 | 关联生成该任务的 OmniReach（Follow-up BombDB）模板；非 OmniReach 任务可留空 |
 | OmniReach Run Id | Text | 否 | 同一次 Launch 生成的所有 Task 共享同一 UUID；用于区分停后再启的多次执行；Plan 按此字段分组 |
-| Call Review Status | Select | 否 | 仅 Phone Task；`Qualified` / `Unqualified`；Account Manager 评审通话后写入；Qualified 时 Task Status→Completed，Unqualified 时 Task Status→Pending、Owner→Beril、Priority→P0 |
+| Call Review Status | Select | 否 | 仅 Phone Task；`Awaiting Review` / `Qualified` / `Unqualified`；Quo 回写 `Call Result = Connected` 时自动写入 Awaiting Review 并将 Task Status→Completed；Account Manager 评审后写入 Qualified / Unqualified；Qualified 保持 Completed，Unqualified 时 Task Status→Pending、Owner→Beril、Priority→P0 |
 | Interactions | Relation | 否 | 关联实际产生的 Interaction |
 | Ended At | Date | 否 | 任务变为 Completed、Failed 或 Cancelled 时写入 |
 | Notes | Text | 否 | 记录失败、取消或渠道不可用等原因；备注内容必须使用中文 |
@@ -291,10 +291,11 @@ Cancelled
 
 ### 6.4 Call Review Status
 
-仅 Phone 任务使用。Account Manager 在 Portal 审阅通话后写入：
+仅 Phone 任务使用。
 
-- **Qualified**：通话合格；同时将 Task Status 设为 Completed，并写入 Ended At。
-- **Unqualified**：通话不合格、需召回；同时将 Task Status 设为 Pending、Owner 改派给 Beril（`beril@fridgechannels.com`）、Priority 设为 P0。
+- **Awaiting Review**：Quo 回写 `Call Result = Connected` 后自动写入；同时将 Task Status 设为 Completed（结束 Pending），表示通话已执行、等待 Account Manager 评审。
+- **Qualified**：通话合格；Task Status 保持 / 设为 Completed，并写入 Ended At。
+- **Unqualified**：通话不合格、需召回；同时将 Task Status 设为 Pending、Owner 改派给 Beril（`beril@fridgechannels.com`）、Priority 设为 P0。召回后若再次 Connected，会重新进入 Awaiting Review。
 
 该字段写在 TaskDB（不是 ConversationDB），因为评审结论驱动的是任务闭环与召回改派，而不是单条消息内容。
 

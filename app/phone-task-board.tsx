@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { CheckCircle2, ChevronDown, ChevronRight, Phone, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { callReviewsFromTasks, type CallReviewStatus } from "@/lib/call-review-metadata";
-import { dateOnly, isClosedTaskStatus, type Contact, type Interaction } from "@/lib/outreach-domain";
+import { dateOnly, isCancelledTaskStatus, isClosedTaskStatus, type Contact, type Interaction } from "@/lib/outreach-domain";
 import { devCallPhoneOnClient } from "@/lib/quo/dev-call-phone";
 import { formatUtcTime } from "./bomb-plan";
 import { ChannelIcon } from "./channel-icon";
@@ -35,10 +35,24 @@ function isDone(status: string) {
   return isClosedTaskStatus(status);
 }
 
-function CallActionButton({ phone, completed, onCallOpening }: { phone: string; completed: boolean; onCallOpening: () => void }) {
+function dialState(status: string, reviewStatus?: CallReviewStatus | null) {
+  if (reviewStatus === "Awaiting Review" || reviewStatus === "Qualified") return "completed" as const;
+  if (status === "Completed" || status === "Resolved") return "completed" as const;
+  if (isCancelledTaskStatus(status)) return "cancelled" as const;
+  if (status === "Failed") return "failed" as const;
+  return "open" as const;
+}
+
+function CallActionButton({ phone, state, onCallOpening }: { phone: string; state: ReturnType<typeof dialState>; onCallOpening: () => void }) {
   const quoDial = phone ? `openphone://dial?number=${encodeURIComponent(phone)}&action=call` : "";
-  if (completed) {
+  if (state === "completed") {
     return <Button disabled className="bg-emerald-600 text-white hover:bg-emerald-600"><CheckCircle2 className="mr-2 size-4"/>Call completed</Button>;
+  }
+  if (state === "cancelled") {
+    return <Button disabled variant="secondary"><Phone className="mr-2 size-4"/>Call cancelled</Button>;
+  }
+  if (state === "failed") {
+    return <Button disabled className="bg-rose-100 text-rose-800 hover:bg-rose-100"><Phone className="mr-2 size-4"/>Call failed</Button>;
   }
   if (phone) {
     return <Button asChild><a href={quoDial} onClick={onCallOpening}><Phone className="mr-2 size-4"/>Call with Quo</a></Button>;
@@ -48,7 +62,11 @@ function CallActionButton({ phone, completed, onCallOpening }: { phone: string; 
 
 function ReviewBadge({ status }: { status?: CallReviewStatus | null }) {
   if (!status) return null;
-  return <Badge className={status === "Qualified" ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-100" : "bg-rose-100 text-rose-800 hover:bg-rose-100"}>{status.toLowerCase()}</Badge>;
+  const className =
+    status === "Qualified" ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-100"
+    : status === "Unqualified" ? "bg-rose-100 text-rose-800 hover:bg-rose-100"
+    : "bg-amber-100 text-amber-900 hover:bg-amber-100";
+  return <Badge className={className}>{status === "Awaiting Review" ? "awaiting review" : status.toLowerCase()}</Badge>;
 }
 
 export function PhoneTaskBoard({
@@ -252,8 +270,8 @@ function PhoneTaskBlock({
 }) {
   const [scriptOpen, setScriptOpen] = useState(active || !isDone(task.status));
   const phone = (devCallPhoneOnClient() || contact?.phone || task.contactPhone || "").trim();
-  const completed = isDone(task.status);
-  const showReviewActions = canReviewCalls && !!quoResults.length && !reviewStatus;
+  const actionState = dialState(task.status, reviewStatus);
+  const showReviewActions = canReviewCalls && !!quoResults.length && (!reviewStatus || reviewStatus === "Awaiting Review");
 
   return <section className={`rounded-2xl border p-5 ${active ? "border-blue-300 bg-blue-50/70 shadow-sm" : "border-slate-200 bg-slate-50/70"}`}>
     <div className="flex flex-wrap items-start justify-between gap-4">
@@ -270,7 +288,7 @@ function PhoneTaskBlock({
         </h3>
         <p className={`mt-1 text-sm ${active ? "text-blue-900" : "text-slate-600"}`}>{contact?.name || "Contact"} · {phone || "No phone number"}</p>
       </div>
-      {showDial ? <div className="flex shrink-0"><CallActionButton phone={phone} completed={completed} onCallOpening={onCallOpening}/></div> : null}
+      {showDial ? <div className="flex shrink-0"><CallActionButton phone={phone} state={actionState} onCallOpening={onCallOpening}/></div> : null}
     </div>
 
     <div className={`mt-5 rounded-xl border ${active ? "border-blue-100/80 bg-white/70" : "border-slate-200 bg-white"}`}>
@@ -293,6 +311,7 @@ function PhoneTaskBlock({
           : <p className="text-slate-500">No Call Script is linked to this task.</p>}
         {reviewStatus === "Unqualified" ? <p className="mt-3 text-xs font-semibold text-rose-700">Recall requested · Reassigned to Beril</p>
           : reviewStatus === "Qualified" ? <p className="mt-3 text-xs font-semibold text-emerald-700">Call review completed · qualified</p>
+          : reviewStatus === "Awaiting Review" ? <p className="mt-3 text-xs font-semibold text-amber-800">Connected · awaiting Account Manager review</p>
           : null}
       </div>}
     </div>

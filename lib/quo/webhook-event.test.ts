@@ -84,4 +84,32 @@ describe("Quo webhook event payloads", () => {
     assert.equal(data?.callId, "AClegacy");
     assert.equal(data?.call?.to, "+18207863604");
   });
+
+  it("maps recording media urls from legacy recording payloads", () => {
+    const data = callDataFromQuoWebhook({
+      type: "call.recording.completed",
+      data: {
+        object: {
+          id: "ACcall1",
+          callId: "ACcall1",
+          media: [{ type: "audio", url: "https://example.com/rec.mp3", duration: 12 }],
+        },
+      },
+    });
+    assert.equal(data?.recordings?.[0]?.url, "https://example.com/rec.mp3");
+    assert.equal(data?.call?.media?.[0]?.url, "https://example.com/rec.mp3");
+  });
+
+  it("accepts string summaries from webhook payloads", () => {
+    const data = callDataFromQuoWebhook({
+      type: "call.summary.completed",
+      data: {
+        resource: {
+          callId: "ACcall1",
+          summary: "Customer confirmed interest.",
+        },
+      },
+    });
+    assert.deepEqual(data?.summary?.summary, ["Customer confirmed interest."]);
+  });
 });

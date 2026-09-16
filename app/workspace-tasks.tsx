@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft, Check, CheckCircle2, MessageCircle, Phone, Search, Send, UserRound,
@@ -9,7 +9,7 @@ import {
 import { toast } from "sonner";
 import type { BrandActivity, BrandContact, BrandDetail, BrandTask, CurrentCpOption } from "@/lib/brand-list";
 import { brandHasActiveOmniReach } from "@/lib/notion/reply-inbox";
-import { canSeeTask, dateOnly, isClosedTaskStatus, type Contact, type Customer, type Interaction } from "@/lib/outreach-domain";
+import { canSeeTask, dateOnly, isCancelledTaskStatus, isClosedTaskStatus, type Contact, type Customer, type Interaction } from "@/lib/outreach-domain";
 import { useWorkspace } from "./workspace-store";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +24,7 @@ import { Status } from "./workspace-pages";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { devCallPhoneOnClient } from "@/lib/quo/dev-call-phone";
 import { taskStatusForCallReview, type CallReviewMetadata, type CallReviewStatus } from "@/lib/call-review-metadata";
+import { useSession } from "./use-session";
 
 type TaskType = "Call" | "Reply";
 type UnifiedTask = {
@@ -106,7 +107,15 @@ const reviewFromNotion = (task: { id: string; callReviewStatus?: CallReviewStatu
     ? { taskId: task.id, status: task.callReviewStatus, recallRequested: task.callReviewStatus === "Unqualified" }
     : undefined;
 const taskWithCallReview = (task: UnifiedTask, review?: CallReviewView) => review ? { ...task, status: taskStatusForCallReview(task.status, review) } : task;
-const CallReviewBadge = ({ review }: { review?: CallReviewView }) => review ? <Badge className={review.status === "Qualified" ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-100" : "bg-rose-100 text-rose-800 hover:bg-rose-100"}>{review.status.toLowerCase()}</Badge> : null;
+const CallReviewBadge = ({ review }: { review?: CallReviewView }) => {
+  if (!review) return null;
+  const className =
+    review.status === "Qualified" ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-100"
+    : review.status === "Unqualified" ? "bg-rose-100 text-rose-800 hover:bg-rose-100"
+    : "bg-amber-100 text-amber-900 hover:bg-amber-100";
+  const label = review.status === "Awaiting Review" ? "awaiting review" : review.status.toLowerCase();
+  return <Badge className={className}>{label}</Badge>;
+};
 const isDue = (task: UnifiedTask, now: string) => {
   if (isDone(task)) return false;
   if (task.source === "inbox" && task.status === "Waiting for Reply") return false;
@@ -221,6 +230,7 @@ function toTaskContact(item: BrandContact): Contact {
 
 function TaskDetail({ task }: { task: UnifiedTask }) {
   const { state, can, resolveInbox, assignBrand, reassignCall } = useWorkspace();
+  const { user } = useSession();
   const router = useRouter();
   const [launch, setLaunch] = useState(false);
   const [sendMessage, setSendMessage] = useState(false);
@@ -229,6 +239,7 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
   const [owners, setOwners] = useState<Array<{id:string;name:string}>>([]);
   const [liveTask, setLiveTask] = useState(task);
   const [quoRefreshingCallId, setQuoRefreshingCallId] = useState<string | null>(null);
+  const autoRefreshedQuoCallId = useRef<string | null>(null);
   const [remote, setRemote] = useState<{ customer: Customer; contact: Contact; timeline: Interaction[]; ownerName?: string; brand?: BrandDetail; cps?: CurrentCpOption[] } | null>(null);
   const [callScript, setCallScript] = useState<CallScript | null>(null);
   const [callScriptLoading, setCallScriptLoading] = useState(false);
@@ -300,7 +311,7 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
     setRemote({ customer, contact, timeline, ownerName: item.ownerName || payload.brand?.ownerName || undefined, brand: payload.brand || undefined, cps: payload.cps });
     setLiveTask(fromNotionTask(item));
   };
-  useEffect(() => { setLiveTask(task); }, [task]);
+  useEffect(() => { setLiveTask(task); autoRefreshedQuoCallId.current = null; }, [task]);
   useEffect(() => {
     if (!task.remote) { setRemote(null); return; }
     let cancelled = false;
@@ -347,7 +358,8 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
     return () => { cancelled = true; };
   }, [state.currentRole, task.id, task.remote, task.type, liveTask.templateId]);
   useEffect(() => {
-    if (!task.remote || task.type !== "Call" || isDone(liveTask)) return;
+    const awaitingReview = liveTask.callReviewStatus === "Awaiting Review";
+    if (!task.remote || task.type !== "Call" || (isDone(liveTask) && !awaitingReview)) return;
     let cancelled = false;
     let inFlight = false;
     const poll = async () => {
@@ -366,7 +378,7 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
     };
     const interval = window.setInterval(() => { void poll(); }, 10000);
     return () => { cancelled = true; window.clearInterval(interval); };
-  }, [task.id, task.remote, task.type, liveTask.status]);
+  }, [task.id, task.remote, task.type, liveTask.status, liveTask.callReviewStatus]);
   const localCustomer = state.customers.find(c => c.id === task.customerId);
   const customer = localCustomer || remote?.customer;
   const partnershipContext=customer?.partnershipContext;
@@ -386,7 +398,7 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
   };
   const baseTimeline = remote?.timeline || state.interactions.filter(item => item.customerId === task.customerId).map(item => ({ ...item, cp: item.cp || customer?.cp }));
   const timeline = [...baseTimeline].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  const refreshQuo = async (callId: string) => {
+  const refreshQuo = async (callId: string, options?: { silent?: boolean }) => {
     if (!task.remote || quoRefreshingCallId) return;
     setQuoRefreshingCallId(callId);
     try {
@@ -395,19 +407,40 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
       if (!response.ok) throw new Error(payload.error || "Unable to refresh Quo data");
       const next = await fetch(`/api/tasks/${task.id}`);
       applyTaskPayload(await next.json() as TaskPayload);
+      if (options?.silent) return;
       if (payload.errors?.length) toast.warning(`Quo refresh completed with ${payload.errors.length} unavailable section${payload.errors.length === 1 ? "" : "s"}`);
       else toast.success("Quo data refreshed");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to refresh Quo data");
+      if (!options?.silent) toast.error(error instanceof Error ? error.message : "Unable to refresh Quo data");
     } finally {
       setQuoRefreshingCallId(null);
     }
   };
+  useEffect(() => {
+    if (!task.remote || liveTask.callReviewStatus !== "Awaiting Review") return;
+    const callId = remote?.timeline.find((item) => item.quo?.callId)?.quo?.callId;
+    if (!callId || callId.startsWith("ACsim")) return;
+    if (autoRefreshedQuoCallId.current === callId) return;
+    const missingArtifacts = !remote.timeline.some((item) => {
+      const quo = item.quo;
+      if (!quo || quo.callId !== callId) return false;
+      const hasRecording = !!(quo.recordings?.length || quo.call?.recordings?.length || quo.call?.media?.some((media) => !!media.url));
+      const hasSummary = !!(quo.summary?.summary?.length);
+      const hasTranscript = !!(quo.transcript?.dialogue?.length);
+      return hasRecording && hasSummary && hasTranscript;
+    });
+    if (!missingArtifacts) return;
+    autoRefreshedQuoCallId.current = callId;
+    const timer = window.setTimeout(() => {
+      void refreshQuo(callId, { silent: true });
+    }, 2500);
+    return () => window.clearTimeout(timer);
+  }, [task.remote, liveTask.callReviewStatus, remote?.timeline]);
   if (task.remote && !customer) return <main className="grid place-items-center bg-slate-50 text-sm text-slate-500">Loading task…</main>;
   if (!customer || !contact) return <main className="grid place-items-center bg-slate-50 text-sm text-slate-500">Brand context unavailable.</main>;
   const humanAssignees = state.users.filter(user => user.role === "AccountManager" || user.role === "Admin");
   const callers = state.users.filter(user => user.role === "Caller");
-  const callerPhoneOnly = state.currentRole === "Caller";
+  const callerPhoneOnly = user?.role === "Caller" || state.currentRole === "Caller";
   const canReviewCalls = task.remote && !callerPhoneOnly && can("reply");
   const reviewTasks = [
     ...(remote?.brand?.tasks || []),
@@ -423,61 +456,70 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
     }).catch(() => undefined);
   };
   const callBrief = reviewedTask.type === "Call" && !callerPhoneOnly
-    ? <CallBrief script={callScript} scriptLoading={callScriptLoading} task={reviewedTask} contact={contact} completed={isDone(reviewedTask)} review={taskReview} onCallOpening={onCallOpening} />
+    ? <CallBrief
+        script={callScript}
+        scriptLoading={callScriptLoading}
+        task={reviewedTask}
+        contact={contact}
+        completed={isDone(reviewedTask)}
+        review={taskReview}
+        onCallOpening={onCallOpening}
+      />
     : null;
+  const callerPhoneTasks = (() => {
+    const contactId = liveTask.contactId || contact.id;
+    const fromBrand = (remote?.brand?.tasks || [])
+      .filter((item) => item.channel === "Phone" && (!contactId || !item.contactId || item.contactId === contactId))
+      .map((item) => ({
+        id: item.id,
+        title: item.title,
+        status: item.status || "Pending",
+        dueAt: item.scheduledAt,
+        contactId: item.contactId,
+        contactPhone: item.contactPhone,
+        templateId: item.templateId,
+        callReviewStatus: item.callReviewStatus,
+        remote: true,
+      }));
+    const mappedLive = {
+      id: liveTask.id,
+      title: liveTask.summary,
+      status: liveTask.status,
+      dueAt: liveTask.dueAt,
+      contactId: liveTask.contactId,
+      contactPhone: liveTask.contactPhone,
+      templateId: liveTask.templateId,
+      callReviewStatus: liveTask.callReviewStatus,
+      remote: true,
+    };
+    return fromBrand.some((item) => item.id === liveTask.id) ? fromBrand : [mappedLive, ...fromBrand];
+  })();
 
   return <div className="mx-auto max-w-[1540px]">
     <button onClick={() => router.push("/tasks")} className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900"><ArrowLeft className="size-4"/>ReplyTask</button>
     <main className="min-w-0 overflow-hidden rounded-2xl bg-white">
     <header className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 bg-white px-5 py-4 lg:px-7">
       <div><div className="flex flex-wrap items-center gap-2"><Badge variant="outline">{reviewedTask.type}</Badge>{isDue(reviewedTask, state.simulatedDate) ? <Status value="Due"/> : <Badge variant="secondary">{reviewedTask.status}</Badge>}<CallReviewBadge review={taskReview}/><span className="text-xs text-slate-400">{dateOnly(reviewedTask.dueAt)}</span></div><h2 className="mt-2 text-xl font-bold">{customer.name}</h2><p className="mt-1 text-xs text-slate-500">{contact.name} · {contact.role} · {customer.cp} · {customer.status}{callerPhoneOnly && <> · Account Manager: {remote?.ownerName || state.users.find(user => user.id === task.assigneeId)?.name || "Unassigned"}</>}</p></div>
-      {state.currentRole !== "Caller" && <Button variant="outline" size="sm" disabled={!customer.id} onClick={() => router.push(`/customers/${encodeURIComponent(customer.id)}`)}>Brand profile</Button>}
+      {callerPhoneOnly ? null : <Button variant="outline" size="sm" disabled={!customer.id} onClick={() => router.push(`/customers/${encodeURIComponent(customer.id)}`)}>Brand profile</Button>}
     </header>
 
     <div className={callerPhoneOnly ? "grid" : "grid lg:grid-cols-[minmax(0,1fr)_290px]"}>
       <div className="min-w-0 p-5 lg:p-7">
         {callerPhoneOnly && reviewedTask.type === "Call" ? (
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-          <PhoneTaskBoard
-            activeTaskId={liveTask.id}
-            headerContactName={contact.name}
-            contacts={customer.contacts}
-            phoneTasks={(() => {
-              const contactId = liveTask.contactId || contact.id;
-              const fromBrand = (remote?.brand?.tasks || [])
-                .filter((item) => item.channel === "Phone" && (!contactId || !item.contactId || item.contactId === contactId))
-                .map((item) => ({
-                  id: item.id,
-                  title: item.title,
-                  status: item.status || "Pending",
-                  dueAt: item.scheduledAt,
-                  contactId: item.contactId,
-                  contactPhone: item.contactPhone,
-                  templateId: item.templateId,
-                  callReviewStatus: item.callReviewStatus,
-                  remote: true,
-                }));
-              const mappedLive = {
-                id: liveTask.id,
-                title: liveTask.summary,
-                status: liveTask.status,
-                dueAt: liveTask.dueAt,
-                contactId: liveTask.contactId,
-                contactPhone: liveTask.contactPhone,
-                templateId: liveTask.templateId,
-                callReviewStatus: liveTask.callReviewStatus,
-                remote: true,
-              };
-              return fromBrand.some((item) => item.id === liveTask.id) ? fromBrand : [mappedLive, ...fromBrand];
-            })()}
-            timeline={timeline}
-            activeScript={callScript}
-            activeScriptLoading={callScriptLoading}
-            quoRefreshingCallId={quoRefreshingCallId}
-            onRefreshQuo={task.remote ? refreshQuo : undefined}
-            onSelectTask={(taskId) => router.push(`/tasks/${encodeURIComponent(taskId)}`)}
-            showDial
-          />
+            <PhoneTaskBoard
+              activeTaskId={liveTask.id}
+              headerContactName={contact.name}
+              contacts={customer.contacts}
+              phoneTasks={callerPhoneTasks}
+              timeline={timeline}
+              activeScript={callScript}
+              activeScriptLoading={callScriptLoading}
+              quoRefreshingCallId={quoRefreshingCallId}
+              onRefreshQuo={task.remote ? refreshQuo : undefined}
+              onSelectTask={(taskId) => router.push(`/tasks/${encodeURIComponent(taskId)}`)}
+              showDial
+            />
           </div>
         ) : (
           <>
@@ -494,7 +536,6 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
                 tasks={reviewTasks}
                 maxHeight="max-h-[640px]"
                 initialChannel={liveTask.type === "Call" ? "Phone" : undefined}
-                initialCp={undefined}
                 canReviewCalls={canReviewCalls}
                 onPersistCallReview={task.remote ? persistCallReview : undefined}
                 onRefreshQuo={task.remote ? refreshQuo : undefined}
@@ -545,6 +586,17 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
 
 function CallBrief({ task, contact, completed, onCallOpening, script = null, scriptLoading = false, review }: { task: UnifiedTask; contact: Contact; completed: boolean; onCallOpening: () => void; script?: CallScript | null; scriptLoading?: boolean; review?: CallReviewView }) {
   const phone = (devCallPhoneOnClient() || contact.phone || task.contactPhone || "").trim();
+  const cancelled = isCancelledTaskStatus(task.status);
+  const failed = task.status === "Failed";
+  const callAction = completed && !cancelled && !failed
+    ? <Button disabled className="bg-emerald-600 text-white hover:bg-emerald-600"><CheckCircle2 className="mr-2 size-4"/>Call completed</Button>
+    : cancelled
+      ? <Button disabled variant="secondary"><Phone className="mr-2 size-4"/>Call cancelled</Button>
+      : failed
+        ? <Button disabled className="bg-rose-100 text-rose-800 hover:bg-rose-100"><Phone className="mr-2 size-4"/>Call failed</Button>
+        : phone
+          ? <Button asChild><a href={`openphone://dial?number=${encodeURIComponent(phone)}&action=call`} onClick={onCallOpening}><Phone className="mr-2 size-4"/>Call with Quo</a></Button>
+          : <Button disabled><Phone className="mr-2 size-4"/>Call with Quo</Button>;
   return <section className="mb-6 rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
     <div className="flex flex-wrap items-start justify-between gap-4">
       <div className="min-w-0">
@@ -552,11 +604,14 @@ function CallBrief({ task, contact, completed, onCallOpening, script = null, scr
         <h3 className="mt-1 text-base font-bold text-blue-950">{task.summary || "Call this Contact"}</h3>
         <p className="mt-1 text-sm text-blue-900">{contact.name} · {phone || "No phone number"}</p>
       </div>
-      <div className="flex shrink-0 flex-wrap gap-2">{completed ? <Button disabled className="bg-emerald-600 text-white hover:bg-emerald-600"><CheckCircle2 className="mr-2 size-4"/>Call completed</Button> : phone ? <Button asChild><a href={`openphone://dial?number=${encodeURIComponent(phone)}&action=call`} onClick={onCallOpening}><Phone className="mr-2 size-4"/>Call with Quo</a></Button> : <Button disabled><Phone className="mr-2 size-4"/>Call with Quo</Button>}</div>
+      <div className="flex shrink-0 flex-wrap gap-2">{callAction}</div>
     </div>
     {(scriptLoading || script || review) && <div className="mt-4 text-sm text-blue-950">
       {scriptLoading ? <p className="text-sm text-blue-800">Loading call script…</p> : script ? <div><div className="flex flex-wrap items-center gap-2 font-semibold"><span>{script.name}</span>{script.status && <Badge variant="outline" className="border-blue-200 bg-white/60 text-[10px] text-blue-800">{script.status}</Badge>}</div><p className="mt-1 whitespace-pre-wrap leading-6 text-blue-950/85">{script.content || "No content template configured."}</p></div> : null}
-      {review?.recallRequested ? <p className="mt-3 text-xs font-semibold text-rose-700">Recall requested · Reassigned to Beril</p> : review?.status === "Qualified" ? <p className="mt-3 text-xs font-semibold text-emerald-700">Call review completed · qualified</p> : null}
+      {review?.recallRequested ? <p className="mt-3 text-xs font-semibold text-rose-700">Recall requested · Reassigned to Beril</p>
+        : review?.status === "Qualified" ? <p className="mt-3 text-xs font-semibold text-emerald-700">Call review completed · qualified</p>
+        : review?.status === "Awaiting Review" ? <p className="mt-3 text-xs font-semibold text-amber-800">Connected · awaiting Account Manager review</p>
+        : null}
     </div>}
   </section>;
 }
