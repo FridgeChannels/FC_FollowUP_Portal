@@ -22,6 +22,9 @@ export function cacheBrandList(items: BrandListItem[]) {
   } catch {
     /* ignore quota */
   }
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("fc-brands-cache-updated"));
+  }
 }
 
 export function cacheBrandItem(item: BrandListItem) {
@@ -37,4 +40,8 @@ export function getCachedBrand(id: string) {
       (brand) => brand.id.replace(/-/g, "").toLowerCase() === normalized,
     ) || null
   );
+}
+
+export function getCachedBrandList() {
+  return readStorage();
 }

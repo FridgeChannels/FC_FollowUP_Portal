@@ -168,27 +168,49 @@ async function contactPhoneNumber(contact: NotionPage | null, caches: TaskCaches
   return phoneFromProperties(person?.properties);
 }
 
-async function mapTaskPage(page: NotionPage, caches: TaskCaches): Promise<BrandTask> {
+export type TaskResolveHints = {
+  /** Skip Contact/KeyPerson retrieves when the detail path already loaded contacts. */
+  contactsById?: Map<string, { name: string | null; phone: string | null }>;
+  /** Skip Follow-up Client retrieves when mapping tasks for a known brand. */
+  brand?: { id: string; name: string; ownerId: string | null };
+};
+
+async function mapTaskPage(
+  page: NotionPage,
+  caches: TaskCaches,
+  hints?: TaskResolveHints,
+): Promise<BrandTask> {
   const properties = page.properties || {};
   const contactId = firstRelationId(properties["Follow-up Contact"]) || null;
   const ownerId = firstRelationId(properties.Owner) || null;
-  const [contact, owner] = await Promise.all([
-    resolveContactPage(contactId || undefined, caches),
-    ownerId
-      ? caches.owners.has(ownerId)
-        ? Promise.resolve(caches.owners.get(ownerId) || null)
-        : retrieveOwner(ownerId).then((value) => {
-            caches.owners.set(ownerId, value);
-            return value;
-          })
-      : Promise.resolve(null),
-  ]);
-  const brand = await resolveBrandFromContact(contact, caches);
-  const contactTitle = titleFromProperties(contact?.properties);
-  const [contactName, contactPhone] = await Promise.all([
-    contactDisplayName(contact, contactTitle, caches),
-    contactPhoneNumber(contact, caches),
-  ]);
+  const hintedContact = contactId ? hints?.contactsById?.get(contactId) : undefined;
+  const owner = ownerId
+    ? caches.owners.has(ownerId)
+      ? caches.owners.get(ownerId) || null
+      : await retrieveOwner(ownerId).then((value) => {
+          caches.owners.set(ownerId, value);
+          return value;
+        })
+    : null;
+
+  let contactName = hintedContact?.name ?? null;
+  let contactPhone = hintedContact?.phone ?? null;
+  let brand = hints?.brand || null;
+
+  if (!hintedContact || !brand) {
+    const contact = await resolveContactPage(contactId || undefined, caches);
+    if (!brand) brand = await resolveBrandFromContact(contact, caches);
+    if (!hintedContact) {
+      const contactTitle = titleFromProperties(contact?.properties);
+      const [resolvedName, resolvedPhone] = await Promise.all([
+        contactDisplayName(contact, contactTitle, caches),
+        contactPhoneNumber(contact, caches),
+      ]);
+      contactName = resolvedName;
+      contactPhone = resolvedPhone;
+    }
+  }
+
   return {
     id: page.id,
     title: titleFromProperties(properties) || "Untitled Task",
@@ -232,7 +254,10 @@ function sortTasks(tasks: BrandTask[]) {
   });
 }
 
-export async function listFollowupTasks(contactIds: string[]): Promise<BrandTask[]> {
+export async function listFollowupTasks(
+  contactIds: string[],
+  hints?: TaskResolveHints,
+): Promise<BrandTask[]> {
   if (!contactIds.length) return [];
   let pages: NotionPage[] = [];
   try {
@@ -248,7 +273,8 @@ export async function listFollowupTasks(contactIds: string[]): Promise<BrandTask
     }
   }
   const caches = emptyCaches();
-  const tasks = await Promise.all(pages.map((page) => mapTaskPage(page, caches)));
+  if (hints?.brand) caches.brands.set(hints.brand.id, hints.brand);
+  const tasks = await Promise.all(pages.map((page) => mapTaskPage(page, caches, hints)));
   return sortTasks(tasks);
 }
 

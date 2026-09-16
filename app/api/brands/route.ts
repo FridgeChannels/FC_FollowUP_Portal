@@ -2,9 +2,7 @@ import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { queryFollowupClientPages } from "@/lib/notion/client";
 import {
   attachBrandReplySignals,
-  attachBrandInteractionSignals,
   listBrandReplySignals,
-  listBrandInteractionSignals,
 } from "@/lib/notion/brand-reply-signals";
 import { listCheckpoints } from "@/lib/notion/cps";
 import { mapFollowupClientPages } from "@/lib/notion/followup-clients";
@@ -16,27 +14,32 @@ export async function GET(request: Request) {
     if (!viewer.email) {
       return Response.json({ error: "Sign in required" }, { status: 401 });
     }
-    const cps = await listCheckpoints();
     if (!viewer.isAdmin && !viewer.ownerId) {
+      const cps = await listCheckpoints();
       return Response.json({
         brands: [],
         cps,
         viewer: { isAdmin: false, ownerName: viewer.name },
       });
     }
+
     const ownerParam = new URL(request.url).searchParams.get("owner");
-    const pages = await queryFollowupClientPages(
-      ownerPageIdFromQueryParam(viewer.isAdmin, viewer.ownerId, ownerParam),
+    const ownerPageId = ownerPageIdFromQueryParam(
+      viewer.isAdmin,
+      viewer.ownerId,
+      ownerParam,
     );
-    const [mapped, replySignals, interactionSignals] = await Promise.all([
-      mapFollowupClientPages(pages),
-      listBrandReplySignals().catch(() => new Map()),
-      listBrandInteractionSignals(pages).catch(() => new Map()),
+    const [cps, pages] = await Promise.all([
+      listCheckpoints(),
+      queryFollowupClientPages(ownerPageId),
     ]);
-    const brands = attachBrandInteractionSignals(
-      attachBrandReplySignals(mapped, replySignals),
-      interactionSignals,
-    );
+    // Skip per-brand full conversation scans — list uses rollup Last Interaction At /
+    // Last Reply At. Reply-needed badges still come from Needs Reply query.
+    const [mapped, replySignals] = await Promise.all([
+      mapFollowupClientPages(pages),
+      listBrandReplySignals(pages).catch(() => new Map()),
+    ]);
+    const brands = attachBrandReplySignals(mapped, replySignals);
     return Response.json({
       brands,
       cps,

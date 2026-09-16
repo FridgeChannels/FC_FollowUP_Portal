@@ -107,12 +107,9 @@ export function PhoneTaskBoard({
 
   const tasks = useMemo(() => {
     const byId = new Map(phoneTasks.map((item) => [item.id, item]));
-    return [...byId.values()].sort((left, right) => {
-      const leftDone = isDone(left.status);
-      const rightDone = isDone(right.status);
-      if (leftDone !== rightDone) return leftDone ? 1 : -1;
-      return (left.dueAt || "").localeCompare(right.dueAt || "") || left.id.localeCompare(right.id);
-    });
+    return [...byId.values()].sort((left, right) =>
+      (left.dueAt || "").localeCompare(right.dueAt || "") || left.id.localeCompare(right.id),
+    );
   }, [phoneTasks]);
 
   const openPhoneTaskIds = useMemo(

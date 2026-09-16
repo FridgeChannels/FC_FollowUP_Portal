@@ -28,7 +28,10 @@ function asReplyStatus(value: string): BrandActivity["replyStatus"] {
   return null;
 }
 
-function mapConversation(page: NotionPage): BrandActivity {
+function mapConversation(
+  page: NotionPage,
+  options: { trimPayload?: boolean } = {},
+): BrandActivity {
   const properties = page.properties || {};
   const subject = propertyText(properties.Subject) || null;
   const notes = propertyText(properties.Notes) || null;
@@ -48,7 +51,7 @@ function mapConversation(page: NotionPage): BrandActivity {
     sourceUrl: propertyText(properties["Source URL"]) || null,
     threadId: propertyText(properties["Thread ID"]) || null,
     messageId: propertyText(properties["Message ID"]) || null,
-    extendedParameters,
+    extendedParameters: options.trimPayload ? null : extendedParameters,
     replyStatus: asReplyStatus(propertyText(properties["Reply Status"])),
     cpId: firstRelationId(properties.CP) || null,
     cpAtInteraction: null,
@@ -100,6 +103,112 @@ async function queryConversationsByContacts(contactIds: string[]) {
   return pages;
 }
 
+export type ListConversationsPageOptions = {
+  limit?: number;
+  cursor?: string | null;
+  /** Drop raw Extended Parameters from JSON (parsed quo is kept). */
+  trimPayload?: boolean;
+};
+
+export type ConversationsPage = {
+  activities: BrandActivity[];
+  nextCursor: string | null;
+  hasMore: boolean;
+};
+
+async function queryConversationsPageByContacts(
+  contactIds: string[],
+  options: { limit: number; cursor?: string | null },
+) {
+  // Pagination cursors are only safe for a single Notion filter; brands rarely exceed 100 contacts.
+  const chunk = contactIds.slice(0, 100);
+  const body: Record<string, unknown> = {
+    page_size: Math.min(Math.max(options.limit, 1), 100),
+    filter: contactRelationFilter(chunk),
+    sorts: [{ property: "Interaction At", direction: "descending" }],
+  };
+  if (options.cursor) body.start_cursor = options.cursor;
+  try {
+    return await notionFetch<{
+      results: NotionPage[];
+      has_more?: boolean;
+      next_cursor?: string | null;
+    }>(`/databases/${getFollowupConversationDbId()}/query`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  } catch (error) {
+    if (isRetryableNotionError(error)) throw error;
+    // Fallback when Interaction At is missing / not sortable.
+    const { sorts: _sorts, ...withoutSorts } = body;
+    return notionFetch<{
+      results: NotionPage[];
+      has_more?: boolean;
+      next_cursor?: string | null;
+    }>(`/databases/${getFollowupConversationDbId()}/query`, {
+      method: "POST",
+      body: JSON.stringify(withoutSorts),
+    });
+  }
+}
+
+export async function listFollowupConversationsPage(
+  contactIds: string[],
+  options: ListConversationsPageOptions = {},
+): Promise<ConversationsPage> {
+  if (!contactIds.length) {
+    return { activities: [], nextCursor: null, hasMore: false };
+  }
+  const limit = Math.min(Math.max(options.limit ?? 40, 1), 100);
+  let data: {
+    results: NotionPage[];
+    has_more?: boolean;
+    next_cursor?: string | null;
+  };
+  try {
+    data = await queryConversationsPageByContacts(contactIds, {
+      limit,
+      cursor: options.cursor,
+    });
+  } catch (error) {
+    if (isRetryableNotionError(error)) throw error;
+    try {
+      const pages = await listFromContactRelations(contactIds);
+      const mapped = await attachConversationCp(
+        sortConversations(
+          pages.map((page) => mapConversation(page, { trimPayload: options.trimPayload })),
+        ),
+      );
+      const offset = options.cursor ? Number.parseInt(options.cursor, 10) || 0 : 0;
+      const slice = mapped.slice(offset, offset + limit);
+      const nextOffset = offset + slice.length;
+      return {
+        activities: slice,
+        nextCursor: nextOffset < mapped.length ? String(nextOffset) : null,
+        hasMore: nextOffset < mapped.length,
+      };
+    } catch (fallbackError) {
+      if (isRetryableNotionError(fallbackError)) throw fallbackError;
+      return { activities: [], nextCursor: null, hasMore: false };
+    }
+  }
+
+  const activities = await attachConversationCp(
+    data.results.map((page) => mapConversation(page, { trimPayload: options.trimPayload })),
+  );
+  // When Notion couldn't sort, keep newest-first within the page.
+  sortConversations(activities);
+  // Only advertise another page when this response filled the requested page size.
+  const hasMore = Boolean(
+    data.has_more && data.next_cursor && data.results.length >= limit,
+  );
+  return {
+    activities,
+    nextCursor: hasMore ? data.next_cursor || null : null,
+    hasMore,
+  };
+}
+
 async function listFromContactRelations(contactIds: string[]) {
   const conversationIds = new Set<string>();
   const contacts = await Promise.all(
@@ -124,7 +233,7 @@ export async function listConversationsByIds(ids: string[]): Promise<BrandActivi
   return attachConversationCp(
     pages
       .filter((page): page is NotionPage => !!page)
-      .map(mapConversation),
+      .map((page) => mapConversation(page)),
   ).then(sortConversations);
 }
 
@@ -146,7 +255,7 @@ export async function listFollowupConversations(
     }
   }
 
-  return attachConversationCp(pages.map(mapConversation)).then(sortConversations);
+  return attachConversationCp(pages.map((page) => mapConversation(page))).then(sortConversations);
 }
 
 function sortConversations(items: BrandActivity[]) {
@@ -157,16 +266,17 @@ function sortConversations(items: BrandActivity[]) {
   });
 }
 
-async function attachConversationCp(items: BrandActivity[]) {
+async function attachConversationCp(items: BrandActivity[]): Promise<BrandActivity[]> {
   const ids = [...new Set(items.map((item) => item.cpId).filter((id): id is string => !!id))];
   if (!ids.length) return items;
   const checkpoints = await listCheckpoints();
   const byId = new Map(checkpoints.map((item) => [item.id, item]));
   return items.map((item) => {
     const checkpoint = item.cpId ? byId.get(item.cpId) : undefined;
+    const code = interactionCpCode(checkpoint?.name);
     return {
       ...item,
-      cpAtInteraction: interactionCpCode(checkpoint?.name) || null,
+      cpAtInteraction: code === "CP1" || code === "CP2" || code === "CP3" ? code : null,
     };
   });
 }
@@ -181,7 +291,7 @@ async function findConversationsByText(
     property,
     rich_text: { equals: text },
   });
-  return attachConversationCp(pages.map(mapConversation)).then(sortConversations);
+  return attachConversationCp(pages.map((page) => mapConversation(page))).then(sortConversations);
 }
 
 export function findConversationsByMessageId(messageId?: string | null) {

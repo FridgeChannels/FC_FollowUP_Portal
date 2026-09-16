@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { ownerPageIdFromQueryParam, ownerRelationFilter, taskListFilter, taskQueryForViewer } from "./owner-filter.ts";
+import {
+  ownerPageIdFromQueryParam,
+  ownerRelationFilter,
+  parseTaskStatusScope,
+  taskListFilter,
+  taskQueryForViewer,
+  taskStatusFilter,
+} from "./owner-filter.ts";
 
 describe("ownerRelationFilter", () => {
   it("queries all owners when no owner is selected", () => {
@@ -37,27 +44,61 @@ describe("ownerPageIdFromQueryParam", () => {
   });
 });
 
+describe("parseTaskStatusScope", () => {
+  it("defaults to open", () => {
+    assert.equal(parseTaskStatusScope(null), "open");
+    assert.equal(parseTaskStatusScope(undefined), "open");
+    assert.equal(parseTaskStatusScope(""), "open");
+  });
+
+  it("accepts completed and all", () => {
+    assert.equal(parseTaskStatusScope("completed"), "completed");
+    assert.equal(parseTaskStatusScope("closed"), "completed");
+    assert.equal(parseTaskStatusScope("all"), "all");
+  });
+});
+
 describe("taskQueryForViewer", () => {
-  it("queries Phone tasks for Caller", () => {
+  it("queries Phone + open tasks for Caller by default", () => {
     assert.deepEqual(
       taskQueryForViewer({ isAdmin: false, role: "Caller", ownerId: "caller-1" }),
-      { channel: "Phone" },
+      { channel: "Phone", statusScope: "open" },
     );
   });
 
-  it("scopes AccountManager to their Owner relation", () => {
+  it("scopes AccountManager to their Owner relation and open status", () => {
     assert.deepEqual(
       taskQueryForViewer({ isAdmin: false, role: "AccountManager", ownerId: "owner-1" }),
-      { ownerPageId: "owner-1" },
+      { ownerPageId: "owner-1", statusScope: "open" },
+    );
+  });
+
+  it("passes through status=all", () => {
+    assert.deepEqual(
+      taskQueryForViewer({ isAdmin: true, role: "Admin", ownerId: "admin-1" }, null, "all"),
+      { ownerPageId: undefined, statusScope: "all" },
     );
   });
 });
 
 describe("taskListFilter", () => {
-  it("filters Caller lists by Channel Phone", () => {
+  it("filters Caller lists by Channel Phone and open status", () => {
     assert.deepEqual(taskListFilter({ channel: "Phone" }), {
+      and: [
+        { property: "Channel", select: { equals: "Phone" } },
+        taskStatusFilter("open"),
+      ],
+    });
+  });
+
+  it("omits status when scope is all", () => {
+    assert.deepEqual(taskListFilter({ channel: "Phone", statusScope: "all" }), {
       property: "Channel",
       select: { equals: "Phone" },
     });
+  });
+
+  it("filters completed statuses", () => {
+    assert.deepEqual(taskListFilter({ statusScope: "completed" }), taskStatusFilter("completed"));
   });
 });

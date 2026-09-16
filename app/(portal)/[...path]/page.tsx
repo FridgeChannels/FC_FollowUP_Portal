@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import OutreachApp from "../outreach-workspace";
 import { workspaceMetadata } from "@/lib/page-metadata";
 
 type Props = {
@@ -15,6 +14,7 @@ export async function generateMetadata({
   return workspaceMetadata(path, await searchParams);
 }
 
+/** Content is rendered by the portal layout shell to keep the sidebar mounted. */
 export default function WorkspaceRoute() {
-  return <OutreachApp />;
+  return null;
 }

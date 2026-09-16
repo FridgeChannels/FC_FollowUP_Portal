@@ -19,7 +19,7 @@ import {
 } from "./client";
 import { listFollowupContacts } from "./contacts";
 import { listFollowupConversations } from "./conversations";
-import { listFollowupTasks } from "./tasks";
+import { listFollowupTasks, type TaskResolveHints } from "./tasks";
 import { retrieveOwner, type FollowupOwner } from "./owners";
 const HANDLING_MODES = new Set(["Automated", "Human"]);
 
@@ -130,10 +130,9 @@ export async function mapFollowupClientPage(
 export async function mapFollowupClientPages(pages: NotionPage[]) {
   const titleCache = new Map<string, string>();
   const ownerCache = new Map<string, FollowupOwner | null>();
-  const brands: BrandListItem[] = [];
-  for (const page of pages) {
-    brands.push(await mapFollowupClientPage(page, titleCache, ownerCache));
-  }
+  const brands = await Promise.all(
+    pages.map((page) => mapFollowupClientPage(page, titleCache, ownerCache)),
+  );
   return brands.sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -152,7 +151,15 @@ async function resolveBombMeta(pageId: string) {
   }
 }
 
-export async function mapFollowupClientDetail(page: NotionPage): Promise<BrandDetail> {
+export type MapFollowupClientDetailOptions = {
+  /** Default false — brand shell loads first; timeline uses /activities. */
+  includeActivities?: boolean;
+};
+
+export async function mapFollowupClientDetail(
+  page: NotionPage,
+  options: MapFollowupClientDetailOptions = {},
+): Promise<BrandDetail> {
   const properties = page.properties || {};
   const [brand, contacts, company, followupExhibition] = await Promise.all([
     mapFollowupClientPage(page),
@@ -164,9 +171,22 @@ export async function mapFollowupClientDetail(page: NotionPage): Promise<BrandDe
     (brand.currentCpId ? await resolveCheckpoint(brand.currentCpId) : null) ||
     currentCpOption(brand.currentCp);
   const contactIds = contacts.map((item) => item.id);
+  const brandName = company.companyName || brand.name;
+  const taskHints: TaskResolveHints = {
+    contactsById: new Map(
+      contacts.map((item) => [item.id, { name: item.name, phone: item.phone }]),
+    ),
+    brand: {
+      id: brand.id,
+      name: brandName,
+      ownerId: brand.ownerId,
+    },
+  };
   const [activities, tasks] = await Promise.all([
-    listFollowupConversations(contactIds),
-    listFollowupTasks(contactIds),
+    options.includeActivities
+      ? listFollowupConversations(contactIds)
+      : Promise.resolve([]),
+    listFollowupTasks(contactIds, taskHints),
   ]);
   const bombIds = [...new Set(tasks.map((item) => item.sourceBombId).filter((id): id is string => !!id))];
   const bombMeta = new Map(
@@ -176,7 +196,7 @@ export async function mapFollowupClientDetail(page: NotionPage): Promise<BrandDe
   );
   return {
     ...brand,
-    name: company.companyName || brand.name,
+    name: brandName,
     productDescription: company.productDescription,
     matchedCategory: company.matchedCategory,
     followupExhibition,

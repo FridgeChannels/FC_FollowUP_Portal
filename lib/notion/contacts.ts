@@ -116,3 +116,18 @@ export async function listFollowupContacts(
     return order || a.name.localeCompare(b.name);
   });
 }
+
+/** Contact page ids only — skips Key Person retrieves used on the detail shell. */
+export async function listFollowupContactIds(
+  clientPageId: string,
+  relatedIds: string[] = [],
+): Promise<string[]> {
+  let pages: NotionPage[] = [];
+  try {
+    pages = await queryContactsByClient(clientPageId);
+  } catch {
+    pages = [];
+  }
+  if (pages.length) return pages.map((page) => page.id);
+  return relatedIds;
+}

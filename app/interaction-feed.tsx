@@ -7,7 +7,7 @@ import { callReviewsFromTasks, type CallReviewStatus } from "@/lib/call-review-m
 import type { BrandTask } from "@/lib/brand-list";
 import { BombInstance, Channel, Contact, CPCode, CP_CODES, Interaction, ScheduledAction } from "@/lib/outreach-domain";
 import { BombExecutionPlan, formatUtcTime } from "./bomb-plan";
-import { BrandReplyBox } from "./brand-reply-box";
+import { BrandReplyBox, inboundNeedsComposer } from "./brand-reply-box";
 import { ChannelIcon } from "./channel-icon";
 import { PhoneTaskBoard } from "./phone-task-board";
 import { QuoCallPanel } from "./quo-call-panel";
@@ -16,6 +16,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Spinner } from "@/components/ui/spinner";
 
 const CHANNELS: Channel[] = ["Email", "LinkedIn", "SMS", "WhatsApp", "Phone"];
 
@@ -106,6 +107,7 @@ export function InteractionFeed({
   canReviewCalls = false,
   tasks = [],
   onPersistCallReview,
+  loading = false,
 }: {
   interactions: Interaction[];
   contacts: Contact[];
@@ -127,6 +129,7 @@ export function InteractionFeed({
   canReviewCalls?: boolean;
   tasks?: Array<Pick<BrandTask, "id" | "channel" | "title" | "status" | "contactId" | "contactPhone" | "templateId" | "scheduledAt" | "callReviewStatus"> & { remote?: boolean }>;
   onPersistCallReview?: (taskId: string, status: CallReviewStatus) => Promise<void>;
+  loading?: boolean;
 }) {
   const { state } = useWorkspace();
   const notionReviews = callReviewsFromTasks(tasks);
@@ -214,14 +217,26 @@ export function InteractionFeed({
     <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 px-5 py-3">
       <div className="flex flex-wrap gap-1.5">
         {visibleChannels.map(channel => {
+          const channelItems = interactions.filter(item =>
+            isChannelMessage(item) && item.channel === channel && belongsToCp(item, selectedCp),
+          );
           const count = channel === "Phone" && phoneTasks.length
             ? phoneTasks.length
-            : interactions.filter(item => isChannelMessage(item) && item.channel === channel && belongsToCp(item, selectedCp)).length;
+            : channelItems.length;
+          const needsReply = !loading && channelItems.some(item => inboundNeedsComposer(state, item, interactions));
           const selected = channel === activeChannel;
-          return <button key={channel} type="button" aria-pressed={selected} onClick={() => setSelectedChannel(channel)} className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${selected ? "bg-violet-600 text-white" : "bg-slate-50 text-slate-600 hover:bg-slate-100"}`}>
+          return <button key={channel} type="button" aria-pressed={selected} disabled={loading} onClick={() => setSelectedChannel(channel)} className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${selected ? "bg-violet-600 text-white" : "bg-slate-50 text-slate-600 hover:bg-slate-100"} ${loading ? "opacity-70" : ""}`}>
             <ChannelIcon channel={channel} className="size-4" alt=""/>
             {channel}
-            <span className={selected ? "text-white/80" : "text-slate-400"}>{count}</span>
+            <span className={`inline-flex items-center gap-1 ${selected ? "text-white/80" : "text-slate-400"}`}>
+              {loading ? "…" : count}
+              {needsReply ? (
+                <span
+                  className={`size-1.5 shrink-0 rounded-full ${selected ? "bg-rose-200" : "bg-rose-500"}`}
+                  aria-label="Reply needed"
+                />
+              ) : null}
+            </span>
           </button>;
         })}
       </div>
@@ -229,7 +244,12 @@ export function InteractionFeed({
     </div>
 
     {channelHeader && (!channelHeaderCp || selectedCp === channelHeaderCp) && <div className="px-5 pt-5">{channelHeader}</div>}
-    {usePhoneTaskBoard ? (
+    {loading ? (
+      <div className="flex items-center justify-center gap-2 px-5 py-10 text-sm text-slate-500">
+        <Spinner className="size-4 text-slate-400" />
+        Loading {activeChannel} activity…
+      </div>
+    ) : usePhoneTaskBoard ? (
       <PhoneTaskBoard
         phoneTasks={phoneTasks}
         contacts={contacts}

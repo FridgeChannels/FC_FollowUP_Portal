@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { enUS } from "date-fns/locale";
 import {
   Activity,
   ArrowRight,
@@ -16,9 +17,10 @@ import {
   Search,
   Upload,
 } from "lucide-react";
+import { type DateRange } from "react-day-picker";
 import { toast } from "sonner";
 import { useWorkspace } from "./workspace-store";
-import { cacheBrandItem, cacheBrandList } from "@/lib/brand-list-cache";
+import { cacheBrandItem, cacheBrandList, getCachedBrandList } from "@/lib/brand-list-cache";
 import {
   FOLLOW_UP_STATUSES,
   listApplicableCps,
@@ -30,6 +32,7 @@ import { usePageMetadata } from "./use-page-metadata";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -47,6 +50,11 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -469,6 +477,8 @@ type BrandListFilters = {
   status: string;
   cp: string;
   owner: string;
+  replyFrom: string;
+  replyTo: string;
 };
 
 function brandListFiltersFromSearch(search: URLSearchParams): BrandListFilters {
@@ -477,6 +487,8 @@ function brandListFiltersFromSearch(search: URLSearchParams): BrandListFilters {
     status: search.get("status") ?? "all",
     cp: search.get("cp") ?? "all",
     owner: search.get("owner") ?? "all",
+    replyFrom: search.get("replyFrom") ?? "",
+    replyTo: search.get("replyTo") ?? "",
   };
 }
 
@@ -486,8 +498,52 @@ function brandListPath(filters: BrandListFilters) {
   if (filters.cp !== "all") params.set("cp", filters.cp);
   if (filters.status !== "all") params.set("status", filters.status);
   if (filters.owner !== "all") params.set("owner", filters.owner);
+  if (filters.replyFrom) params.set("replyFrom", filters.replyFrom);
+  if (filters.replyTo) params.set("replyTo", filters.replyTo);
   const qs = params.toString();
   return qs ? `/customers?${qs}` : "/customers";
+}
+
+/** Inclusive date-only range check for Reply Due At (YYYY-MM-DD). */
+function replyDueInRange(dueAt: string | null | undefined, from: string, to: string) {
+  if (!dueAt) return false;
+  const day = dateOnly(dueAt);
+  const start = from && to && from > to ? to : from;
+  const end = from && to && from > to ? from : to;
+  if (start && day < start) return false;
+  if (end && day > end) return false;
+  return true;
+}
+
+function parseDateOnly(value: string): Date | undefined {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
+function formatDateOnly(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatDateOnlyLabel(value: string) {
+  const date = parseDateOnly(value);
+  if (!date) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+}
+
+function replyDueRangeLabel(from: string, to: string) {
+  if (from && to) return `${formatDateOnlyLabel(from)} – ${formatDateOnlyLabel(to)}`;
+  if (from) return `From ${formatDateOnlyLabel(from)}`;
+  if (to) return `Until ${formatDateOnlyLabel(to)}`;
+  return "Select dates";
 }
 
 async function patchBrandListItem(id: string, body: Record<string, unknown>) {
@@ -536,14 +592,21 @@ export function BrandsPage() {
   const [filters, setFilters] = useState<BrandListFilters>(() =>
     brandListFiltersFromSearch(searchParams),
   );
-  const { q: query, status, cp, owner } = filters;
+  const { q: query, status, cp, owner, replyFrom, replyTo } = filters;
   const effectiveStatus = isAdmin ? status : "all";
-  const [brands, setBrands] = useState<BrandListItem[]>([]);
+  const hasReplyDueFilter = Boolean(replyFrom || replyTo);
+  const ownerQuery =
+    isAdmin && owner !== "all" ? `?owner=${encodeURIComponent(owner)}` : "";
+  const brandsPath = `/api/brands${ownerQuery}`;
+  const [brands, setBrands] = useState<BrandListItem[]>(() =>
+    ownerQuery ? [] : getCachedBrandList(),
+  );
   const [ownerOptions, setOwnerOptions] = useState<Array<{ id: string; name: string }>>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const cps = listApplicableCps();
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !(ownerQuery ? false : getCachedBrandList().length));
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string>();
   const applyBrandUpdate = (brand: BrandListItem) => {
     cacheBrandItem(brand);
@@ -551,9 +614,6 @@ export function BrandsPage() {
       prev.map((item) => (item.id === brand.id ? mergeBrandListItem(item, brand) : item)),
     );
   };
-  const ownerQuery =
-    isAdmin && owner !== "all" ? `?owner=${encodeURIComponent(owner)}` : "";
-  const brandsPath = `/api/brands${ownerQuery}`;
   const setListParam = (key: keyof BrandListFilters, value: string) => {
     setFilters((prev) => {
       const next = { ...prev, [key]: value };
@@ -561,6 +621,18 @@ export function BrandsPage() {
       return next;
     });
   };
+  const setReplyDueRange = (from: string, to: string) => {
+    setFilters((prev) => {
+      const next = { ...prev, replyFrom: from, replyTo: to };
+      window.history.replaceState(window.history.state, "", brandListPath(next));
+      return next;
+    });
+  };
+  const clearReplyDueFilter = () => setReplyDueRange("", "");
+  const replyDueSelected: DateRange | undefined =
+    replyFrom || replyTo
+      ? { from: parseDateOnly(replyFrom), to: parseDateOnly(replyTo) }
+      : undefined;
   useEffect(() => {
     const onPopState = () => {
       setFilters(brandListFiltersFromSearch(new URLSearchParams(window.location.search)));
@@ -595,7 +667,15 @@ export function BrandsPage() {
   }, [isAdmin]);
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+    const cached = ownerQuery ? [] : getCachedBrandList();
+    if (cached.length) {
+      setBrands(cached);
+      setLoading(false);
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+      setRefreshing(false);
+    }
     fetch(brandsPath)
       .then(async (response) => {
         const payload = (await response.json()) as {
@@ -614,15 +694,19 @@ export function BrandsPage() {
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Failed to load brands");
+        if (!cached.length) {
+          setError(err instanceof Error ? err.message : "Failed to load brands");
+        }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (cancelled) return;
+        setLoading(false);
+        setRefreshing(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [brandsPath, state.currentRole]);
+  }, [brandsPath, ownerQuery, state.currentRole]);
   const filtered = useMemo(
     () =>
       brands
@@ -635,7 +719,10 @@ export function BrandsPage() {
               ? owner === "all" ||
                 (owner === "unassigned" ? !c.ownerId : c.ownerId === owner)
               : true) &&
-            c.name.toLowerCase().includes(query.toLowerCase()),
+            c.name.toLowerCase().includes(query.toLowerCase()) &&
+            (!hasReplyDueFilter ||
+              (Boolean(c.needsReply) &&
+                replyDueInRange(c.replyDueAt || c.replyUpdatedAt, replyFrom, replyTo))),
         )
         .sort((a, b) => {
           const replyRank = (item: BrandListItem) => (item.needsReply ? 1 : 0);
@@ -649,7 +736,7 @@ export function BrandsPage() {
             a.name.localeCompare(b.name)
           );
         }),
-    [brands, effectiveStatus, cp, owner, query, isAdmin],
+    [brands, effectiveStatus, cp, owner, query, isAdmin, hasReplyDueFilter, replyFrom, replyTo],
   );
   const owners = useMemo(() => {
     if (ownerOptions.length) return ownerOptions;
@@ -728,7 +815,7 @@ export function BrandsPage() {
   return (
     <div className="mx-auto max-w-[1480px]">
       <PageHeader
-        eyebrow={`${loading ? "Loading" : `${brands.length} records`}`}
+        eyebrow={`${loading ? "Loading" : refreshing ? "Updating" : `${brands.length} records`}`}
         title="Brands"
       />
       {isAdmin && selected.length > 0 && (
@@ -814,6 +901,60 @@ export function BrandsPage() {
               </SelectContent>
             </Select>
           )}
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className={cx(
+                    "w-full justify-start font-normal sm:w-[16.5rem]",
+                    !hasReplyDueFilter && "text-muted-foreground",
+                  )}
+                >
+                  <CalendarClock className="size-4 text-slate-400" />
+                  {replyDueRangeLabel(replyFrom, replyTo)}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-auto p-0" lang="en">
+                <Calendar
+                  mode="range"
+                  locale={enUS}
+                  numberOfMonths={1}
+                  selected={replyDueSelected}
+                  defaultMonth={replyDueSelected?.from || replyDueSelected?.to}
+                  onSelect={(range) => {
+                    setReplyDueRange(
+                      range?.from ? formatDateOnly(range.from) : "",
+                      range?.to ? formatDateOnly(range.to) : "",
+                    );
+                  }}
+                  formatters={{
+                    formatCaption: (date) =>
+                      new Intl.DateTimeFormat("en-US", {
+                        month: "long",
+                        year: "numeric",
+                      }).format(date),
+                    formatWeekdayName: (date) =>
+                      new Intl.DateTimeFormat("en-US", { weekday: "short" }).format(date),
+                    formatMonthDropdown: (date) =>
+                      new Intl.DateTimeFormat("en-US", { month: "short" }).format(date),
+                  }}
+                />
+              </PopoverContent>
+            </Popover>
+            {hasReplyDueFilter ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="text-slate-500"
+                onClick={clearReplyDueFilter}
+              >
+                Clear
+              </Button>
+            ) : null}
+          </div>
         </div>
         {error ? (
           <Empty className="py-20">

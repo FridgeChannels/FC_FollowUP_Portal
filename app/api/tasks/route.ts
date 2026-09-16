@@ -12,8 +12,12 @@ export async function GET(request: Request) {
     if (!viewer.isAdmin && !viewer.ownerId) {
       return Response.json({ tasks: [], viewer: { isAdmin: false, ownerName: viewer.name } });
     }
-    const ownerParam = new URL(request.url).searchParams.get("owner");
-    const listed = await listFollowupTasksForViewer(taskQueryForViewer(viewer, ownerParam));
+    const url = new URL(request.url);
+    const ownerParam = url.searchParams.get("owner");
+    const statusParam = url.searchParams.get("status");
+    const listed = await listFollowupTasksForViewer(
+      taskQueryForViewer(viewer, ownerParam, statusParam),
+    );
     const tasks = viewer.role === "Caller" ? listed : await syncReplyInbox(listed);
     return Response.json({
       tasks,

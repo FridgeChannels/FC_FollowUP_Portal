@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -385,6 +386,8 @@ function toCustomerContacts(contacts: BrandContact[]): Contact[] {
   }));
 }
 
+const ACTIVITY_PAGE_SIZE = 40;
+
 export function BrandDetail({customerId}:{customerId:string}){
   const {state,can,assignBrand,cancelBomb}=useWorkspace();
   const router=useRouter(); const [launch,setLaunch]=useState(false); const [reply,setReply]=useState(false); const [cp,setCP]=useState(false); const [contact,setContact]=useState(false); const [ownerDraft,setOwnerDraft]=useState<string>();
@@ -407,6 +410,12 @@ export function BrandDetail({customerId}:{customerId:string}){
   const [remoteCps,setRemoteCps]=useState<CurrentCpOption[]>([]);
   const [owners,setOwners]=useState<Array<{id:string;name:string}>>([]);
   const [remoteLoading,setRemoteLoading]=useState(false);
+  const [brandReady,setBrandReady]=useState(false);
+  const [activitiesReady,setActivitiesReady]=useState(false);
+  const [activitiesLoading,setActivitiesLoading]=useState(false);
+  const [activitiesLoadingMore,setActivitiesLoadingMore]=useState(false);
+  const [activitiesCursor,setActivitiesCursor]=useState<string|null>(null);
+  const [activitiesHasMore,setActivitiesHasMore]=useState(false);
   const [saving,setSaving]=useState(false);
   useEffect(()=>{
     setOwnerDraft(undefined);
@@ -427,6 +436,10 @@ export function BrandDetail({customerId}:{customerId:string}){
       activities:[],
     }:null);
     setRemoteCps([]);
+    setBrandReady(false);
+    setActivitiesReady(false);
+    setActivitiesCursor(null);
+    setActivitiesHasMore(false);
   },[customerId]);
   const isAdmin=state.currentRole==="Admin";
   const manager=isAdmin||state.currentRole==="AccountManager";
@@ -434,8 +447,45 @@ export function BrandDetail({customerId}:{customerId:string}){
   const applyRemote=(brand:BrandDetail|null,cps:CurrentCpOption[]=[])=>{
     if(!brand){setRemote(null);setRemoteCps([]);return;}
     cacheBrandItem(brand);
-    setRemote(brand);
+    setRemote((prev)=>{
+      const keepActivities=!brand.activities.length&&!!prev?.activities.length;
+      return {
+        ...brand,
+        activities: keepActivities ? prev!.activities : brand.activities,
+      };
+    });
     setRemoteCps(cps);
+  };
+  const applyActivitiesPage=(payload:{activities?:BrandActivity[];nextCursor?:string|null;hasMore?:boolean},mode:"replace"|"append")=>{
+    const items=payload.activities||[];
+    const hasMore=Boolean(payload.hasMore&&payload.nextCursor&&items.length>=ACTIVITY_PAGE_SIZE);
+    setActivitiesCursor(hasMore?(payload.nextCursor||null):null);
+    setActivitiesHasMore(hasMore);
+    setRemote((prev)=>{
+      if(!prev)return prev;
+      if(mode==="replace")return {...prev,activities:items};
+      const seen=new Set(prev.activities.map((item)=>item.id));
+      return {
+        ...prev,
+        activities:[...prev.activities,...items.filter((item)=>!seen.has(item.id))],
+      };
+    });
+  };
+  const fetchActivitiesPage=(cursor?:string|null,mode:"replace"|"append"="replace")=>{
+    const query=new URLSearchParams({limit:String(ACTIVITY_PAGE_SIZE)});
+    if(cursor)query.set("cursor",cursor);
+    return fetch(`/api/brands/${customerId}/activities?${query}`)
+      .then(async (response)=>{
+        const payload=await response.json() as {
+          activities?:BrandActivity[];
+          nextCursor?:string|null;
+          hasMore?:boolean;
+          error?:string;
+        };
+        if(!response.ok)throw new Error(payload.error||"Failed to load activities");
+        applyActivitiesPage(payload,mode);
+        return payload;
+      });
   };
   const refreshRemote=()=>fetch(`/api/brands/${customerId}`)
     .then(async response=>{
@@ -444,15 +494,50 @@ export function BrandDetail({customerId}:{customerId:string}){
       applyRemote(payload.brand||null,payload.cps||[]);
       return payload.brand||null;
     });
+  const refreshBrandAndActivities=async ()=>{
+    setBrandReady(false);
+    setActivitiesReady(false);
+    await refreshRemote();
+    setBrandReady(true);
+    setActivitiesLoading(true);
+    try{
+      await fetchActivitiesPage(null,"replace");
+      setActivitiesReady(true);
+    }
+    finally{setActivitiesLoading(false);}
+  };
   useEffect(()=>{
-    if(local)return;
+    if(local){
+      setBrandReady(true);
+      setActivitiesReady(true);
+      return;
+    }
     let cancelled=false;
     setRemoteLoading(true);
+    setBrandReady(false);
     refreshRemote()
       .catch(()=>{if(!cancelled)setRemote(null)})
-      .finally(()=>{if(!cancelled)setRemoteLoading(false)});
+      .finally(()=>{
+        if(cancelled)return;
+        setRemoteLoading(false);
+        setBrandReady(true);
+      });
     return ()=>{cancelled=true};
   },[customerId,local]);
+  useEffect(()=>{
+    if(local||!remote?.id)return;
+    let cancelled=false;
+    setActivitiesLoading(true);
+    setActivitiesReady(false);
+    fetchActivitiesPage(null,"replace")
+      .catch(()=>{if(!cancelled)applyActivitiesPage({activities:[],nextCursor:null,hasMore:false},"replace");})
+      .finally(()=>{
+        if(cancelled)return;
+        setActivitiesLoading(false);
+        setActivitiesReady(true);
+      });
+    return ()=>{cancelled=true};
+  },[customerId,local,remote?.id]);
   useEffect(()=>{
     if(local||!can("assignOwner"))return;
     let cancelled=false;
@@ -479,9 +564,11 @@ export function BrandDetail({customerId}:{customerId:string}){
     updatedAt: remote.lastEditedAt || "",
   } : undefined);
   const notionBacked=!local&&!!remote;
+  const contactsLoading=notionBacked&&!brandReady;
+  const activityLoading=notionBacked&&(!brandReady||!activitiesReady||activitiesLoading);
   const visible=!!c&&(local?(manager||c.ownerId===state.currentUserId):!!remote);
   usePageMetadata(brandDetailMetadata(visible&&c?{name:c.name,cp:notionBacked&&remote?remote.currentCp:c.cp,status:c.status,source:c.source}:null));
-  if(remoteLoading&&!c)return <div className="grid min-h-[60vh] place-items-center text-sm text-slate-500">Loading brand…</div>;
+  if(remoteLoading&&!c)return <div className="grid min-h-[60vh] place-items-center gap-2 text-sm text-slate-500"><Spinner className="size-5 text-slate-400"/>Loading brand…</div>;
   if(!visible||!c)return <div className="grid min-h-[60vh] place-items-center"><div className="text-center"><CircleAlert className="mx-auto mb-3 size-8 text-slate-300"/><h1 className="font-bold">Brand not found</h1><Button variant="link" onClick={()=>router.push(can("customers")?"/customers":"/tasks")}>{can("customers")?"Back to Brands":"Back to tasks"}</Button></div></div>;
   const ownerChoices=notionBacked
     ? (remote?.ownerId&&!owners.some(item=>item.id===remote.ownerId)
@@ -510,6 +597,13 @@ export function BrandDetail({customerId}:{customerId:string}){
     catch(error){toast.error(error instanceof Error?error.message:"Status update failed");}
     finally{setSaving(false);}
   };
+  const loadMoreActivities=()=>{
+    if(!activitiesHasMore||activitiesLoadingMore||activitiesLoading||!activitiesCursor)return;
+    setActivitiesLoadingMore(true);
+    fetchActivitiesPage(activitiesCursor,"append")
+      .catch((error)=>toast.error(error instanceof Error?error.message:"Failed to load more"))
+      .finally(()=>setActivitiesLoadingMore(false));
+  };
   const currentCp=notionBacked?asCpCode(remote?.currentCp):c.cp;
   const bombPlan=notionBacked?toBombPlan(c.id,remote?.tasks||[],remote?.activities||[]):undefined;
   const hasActiveOmniReach=notionBacked?brandHasActiveOmniReach(remote?.tasks||[]):!!(c.activeBombId||c.status==="Bomb Running");
@@ -527,28 +621,33 @@ export function BrandDetail({customerId}:{customerId:string}){
     <button onClick={()=>router.push(can("customers")?"/customers":"/tasks")} className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900"><ArrowLeft className="size-4"/>{can("customers")?"Brands":"ReplyTask"}</button>
     <section className="mb-8 grid gap-6 rounded-2xl border border-slate-200 bg-white p-5 xl:grid-cols-[minmax(0,1fr)_minmax(260px,.8fr)_176px] xl:items-start">
       <div className="min-w-0">
-        <div className="flex items-start gap-4"><Avatar className="size-14"><AvatarFallback className="bg-violet-100 font-bold text-violet-700">{c.initials}</AvatarFallback></Avatar><div className="min-w-0"><h1 className="text-2xl font-bold tracking-tight">{c.name}</h1><div className="mt-2 flex flex-wrap gap-2"><CP value={notionBacked&&remote?remote.currentCp:c.cp}/>{notionBacked&&remote?.status?(can("editBrand")?<BadgeSelect value={remote.status} options={FOLLOW_UP_STATUSES} disabled={saving} onChange={value=>{void patchBrand({status:value}).then(()=>toast.success("Status updated")).catch(error=>toast.error(error instanceof Error?error.message:"Update failed"));}}/>:<Status value={remote.status}/>):(c.status?<Status value={c.status}/>:null)}{notionBacked&&can("editBrand")?<BadgeSelect value={remote?.handlingMode||""} options={HANDLING_MODES} disabled={saving} onChange={value=>{void patchBrand({handlingMode:value}).then(()=>toast.success("Handling Mode updated")).catch(error=>toast.error(error instanceof Error?error.message:"Update failed"));}}/>:notionBacked&&remote?.handlingMode?<Status value={remote.handlingMode}/>:null}</div><p className="mt-3 text-sm font-medium text-slate-700">{summary}</p>{notionBacked&&<p className="mt-1 text-xs text-slate-500">{currentCpOption(remote?.currentCp).name} · {currentCpOption(remote?.currentCp).fullName}</p>}{notionBacked&&displayNote(remote?.notes)&&<p className="mt-2 text-sm leading-6 text-slate-600">{displayNote(remote?.notes)}</p>}<div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500"><span>Latest: {remote?.lastInteractionAt?dateOnly(remote.lastInteractionAt):last?.title||"No activity"}</span>{!notionBacked&&<span>Source: {c.source}</span>}<span>FC-Owner: {remote?.ownerName||state.users.find(u=>u.id===c.ownerId)?.name||"Unassigned"}</span>{notionBacked&&remote?.createdAt&&<span>Created: {dateOnly(remote.createdAt)}</span>}</div>{can("assignOwner")&&<div className="mt-3 flex flex-wrap items-center gap-2"><Select value={ownerDraft??c.ownerId??"unassigned"} onValueChange={setOwnerDraft}><SelectTrigger size="sm" className="w-44"><SelectValue placeholder="Select owner"/></SelectTrigger><SelectContent><SelectItem value="unassigned">Unassigned</SelectItem>{ownerChoices.map(u=><SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent></Select><Button size="sm" disabled={saving||(ownerDraft??c.ownerId??"unassigned")===(c.ownerId||"unassigned")} onClick={()=>void handleAssign()}>Assign</Button></div>}</div></div>
+        <div className="flex items-start gap-4"><Avatar className="size-14"><AvatarFallback className="bg-violet-100 font-bold text-violet-700">{c.initials}</AvatarFallback></Avatar><div className="min-w-0"><h1 className="text-2xl font-bold tracking-tight">{c.name}</h1><div className="mt-2 flex flex-wrap gap-2"><CP value={notionBacked&&remote?remote.currentCp:c.cp}/>{notionBacked&&remote?.status?(can("editBrand")?<BadgeSelect value={remote.status} options={FOLLOW_UP_STATUSES} disabled={saving||!brandReady} onChange={value=>{void patchBrand({status:value}).then(()=>toast.success("Status updated")).catch(error=>toast.error(error instanceof Error?error.message:"Update failed"));}}/>:<Status value={remote.status}/>):(c.status?<Status value={c.status}/>:null)}{notionBacked&&can("editBrand")?<BadgeSelect value={remote?.handlingMode||""} options={HANDLING_MODES} disabled={saving||!brandReady} onChange={value=>{void patchBrand({handlingMode:value}).then(()=>toast.success("Handling Mode updated")).catch(error=>toast.error(error instanceof Error?error.message:"Update failed"));}}/>:notionBacked&&remote?.handlingMode?<Status value={remote.handlingMode}/>:null}{notionBacked&&!brandReady?<span className="inline-flex items-center gap-1 text-xs font-medium text-slate-400"><Spinner className="size-3"/>Loading details…</span>:null}</div>{brandReady?<><p className="mt-3 text-sm font-medium text-slate-700">{summary}</p>{notionBacked&&<p className="mt-1 text-xs text-slate-500">{currentCpOption(remote?.currentCp).name} · {currentCpOption(remote?.currentCp).fullName}</p>}{notionBacked&&displayNote(remote?.notes)&&<p className="mt-2 text-sm leading-6 text-slate-600">{displayNote(remote?.notes)}</p>}</>:<p className="mt-3 text-sm text-slate-400">Loading brand details…</p>}<div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500"><span>Latest: {remote?.lastInteractionAt?dateOnly(remote.lastInteractionAt):activityLoading?"Loading…":last?.title||"No activity"}</span>{!notionBacked&&<span>Source: {c.source}</span>}<span>FC-Owner: {remote?.ownerName||state.users.find(u=>u.id===c.ownerId)?.name||"Unassigned"}</span>{notionBacked&&remote?.createdAt&&<span>Created: {dateOnly(remote.createdAt)}</span>}</div>{can("assignOwner")&&<div className="mt-3 flex flex-wrap items-center gap-2"><Select value={ownerDraft??c.ownerId??"unassigned"} onValueChange={setOwnerDraft} disabled={!brandReady}><SelectTrigger size="sm" className="w-44"><SelectValue placeholder="Select owner"/></SelectTrigger><SelectContent><SelectItem value="unassigned">Unassigned</SelectItem>{ownerChoices.map(u=><SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent></Select><Button size="sm" disabled={saving||!brandReady||(ownerDraft??c.ownerId??"unassigned")===(c.ownerId||"unassigned")} onClick={()=>void handleAssign()}>Assign</Button></div>}</div></div>
       </div>
-      <BrandContactList contacts={notionBacked&&remote?remote.contacts:c.contacts} canEdit={!notionBacked&&can("editBrand")} onAdd={()=>setContact(true)}/>
-      <div className="flex flex-wrap gap-2 xl:flex-col xl:items-stretch">{can("reply")&&<Button variant="outline" disabled={notionBacked&&!c.contacts.length} onClick={()=>setReply(true)}><Send className="mr-2 size-4"/>Send message</Button>}{can("launch")&&<LaunchOmniReachButton className="xl:w-full" disabled={hasActiveOmniReach} disabledReason={ACTIVE_OMNIREACH_BLOCK_REASON} onClick={()=>setLaunch(true)}/>}{can("changeCP")&&<Button onClick={()=>setCP(true)}>Change CP</Button>}{notionBacked&&can("editBrand")&&<DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label="More follow-up actions" title="More follow-up actions"><MoreHorizontal className="size-5"/></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem disabled={saving||remote?.status==="Paused"||remote?.status==="Completed"} onSelect={()=>void updateFollowUpStatus("Paused")}>Pause FollowUp</DropdownMenuItem><DropdownMenuItem disabled={saving||remote?.status==="Completed"} onSelect={()=>void updateFollowUpStatus("Completed")}>Complete FollowUp</DropdownMenuItem></DropdownMenuContent></DropdownMenu>}</div>
+      <BrandContactList contacts={notionBacked&&remote?remote.contacts:c.contacts} loading={contactsLoading} canEdit={!notionBacked&&can("editBrand")} onAdd={()=>setContact(true)}/>
+      <div className="flex flex-wrap gap-2 xl:flex-col xl:items-stretch">{can("reply")&&<Button variant="outline" disabled={!brandReady||(notionBacked&&!c.contacts.length)} onClick={()=>setReply(true)}><Send className="mr-2 size-4"/>Send message</Button>}{can("launch")&&<LaunchOmniReachButton className="xl:w-full" disabled={!brandReady||hasActiveOmniReach} disabledReason={!brandReady?"Loading brand…":ACTIVE_OMNIREACH_BLOCK_REASON} onClick={()=>setLaunch(true)}/>}{can("changeCP")&&<Button disabled={!brandReady} onClick={()=>setCP(true)}>Change CP</Button>}{notionBacked&&can("editBrand")&&<DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" disabled={!brandReady} aria-label="More follow-up actions" title="More follow-up actions"><MoreHorizontal className="size-5"/></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem disabled={saving||remote?.status==="Paused"||remote?.status==="Completed"} onSelect={()=>void updateFollowUpStatus("Paused")}>Pause FollowUp</DropdownMenuItem><DropdownMenuItem disabled={saving||remote?.status==="Completed"} onSelect={()=>void updateFollowUpStatus("Completed")}>Complete FollowUp</DropdownMenuItem></DropdownMenuContent></DropdownMenu>}</div>
     </section>
-    <div className={`grid gap-6 ${partnershipContext?"xl:grid-cols-[1fr_340px]":""}`}><section><h2 className="mb-3 font-bold">Brand activity</h2><div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">    <InteractionFeed key={`${c.id}-${currentCp}`} customerId={c.id} currentCp={currentCp} cpGoals={notionBacked?toCpGoals(remoteCps):undefined} interactions={interactions} contacts={c.contacts} bombInstances={bombPlan?.bombInstances} actions={bombPlan?.actions} canReviewCalls={notionBacked&&can("reply")} tasks={remote?.tasks||[]} onPersistCallReview={notionBacked?async (taskId,status)=>{
+    <div className={`grid gap-6 ${partnershipContext?"xl:grid-cols-[1fr_340px]":""}`}><section><h2 className="mb-3 font-bold">Brand activity</h2><div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+    <InteractionFeed key={`${c.id}-${currentCp}`} customerId={c.id} currentCp={currentCp} cpGoals={notionBacked?toCpGoals(remoteCps):undefined} interactions={interactions} contacts={c.contacts} bombInstances={bombPlan?.bombInstances} actions={bombPlan?.actions} loading={activityLoading} canReviewCalls={notionBacked&&can("reply")} tasks={remote?.tasks||[]} onPersistCallReview={notionBacked?async (taskId,status)=>{
     const response=await fetch(`/api/tasks/${taskId}/call-review`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status})});
     const payload=await response.json() as {error?:string};
     if(!response.ok)throw new Error(payload.error||"Unable to save call review");
-    await refreshRemote();
-  }:undefined} onCancelBomb={async instance=>{if(!notionBacked){const result=cancelBomb(c.id,instance.id);if(!result.ok)throw new Error(result.message);toast.success(result.message);return;}const response=await fetch(`/api/brands/${c.id}/bombs/${instance.templateId}/cancel`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId:instance.targetContactId,omniReachRunId:instance.id.startsWith("run:")?instance.id.slice(4):undefined})});const payload=await response.json() as {cancelledTaskIds?:string[];error?:string};if(!response.ok)throw new Error(payload.error||"Unable to stop OmniReach");await refreshRemote();toast.success(`${payload.cancelledTaskIds?.length||0} remaining task${payload.cancelledTaskIds?.length===1?"":"s"} cancelled`);}} onSend={notionBacked?async (contactId,channel,content,taskId,threadId)=>{
+    await refreshBrandAndActivities();
+  }:undefined} onCancelBomb={async instance=>{if(!notionBacked){const result=cancelBomb(c.id,instance.id);if(!result.ok)throw new Error(result.message);toast.success(result.message);return;}const response=await fetch(`/api/brands/${c.id}/bombs/${instance.templateId}/cancel`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId:instance.targetContactId,omniReachRunId:instance.id.startsWith("run:")?instance.id.slice(4):undefined})});const payload=await response.json() as {cancelledTaskIds?:string[];error?:string};if(!response.ok)throw new Error(payload.error||"Unable to stop OmniReach");await refreshBrandAndActivities();toast.success(`${payload.cancelledTaskIds?.length||0} remaining task${payload.cancelledTaskIds?.length===1?"":"s"} cancelled`);}} onSend={notionBacked?async (contactId,channel,content,taskId,threadId)=>{
     const response=await fetch(`/api/brands/${c.id}/messages`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId,channel,content,taskId,threadId})});
     const payload=await response.json() as {brand?:BrandDetail;cps?:CurrentCpOption[];error?:string};
     if(!response.ok||!payload.brand)throw new Error(payload.error||"Send failed");
     applyRemote(payload.brand,payload.cps||remoteCps);
-  }:undefined}/></div></section>
+    await fetchActivitiesPage(null,"replace");
+  }:undefined}/>
+  {notionBacked&&activitiesHasMore&&activitiesCursor&&(remote?.activities.length||0)>=ACTIVITY_PAGE_SIZE?<div className="border-t border-slate-100 p-3"><Button variant="outline" size="sm" className="w-full" disabled={activitiesLoadingMore||activitiesLoading} onClick={loadMoreActivities}>{activitiesLoadingMore?<span className="inline-flex items-center gap-2"><Spinner className="size-3.5"/>Loading…</span>:"Load more activity"}</Button></div>:null}
+  </div></section>
     {(c.cp==="CP3"||partnershipContext)&&partnershipContext&&<aside><section className="rounded-2xl bg-emerald-50 p-5"><div className="text-xs font-semibold tracking-wide text-emerald-700">CP3 · Partnership context</div><h2 className="mt-2 font-bold text-emerald-950">{partnershipContext.headline}</h2><p className="mt-2 text-sm leading-6 text-emerald-900">{partnershipContext.summary}</p><div className="mt-4 space-y-2">{partnershipContext.signals.map(signal=><div key={signal} className="rounded-lg bg-white/70 px-3 py-2 text-xs leading-5 text-slate-700">{signal}</div>)}</div><div className="mt-3 text-[11px] text-emerald-700">Updated {dateOnly(partnershipContext.updatedAt)}</div></section></aside>}</div>
-  <LaunchBombDialog customerId={c.id} open={launch} onOpenChange={setLaunch} contacts={notionBacked?c.contacts:undefined} currentCp={notionBacked&&remote?remote.currentCp:undefined} companyName={c.name} productDescription={notionBacked?remote?.productDescription:undefined} matchedCategory={notionBacked?remote?.matchedCategory:undefined} followupExhibition={notionBacked?remote?.followupExhibition:undefined} previewOnly={notionBacked} hasActiveOmniReach={hasActiveOmniReach} onLaunched={notionBacked?()=>{void refreshRemote()}:undefined}/><ReplyDialog customerId={c.id} open={reply} onOpenChange={setReply} contacts={notionBacked?c.contacts:undefined} onSend={notionBacked?async (contactId,channel,content,object)=>{
+  <LaunchBombDialog customerId={c.id} open={launch} onOpenChange={setLaunch} contacts={notionBacked?c.contacts:undefined} currentCp={notionBacked&&remote?remote.currentCp:undefined} companyName={c.name} productDescription={notionBacked?remote?.productDescription:undefined} matchedCategory={notionBacked?remote?.matchedCategory:undefined} followupExhibition={notionBacked?remote?.followupExhibition:undefined} previewOnly={notionBacked} hasActiveOmniReach={hasActiveOmniReach} onLaunched={notionBacked?()=>{void refreshBrandAndActivities()}:undefined}/><ReplyDialog customerId={c.id} open={reply} onOpenChange={setReply} contacts={notionBacked?c.contacts:undefined} onSend={notionBacked?async (contactId,channel,content,object)=>{
     const response=await fetch(`/api/brands/${c.id}/messages`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId,channel,content,object})});
     const payload=await response.json() as {brand?:BrandDetail;cps?:CurrentCpOption[];error?:string};
     if(!response.ok||!payload.brand)throw new Error(payload.error||"Send failed");
     applyRemote(payload.brand,payload.cps||remoteCps);
+    await fetchActivitiesPage(null,"replace");
   }:undefined}/><ChangeCPDialog customerId={c.id} open={cp} onOpenChange={setCP} currentCp={notionBacked&&remote?remote.currentCp:undefined} cps={notionBacked?remoteCps:undefined} onSave={notionBacked?async (currentCpId,evidence,note)=>{await patchBrand({currentCpId,evidence,note});}:undefined}/><ContactDialog customerId={c.id} open={contact} onOpenChange={setContact}/></div>;
 }
 
@@ -572,14 +671,14 @@ function linkedinLabel(value?: string | null) {
   return match ? `linkedin.com/in/${match[1]}` : value;
 }
 
-function BrandContactList({contacts,canEdit,onAdd}:{contacts:DetailContact[];canEdit:boolean;onAdd:()=>void}){
+function BrandContactList({contacts,canEdit,onAdd,loading}:{contacts:DetailContact[];canEdit:boolean;onAdd:()=>void;loading?:boolean}){
   const [open,setOpen]=useState<Set<string>>(new Set());
   const toggle=(id:string)=>setOpen(prev=>{
     const next=new Set(prev);
     if(next.has(id)) next.delete(id); else next.add(id);
     return next;
   });
-  return <section className="min-w-0"><div className="flex items-center justify-between"><h2 className="text-sm font-bold">KeyPerson</h2>{canEdit&&<Button variant="ghost" size="icon-sm" onClick={onAdd}><Plus className="size-4"/></Button>}</div>{contacts.length===0?<p className="mt-3 text-sm text-slate-400">No KeyPerson in this follow-up yet.</p>:<div className="mt-3 grid gap-y-4">{contacts.map(contact=>{
+  return <section className="min-w-0"><div className="flex items-center justify-between"><h2 className="text-sm font-bold">KeyPerson</h2>{canEdit&&!loading&&<Button variant="ghost" size="icon-sm" onClick={onAdd}><Plus className="size-4"/></Button>}</div>{loading?<div className="mt-3 flex items-center gap-2 text-sm text-slate-400"><Spinner className="size-3.5"/>Loading KeyPerson…</div>:contacts.length===0?<p className="mt-3 text-sm text-slate-400">No KeyPerson in this follow-up yet.</p>:<div className="mt-3 grid gap-y-4">{contacts.map(contact=>{
     const expanded=open.has(contact.id);
     const meta=[contact.contactOrder,contact.role,contact.followupStatus].filter(Boolean).join(" · ");
     return <div key={contact.id} className="min-w-0">
@@ -741,7 +840,7 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
       </>}
       </>}
     </div>
-    <DialogFooter>{launched?<Button onClick={()=>onOpenChange(false)}>Done</Button>:<><Button variant="outline" onClick={()=>onOpenChange(false)}>Cancel</Button><Button disabled={launching||!selected||!person||!hasReachableStep||incomplete||!!hasActiveOmniReach||(!previewOnly&&(!!c?.activeBombId||c?.status==="Bomb Running"))} onClick={()=>{if(!selected||!person)return;if(previewOnly){if(!customerId)return;void (async ()=>{setLaunching(true);try{const response=await fetch(`/api/brands/${customerId}/launch`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({bombId:selected.id,contactId:person.id,copies})});const payload=await response.json() as {message?:string;error?:string};if(!response.ok)throw new Error(payload.error||"Launch failed");const brandResponse=await fetch(`/api/brands/${customerId}`);const brandPayload=await brandResponse.json() as {brand?:BrandDetail;cps?:CurrentCpOption[];error?:string};if(!brandResponse.ok||!brandPayload.brand)throw new Error(brandPayload.error||"Launch succeeded but failed to load execution plan");const plan=toBombPlan(customerId,brandPayload.brand.tasks,brandPayload.brand.activities);const instanceId=`${selected.id}:${person.id}`;const instance=plan.bombInstances.find((item)=>item.id===instanceId)||plan.bombInstances.find((item)=>item.templateId===selected.id&&item.targetContactId===person.id)||plan.bombInstances[0];if(!instance)throw new Error("Launch succeeded but no execution plan steps were found");setLaunchPlan({instanceId:instance.id,state:planWorkspaceFromBombPlan(plan)});setPreviewReady(true);toast.success(payload.message||"OmniReach launched");onLaunched?.();}catch(error){toast.error(error instanceof Error?error.message:"Launch failed");}finally{setLaunching(false);}})();return;}if(!c)return;const r=launchBomb(c.id,selected.id,person.id,copies);show(r);if(r.ok&&r.id)setLaunchedInstanceId(r.id);}}>Launch OmniReach</Button></>}</DialogFooter>
+    <DialogFooter>{launched?<Button onClick={()=>onOpenChange(false)}>Done</Button>:<><Button variant="outline" onClick={()=>onOpenChange(false)}>Cancel</Button><Button disabled={launching||!selected||!person||!hasReachableStep||incomplete||!!hasActiveOmniReach||(!previewOnly&&(!!c?.activeBombId||c?.status==="Bomb Running"))} onClick={()=>{if(!selected||!person)return;if(previewOnly){if(!customerId)return;void (async ()=>{setLaunching(true);try{const response=await fetch(`/api/brands/${customerId}/launch`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({bombId:selected.id,contactId:person.id,copies})});const payload=await response.json() as {message?:string;error?:string};if(!response.ok)throw new Error(payload.error||"Launch failed");const brandResponse=await fetch(`/api/brands/${customerId}`);const brandPayload=await brandResponse.json() as {brand?:BrandDetail;cps?:CurrentCpOption[];error?:string};if(!brandResponse.ok||!brandPayload.brand)throw new Error(brandPayload.error||"Launch succeeded but failed to load execution plan");const activitiesResponse=await fetch(`/api/brands/${customerId}/activities?limit=100`);const activitiesPayload=await activitiesResponse.json() as {activities?:BrandActivity[];error?:string};if(activitiesResponse.ok&&activitiesPayload.activities)brandPayload.brand.activities=activitiesPayload.activities;const plan=toBombPlan(customerId,brandPayload.brand.tasks,brandPayload.brand.activities);const instanceId=`${selected.id}:${person.id}`;const instance=plan.bombInstances.find((item)=>item.id===instanceId)||plan.bombInstances.find((item)=>item.templateId===selected.id&&item.targetContactId===person.id)||plan.bombInstances[0];if(!instance)throw new Error("Launch succeeded but no execution plan steps were found");setLaunchPlan({instanceId:instance.id,state:planWorkspaceFromBombPlan(plan)});setPreviewReady(true);toast.success(payload.message||"OmniReach launched");onLaunched?.();}catch(error){toast.error(error instanceof Error?error.message:"Launch failed");}finally{setLaunching(false);}})();return;}if(!c)return;const r=launchBomb(c.id,selected.id,person.id,copies);show(r);if(r.ok&&r.id)setLaunchedInstanceId(r.id);}}>Launch OmniReach</Button></>}</DialogFooter>
   </DialogContent></Dialog>;
 }
 

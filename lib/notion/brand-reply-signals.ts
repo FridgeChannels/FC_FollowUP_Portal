@@ -65,7 +65,14 @@ async function resolveBrandId(
   }
 }
 
-export async function listBrandReplySignals() {
+export async function listBrandReplySignals(clientPages: NotionPage[] = []) {
+  const contactToBrand = new Map<string, string>();
+  for (const page of clientPages) {
+    for (const contactId of relationIds(page.properties?.["Follow-up Contacts"])) {
+      contactToBrand.set(contactId, page.id);
+    }
+  }
+
   const pages = await queryDatabasePages(getFollowupConversationDbId(), {
     and: [
       { property: "Reply Status", select: { equals: "Needs Reply" } },
@@ -79,7 +86,9 @@ export async function listBrandReplySignals() {
   for (const page of pages) {
     const contactId = firstRelationId(page.properties?.["Follow-up Contact"]);
     if (!contactId) continue;
-    const brandId = await resolveBrandId(contactId, contactCache);
+    const brandId =
+      contactToBrand.get(contactId) ||
+      (await resolveBrandId(contactId, contactCache));
     if (!brandId) continue;
 
     const dueAt = conversationDueAt(page);
