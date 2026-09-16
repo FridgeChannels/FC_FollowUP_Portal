@@ -10,6 +10,13 @@ export function isOpenTaskStatus(status?: string | null) {
   return status === "Pending" || status === "In Progress";
 }
 
+/** List GET only annotates open non-Phone tasks; Phone and closed skip conversation sync. */
+export function tasksNeedingReplyInboxSync(tasks: BrandTask[]) {
+  return tasks.filter(
+    (task) => task.channel !== "Phone" && isOpenTaskStatus(task.status),
+  );
+}
+
 /** Brand already has an OmniReach run with open Follow-up Tasks. */
 export function brandHasActiveOmniReach(
   tasks: Array<{ sourceBombId?: string | null; status?: string | null }>,

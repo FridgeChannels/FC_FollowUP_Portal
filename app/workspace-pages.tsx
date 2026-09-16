@@ -50,6 +50,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Popover,
   PopoverContent,
@@ -144,6 +145,16 @@ function formatInteractionDateTime(value: string) {
     year: "numeric",
     hour: "numeric",
     minute: "2-digit",
+  }).format(date);
+}
+
+function formatInteractionDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
   }).format(date);
 }
 
@@ -673,6 +684,7 @@ export function BrandsPage() {
       setLoading(false);
       setRefreshing(true);
     } else {
+      setBrands([]);
       setLoading(true);
       setRefreshing(false);
     }
@@ -809,9 +821,10 @@ export function BrandsPage() {
         owner !== "all" && owner !== "unassigned"
           ? owners.find((item) => item.id === owner)?.name
           : undefined,
-      empty: !loading && filtered.length === 0,
+      empty: !loading && !refreshing && filtered.length === 0,
     }),
   );
+  const brandsBusy = loading || refreshing;
   return (
     <div className="mx-auto max-w-[1480px]">
       <PageHeader
@@ -966,10 +979,19 @@ export function BrandsPage() {
               <EmptyDescription>{error}</EmptyDescription>
             </EmptyHeader>
           </Empty>
-        ) : loading ? (
-          <div className="px-5 py-16 text-sm text-slate-500">Loading brands…</div>
+        ) : brandsBusy && !filtered.length ? (
+          <div className="flex items-center justify-center gap-2 px-5 py-16 text-sm text-slate-500">
+            <Spinner className="size-4" />
+            Loading brands…
+          </div>
         ) : filtered.length ? (
           <div className="overflow-x-auto">
+            {brandsBusy ? (
+              <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50/80 px-5 py-2.5 text-xs font-medium text-slate-500">
+                <Spinner className="size-3.5" />
+                {loading ? "Loading brands…" : "Updating brands…"}
+              </div>
+            ) : null}
             <Table>
               <TableHeader>
                 <TableRow className="bg-slate-50">
@@ -1042,7 +1064,7 @@ export function BrandsPage() {
                               <div className="mt-0.5 truncate text-xs font-medium text-rose-700">
                                 Reply needed
                                 {(c.replyDueAt || c.replyUpdatedAt)
-                                  ? ` · ${dateOnly(c.replyDueAt || c.replyUpdatedAt || "")}`
+                                  ? ` · ${formatInteractionDate(c.replyDueAt || c.replyUpdatedAt || "")}`
                                   : ""}
                               </div>
                             ) : null}

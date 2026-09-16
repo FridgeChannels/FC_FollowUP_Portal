@@ -6,9 +6,9 @@ import {
   Bomb, ChevronDown, ClipboardCheck, LogOut,
   Users, Zap,
 } from "lucide-react";
-import type { BrandListItem, BrandTask } from "@/lib/brand-list";
+import type { BrandListItem } from "@/lib/brand-list";
 import { getCachedBrandList } from "@/lib/brand-list-cache";
-import { isClosedTaskStatus, Role } from "@/lib/outreach-domain";
+import { Role } from "@/lib/outreach-domain";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import {
@@ -24,7 +24,6 @@ import { BrandDetail } from "./workspace-customer";
 import { TasksPage } from "./workspace-tasks";
 import { BombEditor, BombsPage } from "./workspace-bombs";
 import { useSession } from "./use-session";
-import { taskStatusForCallReview } from "@/lib/call-review-metadata";
 
 type Screen = "Brands" | "ReplyTask" | "OmniReach";
 const nav: { label: Screen; path: string; icon: typeof Users; cap: string; badge?: boolean }[] = [
@@ -76,28 +75,14 @@ export default function OutreachWorkspace({ children }: { children?: ReactNode }
   useEffect(() => {
     if (sessionLoading || !user || !can("tasks")) return;
     let cancelled = false;
-    fetch("/api/tasks")
+    fetch("/api/tasks/summary")
       .then(async (response) => {
-        const payload = await response.json() as { tasks?: BrandTask[] };
-        if (!response.ok) throw new Error("Failed to load tasks");
-        return payload.tasks || [];
+        const payload = await response.json() as { openCount?: number; error?: string };
+        if (!response.ok) throw new Error(payload.error || "Failed to load task summary");
+        return payload.openCount || 0;
       })
-      .then((tasks) => {
-        if (cancelled) return;
-        const visibleTasks = tasks.map((task) => ({
-          ...task,
-          status: taskStatusForCallReview(
-            task.status || "Pending",
-            task.callReviewStatus ? { status: task.callReviewStatus } : undefined,
-          ),
-        }));
-        setTaskCount(
-          visibleTasks.filter(
-            (item) =>
-              item.inboxStatus === "Needs Reply" ||
-              (item.channel === "Phone" && !isClosedTaskStatus(item.status || "")),
-          ).length,
-        );
+      .then((openCount) => {
+        if (!cancelled) setTaskCount(openCount);
       })
       .catch(() => {
         if (!cancelled) setTaskCount(0);

@@ -62,7 +62,9 @@ export function canAssignBrandOwner(viewer: BrandViewer) {
 
 export function canViewTask(viewer: BrandViewer, task: BrandTask) {
   if (viewer.isAdmin) return true;
-  if (viewer.role === "Caller") return task.channel === "Phone";
+  if (viewer.role === "Caller") {
+    return task.channel === "Phone" && !!viewer.ownerId && task.ownerId === viewer.ownerId;
+  }
   if (viewer.ownerId && task.ownerId === viewer.ownerId) return true;
   if (viewer.ownerId && task.brandOwnerId === viewer.ownerId) return true;
   return false;

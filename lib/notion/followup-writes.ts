@@ -10,6 +10,7 @@ import {
   annotateTasksWithReplyInbox,
   groupConversationsByThread,
   isOpenTaskStatus,
+  tasksNeedingReplyInboxSync,
 } from "./reply-inbox";
 import { pickReplyTaskForChannel } from "./reply-target";
 import {
@@ -585,15 +586,41 @@ async function backfillUnlinkedInbounds(tasks: BrandTask[], activities: BrandAct
   return created;
 }
 
-export async function syncReplyInbox(tasks: BrandTask[]) {
+export async function syncReplyInbox(
+  tasks: BrandTask[],
+  options: { backfill?: boolean } = {},
+) {
+  const annotateTargets = tasksNeedingReplyInboxSync(tasks);
   const contactIds = [
-    ...new Set(tasks.map((item) => item.contactId).filter((id): id is string => !!id)),
+    ...new Set(annotateTargets.map((item) => item.contactId).filter((id): id is string => !!id)),
   ];
-  if (!contactIds.length) return tasks.map((item) => ({ ...item, inboxStatus: null, preview: null, lastInboundAt: null }));
-  let activities = await listFollowupConversations(contactIds);
-  const extras = await backfillUnlinkedInbounds(tasks, activities);
-  if (extras.length) {
-    activities = await listFollowupConversations(contactIds);
+
+  const clearInbox = (task: BrandTask): BrandTask => ({
+    ...task,
+    inboxStatus: null,
+    preview: null,
+    lastInboundAt: null,
+  });
+
+  if (!contactIds.length) {
+    return tasks.map(clearInbox);
   }
-  return annotateTasksWithReplyInbox([...tasks, ...extras], activities);
+
+  let activities = await listFollowupConversations(contactIds);
+  let extras: BrandTask[] = [];
+  if (options.backfill) {
+    extras = await backfillUnlinkedInbounds(annotateTargets, activities);
+    if (extras.length) {
+      activities = await listFollowupConversations(contactIds);
+    }
+  }
+
+  const annotated = annotateTasksWithReplyInbox([...annotateTargets, ...extras], activities);
+  const byId = new Map(annotated.map((item) => [item.id, item]));
+  const merged = tasks.map((task) => byId.get(task.id) || clearInbox(task));
+  for (const extra of extras) {
+    const hit = byId.get(extra.id);
+    if (hit && !merged.some((item) => item.id === hit.id)) merged.push(hit);
+  }
+  return merged;
 }

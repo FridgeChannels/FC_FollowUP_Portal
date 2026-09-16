@@ -21,6 +21,9 @@ export function ownerPageIdFromQueryParam(
   return value;
 }
 
+/** Default list page size for `/api/tasks` and ReplyTask UI. */
+export const DEFAULT_TASK_PAGE_SIZE = 25;
+
 /** Default list scope matches ReplyTask UI "Open". */
 export type TaskStatusScope = "open" | "completed" | "all";
 
@@ -52,7 +55,10 @@ export function taskStatusFilter(scope: TaskStatusScope = "open") {
 
 export type TaskListQuery = {
   ownerPageId?: string | null;
+  /** Single channel (e.g. Phone). Ignored when `channels` is set. */
   channel?: string;
+  /** OR of multiple Channel selects (e.g. reply channels). */
+  channels?: string[];
   /** Defaults to open when omitted. */
   statusScope?: TaskStatusScope;
 };
@@ -61,7 +67,18 @@ export function taskListFilter(query: TaskListQuery = {}) {
   const filters: Record<string, unknown>[] = [];
   const owner = ownerRelationFilter(query.ownerPageId);
   if (owner) filters.push(owner);
-  if (query.channel) {
+  if (query.channels?.length) {
+    if (query.channels.length === 1) {
+      filters.push({ property: "Channel", select: { equals: query.channels[0] } });
+    } else {
+      filters.push({
+        or: query.channels.map((channel) => ({
+          property: "Channel",
+          select: { equals: channel },
+        })),
+      });
+    }
+  } else if (query.channel) {
     filters.push({ property: "Channel", select: { equals: query.channel } });
   }
   const status = taskStatusFilter(query.statusScope ?? "open");
@@ -78,7 +95,11 @@ export function taskQueryForViewer(
 ): TaskListQuery {
   const statusScope = parseTaskStatusScope(statusParam);
   if (viewer.role === "Caller") {
-    return { channel: "Phone", statusScope };
+    return {
+      channel: "Phone",
+      ownerPageId: viewer.ownerId || undefined,
+      statusScope,
+    };
   }
   return {
     ownerPageId: ownerPageIdFromQueryParam(viewer.isAdmin, viewer.ownerId, ownerParam),

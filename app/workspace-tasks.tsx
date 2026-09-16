@@ -17,6 +17,8 @@ import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Spinner } from "@/components/ui/spinner";
+import { DEFAULT_TASK_PAGE_SIZE } from "@/lib/notion/owner-filter";
 import { ChangeCPDialog, LaunchBombDialog, LaunchOmniReachButton, ReplyDialog, ACTIVE_OMNIREACH_BLOCK_REASON } from "./workspace-customer";
 import { InteractionFeed } from "./interaction-feed";
 import { PhoneTaskBoard } from "./phone-task-board";
@@ -132,6 +134,9 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
   const [query, setQuery] = useState("");
   const [remoteTasks, setRemoteTasks] = useState<UnifiedTask[] | null>(null);
   const [remoteLoading, setRemoteLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
   const [detailTask, setDetailTask] = useState<UnifiedTask | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
@@ -147,24 +152,82 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
       "status",
       status === "Completed" ? "completed" : status === "All" ? "all" : "open",
     );
-    const value = params.toString();
-    return value ? `?${value}` : "";
+    params.set("limit", String(DEFAULT_TASK_PAGE_SIZE));
+    return params.toString();
   }, [manager, assignee, status]);
 
   useEffect(() => {
     let cancelled = false;
     setRemoteLoading(true);
-    fetch(`/api/tasks${taskListQuery}`)
+    setNextCursor(null);
+    setHasMore(false);
+    fetch(`/api/tasks?${taskListQuery}`)
       .then(async response => {
-        const payload = await response.json() as { tasks?: BrandTask[]; error?: string };
+        const payload = await response.json() as {
+          tasks?: BrandTask[];
+          nextCursor?: string | null;
+          hasMore?: boolean;
+          error?: string;
+        };
         if (!response.ok) throw new Error(payload.error || "Failed to load tasks");
-        return (payload.tasks || []).map(fromNotionTask);
+        const items = (payload.tasks || []).map(fromNotionTask);
+        const more = Boolean(payload.hasMore && payload.nextCursor && items.length >= DEFAULT_TASK_PAGE_SIZE);
+        return {
+          items,
+          nextCursor: more ? (payload.nextCursor || null) : null,
+          hasMore: more,
+        };
       })
-      .then(items => { if (!cancelled) setRemoteTasks(items); })
-      .catch(() => { if (!cancelled) setRemoteTasks([]); })
+      .then(result => {
+        if (cancelled) return;
+        setRemoteTasks(result.items);
+        setNextCursor(result.nextCursor);
+        setHasMore(result.hasMore);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setRemoteTasks([]);
+        setNextCursor(null);
+        setHasMore(false);
+      })
       .finally(() => { if (!cancelled) setRemoteLoading(false); });
     return () => { cancelled = true; };
   }, [taskListQuery]);
+
+  const loadMoreTasks = () => {
+    if (!nextCursor || loadingMore || remoteLoading) return;
+    setLoadingMore(true);
+    const params = new URLSearchParams(taskListQuery);
+    params.set("cursor", nextCursor);
+    fetch(`/api/tasks?${params.toString()}`)
+      .then(async response => {
+        const payload = await response.json() as {
+          tasks?: BrandTask[];
+          nextCursor?: string | null;
+          hasMore?: boolean;
+          error?: string;
+        };
+        if (!response.ok) throw new Error(payload.error || "Failed to load tasks");
+        const items = (payload.tasks || []).map(fromNotionTask);
+        const more = Boolean(payload.hasMore && payload.nextCursor && items.length >= DEFAULT_TASK_PAGE_SIZE);
+        return {
+          items,
+          nextCursor: more ? (payload.nextCursor || null) : null,
+          hasMore: more,
+        };
+      })
+      .then(result => {
+        setRemoteTasks(prev => [...(prev || []), ...result.items]);
+        setNextCursor(result.nextCursor);
+        setHasMore(result.hasMore);
+      })
+      .catch(() => {
+        /* keep existing list */
+      })
+      .finally(() => {
+        setLoadingMore(false);
+      });
+  };
 
   const allTasks = useMemo<UnifiedTask[]>(() => (remoteTasks ?? []).map(task => taskWithCallReview(task, reviewFromNotion(task))), [remoteTasks]);
 
@@ -251,7 +314,15 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
           <TableCell><div className="flex flex-wrap items-center gap-1.5">{overdue ? <Status value="Due"/> : <Status value={task.status}/>}<CallReviewBadge review={reviewFromNotion(task)}/></div></TableCell>
           <TableCell className="whitespace-nowrap text-xs text-slate-500">{dateOnly(task.dueAt)}</TableCell>
         </TableRow>;
-      })}</TableBody></Table></div> : <Empty className="py-24"><EmptyHeader><EmptyMedia variant="icon"><CheckCircle2/></EmptyMedia><EmptyTitle>All caught up</EmptyTitle><EmptyDescription>No tasks match these filters.</EmptyDescription></EmptyHeader></Empty>}
+      })}</TableBody></Table>
+        {hasMore && nextCursor && (remoteTasks?.length || 0) >= DEFAULT_TASK_PAGE_SIZE ? (
+          <div className="border-t border-slate-100 p-3">
+            <Button variant="outline" size="sm" className="w-full" disabled={loadingMore || remoteLoading} onClick={loadMoreTasks}>
+              {loadingMore ? <span className="inline-flex items-center gap-2"><Spinner className="size-3.5"/>Loading…</span> : "Load more"}
+            </Button>
+          </div>
+        ) : null}
+      </div> : <Empty className="py-24"><EmptyHeader><EmptyMedia variant="icon"><CheckCircle2/></EmptyMedia><EmptyTitle>All caught up</EmptyTitle><EmptyDescription>No tasks match these filters.</EmptyDescription></EmptyHeader></Empty>}
     </div>
   </div>;
 }

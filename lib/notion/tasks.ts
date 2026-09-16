@@ -11,7 +11,7 @@ import {
   type NotionPage,
 } from "./client";
 import { getFollowupTaskDbId } from "./config";
-import { taskListFilter, type TaskListQuery } from "./owner-filter";
+import { taskListFilter, type TaskListQuery, DEFAULT_TASK_PAGE_SIZE } from "./owner-filter";
 import { retrieveOwner, type FollowupOwner } from "./owners";
 
 const CONTACT_TASK_KEYS = ["Follow-up Tasks", "Tasks"];
@@ -28,26 +28,125 @@ function relationFilter(property: string, ids: string[]) {
   };
 }
 
+export { DEFAULT_TASK_PAGE_SIZE };
+
+const TASK_LIST_SORTS = [{ property: "Scheduled At", direction: "ascending" as const }];
+
+async function queryTaskPagesOnce(options: {
+  filter?: Record<string, unknown>;
+  startCursor?: string | null;
+  pageSize?: number;
+  sorts?: Array<{ property: string; direction: "ascending" | "descending" }>;
+}) {
+  const pageSize = Math.min(Math.max(options.pageSize ?? DEFAULT_TASK_PAGE_SIZE, 1), 100);
+  const data = await notionFetch<{
+    results: NotionPage[];
+    has_more?: boolean;
+    next_cursor?: string | null;
+  }>(`/databases/${getFollowupTaskDbId()}/query`, {
+    method: "POST",
+    body: JSON.stringify({
+      page_size: pageSize,
+      ...(options.startCursor ? { start_cursor: options.startCursor } : {}),
+      ...(options.filter ? { filter: options.filter } : {}),
+      ...(options.sorts?.length ? { sorts: options.sorts } : {}),
+    }),
+  });
+  const nextCursor = data.has_more && data.next_cursor ? data.next_cursor : null;
+  return {
+    pages: data.results,
+    nextCursor,
+    hasMore: Boolean(nextCursor && data.results.length >= pageSize),
+  };
+}
+
 async function queryTaskPages(filter?: Record<string, unknown>) {
   const pages: NotionPage[] = [];
   let cursor: string | undefined;
   do {
-    const data = await notionFetch<{
-      results: NotionPage[];
-      has_more?: boolean;
-      next_cursor?: string | null;
-    }>(`/databases/${getFollowupTaskDbId()}/query`, {
-      method: "POST",
-      body: JSON.stringify({
-        page_size: 100,
-        start_cursor: cursor,
-        ...(filter ? { filter } : {}),
-      }),
+    const batch = await queryTaskPagesOnce({
+      filter,
+      startCursor: cursor,
+      pageSize: 100,
     });
-    pages.push(...data.results);
-    cursor = data.has_more && data.next_cursor ? data.next_cursor : undefined;
+    pages.push(...batch.pages);
+    cursor = batch.nextCursor || undefined;
   } while (cursor);
   return pages;
+}
+
+function stubTaskFromPage(page: NotionPage): BrandTask {
+  const properties = page.properties || {};
+  return {
+    id: page.id,
+    title: titleFromProperties(properties) || "Untitled Task",
+    contactId: firstRelationId(properties["Follow-up Contact"]) || null,
+    contactName: null,
+    brandId: null,
+    brandName: null,
+    brandOwnerId: null,
+    ownerId: firstRelationId(properties.Owner) || null,
+    ownerName: null,
+    channel: propertyText(properties.Channel) || null,
+    status: propertyText(properties["Task Status"]) || null,
+    priority: propertyText(properties.Priority) || null,
+    creationMethod: null,
+    scheduledAt: propertyDate(properties["Scheduled At"]),
+    endedAt: null,
+    notes: null,
+    conversationIds: [],
+    templateId: null,
+    sourceBombId: null,
+  };
+}
+
+async function countTaskPages(filter?: Record<string, unknown>) {
+  let count = 0;
+  let cursor: string | undefined;
+  do {
+    const batch = await queryTaskPagesOnce({
+      filter,
+      startCursor: cursor,
+      pageSize: 100,
+    });
+    count += batch.pages.length;
+    cursor = batch.nextCursor || undefined;
+  } while (cursor);
+  return count;
+}
+
+/** Open Phone count — page IDs only, no Contact/Brand mapping. */
+export async function countOpenPhoneTasksForViewer(query: TaskListQuery) {
+  return countTaskPages(
+    taskListFilter({
+      ...query,
+      channel: "Phone",
+      channels: undefined,
+      statusScope: "open",
+    }),
+  );
+}
+
+/**
+ * Open non-Phone task stubs for badge Needs Reply annotation.
+ * Reads Task properties only — skips Contact/Brand N+1.
+ */
+export async function listOpenReplyTaskStubsForViewer(query: TaskListQuery) {
+  const replyChannels = CHANNELS.filter((channel) => channel !== "Phone");
+  let pages: NotionPage[] = [];
+  try {
+    pages = await queryTaskPages(
+      taskListFilter({
+        ...query,
+        channel: undefined,
+        channels: [...replyChannels],
+        statusScope: "open",
+      }),
+    );
+  } catch {
+    pages = [];
+  }
+  return pages.map(stubTaskFromPage);
 }
 
 async function queryTasksByContacts(contactIds: string[]) {
@@ -92,6 +191,137 @@ function emptyCaches(): TaskCaches {
     contacts: new Map(),
     brands: new Map(),
   };
+}
+
+function keyPersonCacheKey(keyPersonId: string) {
+  return `key-person:${keyPersonId}`;
+}
+
+async function prefetchContactEntries(
+  entries: Array<{ cacheKey: string; pageId: string }>,
+  caches: TaskCaches,
+) {
+  const pending = entries.filter((entry) => !caches.contacts.has(entry.cacheKey));
+  await Promise.all(
+    pending.map(async (entry) => {
+      const page = await retrievePage(entry.pageId).catch(() => null);
+      caches.contacts.set(entry.cacheKey, page);
+    }),
+  );
+}
+
+async function prefetchOwners(ownerIds: string[], caches: TaskCaches) {
+  const unique = [...new Set(ownerIds)].filter((id) => !caches.owners.has(id));
+  await Promise.all(
+    unique.map(async (ownerId) => {
+      caches.owners.set(ownerId, await retrieveOwner(ownerId));
+    }),
+  );
+}
+
+async function prefetchTitles(pageIds: string[], caches: TaskCaches) {
+  const unique = [...new Set(pageIds)].filter((id) => id && !caches.titles.has(id));
+  await Promise.all(
+    unique.map(async (pageId) => {
+      try {
+        const page = await retrievePage(pageId);
+        caches.titles.set(pageId, titleFromProperties(page.properties));
+      } catch {
+        caches.titles.set(pageId, "");
+      }
+    }),
+  );
+}
+
+async function prefetchBrands(clientIds: string[], caches: TaskCaches) {
+  const unique = [...new Set(clientIds)].filter((id) => id && !caches.brands.has(id));
+  if (!unique.length) return;
+
+  const clientPages = await Promise.all(
+    unique.map(async (clientId) => {
+      const page = await retrievePage(clientId).catch(() => null);
+      return { clientId, page };
+    }),
+  );
+
+  const titleIds = clientPages
+    .map(({ page }) => firstRelationId(page?.properties?.Client))
+    .filter((id): id is string => !!id);
+  await prefetchTitles(titleIds, caches);
+
+  for (const { clientId, page } of clientPages) {
+    if (!page) {
+      caches.brands.set(clientId, null);
+      continue;
+    }
+    const properties = page.properties || {};
+    const clientTitleId = firstRelationId(properties.Client);
+    const name =
+      (clientTitleId ? caches.titles.get(clientTitleId) : "") ||
+      titleFromProperties(properties) ||
+      "Untitled Client";
+    caches.brands.set(clientId, {
+      id: page.id,
+      name,
+      ownerId: firstRelationId(properties.Owner) || null,
+    });
+  }
+}
+
+/** Prefetch Contact / Owner / Brand / KeyPerson once per page batch to avoid N+1 races. */
+async function warmCachesForTaskPages(
+  pages: NotionPage[],
+  caches: TaskCaches,
+  hints?: TaskResolveHints,
+) {
+  if (hints?.brand) caches.brands.set(hints.brand.id, hints.brand);
+
+  const contactIds: string[] = [];
+  const ownerIds: string[] = [];
+  for (const page of pages) {
+    const properties = page.properties || {};
+    const contactId = firstRelationId(properties["Follow-up Contact"]);
+    if (
+      contactId &&
+      (!hints?.contactsById?.has(contactId) || !hints?.brand)
+    ) {
+      contactIds.push(contactId);
+    }
+    const ownerId = firstRelationId(properties.Owner);
+    if (ownerId) ownerIds.push(ownerId);
+  }
+
+  await Promise.all([
+    prefetchContactEntries(
+      [...new Set(contactIds)].map((id) => ({ cacheKey: id, pageId: id })),
+      caches,
+    ),
+    prefetchOwners(ownerIds, caches),
+  ]);
+
+  const keyPersonEntries: Array<{ cacheKey: string; pageId: string }> = [];
+  const brandClientIds: string[] = [];
+  for (const contactId of new Set(contactIds)) {
+    const contact = caches.contacts.get(contactId) || null;
+    if (!hints?.contactsById?.has(contactId)) {
+      const keyPersonId = firstRelationId(contact?.properties?.["Key Person"]);
+      if (keyPersonId) {
+        keyPersonEntries.push({
+          cacheKey: keyPersonCacheKey(keyPersonId),
+          pageId: keyPersonId,
+        });
+      }
+    }
+    if (!hints?.brand) {
+      const clientId = firstRelationId(contact?.properties?.["Follow-up Client"]);
+      if (clientId) brandClientIds.push(clientId);
+    }
+  }
+
+  await Promise.all([
+    prefetchContactEntries(keyPersonEntries, caches),
+    hints?.brand ? Promise.resolve() : prefetchBrands(brandClientIds, caches),
+  ]);
 }
 
 async function resolveContactPage(contactId: string | undefined, caches: TaskCaches) {
@@ -148,7 +378,7 @@ function phoneFromProperties(properties?: NotionPage["properties"]) {
 async function resolveKeyPerson(contact: NotionPage | null, caches: TaskCaches) {
   const keyPersonId = firstRelationId(contact?.properties?.["Key Person"]);
   if (!keyPersonId) return null;
-  const cacheKey = `key-person:${keyPersonId}`;
+  const cacheKey = keyPersonCacheKey(keyPersonId);
   if (caches.contacts.has(cacheKey)) return caches.contacts.get(cacheKey) || null;
   const page = await retrievePage(keyPersonId).catch(() => null);
   caches.contacts.set(cacheKey, page);
@@ -237,6 +467,12 @@ async function mapTaskPage(
   };
 }
 
+async function mapTaskPages(pages: NotionPage[], hints?: TaskResolveHints) {
+  const caches = emptyCaches();
+  await warmCachesForTaskPages(pages, caches, hints);
+  return Promise.all(pages.map((page) => mapTaskPage(page, caches, hints)));
+}
+
 function asCallReviewStatus(value?: string | null): BrandTask["callReviewStatus"] {
   if (value === "Awaiting Review" || value === "Qualified" || value === "Unqualified") return value;
   return null;
@@ -272,9 +508,7 @@ export async function listFollowupTasks(
       pages = [];
     }
   }
-  const caches = emptyCaches();
-  if (hints?.brand) caches.brands.set(hints.brand.id, hints.brand);
-  const tasks = await Promise.all(pages.map((page) => mapTaskPage(page, caches, hints)));
+  const tasks = await mapTaskPages(pages, hints);
   return sortTasks(tasks);
 }
 
@@ -283,9 +517,7 @@ export async function listFollowupTasksByBomb(bombId: string): Promise<BrandTask
     property: "Source Bomb",
     relation: { contains: bombId },
   });
-  const caches = emptyCaches();
-  const tasks = await Promise.all(pages.map((page) => mapTaskPage(page, caches)));
-  return sortTasks(tasks);
+  return sortTasks(await mapTaskPages(pages));
 }
 
 export async function listFollowupTasksForViewer(query: TaskListQuery = {}) {
@@ -295,14 +527,38 @@ export async function listFollowupTasksForViewer(query: TaskListQuery = {}) {
   } catch {
     pages = [];
   }
-  const caches = emptyCaches();
-  const tasks = await Promise.all(pages.map((page) => mapTaskPage(page, caches)));
-  return sortTasks(tasks);
+  return sortTasks(await mapTaskPages(pages));
+}
+
+export async function listFollowupTasksForViewerPage(
+  query: TaskListQuery = {},
+  options: { cursor?: string | null; pageSize?: number } = {},
+) {
+  const pageSize = Math.min(Math.max(options.pageSize ?? DEFAULT_TASK_PAGE_SIZE, 1), 100);
+  let batch = { pages: [] as NotionPage[], nextCursor: null as string | null, hasMore: false };
+  try {
+    batch = await queryTaskPagesOnce({
+      filter: taskListFilter(query),
+      startCursor: options.cursor,
+      pageSize,
+      sorts: TASK_LIST_SORTS,
+    });
+  } catch {
+    batch = { pages: [], nextCursor: null, hasMore: false };
+  }
+  const tasks = await mapTaskPages(batch.pages);
+  return {
+    tasks,
+    nextCursor: batch.nextCursor,
+    hasMore: batch.hasMore,
+    pageSize,
+  };
 }
 
 export async function retrieveFollowupTask(pageId: string) {
   const page = await retrievePage(pageId);
-  return mapTaskPage(page, emptyCaches());
+  const [task] = await mapTaskPages([page]);
+  return task;
 }
 
 const NOTION_PAGE_ID = /^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i;
@@ -331,8 +587,7 @@ export async function findFollowupTasksByTitle(title: string): Promise<BrandTask
     property: "Follow-up Task",
     title: { equals: query },
   });
-  const caches = emptyCaches();
-  return Promise.all(pages.map((page) => mapTaskPage(page, caches)));
+  return mapTaskPages(pages);
 }
 
 const TASK_STATUSES = new Set<TaskStatus>([
@@ -345,8 +600,7 @@ const TASK_STATUSES = new Set<TaskStatus>([
 
 export async function listExistingTasksForSchedule(): Promise<ExistingTask[]> {
   const pages = await queryTaskPages();
-  const caches = emptyCaches();
-  const tasks = await Promise.all(pages.map((page) => mapTaskPage(page, caches)));
+  const tasks = await mapTaskPages(pages);
   return tasks.flatMap((task) => {
     const channel = task.channel;
     const scheduledAt = task.scheduledAt?.slice(0, 10);
