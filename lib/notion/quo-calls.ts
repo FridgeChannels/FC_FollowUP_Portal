@@ -3,6 +3,7 @@ import { findQuoCallConversation } from "./conversations";
 import { serializeQuoCallData } from "../quo/call-payload";
 import { createOutboundConversation, updateFollowupTask } from "./followup-writes";
 import { firstRelationId, retrievePage, richText, updatePage } from "./client";
+import { resolveCheckpoint } from "./cps";
 import { retrieveFollowupTask } from "./tasks";
 import type { QuoCall, QuoCallData } from "../quo/types";
 import { mergeQuoCallData, recordingsForQuoCall } from "../quo/data";
@@ -39,10 +40,16 @@ function eventTime(data: QuoCallData) {
 }
 
 async function brandCheckpoint(task: BrandTask) {
-  if (!task.brandId) return { cpId: null as string | null, cpAtInteraction: interactionCpCode(task.sourceBombCp) };
+  const fromBomb = interactionCpCode(task.sourceBombCp);
+  if (!task.brandId) return { cpId: null as string | null, cpAtInteraction: fromBomb };
   const page = await retrievePage(task.brandId).catch(() => null);
   const cpId = firstRelationId(page?.properties?.["Current CP"]) || null;
-  return { cpId, cpAtInteraction: interactionCpCode(task.sourceBombCp) };
+  const fromBrand = cpId
+    ? interactionCpCode((await resolveCheckpoint(cpId))?.name)
+    : null;
+  // Prefer bomb CP when present; otherwise stamp brand Current CP so the call
+  // is visible on the matching CP tab (unstamped Phone rows are filtered out).
+  return { cpId, cpAtInteraction: fromBomb || fromBrand };
 }
 
 function readableContent(data: QuoCallData) {

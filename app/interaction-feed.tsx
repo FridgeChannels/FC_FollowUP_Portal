@@ -88,15 +88,18 @@ function isChannelMessage(item: Interaction) {
   return (item.type === "Message" || item.type === "Phone") && !!item.channel;
 }
 
-function belongsToCp(item: Interaction, cp: CPCode) {
-  return item.cp === cp;
+function belongsToCp(item: Interaction, cp: CPCode, fallbackCp?: CPCode) {
+  if (item.cp === cp) return true;
+  // Legacy Quo rows may lack a CP stamp; show them on the brand's current CP tab.
+  if (!item.cp && item.channel === "Phone" && item.quo && fallbackCp === cp) return true;
+  return false;
 }
 
 /** Phone tasks that have at least one Conversation stamped with this CP. */
-function phoneTaskIdsForCp(interactions: Interaction[], cp: CPCode) {
+function phoneTaskIdsForCp(interactions: Interaction[], cp: CPCode, fallbackCp?: CPCode) {
   const ids = new Set<string>();
   for (const item of interactions) {
-    if (item.channel === "Phone" && item.taskId && belongsToCp(item, cp)) ids.add(item.taskId);
+    if (item.channel === "Phone" && item.taskId && belongsToCp(item, cp, fallbackCp)) ids.add(item.taskId);
   }
   return ids;
 }
@@ -194,7 +197,13 @@ export function InteractionFeed({
   const [selectedCp, setSelectedCp] = useState<CPCode>(selectedCpIsVisible ? selectedInitialCp : visibleCps[visibleCps.length - 1]);
   const displayCurrentCp = visibleCps.includes(currentCp as (typeof visibleCps)[number]) ? currentCp : visibleCps[visibleCps.length - 1];
   const currentIndex = visibleCps.indexOf(displayCurrentCp as (typeof visibleCps)[number]);
-  const cpInteractions = interactions.filter(item => !isChannelMessage(item) || belongsToCp(item, selectedCp));
+  const cpInteractions = interactions.filter((item) => {
+    if (!isChannelMessage(item)) return true;
+    if (belongsToCp(item, selectedCp, displayCurrentCp)) return true;
+    // Task detail: keep Phone rows linked to the focused task even without a CP stamp.
+    if (activeTaskId && item.channel === "Phone" && item.taskId === activeTaskId) return true;
+    return false;
+  });
   const planState = bombInstances ? { ...state, bombInstances, actions: actions ?? [], interactions: cpInteractions } : state;
   const activeChannel = callerPhoneOnly ? "Phone" : selectedChannel;
   const visibleChannels: Channel[] = callerPhoneOnly ? ["Phone"] : CHANNELS;
@@ -203,7 +212,8 @@ export function InteractionFeed({
   const bombsForCp = planState.bombInstances
     .filter(item => item.customerId === customerId && item.cp === selectedCp)
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt) || b.id.localeCompare(a.id));
-  const taskIdsForCp = phoneTaskIdsForCp(interactions, selectedCp);
+  const taskIdsForCp = phoneTaskIdsForCp(interactions, selectedCp, displayCurrentCp);
+  if (activeTaskId) taskIdsForCp.add(activeTaskId);
   const phoneTasks = tasks
     .filter((item) => item.channel === "Phone" && taskIdsForCp.has(item.id))
     .map((item) => ({
@@ -245,7 +255,7 @@ export function InteractionFeed({
       <div className="flex flex-wrap gap-1.5">
         {visibleChannels.map(channel => {
           const channelItems = interactions.filter(item =>
-            isChannelMessage(item) && item.channel === channel && belongsToCp(item, selectedCp),
+            isChannelMessage(item) && item.channel === channel && belongsToCp(item, selectedCp, displayCurrentCp),
           );
           const count = channel === "Phone" && phoneTasks.length
             ? phoneTasks.length
