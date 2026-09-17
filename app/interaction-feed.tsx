@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { callReviewsFromTasks, type CallReviewStatus } from "@/lib/call-review-metadata";
 import type { BrandTask } from "@/lib/brand-list";
 import { BombInstance, Channel, Contact, CPCode, CP_CODES, Interaction, ScheduledAction, interactionPageAt, interactionSortAt } from "@/lib/outreach-domain";
-import { BombExecutionPlan, formatEasternDateTime, formatUtcTime } from "./bomb-plan";
+import { BombExecutionPlan, formatEasternDateTime } from "./bomb-plan";
 import { BrandReplyBox, inboundNeedsComposer } from "./brand-reply-box";
 import { ChannelIcon } from "./channel-icon";
 import { PhoneTaskBoard } from "./phone-task-board";
@@ -67,11 +67,11 @@ function deliveryTiming(item: Interaction) {
   if (!taskStatus) return null;
   const label = taskStatus === "Canceled" ? "Cancelled" : taskStatus;
   // Cancelled / Pending / In Progress: Conversation Scheduled At → Task Scheduled At; else empty.
-  // (item.scheduledAt is already filled that way in workspace-customer.)
+  // Completed / Failed etc.: Conversation created_time.
   const usesScheduledAt =
     label === "Cancelled" || label === "Pending" || label === "In Progress";
   const at = usesScheduledAt ? item.scheduledAt || null : item.createdAt || null;
-  return { label, at, usesScheduledAt };
+  return { label, at };
 }
 
 function SendStatusBadge({ status }: { status: string }) {
@@ -537,9 +537,7 @@ function ThreadMessages({
             </span>
             {timing.at ? (
               <time dateTime={timing.at} className="font-mono text-[11px]">
-                {timing.usesScheduledAt
-                  ? formatEasternDateTime(timing.at)
-                  : formatUtcTime(timing.at)}
+                {formatEasternDateTime(timing.at)}
               </time>
             ) : null}
           </div>

@@ -507,7 +507,7 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
       direction: activity.direction || undefined,
       title: activity.subject || activity.channel || "Conversation",
       content: activity.content,
-      createdAt: activity.recordedAt || activity.createdAt || "",
+      createdAt: activity.createdAt || "",
       recordedAt: activity.recordedAt || activity.createdAt || "",
       scheduledAt: activity.scheduledAt
         || (activity.taskId ? taskById.get(activity.taskId)?.scheduledAt : undefined)

@@ -60,8 +60,9 @@ export function interactionSortAt(
 }
 
 /** Card timestamp: Notion page created_time only. */
-export function interactionPageAt(item: Pick<Interaction, "recordedAt" | "createdAt">) {
-  return item.recordedAt || item.createdAt || "";
+/** Conversation card corner time: Notion page created_time only. */
+export function interactionPageAt(item: Pick<Interaction, "createdAt">) {
+  return item.createdAt || "";
 }
 export type InboxItem = {
   id: string; customerId: string; contactId?: string; type: "Reply";

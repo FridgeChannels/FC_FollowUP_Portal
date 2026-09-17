@@ -29,6 +29,7 @@ import {
 import { Contact, dateOnly } from "@/lib/outreach-domain";
 import { brandListMetadata } from "@/lib/page-metadata";
 import { usePageMetadata } from "./use-page-metadata";
+import { formatEasternDateTime } from "./bomb-plan";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -134,18 +135,6 @@ export function Status({ value }: { value: string }) {
       {value === "Bomb Running" ? "OmniReach Running" : value}
     </span>
   );
-}
-
-function formatInteractionDateTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
 }
 
 function lastInteractionLabel(item: BrandListItem) {
@@ -1057,7 +1046,7 @@ export function BrandsPage() {
                               <div className="mt-0.5 truncate text-xs font-medium text-rose-700">
                                 Reply needed
                                 {(c.replyDueAt || c.replyUpdatedAt)
-                                  ? ` · ${formatInteractionDateTime(c.replyDueAt || c.replyUpdatedAt || "")}`
+                                  ? ` · ${formatEasternDateTime(c.replyDueAt || c.replyUpdatedAt || "")}`
                                   : ""}
                               </div>
                             ) : null}
@@ -1080,7 +1069,7 @@ export function BrandsPage() {
                               {lastInteractionLabel(c)}
                             </div>
                             <time dateTime={c.lastInteractionAt} className="mt-0.5 block truncate font-mono text-[11px] text-slate-500">
-                              {formatInteractionDateTime(c.lastInteractionAt)}
+                              {formatEasternDateTime(c.lastInteractionAt)}
                             </time>
                           </div>
                         ) : (

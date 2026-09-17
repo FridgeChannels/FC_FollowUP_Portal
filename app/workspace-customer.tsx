@@ -392,7 +392,7 @@ function toInteractions(
     direction: item.direction || undefined,
     title: item.subject || item.channel || "Conversation",
     content: item.content,
-    createdAt: item.recordedAt || item.createdAt || "",
+    createdAt: item.createdAt || "",
     recordedAt: item.recordedAt || item.createdAt || "",
     creationMethod: isManualActivity(item, manualTaskIds)
       ? "Manual"

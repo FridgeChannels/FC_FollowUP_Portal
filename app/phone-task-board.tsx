@@ -4,9 +4,9 @@ import { useMemo, useState } from "react";
 import { CheckCircle2, ChevronDown, ChevronRight, Phone, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { callReviewsFromTasks, type CallReviewStatus } from "@/lib/call-review-metadata";
-import { dateOnly, isCancelledTaskStatus, isClosedTaskStatus, type Contact, type Interaction } from "@/lib/outreach-domain";
+import { isCancelledTaskStatus, isClosedTaskStatus, type Contact, type Interaction } from "@/lib/outreach-domain";
 import { devCallPhoneOnClient } from "@/lib/quo/dev-call-phone";
-import { formatUtcTime } from "./bomb-plan";
+import { formatEasternDateTime } from "./bomb-plan";
 import { ChannelIcon } from "./channel-icon";
 import { QuoCallPanel } from "./quo-call-panel";
 import { Badge } from "@/components/ui/badge";
@@ -264,7 +264,7 @@ function PhoneTaskBlock({
           <div className={`text-[11px] font-semibold tracking-[.14em] ${active ? "text-blue-700" : "text-slate-500"}`}>Task Description</div>
           {active ? <Badge className="bg-violet-600 text-[10px] text-white hover:bg-violet-600">Current</Badge> : null}
           <Badge variant="secondary" className="text-[10px]">{task.status}</Badge>
-          {task.dueAt ? <span className="text-[11px] text-slate-400">{dateOnly(task.dueAt)}</span> : null}
+          {task.dueAt ? <span className="text-[11px] text-slate-400">{formatEasternDateTime(task.dueAt)}</span> : null}
           <ReviewBadge status={reviewStatus}/>
         </div>
         <h3 className={`mt-1 text-base font-bold ${active ? "text-blue-950" : "text-slate-900"}`}>
@@ -307,7 +307,7 @@ function PhoneTaskBlock({
               <Badge variant="secondary" className="text-[10px]">{item.direction || "Outbound"}</Badge>
               {item.callResult ? <Badge variant="outline" className="text-[10px]">{item.callResult}</Badge> : null}
             </div>
-            <time dateTime={item.createdAt} className="font-mono text-[11px] text-slate-500">{formatUtcTime(item.createdAt)}</time>
+            <time dateTime={item.createdAt} className="font-mono text-[11px] text-slate-500">{formatEasternDateTime(item.createdAt)}</time>
           </div>
           <QuoCallPanel
             compact

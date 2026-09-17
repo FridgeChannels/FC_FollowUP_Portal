@@ -18,15 +18,14 @@ import type {
   QuoTranscriptLine,
   QuoVoicemail,
 } from "@/lib/quo/types";
+import { formatScheduledDateTime } from "@/lib/display-time";
 import { recordingsForQuoCall } from "@/lib/quo/data";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 function formatDate(value?: string | null) {
   if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "medium" }).format(date);
+  return formatScheduledDateTime(value) || value;
 }
 
 function formatDuration(value?: number | null) {
