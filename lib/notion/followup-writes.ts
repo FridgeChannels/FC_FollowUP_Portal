@@ -43,13 +43,26 @@ export async function resolveConversationThread(
   channel: string,
   preferredThreadId?: string | null,
   existing?: BrandActivity[],
+  options?: { forceNew?: boolean },
 ) {
+  if (options?.forceNew) {
+    return {
+      threadId: uniqueRecordId("THR", channel),
+      messageId: uniqueRecordId("MSG", channel),
+    };
+  }
+  const preferred = preferredThreadId?.trim() || "";
+  // Explicit thread wins: cold inbound can open a new topic on the same channel,
+  // and replies /api/replies must stay on that line instead of collapsing to the oldest THR-.
+  if (preferred) {
+    return {
+      threadId: preferred,
+      messageId: uniqueRecordId("MSG", channel),
+    };
+  }
   const listed = existing ?? (await listFollowupConversations([contactId]));
   return {
-    threadId:
-      pickContactChannelThreadId(listed, channel) ||
-      preferredThreadId?.trim() ||
-      uniqueRecordId("THR", channel),
+    threadId: pickContactChannelThreadId(listed, channel) || uniqueRecordId("THR", channel),
     messageId: uniqueRecordId("MSG", channel),
   };
 }

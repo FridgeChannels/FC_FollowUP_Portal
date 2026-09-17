@@ -74,7 +74,7 @@ Authorization: Bearer <REPLY_INGEST_TOKEN>
 
 服务端自动处理（调用方不要传）：
 
-- `threadId`：同联系人同渠道已有系统 `THR-…` 则复用，否则新建
+- `threadId`：一律新建系统 `THR-…`（Cold Inbound 视为新话题，不挂到原有对话线）
 - `messageId`：生成 `IN-{channel}-{timestamp}`
 - `occurredAt`：服务器时间
 - Follow-up Task：**不关联**

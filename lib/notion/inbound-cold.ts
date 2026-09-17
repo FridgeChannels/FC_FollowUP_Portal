@@ -7,7 +7,6 @@ import {
 } from "./client";
 import { getFollowupConversationDbId } from "./config";
 import { listFollowupContacts } from "./contacts";
-import { listFollowupConversations } from "./conversations";
 import { conversationCpRelation } from "./cps";
 import { mapFollowupClientPage } from "./followup-clients";
 import { markFollowupClientEngaged, resolveConversationThread } from "./followup-writes";
@@ -95,12 +94,13 @@ export async function ingestInboundCold(
   const target = await resolveInboundColdTarget(input);
   if (assertAccess) await assertAccess({ brandId: target.brandId });
 
-  const activities = await listFollowupConversations([target.contactId]);
+  // Cold inbound is a new topic (no matching outbound task) → always open a new thread.
   const { threadId } = await resolveConversationThread(
     target.contactId,
     input.channel,
     null,
-    activities,
+    undefined,
+    { forceNew: true },
   );
   const messageId = `IN-${input.channel}-${Date.now()}`;
   const occurredAt = new Date().toISOString();
