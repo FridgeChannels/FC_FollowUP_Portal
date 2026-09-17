@@ -1,7 +1,7 @@
 import type { BrandActivity, BrandDetail, BrandTask, CurrentCpOption } from "../brand-list";
 import { brandInitials } from "../brand-list";
 import { retrievePage } from "./client";
-import { retrieveFollowupContact } from "./contacts";
+import { listFollowupContacts, retrieveFollowupContact } from "./contacts";
 import { listConversationsByIds, listFollowupConversations } from "./conversations";
 import { listCheckpoints } from "./cps";
 import { mapFollowupClientDetail, mapFollowupClientPage } from "./followup-clients";
@@ -75,48 +75,68 @@ export async function buildTaskDetailPayload(id: string): Promise<TaskDetailPayl
 }
 
 /**
- * Caller / lite payload: current Phone task context only.
- * Skips company/category/exhibition/bomb meta and non-Phone brand work.
+ * Caller / lite payload: brand-scoped Phone work.
+ * Loads all Phone tasks/contacts on the Follow-up Client; skips non-Phone meta.
  */
 export async function buildCallerTaskDetailPayload(id: string): Promise<TaskDetailPayload> {
   const task = await retrieveFollowupTask(id);
   const contactId = task.contactId;
+  const brandId = task.brandId;
 
-  const hints: TaskResolveHints | undefined = task.brandId
+  const [brandContacts, brandList] = await Promise.all([
+    brandId ? listFollowupContacts(brandId).catch(() => []) : Promise.resolve([]),
+    brandId
+      ? retrievePage(brandId).then((page) => mapFollowupClientPage(page)).catch(() => null)
+      : Promise.resolve(null),
+  ]);
+
+  const contactsById = new Map<string, { name: string | null; phone: string | null }>(
+    brandContacts.map((item) => [item.id, { name: item.name, phone: item.phone || null }]),
+  );
+  if (contactId && !contactsById.has(contactId)) {
+    contactsById.set(contactId, { name: task.contactName, phone: task.contactPhone || null });
+  }
+
+  const hints: TaskResolveHints | undefined = brandId
     ? {
         brand: {
-          id: task.brandId,
-          name: task.brandName || "Untitled brand",
-          ownerId: task.brandOwnerId,
+          id: brandId,
+          name: task.brandName || brandList?.name || "Untitled brand",
+          ownerId: task.brandOwnerId || brandList?.ownerId || null,
         },
-        contactsById: contactId
-          ? new Map([[contactId, { name: task.contactName, phone: task.contactPhone || null }]])
-          : undefined,
+        contactsById,
       }
     : undefined;
 
-  const [phoneActivities, phoneTasks, contact, brandList] = await Promise.all([
-    contactId
-      ? listFollowupConversations([contactId]).then((items) =>
+  const contactIds = brandContacts.length
+    ? brandContacts.map((item) => item.id)
+    : contactId
+      ? [contactId]
+      : [];
+
+  const [phoneActivities, phoneTasks, fallbackContact] = await Promise.all([
+    contactIds.length
+      ? listFollowupConversations(contactIds).then((items) =>
           items.filter((item) => item.channel === "Phone"),
         )
       : listConversationsByIds(task.conversationIds).then((items) =>
           items.filter((item) => item.channel === "Phone"),
         ),
-    contactId
-      ? listFollowupTasks([contactId], hints).then((items) =>
+    contactIds.length
+      ? listFollowupTasks(contactIds, hints).then((items) =>
           items.filter((item) => item.channel === "Phone"),
         )
       : Promise.resolve(task.channel === "Phone" ? [task] : []),
-    contactId
+    !brandContacts.length && contactId
       ? retrieveFollowupContact(contactId).catch(() => null)
-      : Promise.resolve(null),
-    task.brandId
-      ? retrievePage(task.brandId).then((page) => mapFollowupClientPage(page)).catch(() => null)
       : Promise.resolve(null),
   ]);
 
-  const contacts = contact ? [contact] : [];
+  const contacts = brandContacts.length
+    ? brandContacts
+    : fallbackContact
+      ? [fallbackContact]
+      : [];
   const byId = new Map(phoneTasks.map((item) => [item.id, item]));
   if (task.channel === "Phone" && !byId.has(task.id)) byId.set(task.id, task);
   const tasks = [...byId.values()];

@@ -5,7 +5,7 @@ import { Bomb, CheckCircle2, ChevronRight, RotateCcw, UserRound } from "lucide-r
 import { toast } from "sonner";
 import { callReviewsFromTasks, type CallReviewStatus } from "@/lib/call-review-metadata";
 import type { BrandTask } from "@/lib/brand-list";
-import { BombInstance, Channel, Contact, CPCode, CP_CODES, Interaction, ScheduledAction } from "@/lib/outreach-domain";
+import { BombInstance, Channel, Contact, CPCode, CP_CODES, Interaction, ScheduledAction, interactionPageAt, interactionSortAt } from "@/lib/outreach-domain";
 import { BombExecutionPlan, formatEasternDateTime, formatUtcDate, formatUtcTime } from "./bomb-plan";
 import { BrandReplyBox, inboundNeedsComposer } from "./brand-reply-box";
 import { ChannelIcon } from "./channel-icon";
@@ -39,6 +39,15 @@ function sourceLabel(item: Interaction, bombInstances: BombInstance[]): string |
   if (item.creationMethod === "Manual") return "Human";
   if (item.bombInstanceId || item.creationMethod === "Automated") return bombInstances.find(instance => instance.id === item.bombInstanceId)?.templateName || "OmniReach";
   return null;
+}
+
+/** Email subject from title; skip placeholders and content that already embeds Subject. */
+function emailSubjectLabel(item: Interaction) {
+  if (item.channel !== "Email") return null;
+  const subject = item.title?.trim();
+  if (!subject || subject === "Email" || subject === "Conversation") return null;
+  if (/^Subject:\s*/i.test(item.content.trim())) return null;
+  return subject;
 }
 
 function SourceBadge({ source }: { source: string }) {
@@ -355,8 +364,8 @@ function groupByContact(messages: Interaction[], contacts: Contact[]) {
   }));
   if (orphan.length) groups.push({ contact: undefined, messages: orphan });
   return groups.sort((left, right) => {
-    const leftTime = left.messages.map(item => item.createdAt).sort().at(-1) || "";
-    const rightTime = right.messages.map(item => item.createdAt).sort().at(-1) || "";
+    const leftTime = left.messages.map(item => interactionSortAt(item)).sort().at(-1) || "";
+    const rightTime = right.messages.map(item => interactionSortAt(item)).sort().at(-1) || "";
     return rightTime.localeCompare(leftTime);
   });
 }
@@ -370,8 +379,8 @@ function groupByThread(messages: Interaction[]) {
     groups.set(key, list);
   }
   return [...groups.values()]
-    .map(list => [...list].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)))
-    .sort((left, right) => (left[0]?.createdAt || "").localeCompare(right[0]?.createdAt || ""));
+    .map(list => [...list].sort((a, b) => interactionSortAt(a).localeCompare(interactionSortAt(b)) || a.id.localeCompare(b.id)))
+    .sort((left, right) => interactionSortAt(left[0]!).localeCompare(interactionSortAt(right[0]!)));
 }
 
 function ContactThreads({
@@ -466,6 +475,7 @@ function ThreadMessages({
       const canRefresh = !!callId && !callId.startsWith("ACsim") && !!onRefreshQuo;
       const timing = !inbound && !phoneCall ? deliveryTiming(item) : null;
       const callReview = phoneCall ? resolveReview(item.taskId) : undefined;
+      const emailSubject = emailSubjectLabel(item);
       return <article key={item.id} className={`rounded-xl p-4 ${inbound ? "bg-rose-50/80" : "bg-slate-50"}`}>
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
@@ -476,10 +486,19 @@ function ThreadMessages({
             {phoneCall && item.callResult ? <SendStatusBadge status={item.callResult}/> : null}
             {callReview ? <Badge className={callReview.status === "Qualified" ? "bg-emerald-100 text-[10px] text-emerald-800 hover:bg-emerald-100" : "bg-rose-100 text-[10px] text-rose-800 hover:bg-rose-100"}>{callReview.status.toLowerCase()}</Badge> : null}
           </div>
-          <time dateTime={item.createdAt} className="font-mono text-[11px] text-slate-500">{formatUtcTime(item.createdAt)}</time>
+          <time dateTime={interactionPageAt(item)} className="font-mono text-[11px] text-slate-500">{formatUtcTime(interactionPageAt(item))}</time>
         </div>
         {timing && <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-slate-500"><span className={timing.label === "Completed" ? "font-semibold text-emerald-700" : timing.label === "Failed" ? "font-semibold text-rose-700" : timing.label === "Cancelled" ? "font-semibold text-slate-600" : "font-semibold text-amber-700"}>{timing.label}</span><time dateTime={timing.at} className="font-mono text-[11px]">{timing.label === "Cancelled" ? formatUtcDate(timing.at) : timing.label === "Pending" || timing.label === "In Progress" ? formatEasternDateTime(timing.at) : formatUtcTime(timing.at)}</time></div>}
-        {!item.quo && <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{item.content}</p>}
+        {!item.quo && (
+          <div className="mt-2 space-y-1">
+            {emailSubject && (
+              <p className="text-sm text-slate-900">
+                <span className="font-medium text-slate-500">Subject:</span> {emailSubject}
+              </p>
+            )}
+            {item.content ? <p className="whitespace-pre-wrap text-sm leading-6 text-slate-700">{item.content}</p> : null}
+          </div>
+        )}
         {item.quo ? <div className="mt-3">
           <QuoCallPanel
             compact

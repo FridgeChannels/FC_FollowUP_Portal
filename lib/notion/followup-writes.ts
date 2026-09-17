@@ -196,6 +196,8 @@ export async function createOutboundConversation(input: {
   messageId?: string | null;
   callResult?: string | null;
   interactionAt?: string | null;
+  /** Plan send time from the scheduling engine (same format as TaskDB Scheduled At). */
+  scheduledAt?: string | null;
   notes?: string;
   titleSuffix?: string;
   direction?: "Inbound" | "Outbound";
@@ -243,6 +245,9 @@ export async function createOutboundConversation(input: {
   }
   if (input.interactionAt) {
     properties["Interaction At"] = { date: { start: input.interactionAt } };
+  }
+  if (input.scheduledAt?.trim()) {
+    properties["Scheduled At"] = notionScheduledAtProperty(input.scheduledAt.trim());
   }
   const cp = await conversationCpRelation(input.cpId || input.cpAtInteraction);
   if (cp) properties.CP = cp;
@@ -490,13 +495,14 @@ export async function createHumanOutbound(input: {
   if (input.channel === "Email" && !input.subject?.trim()) {
     throw new Error("object (email subject) is required for Email");
   }
+  const scheduledAt = scheduledAtNow();
   const created = await createFollowupTask({
     brandName: input.brandName,
     contactId: input.contactId,
     contactName: input.contactName,
     ownerId,
     channel: input.channel,
-    scheduledAt: scheduledAtNow(),
+    scheduledAt,
     priority: "P0",
     creationMethod: "Manual",
     notes: isReply
@@ -531,6 +537,7 @@ export async function createHumanOutbound(input: {
         })
       : null,
     existingConversations: threadActivities,
+    scheduledAt,
     notes: isReply
       ? "人工追加回复，尚未实际发送。"
       : "人工消息，尚未实际发送。",

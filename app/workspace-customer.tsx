@@ -9,7 +9,7 @@ import { useWorkspace } from "./workspace-store";
 import { cacheBrandItem, getCachedBrand } from "@/lib/brand-list-cache";
 import { currentCpOption, FOLLOW_UP_STATUSES, HANDLING_MODES, listCurrentCps, type BrandActivity, type BrandContact, type BrandDetail, type BrandTask, type CurrentCpOption } from "@/lib/brand-list";
 import type { BombDetail, BombListItem } from "@/lib/bomb-list";
-import { ActionStatus, BombInstance, Channel, Contact, CPCode, Customer, dateOnly, Interaction, ScheduledAction, WorkspaceState, interactionCpCode, uid } from "@/lib/outreach-domain";
+import { ActionStatus, BombInstance, Channel, Contact, CPCode, Customer, dateOnly, Interaction, ScheduledAction, WorkspaceState, interactionCpCode, interactionSortAt, uid } from "@/lib/outreach-domain";
 import { brandDetailMetadata } from "@/lib/page-metadata";
 import { usePageMetadata } from "./use-page-metadata";
 import { BombExecutionPlan } from "./bomb-plan";
@@ -362,7 +362,9 @@ function toInteractions(
   const threadCp = new Map<string, CPCode>();
   const taskCp = new Map<string, CPCode>();
   const chronological = [...resolved].sort((left, right) =>
-    (left.item.createdAt || "").localeCompare(right.item.createdAt || ""),
+    (left.item.scheduledAt || left.item.recordedAt || left.item.createdAt || "").localeCompare(
+      right.item.scheduledAt || right.item.recordedAt || right.item.createdAt || "",
+    ),
   );
   for (const entry of chronological) {
     if (!entry.cp) continue;
@@ -384,7 +386,8 @@ function toInteractions(
     direction: item.direction || undefined,
     title: item.subject || item.channel || "Conversation",
     content: item.content,
-    createdAt: item.createdAt || "",
+    createdAt: item.recordedAt || item.createdAt || "",
+    recordedAt: item.recordedAt || item.createdAt || "",
     creationMethod: isManualActivity(item, manualTaskIds)
       ? "Manual"
       : activityInstanceIds[item.id] || /OmniReach|Bomb/.test(item.notes || "")
@@ -395,7 +398,9 @@ function toInteractions(
     replyStatus: item.replyStatus || undefined,
     cp: (item.threadId ? threadInboundCp.get(item.threadId) : undefined) || cp || (item.threadId ? threadCp.get(item.threadId) : undefined) || (item.taskId ? taskCp.get(item.taskId) : undefined),
     taskStatus: (item.taskId ? tasksById.get(item.taskId)?.status : undefined) || undefined,
-    scheduledAt: (item.taskId ? tasksById.get(item.taskId)?.scheduledAt : undefined) || undefined,
+    scheduledAt: item.scheduledAt
+      || (item.taskId ? tasksById.get(item.taskId)?.scheduledAt : undefined)
+      || undefined,
     callResult: item.callResult || undefined,
     quo: item.quo || null,
   }));
@@ -648,9 +653,9 @@ export function BrandDetail({customerId}:{customerId:string}){
   const bombPlan=notionBacked?toBombPlan(c.id,remote?.tasks||[],remote?.activities||[]):undefined;
   const hasActiveOmniReach=notionBacked?brandHasActiveOmniReach(remote?.tasks||[]):!!(c.activeBombId||c.status==="Bomb Running");
   const interactions=(notionBacked?toInteractions(c.id,remote?.activities||[],bombPlan?.activityInstanceIds,remote?.tasks||[],bombPlan?.bombInstances||[]):state.interactions.filter(i=>i.customerId===c.id).map(i=>({...i,cp:i.cp||c.cp}))).sort((a,b)=>{
-    const aManual=a.direction==="Outbound"&&a.creationMethod==="Manual"?0:1;
-    const bManual=b.direction==="Outbound"&&b.creationMethod==="Manual"?0:1;
-    return aManual-bManual||b.createdAt.localeCompare(a.createdAt);
+    const left=interactionSortAt(a);
+    const right=interactionSortAt(b);
+    return right.localeCompare(left)||a.id.localeCompare(b.id);
   });
   const last=interactions[0];
   const partnershipContext=c.partnershipContext;
@@ -903,7 +908,7 @@ export function ReplyDialog({customerId,open,onOpenChange,contacts,onSend}:{cust
   const effective=available.includes(channel)?channel:available[0];
   const emailNeedsObject=effective==="Email";
   const canSubmit=!!contact&&!!content.trim()&&!!effective&&(!emailNeedsObject||!!object.trim())&&!saving;
-  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent><DialogHeader><DialogTitle>Send message</DialogTitle><DialogDescription>Choose Email, Phone, SMS, WhatsApp, or LinkedIn. An active OmniReach will stop before this human message is sent.</DialogDescription></DialogHeader><div className="grid grid-cols-2 gap-3"><Select value={contact?.id} onValueChange={setContact}><SelectTrigger className="w-full"><SelectValue/></SelectTrigger><SelectContent>{people.map(x=><SelectItem key={x.id} value={x.id}>{x.name}</SelectItem>)}</SelectContent></Select><Select value={effective} onValueChange={v=>setChannel(v as Channel)}><SelectTrigger className="w-full"><SelectValue/></SelectTrigger><SelectContent>{MESSAGE_CHANNELS.map(x=><SelectItem key={x} value={x} disabled={!contact||!channelAvailable(contact,x)}><ChannelOption channel={x}/></SelectItem>)}</SelectContent></Select></div>{emailNeedsObject?<Input value={object} onChange={e=>setObject(e.target.value)} placeholder="Object (email subject)"/>:null}<Textarea className="min-h-32" value={content} onChange={e=>setContent(e.target.value)} placeholder="Write a reply…"/><DialogFooter><Button variant="outline" onClick={()=>onOpenChange(false)}>Cancel</Button><Button disabled={!canSubmit} onClick={()=>{void (async ()=>{if(!contact||!effective)return;if(emailNeedsObject&&!object.trim()){toast.error("Object is required for Email");return;}if(onSend){setSaving(true);try{await onSend(contact.id,effective,content,emailNeedsObject?object.trim():undefined);toast.success("Message saved as pending");setObject("");setContent("");onOpenChange(false);}catch(error){toast.error(error instanceof Error?error.message:"Send failed");}finally{setSaving(false);}return;}const r=sendHumanReply(customerId,contact.id,effective,emailNeedsObject&&object.trim()?`Subject: ${object.trim()}\n\n${content}`:content);show(r);if(r.ok){setObject("");setContent("");onOpenChange(false);}})()}}><Send className="mr-2 size-4"/>Send</Button></DialogFooter></DialogContent></Dialog>;
+  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent><DialogHeader><DialogTitle>Send message</DialogTitle><DialogDescription>Choose Email, Phone, SMS, WhatsApp, or LinkedIn. An active OmniReach will stop before this human message is sent.</DialogDescription></DialogHeader><div className="grid grid-cols-2 gap-3"><Select value={contact?.id} onValueChange={setContact}><SelectTrigger className="w-full"><SelectValue/></SelectTrigger><SelectContent>{people.map(x=><SelectItem key={x.id} value={x.id}>{x.name}</SelectItem>)}</SelectContent></Select><Select value={effective} onValueChange={v=>setChannel(v as Channel)}><SelectTrigger className="w-full"><SelectValue/></SelectTrigger><SelectContent>{MESSAGE_CHANNELS.map(x=><SelectItem key={x} value={x} disabled={!contact||!channelAvailable(contact,x)}><ChannelOption channel={x}/></SelectItem>)}</SelectContent></Select></div>{emailNeedsObject?<Input value={object} onChange={e=>setObject(e.target.value)} placeholder="Email subject"/>:null}<Textarea className="min-h-32" value={content} onChange={e=>setContent(e.target.value)} placeholder="Write a reply…"/><DialogFooter><Button variant="outline" onClick={()=>onOpenChange(false)}>Cancel</Button><Button disabled={!canSubmit} onClick={()=>{void (async ()=>{if(!contact||!effective)return;if(emailNeedsObject&&!object.trim()){toast.error("Subject is required for Email");return;}if(onSend){setSaving(true);try{await onSend(contact.id,effective,content,emailNeedsObject?object.trim():undefined);toast.success("Message saved as pending");setObject("");setContent("");onOpenChange(false);}catch(error){toast.error(error instanceof Error?error.message:"Send failed");}finally{setSaving(false);}return;}const r=sendHumanReply(customerId,contact.id,effective,emailNeedsObject&&object.trim()?`Subject: ${object.trim()}\n\n${content}`:content);show(r);if(r.ok){setObject("");setContent("");onOpenChange(false);}})()}}><Send className="mr-2 size-4"/>Send</Button></DialogFooter></DialogContent></Dialog>;
 }
 
 export function ChangeCPDialog({customerId,open,onOpenChange,currentCp,cps,onSave}:{customerId:string;open:boolean;onOpenChange:(v:boolean)=>void;currentCp?:string;cps?:CurrentCpOption[];onSave?:(currentCpId:string,evidence:string,note:string)=>Promise<void>}){

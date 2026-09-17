@@ -128,6 +128,59 @@ export async function countOpenPhoneTasksForViewer(query: TaskListQuery) {
 }
 
 /**
+ * Open Phone brand count for Caller ReplyTask badge.
+ * Same brand with multiple Phone tasks counts as 1.
+ */
+export async function countOpenPhoneBrandsForViewer(query: TaskListQuery) {
+  let pages: NotionPage[] = [];
+  try {
+    pages = await queryTaskPages(
+      taskListFilter({
+        ...query,
+        channel: "Phone",
+        channels: undefined,
+        statusScope: "open",
+      }),
+    );
+  } catch {
+    return 0;
+  }
+  if (!pages.length) return 0;
+
+  const contactIds = [
+    ...new Set(
+      pages
+        .map((page) => firstRelationId(page.properties?.["Follow-up Contact"]) || null)
+        .filter((id): id is string => !!id),
+    ),
+  ];
+  const brandByContact = new Map<string, string | null>();
+  await Promise.all(
+    contactIds.map(async (contactId) => {
+      try {
+        const contact = await retrievePage(contactId);
+        brandByContact.set(
+          contactId,
+          firstRelationId(contact.properties?.["Follow-up Client"]) || null,
+        );
+      } catch {
+        brandByContact.set(contactId, null);
+      }
+    }),
+  );
+
+  const keys = new Set<string>();
+  for (const page of pages) {
+    const contactId = firstRelationId(page.properties?.["Follow-up Contact"]) || null;
+    const brandId = contactId ? brandByContact.get(contactId) : null;
+    if (brandId) keys.add(`brand:${brandId}`);
+    else if (contactId) keys.add(`contact:${contactId}`);
+    else keys.add(`task:${page.id}`);
+  }
+  return keys.size;
+}
+
+/**
  * Open non-Phone task stubs for badge Needs Reply annotation.
  * Reads Task properties only — skips Contact/Brand N+1.
  */

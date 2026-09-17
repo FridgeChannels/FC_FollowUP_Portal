@@ -271,6 +271,7 @@ export async function launchFollowupBomb(input: {
         cpId: brand.currentCpId,
         cpAtInteraction: interactionCpCode(brand.currentCp),
         existingConversations,
+        scheduledAt: write.scheduledAt,
         notes: "OmniReach 方案已排班，尚未实际发送。",
       });
       conversationId = page.id;

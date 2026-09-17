@@ -117,6 +117,19 @@ const isDue = (task: UnifiedTask, now: string) => {
   return dateOnly(task.dueAt) <= dateOnly(now);
 };
 
+/** Caller ReplyTask is brand-scoped: keep the first (already sorted) Phone row per brand. */
+function dedupeCallerTasksByBrand(tasks: UnifiedTask[]): UnifiedTask[] {
+  const seen = new Set<string>();
+  const result: UnifiedTask[] = [];
+  for (const task of tasks) {
+    const key = task.customerId || task.brandName || task.id;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(task);
+  }
+  return result;
+}
+
 export function TasksPage({ selectedId }: { selectedId?: string }) {
   const { state } = useWorkspace();
   const router = useRouter();
@@ -224,7 +237,7 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
   const allTasks = useMemo<UnifiedTask[]>(() => (remoteTasks ?? []).map(task => taskWithCallReview(task, reviewFromNotion(task))), [remoteTasks]);
 
   const tasks = useMemo(() => {
-    return allTasks.filter(task => {
+    const filtered = allTasks.filter(task => {
       const customer = state.customers.find(c => c.id === task.customerId);
       const matchesQuery = !query || customer?.name.toLowerCase().includes(query.toLowerCase()) || (task.brandName || "").toLowerCase().includes(query.toLowerCase()) || task.summary.toLowerCase().includes(query.toLowerCase());
       const matchesScope = task.remote || canSeeTask(state, task.customerId, task.assigneeId);
@@ -241,6 +254,8 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
       if (priorityRank[a.priority] !== priorityRank[b.priority]) return priorityRank[a.priority] - priorityRank[b.priority];
       return a.dueAt.localeCompare(b.dueAt);
     });
+    // Caller queue is brand-level: one list row per Follow-up Client.
+    return state.currentRole === "Caller" ? dedupeCallerTasksByBrand(filtered) : filtered;
   }, [allTasks, state, query, type, assignee, status]);
 
   const selectedFromList = selectedId ? allTasks.find(task => task.id === selectedId) : undefined;
@@ -465,7 +480,11 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
     const threadInboundCp = new Map<string, NonNullable<BrandActivity["cpAtInteraction"]>>();
     const threadCp = new Map<string, NonNullable<BrandActivity["cpAtInteraction"]>>();
     const taskCp = new Map<string, NonNullable<BrandActivity["cpAtInteraction"]>>();
-    const chronological = [...activities].sort((left, right) => (left.createdAt || "").localeCompare(right.createdAt || ""));
+    const chronological = [...activities].sort((left, right) =>
+      (left.scheduledAt || left.recordedAt || left.createdAt || "").localeCompare(
+        right.scheduledAt || right.recordedAt || right.createdAt || "",
+      ),
+    );
     for (const activity of chronological) {
       if (!activity.cpAtInteraction) continue;
       if (activity.threadId) {
@@ -487,7 +506,11 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
       direction: activity.direction || undefined,
       title: activity.subject || activity.channel || "Conversation",
       content: activity.content,
-      createdAt: activity.createdAt || "",
+      createdAt: activity.recordedAt || activity.createdAt || "",
+      recordedAt: activity.recordedAt || activity.createdAt || "",
+      scheduledAt: activity.scheduledAt
+        || (activity.taskId ? taskById.get(activity.taskId)?.scheduledAt : undefined)
+        || undefined,
       outcome: activity.callResult as Interaction["outcome"],
       callResult: activity.callResult || undefined,
       quo: activity.quo || null,
@@ -590,7 +613,11 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
     applyTaskPayload(await fetch(taskPollUrl(task.id)).then(item => item.json()) as TaskPayload);
   };
   const baseTimeline = remote?.timeline || state.interactions.filter(item => item.customerId === task.customerId).map(item => ({ ...item, cp: item.cp || customer?.cp }));
-  const timeline = [...baseTimeline].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const timeline = [...baseTimeline].sort((a, b) => {
+    const left = a.scheduledAt || a.recordedAt || a.createdAt;
+    const right = b.scheduledAt || b.recordedAt || b.createdAt;
+    return right.localeCompare(left);
+  });
   const callScript = callScriptFromConversations(timeline, liveTask.id);
   const callScriptLoading = task.remote && !detailHydrated;
   const refreshQuo = async (callId: string, options?: { silent?: boolean }) => {
@@ -654,9 +681,9 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
       />
     : null;
   const callerPhoneTasks = (() => {
-    const contactId = liveTask.contactId || contact.id;
+    // Brand-level board: all Phone tasks on this Follow-up Client.
     const fromBrand = (remote?.brand?.tasks || [])
-      .filter((item) => item.channel === "Phone" && (!contactId || !item.contactId || item.contactId === contactId))
+      .filter((item) => item.channel === "Phone")
       .map((item) => ({
         id: item.id,
         title: item.title,

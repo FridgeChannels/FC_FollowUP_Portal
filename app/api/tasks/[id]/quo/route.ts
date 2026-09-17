@@ -5,8 +5,7 @@ import { quoApiConfigured, getQuoCallBundle } from "@/lib/quo/client";
 import { getQuoFromNumber } from "@/lib/quo/config";
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { retrieveFollowupTask } from "@/lib/notion/tasks";
-import type { QuoCallData } from "@/lib/quo/types";
-import { mergeQuoCallData } from "@/lib/quo/data";
+import { syncQuoCallDataFromLive } from "@/lib/quo/data";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -28,14 +27,12 @@ export async function GET(request: Request, { params }: Params) {
     }
     if (!quoApiConfigured()) return Response.json({ configured: false, data: existingData, fromNumber: getQuoFromNumber() || null });
     const live = await getQuoCallBundle(existingData.callId);
-    const data: QuoCallData = mergeQuoCallData(existingData, {
-      callId: existingData.callId,
-      call: live.call || existingData.call,
-      recordings: live.recordings.length ? live.recordings : existingData.recordings,
-      transcript: live.transcript || existingData.transcript,
-      summary: live.summary || existingData.summary,
-      voicemail: live.voicemail || existingData.voicemail,
-      lastEventAt: new Date().toISOString(),
+    const data = syncQuoCallDataFromLive(existingData, {
+      call: live.call,
+      recordings: live.recordings,
+      transcript: live.transcript,
+      summary: live.summary,
+      voicemail: live.voicemail,
     });
     await upsertQuoCallActivity({ task, data, eventType: "call.sync" });
     return Response.json({ configured: true, data, errors: live.errors, fromNumber: getQuoFromNumber() || null });

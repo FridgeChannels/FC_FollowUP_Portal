@@ -56,9 +56,9 @@ function mapConversation(
     replyStatus: asReplyStatus(propertyText(properties["Reply Status"])),
     cpId: firstRelationId(properties.CP) || null,
     cpAtInteraction: null,
-    createdAt:
-      propertyDate(properties["Interaction At"]) || page.created_time || null,
-    recordedAt: page.created_time || propertyDate(properties["Interaction At"]),
+    createdAt: page.created_time || null,
+    recordedAt: page.created_time || null,
+    scheduledAt: propertyDate(properties["Scheduled At"]) || null,
     replyDueAt: propertyDate(properties["Reply Due At"]) || null,
     quo: parseQuoCallData(extendedParameters),
   };
@@ -126,7 +126,7 @@ async function queryConversationsPageByContacts(
   const body: Record<string, unknown> = {
     page_size: Math.min(Math.max(options.limit, 1), 100),
     filter: contactRelationFilter(chunk),
-    sorts: [{ property: "Interaction At", direction: "descending" }],
+    sorts: [{ timestamp: "created_time", direction: "descending" }],
   };
   if (options.cursor) body.start_cursor = options.cursor;
   try {
@@ -140,7 +140,7 @@ async function queryConversationsPageByContacts(
     });
   } catch (error) {
     if (isRetryableNotionError(error)) throw error;
-    // Fallback when Interaction At is missing / not sortable.
+    // Fallback when created_time sort is unavailable.
     const { sorts: _sorts, ...withoutSorts } = body;
     return notionFetch<{
       results: NotionPage[];
@@ -259,10 +259,14 @@ export async function listFollowupConversations(
   return attachConversationCp(pages.map((page) => mapConversation(page))).then(sortConversations);
 }
 
+function activitySortAt(item: BrandActivity) {
+  return item.scheduledAt || item.recordedAt || item.createdAt || "";
+}
+
 function sortConversations(items: BrandActivity[]) {
   return items.sort((a, b) => {
-    const left = a.createdAt || "";
-    const right = b.createdAt || "";
+    const left = activitySortAt(a);
+    const right = activitySortAt(b);
     return right.localeCompare(left) || a.id.localeCompare(b.id);
   });
 }

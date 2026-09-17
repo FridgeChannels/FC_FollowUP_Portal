@@ -361,6 +361,7 @@ Phone
 | Direction | Select | 是 | Outbound / Inbound |
 | Subject | Text | 否 | Email 主题；其他渠道可留空 |
 | Content | Text | 否 | 实际待发送、已发送或已收到的完整内容 |
+| Scheduled At | Date | 否 | 计划发送时刻（精确到分钟的 datetime，时区 America/New_York）；由排班引擎生成，写入格式与 TaskDB 一致。Outbound Pending 必填；Inbound / 纯实际互动记录可留空 |
 | Interaction At | Date | 否 | 实际发送、收到或通话发生的时间；Pending 时留空 |
 | Sender | Text | 否 | 发件账号、发送号码、LinkedIn 账号或拨打人 |
 | Message Status | Select | 否 | Pending / Sent / Received / Failed；Phone 可留空 |
@@ -607,11 +608,12 @@ Phone
 例如，计划于 2026-09-16 发送 WhatsApp，但实际于 2026-09-17 10:42 才发送：
 
 - Follow-up Task 的 Scheduled At 写入计划发送时刻（datetime，America/New_York），例如 2026-09-16 14:10 ET。
-- Notion TaskDB 的 `Scheduled At` 属性需开启 **Include time**，否则界面只显示日期。
+- Follow-up Conversation 的 Scheduled At 与对应 Task 使用同一排班结果、同一写入格式；Inbound 不写 Scheduled At。
+- Notion TaskDB / ConversationDB 的 `Scheduled At` 属性需开启 **Include time**，否则界面只显示日期。
 - Conversation Record 在 Message Status 为 Pending 时，Interaction At 留空。
 - 实际发送后，Message Status 更新为 Sent，Interaction At 写入实际发送时间：2026-09-17 10:42。
 - Follow-up Task 的 Task Status 更新为 Completed，Ended At 写入任务实际结束时间：2026-09-17 10:42。
-- Scheduled At 使用日期；Interaction At 和 Ended At 使用完整日期与时间，并按照工作区时区记录。
+- Interaction At 和 Ended At 使用完整日期与时间；Scheduled At 使用带时区的计划发送时刻。
 
 ### 11.3 客户级与人员级状态分开
 

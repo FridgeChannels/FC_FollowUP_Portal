@@ -260,6 +260,8 @@ export type BrandActivity = {
   cpAtInteraction: "CP1" | "CP2" | "CP3" | null;
   createdAt: string | null;
   recordedAt?: string | null;
+  /** Plan send time (Outbound from scheduling / portal); Inbound usually empty. */
+  scheduledAt?: string | null;
   replyDueAt?: string | null;
   quo?: QuoCallData | null;
 };

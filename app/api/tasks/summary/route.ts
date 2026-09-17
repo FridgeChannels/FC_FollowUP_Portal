@@ -2,6 +2,7 @@ import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { syncReplyInbox } from "@/lib/notion/followup-writes";
 import { taskQueryForViewer } from "@/lib/notion/owner-filter";
 import {
+  countOpenPhoneBrandsForViewer,
   countOpenPhoneTasksForViewer,
   listOpenReplyTaskStubsForViewer,
 } from "@/lib/notion/tasks";
@@ -20,7 +21,8 @@ export async function GET(request: Request) {
     const query = taskQueryForViewer(viewer, null, "open");
 
     if (viewer.role === "Caller") {
-      const openCount = await countOpenPhoneTasksForViewer(query);
+      // Caller ReplyTask is brand-scoped: one badge unit per Follow-up Client.
+      const openCount = await countOpenPhoneBrandsForViewer(query);
       return Response.json({ openCount });
     }
 

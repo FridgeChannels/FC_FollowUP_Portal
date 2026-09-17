@@ -45,10 +45,24 @@ export type ScheduledAction = {
 export type Interaction = {
   id: string; customerId: string; contactId?: string; bombInstanceId?: string; cp?: CPCode; type: "Message" | "Phone" | "Bomb" | "CP" | "Follow-up" | "Human" | "System";
   channel?: Channel; direction?: "Inbound" | "Outbound"; title: string; content: string; createdAt: string; outcome?: CallOutcome; recording?: string;
+  /** Notion page created_time; preferred for feed ordering/display. */
+  recordedAt?: string;
   creationMethod?: "Automated" | "Manual"; threadId?: string; taskId?: string; replyStatus?: "Needs Reply" | "Replied";
   taskStatus?: string; scheduledAt?: string; callResult?: string;
   quo?: QuoCallData | null;
 };
+
+/** Feed sort key: Scheduled At first, then Notion page created_time. */
+export function interactionSortAt(
+  item: Pick<Interaction, "scheduledAt" | "recordedAt" | "createdAt" | "id">,
+) {
+  return item.scheduledAt || item.recordedAt || item.createdAt || "";
+}
+
+/** Card timestamp: Notion page created_time only. */
+export function interactionPageAt(item: Pick<Interaction, "recordedAt" | "createdAt">) {
+  return item.recordedAt || item.createdAt || "";
+}
 export type InboxItem = {
   id: string; customerId: string; contactId?: string; type: "Reply";
   status: "Needs Reply" | "Waiting for Reply" | "Follow-up Scheduled" | "Resolved"; ownerId?: string; createdAt: string; updatedAt: string; preview: string;

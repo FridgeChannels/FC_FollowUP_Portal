@@ -161,8 +161,9 @@ export function callDataFromQuoWebhook(event: JsonObject): QuoCallData | null {
   const mediaRecordings = Array.isArray(resource.media)
     ? (resource.media as Array<{ url?: string | null; type?: string | null; duration?: number | null }>)
       .filter((item) => typeof item?.url === "string" && !!item.url.trim())
-      .map((item, index) => ({
-        id: `media-${index + 1}`,
+      .map((item) => ({
+        // Identity by URL — never media-1/media-2 (those collide across payloads).
+        id: item.url || null,
         url: item.url || null,
         type: item.type || null,
         duration: typeof item.duration === "number" ? item.duration : null,
