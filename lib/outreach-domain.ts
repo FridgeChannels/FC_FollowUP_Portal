@@ -52,10 +52,18 @@ export type Interaction = {
   quo?: QuoCallData | null;
 };
 
-/** Feed sort key: Scheduled At first, then Notion page created_time. */
+/**
+ * Feed sort key.
+ * Inbound: prefer actual occurrence (Interaction At / created_time) — never the parent
+ * task's Scheduled At, or replies sort as if they happened at send time.
+ * Outbound / other: Scheduled At first (pending sends), then recorded/created.
+ */
 export function interactionSortAt(
-  item: Pick<Interaction, "scheduledAt" | "recordedAt" | "createdAt" | "id">,
+  item: Pick<Interaction, "scheduledAt" | "recordedAt" | "createdAt" | "id" | "direction">,
 ) {
+  if (item.direction === "Inbound") {
+    return item.recordedAt || item.createdAt || item.scheduledAt || "";
+  }
   return item.scheduledAt || item.recordedAt || item.createdAt || "";
 }
 

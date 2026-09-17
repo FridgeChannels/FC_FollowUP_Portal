@@ -501,8 +501,11 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
       content: activity.content,
       createdAt: activity.createdAt || "",
       recordedAt: activity.recordedAt || activity.createdAt || "",
+      // Inbound shares the outbound Task — do not inherit Task Scheduled At for sorting.
       scheduledAt: activity.scheduledAt
-        || (activity.taskId ? taskById.get(activity.taskId)?.scheduledAt : undefined)
+        || (activity.direction === "Outbound" && activity.taskId
+          ? taskById.get(activity.taskId)?.scheduledAt
+          : undefined)
         || undefined,
       outcome: activity.callResult as Interaction["outcome"],
       callResult: activity.callResult || undefined,

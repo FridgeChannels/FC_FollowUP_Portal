@@ -396,8 +396,12 @@ function toInteractions(
     replyStatus: item.replyStatus || undefined,
     cp: resolveInteractionDisplayCp(cp, item, fallbacks),
     taskStatus: (item.taskId ? tasksById.get(item.taskId)?.status : undefined) || undefined,
+    // Inbound replies share the outbound Task; do not inherit Task Scheduled At
+    // or they sort as if they occurred at send time and can appear above Outbound.
     scheduledAt: item.scheduledAt
-      || (item.taskId ? tasksById.get(item.taskId)?.scheduledAt : undefined)
+      || (item.direction === "Outbound" && item.taskId
+        ? tasksById.get(item.taskId)?.scheduledAt
+        : undefined)
       || undefined,
     callResult: item.callResult || undefined,
     quo: item.quo || null,
