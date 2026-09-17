@@ -95,11 +95,29 @@ function belongsToCp(item: Interaction, cp: CPCode, fallbackCp?: CPCode) {
   return false;
 }
 
+function sameNotionId(left?: string | null, right?: string | null) {
+  if (!left || !right) return false;
+  if (left === right) return true;
+  return left.replace(/-/g, "").toLowerCase() === right.replace(/-/g, "").toLowerCase();
+}
+
 /** Phone tasks that have at least one Conversation stamped with this CP. */
-function phoneTaskIdsForCp(interactions: Interaction[], cp: CPCode, fallbackCp?: CPCode) {
+function phoneTaskIdsForCp(
+  interactions: Interaction[],
+  cp: CPCode,
+  fallbackCp?: CPCode,
+  tasks: Array<{ id: string; channel?: string | null; callReviewStatus?: string | null }> = [],
+) {
   const ids = new Set<string>();
   for (const item of interactions) {
     if (item.channel === "Phone" && item.taskId && belongsToCp(item, cp, fallbackCp)) ids.add(item.taskId);
+  }
+  // Ensure Connected/awaiting-review Phone tasks stay visible on the brand's current CP
+  // even when Conversation CP stamps disagree (e.g. Quo stamped CP4, script stamped CP3).
+  if (fallbackCp === cp) {
+    for (const task of tasks) {
+      if (task.channel === "Phone" && task.callReviewStatus === "Awaiting Review") ids.add(task.id);
+    }
   }
   return ids;
 }
@@ -195,27 +213,15 @@ export function InteractionFeed({
   const selectedInitialCp = initialCp || currentCp;
   const selectedCpIsVisible = visibleCps.includes(selectedInitialCp as (typeof visibleCps)[number]);
   const [selectedCp, setSelectedCp] = useState<CPCode>(selectedCpIsVisible ? selectedInitialCp : visibleCps[visibleCps.length - 1]);
-  const displayCurrentCp = visibleCps.includes(currentCp as (typeof visibleCps)[number]) ? currentCp : visibleCps[visibleCps.length - 1];
+  // Brand may be on CP4+; the strip only goes to CP3, so treat CP3 as the current tab.
+  const displayCurrentCp = visibleCps.includes(currentCp as (typeof visibleCps)[number])
+    ? currentCp
+    : visibleCps[visibleCps.length - 1];
   const currentIndex = visibleCps.indexOf(displayCurrentCp as (typeof visibleCps)[number]);
-  const cpInteractions = interactions.filter((item) => {
-    if (!isChannelMessage(item)) return true;
-    if (belongsToCp(item, selectedCp, displayCurrentCp)) return true;
-    // Task detail: keep Phone rows linked to the focused task even without a CP stamp.
-    if (activeTaskId && item.channel === "Phone" && item.taskId === activeTaskId) return true;
-    return false;
-  });
-  const planState = bombInstances ? { ...state, bombInstances, actions: actions ?? [], interactions: cpInteractions } : state;
-  const activeChannel = callerPhoneOnly ? "Phone" : selectedChannel;
-  const visibleChannels: Channel[] = callerPhoneOnly ? ["Phone"] : CHANNELS;
-  const channelMessages = cpInteractions.filter(item => isChannelMessage(item) && item.channel === activeChannel);
-  // Newest OmniReach launch first (startedAt = creation/launch time).
-  const bombsForCp = planState.bombInstances
-    .filter(item => item.customerId === customerId && item.cp === selectedCp)
-    .sort((a, b) => b.startedAt.localeCompare(a.startedAt) || b.id.localeCompare(a.id));
-  const taskIdsForCp = phoneTaskIdsForCp(interactions, selectedCp, displayCurrentCp);
+  const taskIdsForCp = phoneTaskIdsForCp(interactions, selectedCp, displayCurrentCp, tasks);
   if (activeTaskId) taskIdsForCp.add(activeTaskId);
   const phoneTasks = tasks
-    .filter((item) => item.channel === "Phone" && taskIdsForCp.has(item.id))
+    .filter((item) => item.channel === "Phone" && [...taskIdsForCp].some((id) => sameNotionId(id, item.id)))
     .map((item) => ({
       id: item.id,
       title: item.title,
@@ -227,6 +233,31 @@ export function InteractionFeed({
       callReviewStatus: item.callReviewStatus,
       remote: item.remote !== false,
     }));
+  const phoneBoardTaskIds = phoneTasks.map((item) => item.id);
+  const cpInteractions = interactions.filter((item) => {
+    if (!isChannelMessage(item)) return true;
+    if (belongsToCp(item, selectedCp, displayCurrentCp)) return true;
+    // Task detail: keep Phone rows linked to the focused task even without a CP stamp.
+    if (activeTaskId && item.channel === "Phone" && sameNotionId(item.taskId, activeTaskId)) return true;
+    // Keep Quo/Phone rows for tasks shown on this board even when Conversation CP
+    // differs from the selected tab (e.g. brand is CP4 but script was stamped CP3).
+    if (
+      item.channel === "Phone"
+      && item.taskId
+      && phoneBoardTaskIds.some((id) => sameNotionId(id, item.taskId))
+    ) {
+      return true;
+    }
+    return false;
+  });
+  const planState = bombInstances ? { ...state, bombInstances, actions: actions ?? [], interactions: cpInteractions } : state;
+  const activeChannel = callerPhoneOnly ? "Phone" : selectedChannel;
+  const visibleChannels: Channel[] = callerPhoneOnly ? ["Phone"] : CHANNELS;
+  const channelMessages = cpInteractions.filter(item => isChannelMessage(item) && item.channel === activeChannel);
+  // Newest OmniReach launch first (startedAt = creation/launch time).
+  const bombsForCp = planState.bombInstances
+    .filter(item => item.customerId === customerId && item.cp === selectedCp)
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt) || b.id.localeCompare(a.id));
   const usePhoneTaskBoard = activeChannel === "Phone" && (callerPhoneOnly || phoneTasks.length > 0);
 
   return <div className={maxHeight ? `${maxHeight} overflow-y-auto` : undefined}>

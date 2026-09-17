@@ -53,6 +53,12 @@ export function callScriptFromConversations(
   };
 }
 
+function sameNotionId(left?: string | null, right?: string | null) {
+  if (!left || !right) return false;
+  if (left === right) return true;
+  return left.replace(/-/g, "").toLowerCase() === right.replace(/-/g, "").toLowerCase();
+}
+
 function isDone(status: string) {
   return isClosedTaskStatus(status);
 }
@@ -162,8 +168,11 @@ export function PhoneTaskBoard({
       const review = reviews[item.id];
       const quoResults = timeline.filter((entry) => {
         if (!entry.quo) return false;
-        if (entry.taskId === item.id) return true;
-        return !entry.taskId && openPhoneTaskIds.has(item.id) && openPhoneTaskIds.size === 1;
+        if (sameNotionId(entry.taskId, item.id)) return true;
+        if (entry.taskId) return false;
+        // Unlinked Quo rows: attach to the sole Phone task on this board (even if Completed).
+        if (tasks.length === 1 && tasks[0].id === item.id) return true;
+        return openPhoneTaskIds.has(item.id) && openPhoneTaskIds.size === 1;
       }).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
       return <PhoneTaskBlock
         key={item.id}

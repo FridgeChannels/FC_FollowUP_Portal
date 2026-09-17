@@ -14,7 +14,7 @@ import {
 import { getFollowupConversationDbId } from "./config";
 import { listCheckpoints } from "./cps";
 import { isRetryableNotionError } from "./rate-limit";
-import { parseQuoCallData } from "../quo/call-payload";
+import { parseQuoCallData, quoFromMessageId } from "../quo/call-payload";
 
 const CONTACT_CONVERSATION_KEYS = ["Interactions", "Conversations", "Conversation Records"];
 
@@ -36,6 +36,7 @@ function mapConversation(
   const subject = propertyText(properties.Subject) || null;
   const notes = propertyText(properties.Notes) || null;
   const extendedParameters = propertyText(properties["Extended Parameters"]) || null;
+  const messageId = propertyText(properties["Message ID"]) || null;
   return {
     id: page.id,
     contactId: firstRelationId(properties["Follow-up Contact"]) || null,
@@ -51,7 +52,7 @@ function mapConversation(
     callResult: propertyText(properties["Call Result"]) || null,
     sourceUrl: propertyText(properties["Source URL"]) || null,
     threadId: propertyText(properties["Thread ID"]) || null,
-    messageId: propertyText(properties["Message ID"]) || null,
+    messageId,
     extendedParameters: options.trimPayload ? null : extendedParameters,
     replyStatus: asReplyStatus(propertyText(properties["Reply Status"])),
     cpId: firstRelationId(properties.CP) || null,
@@ -62,7 +63,9 @@ function mapConversation(
       propertyDate(properties["Interaction At"]) || page.created_time || null,
     scheduledAt: propertyDate(properties["Scheduled At"]) || null,
     replyDueAt: propertyDate(properties["Reply Due At"]) || null,
-    quo: parseQuoCallData(extendedParameters),
+    // Prefer full Extended Parameters; fall back to Message ID so Call results still appear
+    // when Notion truncates the rich_text payload on list/query responses.
+    quo: parseQuoCallData(extendedParameters) || quoFromMessageId(messageId),
   };
 }
 
@@ -283,7 +286,15 @@ async function attachConversationCp(items: BrandActivity[]): Promise<BrandActivi
     const code = interactionCpCode(checkpoint?.name);
     return {
       ...item,
-      cpAtInteraction: code === "CP1" || code === "CP2" || code === "CP3" ? code : null,
+      cpAtInteraction:
+        code === "CP1"
+        || code === "CP2"
+        || code === "CP3"
+        || code === "CP4"
+        || code === "CP5"
+        || code === "CP6"
+          ? code
+          : null,
     };
   });
 }

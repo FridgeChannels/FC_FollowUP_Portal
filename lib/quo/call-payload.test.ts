@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { parseQuoCallData, serializeQuoCallData } from "./call-payload.ts";
+import { parseQuoCallData, quoFromMessageId, serializeQuoCallData } from "./call-payload.ts";
 
 const call = {
   callId: "AC1",
@@ -27,5 +27,15 @@ describe("Quo conversation payload", () => {
     const parsed = JSON.parse(encoded) as Record<string, unknown>;
     assert.equal(parsed.custom, "keep");
     assert.equal(parsed.quoCallId, "AC1");
+  });
+
+  it("recovers callId from truncated Extended Parameters JSON", () => {
+    const truncated = '{"quoCallId":"AC99","quo":{"callId":"AC99","transcript":{"dialogue":[{"t":"';
+    assert.equal(parseQuoCallData(truncated)?.callId, "AC99");
+  });
+
+  it("builds a stub Quo payload from Message ID", () => {
+    assert.equal(quoFromMessageId("QUO_CALL:AC42")?.callId, "AC42");
+    assert.equal(quoFromMessageId("other"), null);
   });
 });

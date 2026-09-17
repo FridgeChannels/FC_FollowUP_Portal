@@ -460,6 +460,7 @@ export function BrandDetail({customerId}:{customerId:string}){
   const [activitiesCursor,setActivitiesCursor]=useState<string|null>(null);
   const [activitiesHasMore,setActivitiesHasMore]=useState(false);
   const [saving,setSaving]=useState(false);
+  const [quoRefreshingCallId,setQuoRefreshingCallId]=useState<string|null>(null);
   useEffect(()=>{
     setOwnerDraft(undefined);
     const next=getCachedBrand(customerId);
@@ -548,6 +549,32 @@ export function BrandDetail({customerId}:{customerId:string}){
       setActivitiesReady(true);
     }
     finally{setActivitiesLoading(false);}
+  };
+  const refreshQuoForBrand=async (callId:string)=>{
+    if(!remote||quoRefreshingCallId)return;
+    const activity=(remote.activities||[]).find((item)=>
+      item.quo?.callId===callId||item.messageId===`QUO_CALL:${callId}`
+    );
+    const taskId=activity?.taskId
+      || remote.tasks.find((task)=>task.channel==="Phone"&&task.callReviewStatus==="Awaiting Review")?.id
+      || remote.tasks.find((task)=>task.channel==="Phone")?.id;
+    if(!taskId){
+      toast.error("No Phone task linked to this Quo call");
+      return;
+    }
+    setQuoRefreshingCallId(callId);
+    try{
+      const response=await fetch(`/api/tasks/${taskId}/quo?callId=${encodeURIComponent(callId)}`);
+      const payload=await response.json() as {errors?:string[];error?:string};
+      if(!response.ok)throw new Error(payload.error||"Unable to refresh Quo data");
+      await Promise.all([refreshRemote(),fetchActivitiesPage(null,"replace")]);
+      if(payload.errors?.length)toast.warning(`Quo refresh completed with ${payload.errors.length} unavailable section${payload.errors.length===1?"":"s"}`);
+      else toast.success("Quo data refreshed");
+    }catch(error){
+      toast.error(error instanceof Error?error.message:"Unable to refresh Quo data");
+    }finally{
+      setQuoRefreshingCallId(null);
+    }
   };
   useEffect(()=>{
     if(local){
@@ -670,7 +697,7 @@ export function BrandDetail({customerId}:{customerId:string}){
       <div className="flex flex-wrap gap-2 xl:flex-col xl:items-stretch">{can("reply")&&<Button variant="outline" disabled={!brandReady||(notionBacked&&!c.contacts.length)} onClick={()=>setReply(true)}><Send className="mr-2 size-4"/>Send message</Button>}{can("launch")&&<LaunchOmniReachButton className="xl:w-full" disabled={!brandReady||hasActiveOmniReach} disabledReason={!brandReady?"Loading brand…":ACTIVE_OMNIREACH_BLOCK_REASON} onClick={()=>setLaunch(true)}/>}{can("changeCP")&&<Button disabled={!brandReady} onClick={()=>setCP(true)}>Change CP</Button>}{notionBacked&&can("editBrand")&&<DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" disabled={!brandReady} aria-label="More follow-up actions" title="More follow-up actions"><MoreHorizontal className="size-5"/></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem disabled={saving||remote?.status==="Paused"||remote?.status==="Completed"} onSelect={()=>void updateFollowUpStatus("Paused")}>Pause FollowUp</DropdownMenuItem><DropdownMenuItem disabled={saving||remote?.status==="Completed"} onSelect={()=>void updateFollowUpStatus("Completed")}>Complete FollowUp</DropdownMenuItem></DropdownMenuContent></DropdownMenu>}</div>
     </section>
     <div className={`grid gap-6 ${partnershipContext?"xl:grid-cols-[1fr_340px]":""}`}><section><h2 className="mb-3 font-bold">Brand activity</h2><div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-    <InteractionFeed key={`${c.id}-${currentCp}`} customerId={c.id} currentCp={currentCp} cpGoals={notionBacked?toCpGoals(remoteCps):undefined} interactions={interactions} contacts={c.contacts} bombInstances={bombPlan?.bombInstances} actions={bombPlan?.actions} loading={activityLoading} canReviewCalls={notionBacked&&can("reply")} tasks={remote?.tasks||[]} onPersistCallReview={notionBacked?async (taskId,status)=>{
+    <InteractionFeed key={`${c.id}-${currentCp}`} customerId={c.id} currentCp={currentCp} cpGoals={notionBacked?toCpGoals(remoteCps):undefined} interactions={interactions} contacts={c.contacts} bombInstances={bombPlan?.bombInstances} actions={bombPlan?.actions} loading={activityLoading} canReviewCalls={notionBacked&&can("reply")} tasks={remote?.tasks||[]} onRefreshQuo={notionBacked?refreshQuoForBrand:undefined} quoRefreshingCallId={quoRefreshingCallId} onPersistCallReview={notionBacked?async (taskId,status)=>{
     const response=await fetch(`/api/tasks/${taskId}/call-review`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status})});
     const payload=await response.json() as {error?:string};
     if(!response.ok)throw new Error(payload.error||"Unable to save call review");

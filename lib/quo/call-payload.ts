@@ -13,10 +13,26 @@ export function parseQuoCallData(raw?: string | null): QuoCallData | null {
     const record = parsed as Record<string, unknown>;
     if (isQuoCallData(record.quo)) return record.quo;
     if (isQuoCallData(parsed)) return parsed;
+    // Truncated Notion rich_text may still leave top-level ids intact.
+    if (typeof record.quoCallId === "string" && record.quoCallId.trim()) {
+      return { callId: record.quoCallId.trim() };
+    }
   } catch {
-    return null;
+    // Notion often truncates huge Extended Parameters mid-JSON.
+    const fromId =
+      raw.match(/"quoCallId"\s*:\s*"([^"]+)"/)?.[1]
+      || raw.match(/"callId"\s*:\s*"([^"]+)"/)?.[1];
+    if (fromId?.trim()) return { callId: fromId.trim() };
   }
   return null;
+}
+
+/** Fallback when Extended Parameters is empty/truncated but Message ID is `QUO_CALL:<id>`. */
+export function quoFromMessageId(messageId?: string | null): QuoCallData | null {
+  const id = messageId?.trim() || "";
+  if (!id.startsWith("QUO_CALL:")) return null;
+  const callId = id.slice("QUO_CALL:".length).trim();
+  return callId ? { callId } : null;
 }
 
 export function serializeQuoCallData(data: QuoCallData, previous?: string | null) {

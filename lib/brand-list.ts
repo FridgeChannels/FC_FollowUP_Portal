@@ -259,7 +259,7 @@ export type BrandActivity = {
   extendedParameters?: string | null;
   replyStatus: "Needs Reply" | "Replied" | null;
   cpId: string | null;
-  cpAtInteraction: "CP1" | "CP2" | "CP3" | null;
+  cpAtInteraction: "CP1" | "CP2" | "CP3" | "CP4" | "CP5" | "CP6" | null;
   createdAt: string | null;
   recordedAt?: string | null;
   /** Plan send time (Outbound from scheduling / portal); Inbound usually empty. */
