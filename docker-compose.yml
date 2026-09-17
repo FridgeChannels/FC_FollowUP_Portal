@@ -11,10 +11,7 @@ services:
     environment:
       PORT: "8787"
       HOST: "0.0.0.0"
-      # Prefer production channel behavior even if .env still has local values.
-      SKIP_UNAVAILABLE_CHANNELS: "true"
-      # Unset local dial override in containers unless you explicitly set it.
-      DEV_CALL_PHONE: ""
+      # SKIP_UNAVAILABLE_CHANNELS / DEV_CALL_PHONE come from env_file (.env) only.
     volumes:
       # Persist local Miniflare / Wrangler state under the project directory.
       - ./.wrangler/state:/app/.wrangler/state

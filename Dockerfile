@@ -4,7 +4,7 @@
 # Secrets are injected at runtime via .dev.vars (see scripts/docker-start.mjs).
 #
 # Usage:
-#   SKIP_UNAVAILABLE_CHANNELS=true DEV_CALL_PHONE= npm run build
+#   npm run build   # reads SKIP_UNAVAILABLE_CHANNELS / DEV_CALL_PHONE from .env
 #   docker compose build && docker compose up -d
 
 FROM node:22-bookworm-slim AS runner
@@ -14,7 +14,6 @@ ENV NODE_ENV=production \
     PORT=8787 \
     HOST=0.0.0.0 \
     HOME=/home/portal \
-    SKIP_UNAVAILABLE_CHANNELS=true \
     CLOUDFLARE_CF_FETCH_ENABLED=false \
     WRANGLER_SEND_METRICS=false
 
