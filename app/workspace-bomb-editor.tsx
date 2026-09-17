@@ -353,7 +353,6 @@ export function BombEditor({ bombId }: { bombId: string }) {
   };
   const errors = [
     !draft.name && "Name",
-    !draft.goal && "Goal",
     !draft.targetRole && "Target role",
     !draft.steps.length && "At least one action",
     draft.steps.some((step) => step.channel === "Email" && (!step.subject || !step.content)) && "Email subject/body",

@@ -64,21 +64,72 @@ export async function resolveFollowupTaskForQuoWebhook(input: {
   call?: QuoCall | null;
   eventAt?: string | null;
 }) {
+  const phones = callPhones(input.call);
+  console.info("Quo webhook resolve step: find conversation by callId", {
+    callId: input.callId,
+    messageId: `QUO_CALL:${input.callId}`,
+  });
   const existing = (await findQuoCallConversation(input.callId))[0];
   if (existing?.taskId) {
-    const task = await retrieveFollowupTask(existing.taskId).catch(() => null);
-    if (task) return { task, existing, matchedBy: "callId" as const };
+    const task = await retrieveFollowupTask(existing.taskId).catch((error) => {
+      console.warn("Quo webhook resolve: conversation found but task retrieve failed", {
+        callId: input.callId,
+        conversationId: existing.id,
+        taskId: existing.taskId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    });
+    if (task) {
+      console.info("Quo webhook resolve step: matched by callId", {
+        callId: input.callId,
+        conversationId: existing.id,
+        taskId: task.id,
+      });
+      return { task, existing, matchedBy: "callId" as const };
+    }
+  } else {
+    console.info("Quo webhook resolve step: no conversation for callId", {
+      callId: input.callId,
+      orphanConversationId: existing?.id || null,
+    });
   }
 
+  console.info("Quo webhook resolve step: find dial attempt", {
+    callId: input.callId,
+    phones,
+    eventAt: input.call?.createdAt || input.call?.completedAt || input.eventAt || null,
+  });
   const attempt = await findRecentQuoDialAttempt(
-    callPhones(input.call),
+    phones,
     input.call?.createdAt || input.call?.completedAt || input.eventAt,
   );
   if (attempt?.taskId) {
-    const task = await retrieveFollowupTask(attempt.taskId).catch(() => null);
-    if (task) return { task, existing: existing || null, matchedBy: "dial-attempt" as const };
+    const task = await retrieveFollowupTask(attempt.taskId).catch((error) => {
+      console.warn("Quo webhook resolve: dial attempt found but task retrieve failed", {
+        callId: input.callId,
+        taskId: attempt.taskId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    });
+    if (task) {
+      console.info("Quo webhook resolve step: matched by dial-attempt", {
+        callId: input.callId,
+        taskId: task.id,
+        dialedAt: attempt.dialedAt,
+        phone: attempt.phone,
+      });
+      return { task, existing: existing || null, matchedBy: "dial-attempt" as const };
+    }
+  } else {
+    console.info("Quo webhook resolve step: no dial attempt matched", {
+      callId: input.callId,
+      phones,
+    });
   }
 
+  console.info("Quo webhook resolve step: unmatched", { callId: input.callId, phones });
   return { task: null, existing: existing || null, matchedBy: null };
 }
 
@@ -113,9 +164,34 @@ export async function upsertQuoCallActivity(input: {
     if (!existing.taskId && input.task.id) {
       properties["Follow-up Task"] = { relation: [{ id: input.task.id }] };
     }
+    console.info("Quo webhook Notion update", {
+      eventType: input.eventType,
+      callId: data.callId,
+      conversationId: existing.id,
+      taskId: input.task.id,
+      callResult: result,
+      contentPreview: content.slice(0, 120),
+      recordingCount: recordings.length,
+      hasTranscript: !!(data.transcript?.dialogue?.length),
+      hasSummary: !!(data.summary?.summary?.length),
+      extendedParametersChars: extendedParameters.length,
+    });
     await updatePage(existing.id, properties);
   } else {
     const checkpoint = await brandCheckpoint(input.task);
+    console.info("Quo webhook Notion create", {
+      eventType: input.eventType,
+      callId: data.callId,
+      taskId: input.task.id,
+      contactId: input.task.contactId,
+      callResult: result,
+      contentPreview: content.slice(0, 120),
+      recordingCount: recordings.length,
+      hasTranscript: !!(data.transcript?.dialogue?.length),
+      hasSummary: !!(data.summary?.summary?.length),
+      extendedParametersChars: extendedParameters.length,
+      cpAtInteraction: checkpoint.cpAtInteraction,
+    });
     await createOutboundConversation({
       brandName: input.task.brandName || "Untitled Brand",
       contactId: input.task.contactId,
@@ -137,6 +213,12 @@ export async function upsertQuoCallActivity(input: {
   }
 
   if (result === "Connected") {
+    console.info("Quo webhook mark task awaiting review", {
+      callId: data.callId,
+      taskId: input.task.id,
+      previousStatus: input.task.status,
+      previousCallReviewStatus: input.task.callReviewStatus,
+    });
     await markPhoneTaskAwaitingReview(input.task);
   }
 
