@@ -434,9 +434,9 @@ Conversation 的 `CP` 是 Relation，关联 **FC3.0 CheckPoint DB** 中的一条
 
 Brand activity 按以下结构展示，OmniReach 执行计划不是对话的唯一骨架：
 
-1. **CP 选项卡**（CP1 / CP2 / CP3）：客户生命周期阶段，仅可查看已到达或当前阶段。
+1. **CP 选项卡**（CP1 / CP2 / CP3）：客户生命周期阶段，仅可查看已到达或当前阶段。各 CP 时间线内容相互独立，按 Conversation 发生当时 stamp 的 CP 归属，不得互相覆盖。
 2. **渠道选项卡**（Email / LinkedIn / SMS / WhatsApp / Phone）。
-3. **联系人 / Thread**：同一联系人、同一渠道、同一场对话共用 Thread ID，完整展示 OmniReach 发出、客户回复、人工跟进。
+3. **联系人 / Thread**：同一联系人、同一渠道、**同一场对话**共用 Thread ID，完整展示该场对话内的 OmniReach 发出、客户回复、人工跟进。跨 CP 的新 OmniReach run 按「本次 run × 渠道」分配新 Thread（同 run 内同渠道多步仍共用），非 reply 的人工外联也开新 Thread；Inbound / Reply 回写仍跟所回复消息的 Thread。
 4. **OmniReach execution plan**：独立按钮打开，不塞进对话时间线当唯一结构。
 
 每条消息展示发给谁 / 谁回复、时间、人工或 OmniReach。回复框挂在仍为 `Needs Reply` 的 Inbound 下。

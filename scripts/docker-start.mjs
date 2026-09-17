@@ -40,6 +40,7 @@ const WORKER_ENV_KEYS = [
   "QUO_WEBHOOK_SIGNING_SECRET",
   "QUO_WEBHOOK_SIGNING_SECRETS",
   "DISPLAY_TIME_ZONE",
+  "SENDER_NAME",
 ];
 
 function escapeDevVar(value) {

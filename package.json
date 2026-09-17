@@ -20,6 +20,7 @@
     "test:quo": "node --experimental-strip-types --test lib/quo/*.test.ts lib/notion/rate-limit.test.ts lib/notion/conversation-thread.test.ts",
     "test:inbound": "node --experimental-strip-types --test lib/notion/inbound-cold.test.ts",
     "test:variables": "node --experimental-strip-types --test lib/template-variables.test.ts",
+    "test:interaction-cp": "node --experimental-strip-types --test lib/interaction-cp.test.ts",
     "simulate:replies": "node scripts/simulate-channel-replies.mjs",
     "simulate:replies:email": "node scripts/simulate-channel-replies.mjs --channel Email",
     "simulate:replies:linkedin": "node scripts/simulate-channel-replies.mjs --channel LinkedIn",

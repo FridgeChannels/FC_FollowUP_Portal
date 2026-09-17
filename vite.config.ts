@@ -41,6 +41,7 @@ export default defineConfig(async ({ mode }) => {
     process.env.DISPLAY_TIME_ZONE ||
     loadedEnv.DISPLAY_TIME_ZONE ||
     "America/New_York";
+  const senderName = process.env.SENDER_NAME || loadedEnv.SENDER_NAME || "";
   const rawDevAllowedHosts =
     process.env.DEV_ALLOWED_HOSTS || loadedEnv.DEV_ALLOWED_HOSTS || "";
   // `true` / `*` / `all` disables Vite host checks (needed for reverse-proxy domains).
@@ -84,6 +85,7 @@ export default defineConfig(async ({ mode }) => {
         ? { QUO_WEBHOOK_SIGNING_SECRETS: quoWebhookSigningSecrets }
         : {}),
       DISPLAY_TIME_ZONE: displayTimeZone,
+      ...(senderName ? { SENDER_NAME: senderName } : {}),
     },
     d1_databases: d1
       ? [
@@ -125,6 +127,7 @@ export default defineConfig(async ({ mode }) => {
       ),
       "import.meta.env.DEV_CALL_PHONE": JSON.stringify(devCallPhone ?? ""),
       "import.meta.env.DISPLAY_TIME_ZONE": JSON.stringify(displayTimeZone),
+      "import.meta.env.SENDER_NAME": JSON.stringify(senderName),
     },
     server: {
       ...(managedLinux ? { host: "0.0.0.0" } : {}),

@@ -27,6 +27,7 @@ import { InteractionFeed } from "./interaction-feed";
 import { ChannelIcon, ChannelOption } from "./channel-icon";
 import { buildTemplateVariableContext, resolveLaunchStepCopy } from "@/lib/template-variables";
 import { brandHasActiveOmniReach } from "@/lib/notion/reply-inbox";
+import { buildInteractionCpFallbacks, resolveInteractionDisplayCp } from "@/lib/interaction-cp";
 import { cn } from "@/lib/utils";
 
 const show=(r:{ok:boolean;message:string})=>r.ok?toast.success(r.message):toast.error(r.message);
@@ -364,24 +365,15 @@ function toInteractions(
     item,
     cp: resolveActivityCp(item, tasks, activityInstanceIds, bombInstances),
   }));
-  const threadInboundCp = new Map<string, CPCode>();
-  const threadCp = new Map<string, CPCode>();
-  const taskCp = new Map<string, CPCode>();
-  const chronological = [...resolved].sort((left, right) =>
-    (left.item.scheduledAt || left.item.recordedAt || left.item.createdAt || "").localeCompare(
-      right.item.scheduledAt || right.item.recordedAt || right.item.createdAt || "",
-    ),
+  const fallbacks = buildInteractionCpFallbacks(
+    resolved.map(({ item, cp }) => ({
+      threadId: item.threadId,
+      taskId: item.taskId,
+      direction: item.direction,
+      stampedCp: cp,
+      sortAt: item.scheduledAt || item.recordedAt || item.createdAt || "",
+    })),
   );
-  for (const entry of chronological) {
-    if (!entry.cp) continue;
-    if (entry.item.threadId) {
-      if (entry.item.direction === "Inbound" && !threadInboundCp.has(entry.item.threadId)) {
-        threadInboundCp.set(entry.item.threadId, entry.cp);
-      }
-      if (!threadCp.has(entry.item.threadId)) threadCp.set(entry.item.threadId, entry.cp);
-    }
-    if (entry.item.taskId && !taskCp.has(entry.item.taskId)) taskCp.set(entry.item.taskId, entry.cp);
-  }
   return resolved.map(({ item, cp }) => ({
     id: item.id,
     customerId,
@@ -402,7 +394,7 @@ function toInteractions(
     threadId: item.threadId || undefined,
     taskId: item.taskId || undefined,
     replyStatus: item.replyStatus || undefined,
-    cp: (item.threadId ? threadInboundCp.get(item.threadId) : undefined) || cp || (item.threadId ? threadCp.get(item.threadId) : undefined) || (item.taskId ? taskCp.get(item.taskId) : undefined),
+    cp: resolveInteractionDisplayCp(cp, item, fallbacks),
     taskStatus: (item.taskId ? tasksById.get(item.taskId)?.status : undefined) || undefined,
     scheduledAt: item.scheduledAt
       || (item.taskId ? tasksById.get(item.taskId)?.scheduledAt : undefined)

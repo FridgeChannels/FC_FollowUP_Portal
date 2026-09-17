@@ -1,4 +1,4 @@
-export type TemplateVariableCategory = "Company" | "Contact";
+export type TemplateVariableCategory = "Company" | "Contact" | "Sender";
 
 export type TemplateVariable = {
   key: string;
@@ -6,6 +6,8 @@ export type TemplateVariable = {
   category: TemplateVariableCategory;
   description: string;
 };
+
+export const SENDER_NAME_TOKEN = "[Sender Name]";
 
 export const templateVariables: TemplateVariable[] = [
   { key: "company_name", label: "Company name", category: "Company", description: "ClientDB → Company Name" },
@@ -19,6 +21,7 @@ export const templateVariables: TemplateVariable[] = [
   { key: "phone", label: "Phone", category: "Contact", description: "KeyPersonDB → Phone" },
   { key: "owner_or_connector", label: "Owner or Connector", category: "Contact", description: "KeyPersonDB → OwnerOrConnector" },
   { key: "LinkedIn URL", label: "LinkedIn URL", category: "Contact", description: "KeyPersonDB → LinkedIn URL" },
+  { key: "Sender Name", label: "Sender name", category: "Sender", description: ".env → SENDER_NAME" },
 ];
 
 export type TemplateVariableSource = {
@@ -33,6 +36,7 @@ export type TemplateVariableSource = {
   phone?: string | null;
   ownerOrConnector?: string | null;
   linkedinUrl?: string | null;
+  senderName?: string | null;
   hasContact?: boolean;
 };
 
@@ -51,7 +55,25 @@ export type ResolvedOutboundFields = {
   content: string;
 };
 
+declare global {
+  interface ImportMetaEnv {
+    readonly SENDER_NAME?: string;
+  }
+}
+
+/** Outbound sender display name from `.env` (`SENDER_NAME`). */
+export function getSenderName() {
+  const fromImportMeta =
+    typeof import.meta !== "undefined"
+      ? (import.meta.env?.SENDER_NAME as string | undefined)
+      : undefined;
+  const fromProcess =
+    typeof process !== "undefined" ? process.env.SENDER_NAME : undefined;
+  return (fromImportMeta || fromProcess || "").trim();
+}
+
 export function variableToken(key: string) {
+  if (normalizeVariableKey(key) === "sender_name") return SENDER_NAME_TOKEN;
   return `{{${key}}}`;
 }
 
@@ -69,11 +91,14 @@ function contextValue(context: TemplateVariableContext, key: string) {
 }
 
 export function buildTemplateVariableContext(source: TemplateVariableSource): TemplateVariableContext {
+  const senderName = (source.senderName ?? getSenderName()).trim();
   const context: TemplateVariableContext = {
     company_name: source.companyName?.trim() || "",
     product_description: source.productDescription?.trim() || "",
     "Matched Category": source.matchedCategory?.trim() || "",
     "Follow-up-Exhibition": source.followupExhibition?.trim() || "",
+    "Sender Name": senderName,
+    sender_name: senderName,
   };
   const hasContact = source.hasContact === true || [
     source.contactName,
@@ -103,10 +128,14 @@ export function resolveTemplateVariables(
   context: TemplateVariableContext,
 ) {
   if (!text) return "";
-  return text.replace(/{{\s*([^}]+?)\s*}}/g, (placeholder, rawKey: string) => {
+  const withMustache = text.replace(/{{\s*([^}]+?)\s*}}/g, (placeholder, rawKey: string) => {
     const value = contextValue(context, rawKey.trim());
     return value === undefined ? placeholder : value;
   });
+  // Copy templates use the literal `[Sender Name]` (not mustache).
+  const senderValue = contextValue(context, "Sender Name");
+  if (senderValue === undefined) return withMustache;
+  return withMustache.replace(/\[\s*Sender\s+Name\s*\]/gi, senderValue);
 }
 
 export function resolveOutboundFields(

@@ -42,7 +42,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ChannelIcon } from "./channel-icon";
 import { usePageMetadata } from "./use-page-metadata";
 
-type VariableCategory = "All" | "Company" | "Contact";
+type VariableCategory = "All" | "Company" | "Contact" | "Sender";
 
 type EditorDraft = {
   name: string;
@@ -173,7 +173,7 @@ function TemplateVariableField({
                 />
               </div>
               <div className="mt-3 flex gap-1 overflow-x-auto pb-1">
-                {(["All", "Company", "Contact"] as VariableCategory[]).map((item) => (
+                {(["All", "Company", "Contact", "Sender"] as VariableCategory[]).map((item) => (
                   <button
                     type="button"
                     key={item}

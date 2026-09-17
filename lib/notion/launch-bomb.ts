@@ -29,7 +29,7 @@ import {
 import { listFollowupContacts } from "./contacts";
 import { listFollowupConversations } from "./conversations";
 import { mapFollowupClientPage } from "./followup-clients";
-import { createFollowupTask, createOutboundConversation, markFollowupClientEngaged } from "./followup-writes";
+import { createFollowupTask, createOutboundConversation, markFollowupClientEngaged, newConversationThreadId } from "./followup-writes";
 import { hasOpenOmniReachTasks, listExistingTasksForSchedule } from "./tasks";
 
 export type LaunchStepCopy = {
@@ -230,6 +230,14 @@ export async function launchFollowupBomb(input: {
   });
   const omniReachRunId = crypto.randomUUID();
   const existingConversations = await listFollowupConversations([contact.id]);
+  // One new Thread per channel for this run — do not reuse older CP threads,
+  // but keep multi-step messages on the same channel inside one conversation.
+  const runChannelThreads = new Map<string, string>();
+  for (const write of result.writes) {
+    if (!runChannelThreads.has(write.channel)) {
+      runChannelThreads.set(write.channel, newConversationThreadId(write.channel));
+    }
+  }
 
   const planSteps = await mapPool(result.writes, 3, async (write) => {
     const template = bomb.templates.find((item) => item.id === write.templateId);
@@ -268,6 +276,7 @@ export async function launchFollowupBomb(input: {
         content,
         sender: input.sender,
         taskId: task.id,
+        threadId: runChannelThreads.get(write.channel),
         cpId: brand.currentCpId,
         cpAtInteraction: interactionCpCode(brand.currentCp),
         existingConversations,

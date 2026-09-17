@@ -8,7 +8,7 @@ import {
   easternMinuteOfDayCeil,
 } from "../scheduling-engine/calendar";
 import { notionScheduledAtProperty } from "./scheduled-at";
-import { pickContactChannelThreadId } from "./conversation-thread";
+import { chooseConversationThreadId } from "./conversation-thread";
 import { listFollowupConversations } from "./conversations";
 import { asExtendedParameters } from "./extended-parameters";
 import { retrieveOwner } from "./owners";
@@ -38,6 +38,11 @@ function uniqueRecordId(prefix: string, channel: string) {
   return `${prefix}-${token}-${channel}`;
 }
 
+/** Fresh Portal Thread ID (THR-…) for a new conversation line on a channel. */
+export function newConversationThreadId(channel: string) {
+  return uniqueRecordId("THR", channel);
+}
+
 export async function resolveConversationThread(
   contactId: string,
   channel: string,
@@ -45,24 +50,19 @@ export async function resolveConversationThread(
   existing?: BrandActivity[],
   options?: { forceNew?: boolean },
 ) {
-  if (options?.forceNew) {
-    return {
-      threadId: uniqueRecordId("THR", channel),
-      messageId: uniqueRecordId("MSG", channel),
-    };
-  }
-  const preferred = preferredThreadId?.trim() || "";
-  // Explicit thread wins: cold inbound can open a new topic on the same channel,
-  // and replies /api/replies must stay on that line instead of collapsing to the oldest THR-.
-  if (preferred) {
-    return {
-      threadId: preferred,
-      messageId: uniqueRecordId("MSG", channel),
-    };
-  }
-  const listed = existing ?? (await listFollowupConversations([contactId]));
+  // Explicit / forceNew paths skip listing: cold inbound and OmniReach run threads
+  // must not collapse onto the oldest contact+channel THR-.
+  const listed = options?.forceNew || preferredThreadId?.trim()
+    ? []
+    : existing ?? (await listFollowupConversations([contactId]));
   return {
-    threadId: pickContactChannelThreadId(listed, channel) || uniqueRecordId("THR", channel),
+    threadId: chooseConversationThreadId({
+      channel,
+      preferredThreadId,
+      existing: listed,
+      forceNew: options?.forceNew,
+      allocate: (item) => uniqueRecordId("THR", item),
+    }),
     messageId: uniqueRecordId("MSG", channel),
   };
 }
@@ -218,6 +218,8 @@ export async function createOutboundConversation(input: {
   cpAtInteraction?: string | null;
   extendedParameters?: string | null;
   existingConversations?: BrandActivity[];
+  /** New OmniReach / non-reply outbound opens a fresh Thread so CP timelines stay independent. */
+  forceNewThread?: boolean;
 }) {
   if (!CHANNELS.has(input.channel)) throw new Error("Invalid channel");
   const content = input.content.trim();
@@ -233,6 +235,7 @@ export async function createOutboundConversation(input: {
     input.channel,
     input.threadId,
     input.existingConversations,
+    { forceNew: !!input.forceNewThread },
   );
   if (input.messageId?.trim()) {
     thread.messageId = input.messageId.trim();
@@ -554,6 +557,7 @@ export async function createHumanOutbound(input: {
     notes: isReply
       ? "人工追加回复，尚未实际发送。"
       : "人工消息，尚未实际发送。",
+    forceNewThread: !isReply,
   });
   // New task has no Conversations yet; conversation already links Follow-up Task on create.
   await updatePage(taskId, {

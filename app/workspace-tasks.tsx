@@ -11,6 +11,7 @@ import type { BrandActivity, BrandContact, BrandDetail, BrandTask, CurrentCpOpti
 import { listApplicableCps } from "@/lib/brand-list";
 import { brandHasActiveOmniReach } from "@/lib/notion/reply-inbox";
 import { canSeeTask, dateOnly, isCancelledTaskStatus, isClosedTaskStatus, type Contact, type CPCode, type Customer, type Interaction } from "@/lib/outreach-domain";
+import { buildInteractionCpFallbacks, resolveInteractionDisplayCp } from "@/lib/interaction-cp";
 import { useWorkspace } from "./workspace-store";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -478,24 +479,15 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
       updatedAt: payload.brand?.lastEditedAt || "",
     };
     const activities = payload.activities || [];
-    const threadInboundCp = new Map<string, NonNullable<BrandActivity["cpAtInteraction"]>>();
-    const threadCp = new Map<string, NonNullable<BrandActivity["cpAtInteraction"]>>();
-    const taskCp = new Map<string, NonNullable<BrandActivity["cpAtInteraction"]>>();
-    const chronological = [...activities].sort((left, right) =>
-      (left.scheduledAt || left.recordedAt || left.createdAt || "").localeCompare(
-        right.scheduledAt || right.recordedAt || right.createdAt || "",
-      ),
+    const fallbacks = buildInteractionCpFallbacks(
+      activities.map((activity) => ({
+        threadId: activity.threadId,
+        taskId: activity.taskId,
+        direction: activity.direction,
+        stampedCp: activity.cpAtInteraction || undefined,
+        sortAt: activity.scheduledAt || activity.recordedAt || activity.createdAt || "",
+      })),
     );
-    for (const activity of chronological) {
-      if (!activity.cpAtInteraction) continue;
-      if (activity.threadId) {
-        if (activity.direction === "Inbound" && !threadInboundCp.has(activity.threadId)) {
-          threadInboundCp.set(activity.threadId, activity.cpAtInteraction);
-        }
-        if (!threadCp.has(activity.threadId)) threadCp.set(activity.threadId, activity.cpAtInteraction);
-      }
-      if (activity.taskId && !taskCp.has(activity.taskId)) taskCp.set(activity.taskId, activity.cpAtInteraction);
-    }
     const taskById = new Map((payload.brand?.tasks || []).map(item => [item.id, item]));
     if (payload.task) taskById.set(payload.task.id, payload.task);
     const timeline: Interaction[] = activities.map(activity => ({
@@ -515,7 +507,7 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
       outcome: activity.callResult as Interaction["outcome"],
       callResult: activity.callResult || undefined,
       quo: activity.quo || null,
-      cp: (activity.threadId ? threadInboundCp.get(activity.threadId) : undefined) || activity.cpAtInteraction || (activity.threadId ? threadCp.get(activity.threadId) : undefined) || (activity.taskId ? taskCp.get(activity.taskId) : undefined),
+      cp: resolveInteractionDisplayCp(activity.cpAtInteraction || undefined, activity, fallbacks),
       taskId: activity.taskId || undefined,
       threadId: activity.threadId || undefined,
       taskStatus: (activity.taskId ? taskById.get(activity.taskId)?.status : undefined) || undefined,

@@ -329,6 +329,9 @@ export function InteractionFeed({
                   <div className="mt-1 flex flex-wrap items-center gap-1.5">
                     {instance.cp && <Badge variant="outline" className="text-[10px]">{instance.cp}</Badge>}
                     <Badge className={instance.status === "Running" ? "bg-violet-100 text-violet-800" : "bg-slate-100 text-slate-700"}>{instance.status}</Badge>
+                    {instance.startedAt ? (
+                      <span className="text-[11px] text-slate-500">{formatEasternDateTime(instance.startedAt)}</span>
+                    ) : null}
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5">

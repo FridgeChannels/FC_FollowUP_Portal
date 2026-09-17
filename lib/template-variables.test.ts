@@ -17,6 +17,7 @@ const context = buildTemplateVariableContext({
   phone: "+1 208 555 0100",
   ownerOrConnector: "Owner",
   linkedinUrl: "https://linkedin.com/in/melissa",
+  senderName: "Ella",
 });
 
 describe("template variable engine", () => {
@@ -88,6 +89,7 @@ describe("template variable engine", () => {
     const withExhibition = buildTemplateVariableContext({
       companyName: "Oxyfresh",
       followupExhibition: "Expo West 2026",
+      senderName: "Ella",
     });
     assert.equal(
       resolveTemplateVariables("Met at {{Follow-up-Exhibition}}", withExhibition),
@@ -96,6 +98,17 @@ describe("template variable engine", () => {
     assert.equal(
       resolveTemplateVariables("Met at {{Follow-up Exhibition}}", withExhibition),
       "Met at Expo West 2026",
+    );
+  });
+
+  it("replaces the literal [Sender Name] from SENDER_NAME", () => {
+    assert.equal(
+      resolveTemplateVariables("Best,\n[Sender Name]", context),
+      "Best,\nElla",
+    );
+    assert.equal(
+      resolveTemplateVariables("Best,\n[ sender name ]", context),
+      "Best,\nElla",
     );
   });
 });
