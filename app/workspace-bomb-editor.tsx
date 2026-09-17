@@ -383,7 +383,7 @@ export function BombEditor({ bombId }: { bombId: string }) {
             disabled={saving}
             onClick={() => save(draft.status === "Active" ? "Draft" : "Active")}
           >
-            {draft.status === "Active" ? "Stop OmniReach" : "Activate"}
+            {draft.status === "Active" ? "Deactivate" : "Activate"}
           </Button>
           <Button disabled={!!errors.length || saving} onClick={() => save()}>
             <Save className="mr-2 size-4" />

@@ -137,7 +137,7 @@ export function InteractionFeed({
   maxHeight?: string;
   bombInstances?: BombInstance[];
   actions?: ScheduledAction[];
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string) => Promise<void>;
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string) => Promise<void>;
   onCancelBomb?: (instance: BombInstance) => Promise<void>;
   initialChannel?: Channel;
   initialCp?: CPCode;
@@ -250,7 +250,12 @@ export function InteractionFeed({
           const count = channel === "Phone" && phoneTasks.length
             ? phoneTasks.length
             : channelItems.length;
-          const needsReply = !loading && channelItems.some(item => inboundNeedsComposer(state, item, interactions));
+          // Phone notifications represent calls that are waiting for an Account Manager
+          // decision. Historical call events stay in the timeline, but must not keep the
+          // channel marked after they are qualified or recalled.
+          const needsReply = !loading && (channel === "Phone"
+            ? channelItems.some(item => resolveReview(item.taskId)?.status === "Awaiting Review")
+            : channelItems.some(item => inboundNeedsComposer(state, item, interactions)));
           const selected = channel === activeChannel;
           return <button key={channel} type="button" aria-pressed={selected} disabled={loading} onClick={() => setSelectedChannel(channel)} className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${selected ? "bg-violet-600 text-white" : "bg-slate-50 text-slate-600 hover:bg-slate-100"} ${loading ? "opacity-70" : ""}`}>
             <ChannelIcon channel={channel} className="size-4" alt=""/>
@@ -318,11 +323,13 @@ export function InteractionFeed({
         <div className="min-h-0 space-y-5 overflow-y-auto pr-1">
           {bombsForCp.map(instance => (
             <div key={instance.id} className="rounded-xl border border-slate-200 p-4">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                  <div className="text-sm font-bold">{instance.templateName} · V{instance.version}</div>
-                  {instance.cp && <Badge variant="outline" className="text-[10px]">{instance.cp}</Badge>}
-                  <Badge className={instance.status === "Running" ? "bg-violet-100 text-violet-800" : "bg-slate-100 text-slate-700"}>{instance.status}</Badge>
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-bold">{instance.templateName} · V{instance.version}</div>
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                    {instance.cp && <Badge variant="outline" className="text-[10px]">{instance.cp}</Badge>}
+                    <Badge className={instance.status === "Running" ? "bg-violet-100 text-violet-800" : "bg-slate-100 text-slate-700"}>{instance.status}</Badge>
+                  </div>
                 </div>
                 <div className="flex items-center gap-1.5">
                   {instance.status === "Running" && onCancelBomb && <Button size="sm" variant="outline" disabled={cancellingBombId === instance.id} className="border-rose-200 text-rose-700 hover:bg-rose-50 hover:text-rose-800" onClick={async () => {
@@ -360,7 +367,7 @@ function ChannelTranscript({
   contacts: Contact[];
   channel: Channel;
   bombInstances: BombInstance[];
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string) => Promise<void>;
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
   resolveReview: (taskId?: string | null) => { status: CallReviewStatus; recallRequested?: boolean } | undefined;
@@ -427,7 +434,7 @@ function ContactThreads({
   replyPool: Interaction[];
   channel: Channel;
   bombInstances: BombInstance[];
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string) => Promise<void>;
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
   resolveReview: (taskId?: string | null) => { status: CallReviewStatus; recallRequested?: boolean } | undefined;
@@ -480,7 +487,7 @@ function ThreadMessages({
   channel: Channel;
   endpoint?: string;
   bombInstances: BombInstance[];
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string) => Promise<void>;
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
   resolveReview: (taskId?: string | null) => { status: CallReviewStatus; recallRequested?: boolean } | undefined;

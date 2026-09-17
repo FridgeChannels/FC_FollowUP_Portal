@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Channel, Contact, Interaction, ScheduledAction, WorkspaceState } from "@/lib/outreach-domain";
 import { useWorkspace } from "./workspace-store";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -87,12 +88,15 @@ export function BrandReplyBox({
   interactions?: Interaction[];
   actions?: ScheduledAction[];
   taskId?: string;
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string) => Promise<void>;
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string) => Promise<void>;
 }) {
   const { state, can, sendHumanReply } = useWorkspace();
   const customer = state.customers.find(item => item.id === customerId);
   const people = contacts || customer?.contacts || [];
   const [content, setContent] = useState("");
+  const [subject, setSubject] = useState(() =>
+    interaction.channel === "Email" && interaction.title !== "Email" ? interaction.title : "",
+  );
   const [saving, setSaving] = useState(false);
   const contact = people.find(item => item.id === interaction.contactId) || people[0];
   const channel = interaction.channel;
@@ -109,12 +113,15 @@ export function BrandReplyBox({
         <span className="text-xs text-slate-400">Reply needed</span>
       </div>
       <div className="flex gap-2">
-        <Textarea value={content} onChange={event => setContent(event.target.value)} className="min-h-20 resize-none" placeholder="Write a reply…"/>
-        <Button className="h-20 px-5" disabled={!content.trim() || saving} onClick={() => {
+        <div className="min-w-0 flex-1 space-y-2">
+          {channel === "Email" && <Input value={subject} onChange={event => setSubject(event.target.value)} placeholder="Email subject" />}
+          <Textarea value={content} onChange={event => setContent(event.target.value)} className="min-h-20 resize-none" placeholder="Write a reply…"/>
+        </div>
+        <Button className="h-auto px-5" disabled={!content.trim() || (channel === "Email" && !subject.trim()) || saving} onClick={() => {
           if (onSend) {
             setSaving(true);
-            void onSend(contact.id, channel, content, replyTaskId, interaction.threadId)
-              .then(() => { toast.success("Message saved as pending"); setContent(""); })
+            void onSend(contact.id, channel, content, replyTaskId, interaction.threadId, subject)
+              .then(() => { toast.success("Message saved as pending"); setContent(""); setSubject(""); })
               .catch(error => toast.error(error instanceof Error ? error.message : "Send failed"))
               .finally(() => setSaving(false));
             return;
@@ -140,7 +147,7 @@ export function ChannelSendBox({
   channel: Channel;
   contacts: Contact[];
   interactions: Interaction[];
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string) => Promise<void>;
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string) => Promise<void>;
 }) {
   const { state, can, sendHumanReply } = useWorkspace();
   const people = contacts.filter(item => channelAvailable(item, channel));

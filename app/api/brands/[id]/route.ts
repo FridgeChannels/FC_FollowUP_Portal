@@ -1,12 +1,28 @@
 import { currentCpOption } from "@/lib/brand-list";
 import { canAssignBrandOwner, canViewBrand, canWriteBrand } from "@/lib/brand-access";
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
-import { propertyText, retrievePage } from "@/lib/notion/client";
+import { propertyText, retrievePage, type NotionPage } from "@/lib/notion/client";
+import { attachBrandReplySignals, listBrandReplySignals } from "@/lib/notion/brand-reply-signals";
 import { listCheckpoints, resolveCheckpoint } from "@/lib/notion/cps";
 import { mapFollowupClientDetail, mapFollowupClientPage } from "@/lib/notion/followup-clients";
 import { updateFollowupClient } from "@/lib/notion/followup-writes";
 
 type Params = { params: Promise<{ id: string }> };
+
+async function mapDetailWithReplySignal(page: NotionPage) {
+  const [brand, replySignals] = await Promise.all([
+    mapFollowupClientDetail(page),
+    listBrandReplySignals([page]).catch(() => new Map()),
+  ]);
+  const signal = attachBrandReplySignals([brand], replySignals)[0];
+  return {
+    ...brand,
+    needsReply: signal?.needsReply ?? false,
+    replyPreview: signal?.replyPreview ?? null,
+    replyDueAt: signal?.replyDueAt ?? null,
+    replyUpdatedAt: signal?.replyUpdatedAt ?? null,
+  };
+}
 
 export async function GET(request: Request, { params }: Params) {
   try {
@@ -18,7 +34,7 @@ export async function GET(request: Request, { params }: Params) {
     const page = await retrievePage(id);
     const [cps, brand] = await Promise.all([
       listCheckpoints(),
-      mapFollowupClientDetail(page),
+      mapDetailWithReplySignal(page),
     ]);
     if (!canViewBrand(viewer, brand, brand.tasks)) {
       return Response.json({ error: "You do not have access to this brand" }, { status: 403 });
@@ -86,8 +102,11 @@ export async function PATCH(request: Request, { params }: Params) {
       handlingMode: body.handlingMode,
       notes,
     });
-    const updated = await mapFollowupClientDetail(await retrievePage(id));
-    const cps = await listCheckpoints();
+    const updatedPage = await retrievePage(id);
+    const [updated, cps] = await Promise.all([
+      mapDetailWithReplySignal(updatedPage),
+      listCheckpoints(),
+    ]);
     return Response.json({ brand: updated, cps });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";

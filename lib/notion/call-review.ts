@@ -1,7 +1,7 @@
 import { CALL_REVIEW_CALLER_EMAIL, type CallReviewStatus } from "../call-review-metadata";
 import { findOwnerByAccount } from "./owners";
 import { retrieveFollowupTask } from "./tasks";
-import { updateFollowupTask } from "./followup-writes";
+import { markInboundsReplied, updateFollowupTask } from "./followup-writes";
 
 export type { CallReviewStatus };
 
@@ -60,6 +60,17 @@ export async function applyCallReview(input: {
         task.notes,
         `通话评审 Unqualified，已召回改派给 ${caller.name}（${reviewer}）。`,
       ),
+    });
+  }
+
+  // A reviewed call has been handled by the Account Manager. Clear the
+  // notification on the inbound Phone conversation without affecting any
+  // other unresolved replies for this contact.
+  if (task.contactId) {
+    await markInboundsReplied({
+      contactId: task.contactId,
+      channel: "Phone",
+      taskId: task.id,
     });
   }
 
