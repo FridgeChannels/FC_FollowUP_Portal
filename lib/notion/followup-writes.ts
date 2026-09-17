@@ -472,6 +472,29 @@ function scheduledAtNow() {
   return easternDateTimeIso(easternDateOnly(now), easternMinuteOfDayCeil(now));
 }
 
+/** Pick the inbound being answered so portal Reply can inherit its CP. */
+function pickRepliedInbound(
+  activities: BrandActivity[],
+  input: { channel: string; threadId?: string | null; taskId?: string | null },
+) {
+  const threadId = input.threadId?.trim();
+  const related = activities.filter((item) => {
+    if (item.direction !== "Inbound") return false;
+    if (item.channel && item.channel !== input.channel) return false;
+    if (threadId && item.threadId) return item.threadId === threadId;
+    if (input.taskId && item.taskId) return item.taskId === input.taskId;
+    return !threadId && !input.taskId;
+  }).sort((left, right) => (right.createdAt || "").localeCompare(left.createdAt || ""));
+
+  const needsReply = related.find((item) => item.replyStatus === "Needs Reply");
+  if (needsReply) return needsReply;
+  if (input.taskId) {
+    const onTask = related.find((item) => item.taskId === input.taskId);
+    if (onTask) return onTask;
+  }
+  return related[0] || null;
+}
+
 function pickThreadExtendedParameters(
   activities: BrandActivity[],
   input: { channel: string; threadId?: string | null; taskId?: string | null },
@@ -540,8 +563,15 @@ export async function createHumanOutbound(input: {
       notes: taskNotes,
     });
     const taskId = created.id;
-    // Human Send / Reply: stamp Brand Current CP. Customer /api/replies uses outbound CP.
-    // Thread: reply reuses request threadId; non-reply reuses last interaction (not forceNew).
+    // Portal Reply → CP of the inbound being answered. Non-reply Send → Brand Current.
+    // Customer /api/replies stamps from outbound CP in inbound-reply.ts.
+    const repliedInbound = isReply
+      ? pickRepliedInbound(threadActivities, {
+          channel: input.channel,
+          threadId: input.threadId,
+          taskId: input.existingTaskId,
+        })
+      : null;
     const page = await createOutboundConversation({
       brandName: input.brandName,
       contactId: input.contactId,
@@ -552,8 +582,10 @@ export async function createHumanOutbound(input: {
       sender,
       taskId,
       threadId: input.threadId,
-      cpId: input.cpId,
-      cpAtInteraction: input.cpAtInteraction,
+      cpId: isReply ? repliedInbound?.cpId || input.cpId : input.cpId,
+      cpAtInteraction: isReply
+        ? repliedInbound?.cpAtInteraction || input.cpAtInteraction
+        : input.cpAtInteraction,
       extendedParameters: isReply
         ? pickThreadExtendedParameters(threadActivities, {
             channel: input.channel,

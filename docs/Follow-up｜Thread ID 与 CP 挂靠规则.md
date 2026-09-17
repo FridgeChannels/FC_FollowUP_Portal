@@ -29,23 +29,25 @@
 | --- | --- |
 | 新 OmniReach | **launch 当下** Brand Current CP（与任务 `Scheduled At` 无关） |
 | 人工 Send（非回复） | **写入当下** Brand Current CP |
-| 门户 Inbound「Reply」 | **Brand 当前 CP** |
+| 门户 Inbound「Reply」 | **被回复的那条 Inbound 的 CP**（无戳时回退 Brand Current） |
 | `POST /api/replies` 客户回写 | **被回复的那条 Outbound 的 CP**（无 Outbound CP 时才回退 Brand Current） |
 | 冷 Inbound `POST /api/inbound` | Thread 新建；**CP = Brand Current** |
 
 原则：
 
 1. Thread 可跨 CP 连续会话。  
-2. **新外联**（OmniReach / 人工 Send）与 **门户人工 Reply** 挂 Client **当前进度 CP**。  
-3. **只有** `/api/replies` 客户回写按「发出内容」挂 CP。
+2. **新外联**（OmniReach / 人工 Send 非回复）挂 Client **当前进度 CP**。  
+3. **回复链**：客户 replies 跟 Outbound CP；门户人工 Reply 跟所点的那条 Inbound CP。
 
 ## 5. 与显示的关系
 
 Activity Feed 每个 CP tab 严格按 Conversation 上的 CP 戳过滤。  
-因此：在 CP3 launch / 人工发送并沿用旧 Thread 时，**新消息出现在 CP3**；同 Thread 上更早打在 CP2 的消息仍只在 CP2 可见。
+因此：在 CP3 launch / 人工发送并沿用旧 Thread 时，**新消息出现在 CP3**；同 Thread 上更早打在 CP2 的消息仍只在 CP2 可见。  
+在某条 CP2 Inbound 下点 Reply，人工回信也出现在 **CP2**。
 
 ## 6. 修订记录
 
 | 日期 | 说明 |
 | --- | --- |
 | 2026-09-17 | 初版：最后一次交互沿用 Thread；OmniReach/人工 Send 同规则；冷 Inbound 新建；CP 规则如上 |
+| 2026-09-17 | 门户 Inbound Reply 改为挂被回复 Inbound 的 CP（不再用 Brand Current） |
