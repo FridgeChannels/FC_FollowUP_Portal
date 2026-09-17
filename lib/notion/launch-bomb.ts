@@ -36,7 +36,9 @@ import { listFollowupContacts } from "./contacts";
 import { listFollowupConversations } from "./conversations";
 import { mapFollowupClientPage } from "./followup-clients";
 import { createFollowupTask, createOutboundConversation, markFollowupClientEngaged, newConversationThreadId } from "./followup-writes";
+import { chooseConversationThreadId } from "./conversation-thread";
 import { hasOpenOmniReachTasks, listExistingTasksForSchedule, listFollowupTasks } from "./tasks";
+
 
 export type LaunchStepCopy = {
   subject?: string;
@@ -264,12 +266,20 @@ export async function launchFollowupBomb(input: {
     listFollowupConversations([contact.id]),
     listFollowupTasks([contact.id]),
   ]);
-  // One new Thread per channel for this run — do not reuse older CP threads,
-  // but keep multi-step messages on the same channel inside one conversation.
+  // Reuse last interaction Thread per channel when history exists; otherwise allocate.
+  // One Thread per channel for this run (multi-step messages share it).
   const runChannelThreads = new Map<string, string>();
   for (const write of result.writes) {
     if (!runChannelThreads.has(write.channel)) {
-      runChannelThreads.set(write.channel, newConversationThreadId(write.channel));
+      runChannelThreads.set(
+        write.channel,
+        chooseConversationThreadId({
+          channel: write.channel,
+          existing: existingConversations,
+          forceNew: false,
+          allocate: (channel) => newConversationThreadId(channel),
+        }),
+      );
     }
   }
 

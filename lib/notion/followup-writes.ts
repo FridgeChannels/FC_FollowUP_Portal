@@ -224,7 +224,7 @@ export async function createOutboundConversation(input: {
   cpAtInteraction?: string | null;
   extendedParameters?: string | null;
   existingConversations?: BrandActivity[];
-  /** New OmniReach / non-reply outbound opens a fresh Thread so CP timelines stay independent. */
+  /** When true, always allocate a fresh Thread (cold inbound). Default reuses last interaction. */
   forceNewThread?: boolean;
 }) {
   if (!CHANNELS.has(input.channel)) throw new Error("Invalid channel");
@@ -472,30 +472,6 @@ function scheduledAtNow() {
   return easternDateTimeIso(easternDateOnly(now), easternMinuteOfDayCeil(now));
 }
 
-function pickThreadCp(
-  activities: BrandActivity[],
-  input: { channel: string; threadId?: string | null; taskId?: string | null },
-) {
-  const threadId = input.threadId?.trim();
-  const related = activities.filter((item) => {
-    if (!item.cpId && !item.cpAtInteraction) return false;
-    if (item.channel && item.channel !== input.channel) return false;
-    if (threadId && item.threadId) return item.threadId === threadId;
-    if (input.taskId && item.taskId) return item.taskId === input.taskId;
-    return false;
-  }).sort((left, right) => (right.createdAt || "").localeCompare(left.createdAt || ""));
-
-  const inbounds = related.filter((item) => item.direction === "Inbound");
-  // Reply CP follows the message being answered — not Brand Current CP.
-  const needsReply = inbounds.find((item) => item.replyStatus === "Needs Reply");
-  if (needsReply) return needsReply;
-  if (input.taskId) {
-    const onTask = inbounds.find((item) => item.taskId === input.taskId);
-    if (onTask) return onTask;
-  }
-  return inbounds[0] || related[0] || null;
-}
-
 function pickThreadExtendedParameters(
   activities: BrandActivity[],
   input: { channel: string; threadId?: string | null; taskId?: string | null },
@@ -564,18 +540,8 @@ export async function createHumanOutbound(input: {
       notes: taskNotes,
     });
     const taskId = created.id;
-    const threadCp = isReply
-      ? pickThreadCp(threadActivities, {
-          channel: input.channel,
-          threadId: input.threadId,
-          taskId: input.existingTaskId,
-        })
-      : null;
-    // Replies inherit CP from the message being answered. Brand Current CP is only a fallback.
-    const replyCpId = isReply ? threadCp?.cpId || input.cpId : input.cpId;
-    const replyCpAt = isReply
-      ? threadCp?.cpAtInteraction || input.cpAtInteraction
-      : input.cpAtInteraction;
+    // Human Send / Reply: stamp Brand Current CP. Customer /api/replies uses outbound CP.
+    // Thread: reply reuses request threadId; non-reply reuses last interaction (not forceNew).
     const page = await createOutboundConversation({
       brandName: input.brandName,
       contactId: input.contactId,
@@ -586,8 +552,8 @@ export async function createHumanOutbound(input: {
       sender,
       taskId,
       threadId: input.threadId,
-      cpId: replyCpId,
-      cpAtInteraction: replyCpAt,
+      cpId: input.cpId,
+      cpAtInteraction: input.cpAtInteraction,
       extendedParameters: isReply
         ? pickThreadExtendedParameters(threadActivities, {
             channel: input.channel,
@@ -600,7 +566,7 @@ export async function createHumanOutbound(input: {
       notes: isReply
         ? "人工追加回复，尚未实际发送。"
         : "人工消息，尚未实际发送。",
-      forceNewThread: !isReply,
+      forceNewThread: false,
     });
     // New task has no Conversations yet; conversation already links Follow-up Task on create.
     await updatePage(taskId, {
