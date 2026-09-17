@@ -212,10 +212,16 @@ function toBombPlan(customerId: string, tasks: BrandTask[], activities: BrandAct
 
   for (const [instanceId, group] of groups) {
     const first = group[0];
-    const startedAt = group
+    // Launch/creation time (not first step's scheduledAt) — used for multi-OmniReach ordering.
+    const createdAt = group
+      .map((item) => item.createdAt || "")
+      .filter(Boolean)
+      .sort()[0] || "";
+    const firstScheduled = group
       .map((item) => item.scheduledAt || "")
       .filter(Boolean)
       .sort()[0] || "";
+    const startedAt = createdAt || firstScheduled;
     bombInstances.push({
       id: instanceId,
       customerId,
@@ -239,7 +245,7 @@ function toBombPlan(customerId: string, tasks: BrandTask[], activities: BrandAct
       const related = activitiesForTask(task, activities);
       for (const activity of related) activityInstanceIds[activity.id] = instanceId;
       const conversation = sentContentForTask(task, related);
-      const scheduled = task.scheduledAt || conversation?.createdAt || startedAt;
+      const scheduled = task.scheduledAt || conversation?.createdAt || firstScheduled || startedAt;
       const subject = conversation?.subject?.trim();
       const body = typeof conversation?.content === "string" ? conversation.content : "";
       actions.push({
@@ -275,7 +281,7 @@ function launchPlanFromApiSteps(input: {
   }>;
 }) {
   const instanceId = `run:${input.omniReachRunId}`;
-  const startedAt = input.steps.map((step) => step.scheduledAt).filter(Boolean).sort()[0] || "";
+  const startedAt = new Date().toISOString();
   const bombInstances: BombInstance[] = [{
     id: instanceId,
     customerId: input.customerId,

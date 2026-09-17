@@ -179,9 +179,10 @@ export function InteractionFeed({
   const activeChannel = callerPhoneOnly ? "Phone" : selectedChannel;
   const visibleChannels: Channel[] = callerPhoneOnly ? ["Phone"] : CHANNELS;
   const channelMessages = cpInteractions.filter(item => isChannelMessage(item) && item.channel === activeChannel);
+  // Newest OmniReach launch first (startedAt = creation/launch time).
   const bombsForCp = planState.bombInstances
     .filter(item => item.customerId === customerId && item.cp === selectedCp)
-    .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt) || b.id.localeCompare(a.id));
   const phoneTasks = tasks
     .filter((item) => item.channel === "Phone")
     .map((item) => ({

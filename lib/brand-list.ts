@@ -225,6 +225,8 @@ export type BrandTask = {
   creationMethod: string | null;
   scheduledAt: string | null;
   endedAt: string | null;
+  /** Notion task page created_time; used as OmniReach launch/creation time. */
+  createdAt?: string | null;
   notes: string | null;
   conversationIds: string[];
   templateId: string | null;
