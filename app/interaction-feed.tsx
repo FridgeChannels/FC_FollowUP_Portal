@@ -503,6 +503,7 @@ function ThreadMessages({
       const timing = !inbound && !phoneCall ? deliveryTiming(item) : null;
       const callReview = phoneCall ? resolveReview(item.taskId) : undefined;
       const emailSubject = emailSubjectLabel(item);
+      const pageAt = interactionPageAt(item);
       return <article key={item.id} className={`rounded-xl p-4 ${inbound ? "bg-rose-50/80" : "bg-slate-50"}`}>
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
@@ -513,7 +514,11 @@ function ThreadMessages({
             {phoneCall && item.callResult ? <SendStatusBadge status={item.callResult}/> : null}
             {callReview ? <Badge className={callReview.status === "Qualified" ? "bg-emerald-100 text-[10px] text-emerald-800 hover:bg-emerald-100" : "bg-rose-100 text-[10px] text-rose-800 hover:bg-rose-100"}>{callReview.status.toLowerCase()}</Badge> : null}
           </div>
-          <time dateTime={interactionPageAt(item)} className="font-mono text-[11px] text-slate-500">{formatUtcTime(interactionPageAt(item))}</time>
+          {pageAt ? (
+            <time dateTime={pageAt} className="font-mono text-[11px] text-slate-500">
+              {formatEasternDateTime(pageAt)}
+            </time>
+          ) : null}
         </div>
         {timing && (
           <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-slate-500">
