@@ -196,7 +196,7 @@ export function PhoneTaskBoard({
           if (!active && onSelectTask) onSelectTask(item.id);
         }}
       />;
-    }) : <p className="rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500">No Phone tasks yet.</p>}
+    }) : <p className="rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500">No Phone tasks for this CP.</p>}
   </div>;
 
   if (!showChannelTab) return body;

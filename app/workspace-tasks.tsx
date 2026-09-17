@@ -8,8 +8,9 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import type { BrandActivity, BrandContact, BrandDetail, BrandTask, CurrentCpOption } from "@/lib/brand-list";
+import { listApplicableCps } from "@/lib/brand-list";
 import { brandHasActiveOmniReach } from "@/lib/notion/reply-inbox";
-import { canSeeTask, dateOnly, isCancelledTaskStatus, isClosedTaskStatus, type Contact, type Customer, type Interaction } from "@/lib/outreach-domain";
+import { canSeeTask, dateOnly, isCancelledTaskStatus, isClosedTaskStatus, type Contact, type CPCode, type Customer, type Interaction } from "@/lib/outreach-domain";
 import { useWorkspace } from "./workspace-store";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -21,7 +22,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { DEFAULT_TASK_PAGE_SIZE } from "@/lib/notion/owner-filter";
 import { ChangeCPDialog, LaunchBombDialog, LaunchOmniReachButton, ReplyDialog, ACTIVE_OMNIREACH_BLOCK_REASON } from "./workspace-customer";
 import { InteractionFeed } from "./interaction-feed";
-import { callScriptFromConversations, PhoneTaskBoard } from "./phone-task-board";
+import { callScriptFromConversations } from "./phone-task-board";
 import { Status } from "./workspace-pages";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { devCallPhoneOnClient } from "@/lib/quo/dev-call-phone";
@@ -514,7 +515,7 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
       outcome: activity.callResult as Interaction["outcome"],
       callResult: activity.callResult || undefined,
       quo: activity.quo || null,
-      cp: (activity.threadId ? threadInboundCp.get(activity.threadId) : undefined) || activity.cpAtInteraction || (activity.threadId ? threadCp.get(activity.threadId) : undefined) || (activity.taskId ? taskCp.get(activity.taskId) : undefined) || (activity.quo ? customer.cp : undefined),
+      cp: (activity.threadId ? threadInboundCp.get(activity.threadId) : undefined) || activity.cpAtInteraction || (activity.threadId ? threadCp.get(activity.threadId) : undefined) || (activity.taskId ? taskCp.get(activity.taskId) : undefined),
       taskId: activity.taskId || undefined,
       threadId: activity.threadId || undefined,
       taskStatus: (activity.taskId ? taskById.get(activity.taskId)?.status : undefined) || undefined,
@@ -681,7 +682,7 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
       />
     : null;
   const callerPhoneTasks = (() => {
-    // Brand-level board: all Phone tasks on this Follow-up Client.
+    // Brand-level board: all Phone tasks; InteractionFeed filters by Conversation CP.
     const fromBrand = (remote?.brand?.tasks || [])
       .filter((item) => item.channel === "Phone")
       .map((item) => ({
@@ -692,7 +693,9 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
         contactId: item.contactId,
         contactPhone: item.contactPhone,
         templateId: item.templateId,
+        scheduledAt: item.scheduledAt,
         callReviewStatus: item.callReviewStatus,
+        channel: "Phone" as const,
         remote: true,
       }));
     const mappedLive = {
@@ -703,11 +706,18 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
       contactId: liveTask.contactId,
       contactPhone: liveTask.contactPhone,
       templateId: liveTask.templateId,
+      scheduledAt: liveTask.dueAt,
       callReviewStatus: liveTask.callReviewStatus,
+      channel: "Phone" as const,
       remote: true,
     };
     return fromBrand.some((item) => item.id === liveTask.id) ? fromBrand : [mappedLive, ...fromBrand];
   })();
+  const callerCpGoals = Object.fromEntries(
+    (remote?.cps?.length ? remote.cps : listApplicableCps())
+      .filter((item) => /^CP[1-3]$/.test(item.name))
+      .map((item) => [item.name, item.fullName]),
+  ) as Partial<Record<CPCode, string>>;
 
   return <div className="mx-auto max-w-[1540px]">
     <button onClick={() => router.push("/tasks")} className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900"><ArrowLeft className="size-4"/>ReplyTask</button>
@@ -721,18 +731,23 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
       <div className="min-w-0 p-5 lg:p-7">
         {callerPhoneOnly && reviewedTask.type === "Call" ? (
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-            <PhoneTaskBoard
+            <InteractionFeed
+              key={`${customer.id}-${customer.cp}`}
+              callerPhoneOnly
+              customerId={customer.id}
+              currentCp={customer.cp}
+              cpGoals={callerCpGoals}
+              interactions={timeline}
+              contacts={customer.contacts}
+              tasks={callerPhoneTasks}
+              loading={!detailHydrated}
+              scriptsLoading={callScriptLoading}
               activeTaskId={liveTask.id}
               headerContactName={contact.name}
-              contacts={customer.contacts}
-              phoneTasks={callerPhoneTasks}
-              timeline={timeline}
-              scriptsLoading={callScriptLoading}
-              quoRefreshingCallId={quoRefreshingCallId}
-              onRefreshQuo={task.remote ? refreshQuo : undefined}
               onSelectTask={(taskId) => router.push(`/tasks/${encodeURIComponent(taskId)}`)}
               onCallOpening={onCallOpening}
-              showDial
+              onRefreshQuo={task.remote ? refreshQuo : undefined}
+              quoRefreshingCallId={quoRefreshingCallId}
             />
           </div>
         ) : (

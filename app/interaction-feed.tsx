@@ -91,6 +91,15 @@ function belongsToCp(item: Interaction, cp: CPCode) {
   return item.cp === cp;
 }
 
+/** Phone tasks that have at least one Conversation stamped with this CP. */
+function phoneTaskIdsForCp(interactions: Interaction[], cp: CPCode) {
+  const ids = new Set<string>();
+  for (const item of interactions) {
+    if (item.channel === "Phone" && item.taskId && belongsToCp(item, cp)) ids.add(item.taskId);
+  }
+  return ids;
+}
+
 export function InteractionFeed({
   interactions,
   contacts,
@@ -113,6 +122,11 @@ export function InteractionFeed({
   tasks = [],
   onPersistCallReview,
   loading = false,
+  activeTaskId,
+  headerContactName,
+  onSelectTask,
+  onCallOpening,
+  scriptsLoading = false,
 }: {
   interactions: Interaction[];
   contacts: Contact[];
@@ -135,6 +149,11 @@ export function InteractionFeed({
   tasks?: Array<Pick<BrandTask, "id" | "channel" | "title" | "status" | "contactId" | "contactPhone" | "templateId" | "scheduledAt" | "callReviewStatus"> & { remote?: boolean }>;
   onPersistCallReview?: (taskId: string, status: CallReviewStatus) => Promise<void>;
   loading?: boolean;
+  activeTaskId?: string | null;
+  headerContactName?: string;
+  onSelectTask?: (taskId: string) => void;
+  onCallOpening?: () => void;
+  scriptsLoading?: boolean;
 }) {
   const { state } = useWorkspace();
   const notionReviews = callReviewsFromTasks(tasks);
@@ -183,8 +202,9 @@ export function InteractionFeed({
   const bombsForCp = planState.bombInstances
     .filter(item => item.customerId === customerId && item.cp === selectedCp)
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt) || b.id.localeCompare(a.id));
+  const taskIdsForCp = phoneTaskIdsForCp(interactions, selectedCp);
   const phoneTasks = tasks
-    .filter((item) => item.channel === "Phone")
+    .filter((item) => item.channel === "Phone" && taskIdsForCp.has(item.id))
     .map((item) => ({
       id: item.id,
       title: item.title,
@@ -196,7 +216,7 @@ export function InteractionFeed({
       callReviewStatus: item.callReviewStatus,
       remote: item.remote !== false,
     }));
-  const usePhoneTaskBoard = !callerPhoneOnly && activeChannel === "Phone" && phoneTasks.length > 0;
+  const usePhoneTaskBoard = activeChannel === "Phone" && (callerPhoneOnly || phoneTasks.length > 0);
 
   return <div className={maxHeight ? `${maxHeight} overflow-y-auto` : undefined}>
     <div className="px-5 py-4">
@@ -265,7 +285,12 @@ export function InteractionFeed({
         onPersistCallReview={onPersistCallReview}
         onRefreshQuo={onRefreshQuo}
         quoRefreshingCallId={quoRefreshingCallId}
-        showDial={false}
+        showDial={!!callerPhoneOnly}
+        activeTaskId={activeTaskId}
+        headerContactName={headerContactName}
+        onSelectTask={onSelectTask}
+        onCallOpening={onCallOpening}
+        scriptsLoading={scriptsLoading}
       />
     ) : (
     <ChannelTranscript

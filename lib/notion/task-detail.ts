@@ -1,5 +1,5 @@
 import type { BrandActivity, BrandDetail, BrandTask, CurrentCpOption } from "../brand-list";
-import { brandInitials } from "../brand-list";
+import { brandInitials, listApplicableCps } from "../brand-list";
 import { retrievePage } from "./client";
 import { listFollowupContacts, retrieveFollowupContact } from "./contacts";
 import { listConversationsByIds, listFollowupConversations } from "./conversations";
@@ -160,5 +160,5 @@ export async function buildCallerTaskDetailPayload(id: string): Promise<TaskDeta
       }
     : brandShellFromTask(task, contacts, tasks);
 
-  return { task, activities: phoneActivities, brand, cps: [] };
+  return { task, activities: phoneActivities, brand, cps: listApplicableCps() };
 }
