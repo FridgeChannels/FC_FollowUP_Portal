@@ -13,6 +13,7 @@ WORKDIR /app
 ENV NODE_ENV=production \
     PORT=8787 \
     HOST=0.0.0.0 \
+    HOME=/home/portal \
     SKIP_UNAVAILABLE_CHANNELS=true \
     CLOUDFLARE_CF_FETCH_ENABLED=false \
     WRANGLER_SEND_METRICS=false

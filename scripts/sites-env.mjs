@@ -5,6 +5,12 @@ import { fileURLToPath } from "node:url";
 export const projectRoot = fileURLToPath(new URL("../", import.meta.url));
 const runtimeRoot = process.env.SITES_RUNTIME_ROOT || path.join(projectRoot, ".sites-runtime");
 
+// Containers often start as root then drop privileges while leaving HOME=/root.
+// Wrangler still resolves config under $HOME/.wrangler — force a writable home.
+if (process.env.HOME === "/root" || !process.env.HOME) {
+  process.env.HOME = process.env.PORTAL_HOME || "/home/portal";
+}
+
 process.env.CLOUDFLARE_CF_FETCH_ENABLED ||= "false";
 process.env.WRANGLER_SEND_METRICS ||= "false";
 process.env.WRANGLER_WRITE_LOGS ||= "false";
