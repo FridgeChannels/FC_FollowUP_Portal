@@ -37,11 +37,11 @@ COPY scripts ./scripts
 COPY public ./public
 COPY .openai ./.openai
 
-RUN chown -R portal:portal /app
+RUN chmod +x /app/scripts/docker-entrypoint.sh \
+  && chown -R portal:portal /app
 
-USER portal
-
+# Start as root so the entrypoint can chown bind mounts, then drop to portal.
 EXPOSE 8787
 
-ENTRYPOINT ["tini", "--"]
+ENTRYPOINT ["tini", "--", "/app/scripts/docker-entrypoint.sh"]
 CMD ["node", "scripts/docker-start.mjs"]
