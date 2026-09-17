@@ -1,4 +1,5 @@
 import type { BrandTask } from "../brand-list";
+import { isLinkedInColdCapacityTask } from "../linkedin/notes.ts";
 import { CHANNELS, type Channel, type ExistingTask, type TaskStatus } from "../scheduling-engine/types";
 import {
   firstRelationId,
@@ -750,10 +751,18 @@ export async function listExistingTasksForSchedule(): Promise<ExistingTask[]> {
     const channel = propertyText(properties.Channel);
     const scheduledAt = propertyDate(properties["Scheduled At"]) || null;
     const status = propertyText(properties["Task Status"]) as TaskStatus | null;
+    const notes = propertyText(properties.Notes) || null;
     const contactId = firstRelationId(properties["Follow-up Contact"]) || null;
     const clientId = contactId ? brandByContact.get(contactId) : null;
     if (!clientId || !scheduledAt || !status || !TASK_STATUSES.has(status)) return [];
     if (!channel || !CHANNELS.includes(channel as Channel)) return [];
+    // LinkedIn follow-up-after-reply does not occupy Channel Daily Max.
+    if (
+      channel === "LinkedIn" &&
+      !isLinkedInColdCapacityTask({ channel, status, notes })
+    ) {
+      return [];
+    }
     return [{
       clientId,
       contactId: contactId || undefined,

@@ -38,25 +38,25 @@ describe("resolveInteractionDisplayCp", () => {
     );
   });
 
-  it("fills missing CP from earliest inbound on the same thread", () => {
+  it("fills missing CP from latest inbound on the same thread", () => {
     const fallbacks = buildInteractionCpFallbacks([
-      {
-        threadId: "THR-shared-Email",
-        direction: "Outbound",
-        stampedCp: "CP1",
-        sortAt: "2026-09-15T08:00:00.000Z",
-      },
       {
         threadId: "THR-shared-Email",
         direction: "Inbound",
         stampedCp: "CP1",
         sortAt: "2026-09-16T08:00:00.000Z",
       },
+      {
+        threadId: "THR-shared-Email",
+        direction: "Inbound",
+        stampedCp: "CP3",
+        sortAt: "2026-09-17T08:00:00.000Z",
+      },
     ]);
 
     assert.equal(
       resolveInteractionDisplayCp(null, { threadId: "THR-shared-Email" }, fallbacks),
-      "CP1",
+      "CP3",
     );
   });
 

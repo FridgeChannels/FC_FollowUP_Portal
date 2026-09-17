@@ -11,6 +11,7 @@ const DEFAULT_FOLLOWUP_SCENARIO_DB_ID = "a6b464d8-43ec-47c6-8f0f-21e42b224b76";
 const DEFAULT_FOLLOWUP_TEMPLATE_DB_ID = "6b8cab86-324d-4d1d-9a8b-8acc48ebc1c5";
 const DEFAULT_FOLLOWUP_CAPACITY_DB_ID = "0c422a9a-a10b-4f6f-b87d-b97fbb263dee";
 const DEFAULT_FOLLOWUP_CHECKPOINT_DB_ID = "1e1f297c-2925-4903-a0f1-2b6ad113c364";
+const DEFAULT_FOLLOWUP_LINKEDIN_ACCOUNT_DB_ID = "2ea248ed-37c4-42ec-8591-699f336a3ee7";
 
 export const NOTION_VERSION = "2022-06-28";
 
@@ -97,6 +98,16 @@ export function getFollowupCheckpointDbId() {
       ? process.env.NOTION_FOLLOWUP_CHECKPOINT_DB_ID
       : undefined) ||
     DEFAULT_FOLLOWUP_CHECKPOINT_DB_ID
+  );
+}
+
+export function getFollowupLinkedInAccountDbId() {
+  return (
+    env.NOTION_FOLLOWUP_LINKEDIN_ACCOUNT_DB_ID ||
+    (typeof process !== "undefined"
+      ? process.env.NOTION_FOLLOWUP_LINKEDIN_ACCOUNT_DB_ID
+      : undefined) ||
+    DEFAULT_FOLLOWUP_LINKEDIN_ACCOUNT_DB_ID
   );
 }
 

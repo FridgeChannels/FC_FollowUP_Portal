@@ -66,7 +66,7 @@ export async function POST(request: Request, { params }: Params) {
       channel,
       content: body.content || "",
       subject: channel === "Email" ? object : undefined,
-      sender: viewer.email,
+      sender: channel === "LinkedIn" ? undefined : viewer.email,
       existingTaskId: body.taskId,
       threadId: body.threadId,
       cpId: brand.currentCpId,
@@ -86,7 +86,12 @@ export async function POST(request: Request, { params }: Params) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
-    const status = message.includes("404") ? 404 : 500;
+    const status =
+      message.includes("404")
+        ? 404
+        : /LinkedIn|quota|capacity|reply|open LinkedIn|Daily Max|active sender|paused/i.test(message)
+          ? 400
+          : 500;
     return Response.json({ error: message }, { status });
   }
 }

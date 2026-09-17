@@ -454,7 +454,9 @@ export async function ingestInboundReply(
     "Message ID": { rich_text: richText(messageId) },
     "Interaction At": { date: { start: occurredAt } },
   };
-  const cp = await conversationCpRelation(target.currentCpId || target.currentCp);
+  const cp = await conversationCpRelation(
+    outbound.cpId || outbound.cpAtInteraction || target.currentCpId || target.currentCp,
+  );
   if (cp) properties.CP = cp;
   if (channel !== "Phone") {
     properties["Reply Status"] = { select: { name: "Needs Reply" } };
@@ -507,8 +509,8 @@ export async function ingestInboundReply(
         messageId,
         extendedParameters,
         replyStatus: channel === "Phone" ? null : "Needs Reply",
-        cpId: null,
-        cpAtInteraction: target.currentCp || null,
+        cpId: outbound.cpId || null,
+        cpAtInteraction: outbound.cpAtInteraction || target.currentCp || null,
         createdAt: occurredAt,
       },
     ],

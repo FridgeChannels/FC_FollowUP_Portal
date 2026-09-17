@@ -1,4 +1,10 @@
 import type { BrandContact } from "../brand-list";
+import {
+  mergeLinkedInNotes,
+  prepareLinkedInOutbound,
+  releaseLinkedInColdQuota,
+  type LinkedInCreateDecision,
+} from "../linkedin";
 import { easternDateOnly } from "../scheduling-engine/calendar";
 import { commitSchedule } from "../scheduling-engine";
 import type {
@@ -30,7 +36,7 @@ import { listFollowupContacts } from "./contacts";
 import { listFollowupConversations } from "./conversations";
 import { mapFollowupClientPage } from "./followup-clients";
 import { createFollowupTask, createOutboundConversation, markFollowupClientEngaged, newConversationThreadId } from "./followup-writes";
-import { hasOpenOmniReachTasks, listExistingTasksForSchedule } from "./tasks";
+import { hasOpenOmniReachTasks, listExistingTasksForSchedule, listFollowupTasks } from "./tasks";
 
 export type LaunchStepCopy = {
   subject?: string;
@@ -177,6 +183,31 @@ export async function launchFollowupBomb(input: {
     })
     .filter((item): item is { channel: Channel; templateId: string; reachable: true } => !!item);
 
+  // At most one LinkedIn cold step per Key Person; honor account/same-person gate.
+  const linkedInIndexes = selectedChannels
+    .map((item, index) => (item.channel === "LinkedIn" ? index : -1))
+    .filter((index) => index >= 0);
+  if (linkedInIndexes.length) {
+    const keepIndex = linkedInIndexes[0];
+    for (let i = linkedInIndexes.length - 1; i >= 1; i -= 1) {
+      selectedChannels.splice(linkedInIndexes[i], 1);
+    }
+    try {
+      await prepareLinkedInOutbound({
+        contactId: contact.id,
+        checkBandwidth: false,
+        reserveQuota: false,
+      });
+    } catch (error) {
+      selectedChannels.splice(keepIndex, 1);
+      if (!selectedChannels.length) {
+        throw error instanceof Error
+          ? error
+          : new Error("LinkedIn gate blocked this OmniReach launch");
+      }
+    }
+  }
+
   if (!selectedChannels.length) {
     throw new Error("No reachable channels for this KeyPerson; nothing to launch");
   }
@@ -229,7 +260,10 @@ export async function launchFollowupBomb(input: {
     linkedinUrl: contact.linkedin,
   });
   const omniReachRunId = crypto.randomUUID();
-  const existingConversations = await listFollowupConversations([contact.id]);
+  const [existingConversations, existingContactTasks] = await Promise.all([
+    listFollowupConversations([contact.id]),
+    listFollowupTasks([contact.id]),
+  ]);
   // One new Thread per channel for this run — do not reuse older CP threads,
   // but keep multi-step messages on the same channel inside one conversation.
   const runChannelThreads = new Map<string, string>();
@@ -249,58 +283,103 @@ export async function launchFollowupBomb(input: {
       script: incoming?.script ?? (write.channel === "Phone" ? template?.content || undefined : undefined),
     }, context);
     const content = resolved.content.trim() || resolved.subject.trim();
-    const task = await createFollowupTask({
-      brandName,
-      contactId: write.followUpContactId,
-      contactName: contact.name,
-      ownerId: write.ownerId,
-      channel: write.channel,
-      scheduledAt: write.scheduledAt,
-      priority: write.priority,
-      creationMethod: write.creationMethod,
-      templateId: write.templateId,
-      sourceBombId: input.bombId,
-      omniReachRunId,
-      notes: `由 OmniReach 排班生成，尚未实际发送。方案：${bomb.name}。`,
-    });
 
-    let conversationId: string | undefined;
-    let displayContent = content;
-    if (content) {
-      const page = await createOutboundConversation({
-        brandName,
+    let linkedIn: LinkedInCreateDecision | null = null;
+    if (write.channel === "LinkedIn") {
+      linkedIn = await prepareLinkedInOutbound({
         contactId: contact.id,
-        contactName: contact.name,
-        channel: write.channel,
-        subject: resolved.subject || null,
-        content,
-        sender: input.sender,
-        taskId: task.id,
-        threadId: runChannelThreads.get(write.channel),
-        cpId: brand.currentCpId,
-        cpAtInteraction: interactionCpCode(brand.currentCp),
-        existingConversations,
-        scheduledAt: write.scheduledAt,
-        notes: "OmniReach 方案已排班，尚未实际发送。",
+        tasks: existingContactTasks,
+        activities: existingConversations,
+        checkBandwidth: false,
+        reserveQuota: true,
       });
-      conversationId = page.id;
-      await updatePage(task.id, {
-        Conversations: { relation: [{ id: page.id }] },
-      });
-      displayContent = resolved.subject?.trim()
-        ? `Subject: ${resolved.subject.trim()}\n\n${resolved.content.trim() || content}`
-        : content;
     }
 
-    return {
-      taskId: task.id,
-      conversationId,
-      channel: write.channel,
-      scheduledAt: write.scheduledAt,
-      templateId: write.templateId,
-      content: displayContent,
-      status: "Pending" as const,
-    } satisfies LaunchPlanStep;
+    const baseNotes = `由 OmniReach 排班生成，尚未实际发送。方案：${bomb.name}。`;
+    try {
+      const task = await createFollowupTask({
+        brandName,
+        contactId: write.followUpContactId,
+        contactName: contact.name,
+        ownerId: write.ownerId,
+        channel: write.channel,
+        scheduledAt: write.scheduledAt,
+        priority: write.priority,
+        creationMethod: write.creationMethod,
+        templateId: write.templateId,
+        sourceBombId: input.bombId,
+        omniReachRunId,
+        notes: linkedIn ? mergeLinkedInNotes(baseNotes, linkedIn) : baseNotes,
+      });
+
+      let conversationId: string | undefined;
+      let displayContent = content;
+      if (content) {
+        const page = await createOutboundConversation({
+          brandName,
+          contactId: contact.id,
+          contactName: contact.name,
+          channel: write.channel,
+          subject: resolved.subject || null,
+          content,
+          sender: linkedIn?.senderAccount || input.sender,
+          taskId: task.id,
+          threadId: runChannelThreads.get(write.channel),
+          cpId: brand.currentCpId,
+          cpAtInteraction: interactionCpCode(brand.currentCp),
+          existingConversations,
+          scheduledAt: write.scheduledAt,
+          notes: "OmniReach 方案已排班，尚未实际发送。",
+        });
+        conversationId = page.id;
+        await updatePage(task.id, {
+          Conversations: { relation: [{ id: page.id }] },
+        });
+        displayContent = resolved.subject?.trim()
+          ? `Subject: ${resolved.subject.trim()}\n\n${resolved.content.trim() || content}`
+          : content;
+      }
+
+      if (linkedIn) {
+        existingContactTasks.push({
+          id: task.id,
+          title: "",
+          contactId: contact.id,
+          contactName: contact.name,
+          brandId: brand.id,
+          brandName,
+          brandOwnerId: brand.ownerId,
+          ownerId: write.ownerId,
+          ownerName: null,
+          channel: "LinkedIn",
+          status: "Pending",
+          priority: write.priority,
+          creationMethod: write.creationMethod,
+          scheduledAt: write.scheduledAt,
+          endedAt: null,
+          notes: mergeLinkedInNotes(baseNotes, linkedIn),
+          conversationIds: conversationId ? [conversationId] : [],
+          templateId: write.templateId || null,
+          sourceBombId: input.bombId,
+          omniReachRunId,
+        });
+      }
+
+      return {
+        taskId: task.id,
+        conversationId,
+        channel: write.channel,
+        scheduledAt: write.scheduledAt,
+        templateId: write.templateId,
+        content: displayContent,
+        status: "Pending" as const,
+      } satisfies LaunchPlanStep;
+    } catch (error) {
+      if (linkedIn?.countsAgainstQuota) {
+        await releaseLinkedInColdQuota(linkedIn.senderAccount).catch(() => null);
+      }
+      throw error;
+    }
   });
 
   await markFollowupClientEngaged(input.brandId, {

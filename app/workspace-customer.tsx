@@ -912,29 +912,250 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
   </DialogContent></Dialog>;
 }
 
-export function ReplyDialog({customerId,open,onOpenChange,contacts,onSend}:{customerId:string;open:boolean;onOpenChange:(v:boolean)=>void;contacts?:Contact[];onSend?:(contactId:string,channel:Channel,content:string,object?:string)=>Promise<void>}){
-  const {state,sendHumanReply}=useWorkspace();
-  const local=state.customers.find(x=>x.id===customerId);
-  const people=contacts||local?.contacts||[];
-  const [contactId,setContact]=useState(people[0]?.id||"");
-  const [channel,setChannel]=useState<Channel>(people[0]?.preferredChannel||"Email");
-  const [object,setObject]=useState("");
-  const [content,setContent]=useState("");
-  const [saving,setSaving]=useState(false);
-  useEffect(()=>{
-    if(!open)return;
-    setContact(people[0]?.id||"");
-    setChannel(people[0]?.preferredChannel||"Email");
+export function ReplyDialog({
+  customerId,
+  open,
+  onOpenChange,
+  contacts,
+  onSend,
+}: {
+  customerId: string;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  contacts?: Contact[];
+  onSend?: (contactId: string, channel: Channel, content: string, object?: string) => Promise<void>;
+}) {
+  const { state, sendHumanReply } = useWorkspace();
+  const local = state.customers.find((x) => x.id === customerId);
+  const people = contacts || local?.contacts || [];
+  const [contactId, setContact] = useState(people[0]?.id || "");
+  const [channel, setChannel] = useState<Channel>(people[0]?.preferredChannel || "Email");
+  const [object, setObject] = useState("");
+  const [content, setContent] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [linkedinGate, setLinkedinGate] = useState<{
+    available: boolean;
+    reason: string | null;
+  } | null>(null);
+  const [linkedinLoading, setLinkedinLoading] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setContact(people[0]?.id || "");
+    setChannel(people[0]?.preferredChannel || "Email");
     setObject("");
     setContent("");
-  },[open,customerId]);
-  const contact=people.find(x=>x.id===contactId)||people[0];
-  const available=MESSAGE_CHANNELS.filter(ch=>contact&&channelAvailable(contact,ch));
-  const effective=available.includes(channel)?channel:available[0];
-  const emailNeedsObject=effective==="Email";
-  const canSubmit=!!contact&&!!content.trim()&&!!effective&&(!emailNeedsObject||!!object.trim())&&!saving;
-  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent><DialogHeader><DialogTitle>Send message</DialogTitle><DialogDescription>Choose Email, Phone, SMS, WhatsApp, or LinkedIn. An active OmniReach will stop before this human message is sent.</DialogDescription></DialogHeader><div className="grid grid-cols-2 gap-3"><Select value={contact?.id} onValueChange={setContact}><SelectTrigger className="w-full"><SelectValue/></SelectTrigger><SelectContent>{people.map(x=><SelectItem key={x.id} value={x.id}>{x.name}</SelectItem>)}</SelectContent></Select><Select value={effective} onValueChange={v=>setChannel(v as Channel)}><SelectTrigger className="w-full"><SelectValue/></SelectTrigger><SelectContent>{MESSAGE_CHANNELS.map(x=><SelectItem key={x} value={x} disabled={!contact||!channelAvailable(contact,x)}><ChannelOption channel={x}/></SelectItem>)}</SelectContent></Select></div>{emailNeedsObject?<Input value={object} onChange={e=>setObject(e.target.value)} placeholder="Email subject"/>:null}<Textarea className="min-h-32" value={content} onChange={e=>setContent(e.target.value)} placeholder="Write a reply…"/><DialogFooter><Button variant="outline" onClick={()=>onOpenChange(false)}>Cancel</Button><Button disabled={!canSubmit} onClick={()=>{void (async ()=>{if(!contact||!effective)return;if(emailNeedsObject&&!object.trim()){toast.error("Subject is required for Email");return;}if(onSend){setSaving(true);try{await onSend(contact.id,effective,content,emailNeedsObject?object.trim():undefined);toast.success("Message saved as pending");setObject("");setContent("");onOpenChange(false);}catch(error){toast.error(error instanceof Error?error.message:"Send failed");}finally{setSaving(false);}return;}const r=sendHumanReply(customerId,contact.id,effective,emailNeedsObject&&object.trim()?`Subject: ${object.trim()}\n\n${content}`:content);show(r);if(r.ok){setObject("");setContent("");onOpenChange(false);}})()}}><Send className="mr-2 size-4"/>Send</Button></DialogFooter></DialogContent></Dialog>;
+    setLinkedinGate(null);
+  }, [open, customerId]);
+
+  const contact = people.find((x) => x.id === contactId) || people[0];
+  const notionBacked = !!onSend;
+
+  useEffect(() => {
+    if (!open || !notionBacked || !contact?.id) {
+      setLinkedinGate(null);
+      setLinkedinLoading(false);
+      return;
+    }
+    if (!channelAvailable(contact, "LinkedIn")) {
+      setLinkedinGate({
+        available: false,
+        reason: "No LinkedIn profile on this contact.",
+      });
+      setLinkedinLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLinkedinLoading(true);
+    setLinkedinGate(null);
+    void (async () => {
+      try {
+        const response = await fetch(
+          `/api/brands/${customerId}/linkedin-availability?contactId=${encodeURIComponent(contact.id)}`,
+        );
+        const payload = (await response.json()) as {
+          available?: boolean;
+          reason?: string | null;
+          error?: string;
+        };
+        if (cancelled) return;
+        if (!response.ok) {
+          setLinkedinGate({
+            available: false,
+            reason: payload.error || "Unable to check LinkedIn availability.",
+          });
+          return;
+        }
+        setLinkedinGate({
+          available: !!payload.available,
+          reason: payload.reason || null,
+        });
+      } catch {
+        if (!cancelled) {
+          setLinkedinGate({
+            available: false,
+            reason: "Unable to check LinkedIn availability.",
+          });
+        }
+      } finally {
+        if (!cancelled) setLinkedinLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, notionBacked, customerId, contact?.id, contact?.linkedin]);
+
+  const linkedInAllowed =
+    !!contact &&
+    channelAvailable(contact, "LinkedIn") &&
+    (!notionBacked || (!linkedinLoading && linkedinGate?.available === true));
+
+  const available = MESSAGE_CHANNELS.filter((ch) => {
+    if (!contact || !channelAvailable(contact, ch)) return false;
+    if (ch === "LinkedIn") return linkedInAllowed;
+    return true;
+  });
+  const effective = available.includes(channel) ? channel : available[0];
+  const emailNeedsObject = effective === "Email";
+  const canSubmit =
+    !!contact &&
+    !!content.trim() &&
+    !!effective &&
+    (!emailNeedsObject || !!object.trim()) &&
+    !saving;
+
+  const linkedInBlockedReason =
+    linkedinGate?.reason ||
+    (linkedinLoading ? "Checking LinkedIn availability…" : "LinkedIn is unavailable for this contact.");
+
+  const onChannelChange = (value: string) => {
+    const next = value as Channel;
+    if (next === "LinkedIn" && !linkedInAllowed) {
+      toast.error(linkedInBlockedReason);
+      return;
+    }
+    setChannel(next);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Send message</DialogTitle>
+          <DialogDescription>
+            Choose Email, Phone, SMS, WhatsApp, or LinkedIn. An active OmniReach will stop before this human message is sent.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid grid-cols-2 gap-3">
+          <Select value={contact?.id} onValueChange={setContact}>
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {people.map((x) => (
+                <SelectItem key={x.id} value={x.id}>
+                  {x.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={effective} onValueChange={onChannelChange}>
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {MESSAGE_CHANNELS.map((x) => {
+                const profileOk = !!contact && channelAvailable(contact, x);
+                // Keep LinkedIn selectable when only the gate blocks it, so click can toast the reason.
+                const gateBlocked = x === "LinkedIn" && profileOk && notionBacked && !linkedInAllowed;
+                const radixDisabled =
+                  !contact ||
+                  !profileOk ||
+                  (x === "LinkedIn" && notionBacked && linkedinLoading);
+                return (
+                  <SelectItem
+                    key={x}
+                    value={x}
+                    disabled={radixDisabled}
+                    className={gateBlocked ? "opacity-50" : undefined}
+                  >
+                    <ChannelOption channel={x} />
+                  </SelectItem>
+                );
+              })}
+            </SelectContent>
+          </Select>
+        </div>
+        {emailNeedsObject ? (
+          <Input value={object} onChange={(e) => setObject(e.target.value)} placeholder="Email subject" />
+        ) : null}
+        <Textarea
+          className="min-h-32"
+          value={content}
+          onChange={(e) => setContent(e.target.value)}
+          placeholder="Write a reply…"
+        />
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            disabled={!canSubmit}
+            onClick={() => {
+              void (async () => {
+                if (!contact || !effective) return;
+                if (emailNeedsObject && !object.trim()) {
+                  toast.error("Subject is required for Email");
+                  return;
+                }
+                if (onSend) {
+                  setSaving(true);
+                  try {
+                    await onSend(
+                      contact.id,
+                      effective,
+                      content,
+                      emailNeedsObject ? object.trim() : undefined,
+                    );
+                    toast.success("Message saved as pending");
+                    setObject("");
+                    setContent("");
+                    onOpenChange(false);
+                  } catch (error) {
+                    toast.error(error instanceof Error ? error.message : "Send failed");
+                  } finally {
+                    setSaving(false);
+                  }
+                  return;
+                }
+                const r = sendHumanReply(
+                  customerId,
+                  contact.id,
+                  effective,
+                  emailNeedsObject && object.trim()
+                    ? `Subject: ${object.trim()}\n\n${content}`
+                    : content,
+                );
+                show(r);
+                if (r.ok) {
+                  setObject("");
+                  setContent("");
+                  onOpenChange(false);
+                }
+              })();
+            }}
+          >
+            <Send className="mr-2 size-4" />
+            Send
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
+
 
 export function ChangeCPDialog({customerId,open,onOpenChange,currentCp,cps,onSave}:{customerId:string;open:boolean;onOpenChange:(v:boolean)=>void;currentCp?:string;cps?:CurrentCpOption[];onSave?:(currentCpId:string,evidence:string,note:string)=>Promise<void>}){
   const {state,changeCP}=useWorkspace();

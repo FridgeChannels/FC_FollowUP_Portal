@@ -31,7 +31,8 @@ export function buildInteractionCpFallbacks(sources: InteractionCpSource[]): Int
     const cp = entry.stampedCp;
     if (!cp) continue;
     if (entry.threadId) {
-      if (entry.direction === "Inbound" && !threadInboundCp.has(entry.threadId)) {
+      // Keep overwriting so the map holds the latest inbound CP on the thread.
+      if (entry.direction === "Inbound") {
         threadInboundCp.set(entry.threadId, cp);
       }
       if (!threadCp.has(entry.threadId)) threadCp.set(entry.threadId, cp);

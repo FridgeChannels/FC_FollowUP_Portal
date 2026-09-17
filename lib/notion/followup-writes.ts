@@ -1,4 +1,10 @@
 import { FOLLOW_UP_STATUSES, HANDLING_MODES, type BrandActivity, type BrandTask } from "../brand-list";
+import {
+  mergeLinkedInNotes,
+  prepareLinkedInOutbound,
+  releaseLinkedInColdQuota,
+  releaseLinkedInColdQuotaFromTask,
+} from "../linkedin";
 import { conversationCpRelation, resolveCheckpoint } from "./cps";
 import { createPage, propertyText, retrievePage, richText, updatePage } from "./client";
 import { getFollowupConversationDbId, getFollowupTaskDbId } from "./config";
@@ -379,6 +385,10 @@ export async function updateFollowupTask(
     callReviewStatus?: "Awaiting Review" | "Qualified" | "Unqualified" | null;
   },
 ) {
+  const previous =
+    patch.status === "Cancelled"
+      ? await retrieveFollowupTask(pageId).catch(() => null)
+      : null;
   const properties: Record<string, unknown> = {};
   if (patch.status !== undefined) {
     if (!TASK_STATUSES.has(patch.status)) throw new Error("Invalid Task Status");
@@ -406,7 +416,16 @@ export async function updateFollowupTask(
       : { select: null };
   }
   if (!Object.keys(properties).length) throw new Error("No task fields to update");
-  return updatePage(pageId, properties);
+  const updated = await updatePage(pageId, properties);
+  if (previous) {
+    await releaseLinkedInColdQuotaFromTask({
+      channel: previous.channel,
+      status: "Cancelled",
+      previousStatus: previous.status,
+      notes: previous.notes,
+    });
+  }
+  return updated;
 }
 
 export async function createFollowupTask(input: {
@@ -464,12 +483,17 @@ function pickThreadCp(
     if (threadId && item.threadId) return item.threadId === threadId;
     if (input.taskId && item.taskId) return item.taskId === input.taskId;
     return false;
-  }).sort((left, right) => (left.createdAt || "").localeCompare(right.createdAt || ""));
-  return (
-    related.find((item) => item.direction === "Inbound") ||
-    related[0] ||
-    null
-  );
+  }).sort((left, right) => (right.createdAt || "").localeCompare(left.createdAt || ""));
+
+  const inbounds = related.filter((item) => item.direction === "Inbound");
+  // Reply CP follows the message being answered — not Brand Current CP.
+  const needsReply = inbounds.find((item) => item.replyStatus === "Needs Reply");
+  if (needsReply) return needsReply;
+  if (input.taskId) {
+    const onTask = inbounds.find((item) => item.taskId === input.taskId);
+    if (onTask) return onTask;
+  }
+  return inbounds[0] || related[0] || null;
 }
 
 function pickThreadExtendedParameters(
@@ -512,69 +536,94 @@ export async function createHumanOutbound(input: {
     throw new Error("object (email subject) is required for Email");
   }
   const scheduledAt = scheduledAtNow();
-  const created = await createFollowupTask({
-    brandName: input.brandName,
-    contactId: input.contactId,
-    contactName: input.contactName,
-    ownerId,
-    channel: input.channel,
-    scheduledAt,
-    priority: "P0",
-    creationMethod: "Manual",
-    notes: isReply
-      ? "人工追加回复，尚未实际发送。"
-      : "人工发送消息，尚未实际发送。",
-  });
-  const taskId = created.id;
-  const threadCp = isReply
-    ? pickThreadCp(threadActivities, {
-        channel: input.channel,
-        threadId: input.threadId,
-        taskId: input.existingTaskId,
-      })
-    : null;
-  const page = await createOutboundConversation({
-    brandName: input.brandName,
-    contactId: input.contactId,
-    contactName: input.contactName,
-    channel: input.channel,
-    content: input.content,
-    subject: input.subject,
-    sender: input.sender,
-    taskId,
-    threadId: input.threadId,
-    cpId: threadCp?.cpId || input.cpId,
-    cpAtInteraction: threadCp?.cpAtInteraction || input.cpAtInteraction,
-    extendedParameters: isReply
-      ? pickThreadExtendedParameters(threadActivities, {
+
+  let linkedIn = null as Awaited<ReturnType<typeof prepareLinkedInOutbound>> | null;
+  if (input.channel === "LinkedIn") {
+    linkedIn = await prepareLinkedInOutbound({
+      contactId: input.contactId,
+      activities: threadActivities,
+    });
+  }
+
+  const baseNotes = isReply
+    ? "人工追加回复，尚未实际发送。"
+    : "人工发送消息，尚未实际发送。";
+  const taskNotes = linkedIn ? mergeLinkedInNotes(baseNotes, linkedIn) : baseNotes;
+  const sender = linkedIn?.senderAccount || input.sender;
+
+  try {
+    const created = await createFollowupTask({
+      brandName: input.brandName,
+      contactId: input.contactId,
+      contactName: input.contactName,
+      ownerId,
+      channel: input.channel,
+      scheduledAt,
+      priority: "P0",
+      creationMethod: "Manual",
+      notes: taskNotes,
+    });
+    const taskId = created.id;
+    const threadCp = isReply
+      ? pickThreadCp(threadActivities, {
           channel: input.channel,
           threadId: input.threadId,
           taskId: input.existingTaskId,
         })
-      : null,
-    existingConversations: threadActivities,
-    scheduledAt,
-    notes: isReply
-      ? "人工追加回复，尚未实际发送。"
-      : "人工消息，尚未实际发送。",
-    forceNewThread: !isReply,
-  });
-  // New task has no Conversations yet; conversation already links Follow-up Task on create.
-  await updatePage(taskId, {
-    Conversations: { relation: [{ id: page.id }] },
-  });
-  if (isReply) {
-    await markInboundsReplied(
-      {
-        contactId: input.contactId,
-        channel: input.channel,
-        taskId: input.existingTaskId,
-        threadId: input.threadId,
-      },
-      threadActivities,
-    );
+      : null;
+    // Replies inherit CP from the message being answered. Brand Current CP is only a fallback.
+    const replyCpId = isReply ? threadCp?.cpId || input.cpId : input.cpId;
+    const replyCpAt = isReply
+      ? threadCp?.cpAtInteraction || input.cpAtInteraction
+      : input.cpAtInteraction;
+    const page = await createOutboundConversation({
+      brandName: input.brandName,
+      contactId: input.contactId,
+      contactName: input.contactName,
+      channel: input.channel,
+      content: input.content,
+      subject: input.subject,
+      sender,
+      taskId,
+      threadId: input.threadId,
+      cpId: replyCpId,
+      cpAtInteraction: replyCpAt,
+      extendedParameters: isReply
+        ? pickThreadExtendedParameters(threadActivities, {
+            channel: input.channel,
+            threadId: input.threadId,
+            taskId: input.existingTaskId,
+          })
+        : null,
+      existingConversations: threadActivities,
+      scheduledAt,
+      notes: isReply
+        ? "人工追加回复，尚未实际发送。"
+        : "人工消息，尚未实际发送。",
+      forceNewThread: !isReply,
+    });
+    // New task has no Conversations yet; conversation already links Follow-up Task on create.
+    await updatePage(taskId, {
+      Conversations: { relation: [{ id: page.id }] },
+    });
+    if (isReply) {
+      await markInboundsReplied(
+        {
+          contactId: input.contactId,
+          channel: input.channel,
+          taskId: input.existingTaskId,
+          threadId: input.threadId,
+        },
+        threadActivities,
+      );
+    }
+    return { conversationId: page.id, taskId };
+  } catch (error) {
+    if (linkedIn?.countsAgainstQuota) {
+      await releaseLinkedInColdQuota(linkedIn.senderAccount).catch(() => null);
+    }
+    throw error;
   }
-  return { conversationId: page.id, taskId };
 }
 
 export async function markInboundsReplied(

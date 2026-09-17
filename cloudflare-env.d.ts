@@ -13,6 +13,7 @@ declare namespace Cloudflare {
     NOTION_FOLLOWUP_TEMPLATE_DB_ID?: string;
     NOTION_FOLLOWUP_CAPACITY_DB_ID?: string;
     NOTION_FOLLOWUP_CHECKPOINT_DB_ID?: string;
+    NOTION_FOLLOWUP_LINKEDIN_ACCOUNT_DB_ID?: string;
     ADMIN_EMAILS?: string;
     NOTION_ADMIN_EMAILS?: string;
     SKIP_UNAVAILABLE_CHANNELS?: string;

@@ -23,7 +23,13 @@ const CHANNELS: Channel[] = ["Email", "LinkedIn", "SMS", "WhatsApp", "Phone"];
 const contactPoint = (contact: Contact, channel?: Channel) => {
   if (channel === "Email") return contact.email;
   if (channel === "WhatsApp") return contact.whatsapp;
-  if (channel === "LinkedIn") return contact.linkedin ? `linkedin.com/in/${contact.linkedin}` : undefined;
+  if (channel === "LinkedIn") {
+    const handle = contact.linkedin
+      ?.trim()
+      .replace(/^https?:\/\/(www\.)?linkedin\.com\/in\//i, "")
+      .replace(/\/$/, "");
+    return handle ? `linkedin.com/in/${handle}` : undefined;
+  }
   if (channel === "SMS" || channel === "Phone") return contact.phone;
   return contact.email || contact.phone;
 };
@@ -236,6 +242,7 @@ export function InteractionFeed({
   const phoneBoardTaskIds = phoneTasks.map((item) => item.id);
   const cpInteractions = interactions.filter((item) => {
     if (!isChannelMessage(item)) return true;
+    // Strict: only show messages stamped for this CP tab.
     if (belongsToCp(item, selectedCp, displayCurrentCp)) return true;
     // Task detail: keep Phone rows linked to the focused task even without a CP stamp.
     if (activeTaskId && item.channel === "Phone" && sameNotionId(item.taskId, activeTaskId)) return true;
