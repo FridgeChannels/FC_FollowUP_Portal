@@ -12,7 +12,6 @@
 .wrangler
 .sites-runtime
 .vercel
-dist
 node_modules
 coverage
 outputs

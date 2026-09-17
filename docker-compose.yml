@@ -3,9 +3,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        SKIP_UNAVAILABLE_CHANNELS: "true"
-        DEV_CALL_PHONE: ""
     image: fc-followup-portal:latest
     ports:
       - "${PORT:-8787}:8787"
@@ -17,10 +14,11 @@ services:
       # Prefer production channel behavior even if .env still has local values.
       SKIP_UNAVAILABLE_CHANNELS: "true"
       # Unset local dial override in containers unless you explicitly set it.
-      DEV_CALL_PHONE: "${DEV_CALL_PHONE:-}"
+      DEV_CALL_PHONE: ""
     volumes:
-      # Persist local Miniflare / Wrangler state across restarts.
-      - portal-wrangler-state:/app/.wrangler/state
+      # Persist local Miniflare / Wrangler state under the project directory.
+      - ./.wrangler/state:/app/.wrangler/state
+      - ./.sites-runtime:/app/.sites-runtime
     restart: unless-stopped
     healthcheck:
       test:
@@ -34,6 +32,3 @@ services:
       timeout: 5s
       retries: 5
       start_period: 40s
-
-volumes:
-  portal-wrangler-state:
