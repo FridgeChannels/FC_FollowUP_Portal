@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { callReviewsFromTasks, type CallReviewStatus } from "@/lib/call-review-metadata";
 import type { BrandTask } from "@/lib/brand-list";
 import { BombInstance, Channel, Contact, CPCode, CP_CODES, Interaction, ScheduledAction, interactionPageAt, interactionSortAt } from "@/lib/outreach-domain";
-import { BombExecutionPlan, formatEasternDateTime, formatUtcDate, formatUtcTime } from "./bomb-plan";
+import { BombExecutionPlan, formatEasternDateTime, formatUtcTime } from "./bomb-plan";
 import { BrandReplyBox, inboundNeedsComposer } from "./brand-reply-box";
 import { ChannelIcon } from "./channel-icon";
 import { PhoneTaskBoard } from "./phone-task-board";
@@ -66,11 +66,12 @@ function deliveryTiming(item: Interaction) {
   const taskStatus = outboundStatus(item);
   if (!taskStatus) return null;
   const label = taskStatus === "Canceled" ? "Cancelled" : taskStatus;
-  const at =
-    label === "Cancelled" || label === "Pending" || label === "In Progress"
-      ? item.scheduledAt || item.createdAt
-      : item.createdAt;
-  return { label, at };
+  // Cancelled / Pending / In Progress: Conversation Scheduled At → Task Scheduled At; else empty.
+  // (item.scheduledAt is already filled that way in workspace-customer.)
+  const usesScheduledAt =
+    label === "Cancelled" || label === "Pending" || label === "In Progress";
+  const at = usesScheduledAt ? item.scheduledAt || null : item.createdAt || null;
+  return { label, at, usesScheduledAt };
 }
 
 function SendStatusBadge({ status }: { status: string }) {
@@ -514,7 +515,30 @@ function ThreadMessages({
           </div>
           <time dateTime={interactionPageAt(item)} className="font-mono text-[11px] text-slate-500">{formatUtcTime(interactionPageAt(item))}</time>
         </div>
-        {timing && <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-slate-500"><span className={timing.label === "Completed" ? "font-semibold text-emerald-700" : timing.label === "Failed" ? "font-semibold text-rose-700" : timing.label === "Cancelled" ? "font-semibold text-slate-600" : "font-semibold text-amber-700"}>{timing.label}</span><time dateTime={timing.at} className="font-mono text-[11px]">{timing.label === "Cancelled" ? formatUtcDate(timing.at) : timing.label === "Pending" || timing.label === "In Progress" ? formatEasternDateTime(timing.at) : formatUtcTime(timing.at)}</time></div>}
+        {timing && (
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-slate-500">
+            <span
+              className={
+                timing.label === "Completed"
+                  ? "font-semibold text-emerald-700"
+                  : timing.label === "Failed"
+                    ? "font-semibold text-rose-700"
+                    : timing.label === "Cancelled"
+                      ? "font-semibold text-slate-600"
+                      : "font-semibold text-amber-700"
+              }
+            >
+              {timing.label}
+            </span>
+            {timing.at ? (
+              <time dateTime={timing.at} className="font-mono text-[11px]">
+                {timing.usesScheduledAt
+                  ? formatEasternDateTime(timing.at)
+                  : formatUtcTime(timing.at)}
+              </time>
+            ) : null}
+          </div>
+        )}
         {!item.quo && (
           <div className="mt-2 space-y-1">
             {emailSubject && (

@@ -57,7 +57,9 @@ function mapConversation(
     cpId: firstRelationId(properties.CP) || null,
     cpAtInteraction: null,
     createdAt: page.created_time || null,
-    recordedAt: page.created_time || null,
+    // Prefer Interaction At (actual occurrence) over page created_time.
+    recordedAt:
+      propertyDate(properties["Interaction At"]) || page.created_time || null,
     scheduledAt: propertyDate(properties["Scheduled At"]) || null,
     replyDueAt: propertyDate(properties["Reply Due At"]) || null,
     quo: parseQuoCallData(extendedParameters),

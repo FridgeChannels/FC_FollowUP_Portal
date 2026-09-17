@@ -269,11 +269,12 @@ export type BrandActivity = {
 };
 
 export function lastReplyAtFromActivities(
-  items: Array<Pick<BrandActivity, "direction" | "createdAt">>,
+  items: Array<Pick<BrandActivity, "direction" | "createdAt" | "recordedAt" | "scheduledAt">>,
 ) {
   return items
-    .filter((item) => item.direction === "Inbound" && item.createdAt)
-    .map((item) => item.createdAt as string)
+    .filter((item) => item.direction === "Inbound")
+    .map((item) => item.recordedAt || item.createdAt)
+    .filter((value): value is string => !!value)
     .sort()
     .at(-1) || null;
 }

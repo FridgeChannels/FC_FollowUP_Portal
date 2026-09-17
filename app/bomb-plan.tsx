@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { Channel, Contact, Interaction, ScheduledAction, User, WorkspaceState, dateOnly } from "@/lib/outreach-domain";
+import { formatScheduledDateTime } from "@/lib/display-time";
 import { BrandReplyBox } from "./brand-reply-box";
 import { ChannelIcon } from "./channel-icon";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -38,26 +39,8 @@ export const formatUtcTime = (iso: string) => {
   return `${value("year")}-${value("month")}-${value("day")} ${value("hour")}:${value("minute")}:${value("second")} UTC`;
 };
 
-/** Scheduled At display in America/New_York (date-only → that civil day). */
-export const formatEasternDateTime = (iso: string) => {
-  const raw = iso.trim();
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(raw)
-    ? new Date(`${raw}T12:00:00.000Z`)
-    : new Date(raw);
-  if (Number.isNaN(date.getTime())) return raw;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return `${raw} (ET date)`;
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/New_York",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(date);
-  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find(part => part.type === type)?.value || "";
-  return `${value("year")}-${value("month")}-${value("day")} ${value("hour")}:${value("minute")} ET`;
-};
+/** Scheduled At display using `DISPLAY_TIME_ZONE` (AM/PM + zone). */
+export const formatEasternDateTime = (iso: string) => formatScheduledDateTime(iso);
 
 const initials = (name: string) => name.split(/\s+/).map(part => part[0]).join("").slice(0, 2).toUpperCase();
 

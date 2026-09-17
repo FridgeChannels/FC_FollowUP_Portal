@@ -1,7 +1,9 @@
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { queryFollowupClientPages } from "@/lib/notion/client";
 import {
+  attachBrandInteractionSignals,
   attachBrandReplySignals,
+  listBrandInteractionSignals,
   listBrandReplySignals,
 } from "@/lib/notion/brand-reply-signals";
 import { listCheckpoints } from "@/lib/notion/cps";
@@ -33,13 +35,17 @@ export async function GET(request: Request) {
       listCheckpoints(),
       queryFollowupClientPages(ownerPageId),
     ]);
-    // Skip per-brand full conversation scans — list uses rollup Last Interaction At /
-    // Last Reply At. Reply-needed badges still come from Needs Reply query.
-    const [mapped, replySignals] = await Promise.all([
+    // Last interaction comes from each brand's Conversation records (not ClientDB rollup).
+    // Reply-needed badges still come from the Needs Reply query.
+    const [mapped, replySignals, interactionSignals] = await Promise.all([
       mapFollowupClientPages(pages),
       listBrandReplySignals(pages).catch(() => new Map()),
+      listBrandInteractionSignals(pages).catch(() => new Map()),
     ]);
-    const brands = attachBrandReplySignals(mapped, replySignals);
+    const brands = attachBrandInteractionSignals(
+      attachBrandReplySignals(mapped, replySignals),
+      interactionSignals,
+    );
     return Response.json({
       brands,
       cps,

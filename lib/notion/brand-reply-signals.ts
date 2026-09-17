@@ -22,12 +22,17 @@ export type BrandReplySignal = {
 
 export type BrandInteractionSignal = Pick<
   BrandListItem,
+  | "lastInteractionAt"
   | "lastInteractionChannel"
   | "lastInteractionDirection"
   | "lastInteractionStatus"
   | "lastInteractionCallResult"
   | "lastReplyAt"
 >;
+
+function interactionOccurredAt(item: BrandActivity) {
+  return item.scheduledAt || item.recordedAt || item.createdAt || null;
+}
 
 function conversationPreview(page: NotionPage) {
   const properties = page.properties || {};
@@ -165,7 +170,17 @@ export async function listBrandInteractionSignals(pages: NotionPage[]) {
   await Promise.all(
     pages.map(async (page) => {
       const contactIds = relationIds(page.properties?.["Follow-up Contacts"]);
-      if (!contactIds.length) return;
+      if (!contactIds.length) {
+        signals.set(page.id, {
+          lastInteractionAt: null,
+          lastInteractionChannel: null,
+          lastInteractionDirection: null,
+          lastInteractionStatus: null,
+          lastInteractionCallResult: null,
+          lastReplyAt: null,
+        });
+        return;
+      }
       try {
         const [conversations, tasks] = await Promise.all([
           listFollowupConversations(contactIds),
@@ -174,8 +189,8 @@ export async function listBrandInteractionSignals(pages: NotionPage[]) {
         const taskStatusById = new Map(tasks.map((task) => [task.id, task.status]));
         const latest = conversations.find((item) => isCompletedInteraction(item, taskStatusById));
         const lastReplyAt = lastReplyAtFromActivities(conversations);
-        if (!latest && !lastReplyAt) return;
         signals.set(page.id, {
+          lastInteractionAt: latest ? interactionOccurredAt(latest) : null,
           lastInteractionChannel: latest?.channel ?? null,
           lastInteractionDirection: latest?.direction ?? null,
           lastInteractionStatus: latest ? interactionStatusLabel(latest, taskStatusById) : null,
@@ -183,7 +198,7 @@ export async function listBrandInteractionSignals(pages: NotionPage[]) {
           lastReplyAt,
         });
       } catch {
-        // The date rollup remains available if conversation metadata cannot be loaded.
+        // Leave unset so attach keeps any Notion rollup fallback.
       }
     }),
   );
@@ -203,6 +218,8 @@ export function attachBrandInteractionSignals(
     return {
       ...brand,
       ...signal,
+      // Conversation-derived time wins over ClientDB rollup.
+      lastInteractionAt: signal.lastInteractionAt,
       lastReplyAt: signal.lastReplyAt || brand.lastReplyAt,
     };
   });
