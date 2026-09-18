@@ -18,7 +18,16 @@ export type CallReviewRound = {
 
 const HISTORY_START = "[CALL_REVIEW_HISTORY_V1]";
 const HISTORY_END = "[/CALL_REVIEW_HISTORY_V1]";
-const HISTORY_BLOCK = new RegExp(`\\n?${HISTORY_START}\\n([\\s\\S]*?)\\n${HISTORY_END}\\n?`, "g");
+
+/** Escape so `[…]` markers are matched literally (not as character classes). */
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+const HISTORY_BLOCK = new RegExp(
+  `\\n?${escapeRegExp(HISTORY_START)}\\n([\\s\\S]*?)\\n${escapeRegExp(HISTORY_END)}\\n?`,
+  "g",
+);
 
 function normalizeRound(value: unknown): CallReviewRound | null {
   if (!value || typeof value !== "object") return null;
@@ -49,19 +58,38 @@ function normalizeRound(value: unknown): CallReviewRound | null {
 
 export function parseCallReviewHistory(notes?: string | null) {
   if (!notes) return [];
-  const match = notes.match(new RegExp(`${HISTORY_START}\\n([\\s\\S]*?)\\n${HISTORY_END}`));
-  if (!match) return [];
-  try {
-    const parsed = JSON.parse(match[1] || "[]");
-    return Array.isArray(parsed)
-      ? parsed.map(normalizeRound).filter((item): item is CallReviewRound => !!item)
-      : [];
-  } catch {
-    return [];
+  // Prefer the first valid block — later duplicates may have wrongly inherited
+  // every callId into an Unqualified round (see withInheritedCallIds + hydrate).
+  HISTORY_BLOCK.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = HISTORY_BLOCK.exec(notes)) !== null) {
+    try {
+      const parsed = JSON.parse(match[1] || "[]");
+      if (!Array.isArray(parsed)) continue;
+      const rounds = parsed.map(normalizeRound).filter((item): item is CallReviewRound => !!item);
+      if (rounds.length) return rounds;
+    } catch {
+      // try next block
+    }
   }
+  return [];
+}
+
+/** True when Notes contain more than one history marker (corrupt / raced writes). */
+export function hasDuplicateCallReviewHistory(notes?: string | null) {
+  if (!notes) return false;
+  let count = 0;
+  let index = 0;
+  while ((index = notes.indexOf(HISTORY_START, index)) !== -1) {
+    count += 1;
+    index += HISTORY_START.length;
+    if (count > 1) return true;
+  }
+  return false;
 }
 
 export function writeCallReviewHistory(notes: string | null | undefined, history: CallReviewRound[]) {
+  HISTORY_BLOCK.lastIndex = 0;
   const cleanNotes = (notes || "").replace(HISTORY_BLOCK, "").trim();
   if (!history.length) return cleanNotes;
   const payload = JSON.stringify(history);
@@ -136,7 +164,11 @@ export function unusedCallIds(history: CallReviewRound[], callIds: string[]) {
 
 export function withInheritedCallIds(history: CallReviewRound[], allCallIds: string[]) {
   const last = history.at(-1);
+  // Only backfill Awaiting Review / Qualified rounds that were stored without callIds.
+  // Never fill an Unqualified round — that would swallow post-recall Connected calls
+  // and hide "Submit for review" for the next attempt.
   if (!last || last.callIds.length || !allCallIds.length) return history;
+  if (last.status === "Unqualified") return history;
   const inherited = unusedCallIds(history.slice(0, -1), allCallIds);
   if (!inherited.length) return history;
   return history.map((round, index) => (

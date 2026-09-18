@@ -162,14 +162,40 @@ describe("call review rounds", () => {
     assert.equal(view.history[0]?.round, 1);
   });
 
-  it("inherits existing calls onto a legacy Unqualified round", () => {
+  it("does not inherit calls onto an Unqualified round (keeps them for the next attempt)", () => {
     const inherited = withInheritedCallIds(
       [round({ round: 1, status: "Unqualified" })],
+      ["call-1", "call-2"],
+    );
+    assert.deepEqual(inherited[0]?.callIds, []);
+    assert.equal(isCallInCurrentRound("call-1", inherited), true);
+    assert.equal(isCallInCurrentRound("call-2", inherited), true);
+  });
+
+  it("inherits missing callIds onto an Awaiting Review round", () => {
+    const inherited = withInheritedCallIds(
+      [round({ round: 1, status: "Awaiting Review" })],
       ["call-1"],
     );
     assert.deepEqual(inherited[0]?.callIds, ["call-1"]);
-    assert.equal(isCallInCurrentRound("call-1", inherited), false);
-    assert.equal(isCallInCurrentRound("call-2", inherited), true);
+  });
+
+  it("parses bracketed history markers literally and strips duplicate blocks on write", () => {
+    const block = (callIds: string[]) =>
+      `[CALL_REVIEW_HISTORY_V1]\n${JSON.stringify([
+        round({ round: 1, status: "Unqualified", callIds }),
+      ])}\n[/CALL_REVIEW_HISTORY_V1]`;
+    const notes = [
+      "通话评审 Unqualified，已召回改派给 Beril（Peter）。",
+      block(["call-old"]),
+      block(["call-old", "call-new"]),
+    ].join("\n");
+    const parsed = historyFromTask({ id: "t1", notes, callReviewStatus: null });
+    assert.deepEqual(parsed[0]?.callIds, ["call-old"]);
+    const cleaned = writeCallReviewHistory(notes, parsed);
+    assert.equal((cleaned.match(/CALL_REVIEW_HISTORY_V1/g) || []).length, 2);
+    assert.match(cleaned, /"call-old"/);
+    assert.doesNotMatch(cleaned, /call-new/);
   });
 
   it("stores structured history without flattening reason into Notes", () => {

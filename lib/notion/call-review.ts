@@ -39,6 +39,8 @@ export async function submitCallReview(input: {
   callerEmail?: string | null;
   callerName?: string | null;
   note?: string | null;
+  /** Skip re-fetching conversations when the caller already loaded callIds. */
+  callIds?: string[];
 }) {
   const task = await retrieveFollowupTask(input.taskId);
   if (task.channel !== "Phone") {
@@ -57,7 +59,7 @@ export async function submitCallReview(input: {
   const caller = input.callerName?.trim() || input.callerEmail?.trim() || "Caller";
   const note = input.note?.trim();
   const now = new Date().toISOString();
-  const allCallIds = await callIdsForTask(task);
+  const allCallIds = input.callIds ?? await callIdsForTask(task);
   const history = withInheritedCallIds(historyFromTask(task), allCallIds);
   const round = nextReviewRound(history);
   const reviewRound: CallReviewRound = {

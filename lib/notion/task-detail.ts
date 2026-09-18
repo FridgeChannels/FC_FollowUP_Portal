@@ -8,7 +8,12 @@ import { mapFollowupClientDetail, mapFollowupClientPage } from "./followup-clien
 import { annotateTasksWithReplyInbox } from "./reply-inbox";
 import { listFollowupTasks, retrieveFollowupTask, type TaskResolveHints } from "./tasks";
 import { updateFollowupTask } from "./followup-writes";
-import { historyFromTask, withInheritedCallIds, writeCallReviewHistory } from "../call-review-history";
+import {
+  hasDuplicateCallReviewHistory,
+  historyFromTask,
+  withInheritedCallIds,
+  writeCallReviewHistory,
+} from "../call-review-history";
 
 function callIdsFromActivities(task: BrandTask, activities: BrandActivity[]) {
   return [...new Set(
@@ -20,10 +25,11 @@ function callIdsFromActivities(task: BrandTask, activities: BrandActivity[]) {
 }
 
 async function hydrateTaskReviewRounds(task: BrandTask, activities: BrandActivity[]): Promise<BrandTask> {
-  const history = withInheritedCallIds(historyFromTask(task), callIdsFromActivities(task, activities));
   const previous = historyFromTask(task);
+  const history = withInheritedCallIds(previous, callIdsFromActivities(task, activities));
   const changed = JSON.stringify(history) !== JSON.stringify(previous);
-  if (!changed) return { ...task, callReviewHistory: history };
+  const needsCleanup = hasDuplicateCallReviewHistory(task.notes);
+  if (!changed && !needsCleanup) return { ...task, callReviewHistory: history };
   const notes = writeCallReviewHistory(task.notes, history);
   await updateFollowupTask(task.id, { notes }).catch(() => undefined);
   return { ...task, notes, callReviewHistory: history };
