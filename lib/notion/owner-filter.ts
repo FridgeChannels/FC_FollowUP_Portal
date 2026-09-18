@@ -37,6 +37,50 @@ export function ownerRelationFilter(ownerPageId?: string | null) {
   return { property: "Owner", relation: { contains: ownerPageId } };
 }
 
+/** Default Brands table page size. */
+export const DEFAULT_BRAND_PAGE_SIZE = 10;
+
+export function followupClientListFilter(options: {
+  ownerPageId?: string | null;
+  includeTest?: boolean;
+  /** Exact Follow-up Status name, or omit / "all" for any. */
+  status?: string | null;
+  /** Extra statuses to exclude (e.g. Paused/Completed for non-Admin). */
+  excludeStatuses?: string[];
+  /** Follow-up Client title contains (approx. brand search). */
+  titleContains?: string | null;
+  /** Current CP relation page id. */
+  currentCpPageId?: string | null;
+} = {}) {
+  const filters: Array<Record<string, unknown> | undefined | null> = [
+    ownerRelationFilter(options.ownerPageId),
+    options.includeTest ? undefined : nonTestClientFilter(),
+  ];
+  const status = options.status?.trim();
+  if (status && status !== "all") {
+    filters.push({ property: "Follow-up Status", status: { equals: status } });
+  }
+  for (const excluded of options.excludeStatuses || []) {
+    const name = excluded.trim();
+    if (!name) continue;
+    filters.push({ property: "Follow-up Status", status: { does_not_equal: name } });
+  }
+  const title = options.titleContains?.trim();
+  if (title) {
+    filters.push({
+      property: "Follow-up Client",
+      title: { contains: title },
+    });
+  }
+  if (options.currentCpPageId) {
+    filters.push({
+      property: "Current CP",
+      relation: { contains: options.currentCpPageId },
+    });
+  }
+  return andFilters(...filters);
+}
+
 export function ownerPageIdFromQueryParam(
   isAdmin: boolean,
   viewerOwnerId: string | null | undefined,

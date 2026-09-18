@@ -10,6 +10,7 @@ import {
   BarChart3,
   CalendarClock,
   CheckCircle2,
+  ChevronLeft,
   ChevronRight,
   CircleAlert,
   MessageCircle,
@@ -20,7 +21,7 @@ import {
 import { type DateRange } from "react-day-picker";
 import { toast } from "sonner";
 import { useWorkspace } from "./workspace-store";
-import { cacheBrandItem, cacheBrandList, getCachedBrandList } from "@/lib/brand-list-cache";
+import { cacheBrandItem } from "@/lib/brand-list-cache";
 import {
   FOLLOW_UP_STATUSES,
   listApplicableCps,
@@ -28,6 +29,7 @@ import {
 } from "@/lib/brand-list";
 import { Contact, dateOnly } from "@/lib/outreach-domain";
 import { brandListMetadata } from "@/lib/page-metadata";
+import { DEFAULT_BRAND_PAGE_SIZE } from "@/lib/notion/owner-filter";
 import { usePageMetadata } from "./use-page-metadata";
 import { formatEasternDateTime } from "./bomb-plan";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -491,16 +493,6 @@ function brandListPath(filters: BrandListFilters) {
 }
 
 /** Inclusive date-only range check for Reply Due At (YYYY-MM-DD). */
-function replyDueInRange(dueAt: string | null | undefined, from: string, to: string) {
-  if (!dueAt) return false;
-  const day = dateOnly(dueAt);
-  const start = from && to && from > to ? to : from;
-  const end = from && to && from > to ? from : to;
-  if (start && day < start) return false;
-  if (end && day > end) return false;
-  return true;
-}
-
 function parseDateOnly(value: string): Date | undefined {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined;
   const [year, month, day] = value.split("-").map(Number);
@@ -588,19 +580,25 @@ export function BrandsPage() {
   const { q: query, status, cp, owner, replyFrom, replyTo } = filters;
   const effectiveStatus = isAdmin ? status : "all";
   const hasReplyDueFilter = Boolean(replyFrom || replyTo);
-  const ownerQuery =
-    isAdmin && owner !== "all" ? `?owner=${encodeURIComponent(owner)}` : "";
-  const brandsPath = `/api/brands${ownerQuery}`;
-  const [brands, setBrands] = useState<BrandListItem[]>(() =>
-    ownerQuery ? [] : getCachedBrandList(),
-  );
+  const [brands, setBrands] = useState<BrandListItem[]>([]);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [cursorStack, setCursorStack] = useState<Array<string | null>>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
   const [ownerOptions, setOwnerOptions] = useState<Array<{ id: string; name: string }>>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const cps = listApplicableCps();
-  const [loading, setLoading] = useState(() => !(ownerQuery ? false : getCachedBrandList().length));
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string>();
+  const [debouncedQuery, setDebouncedQuery] = useState(query);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQuery(query), 300);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+
   const applyBrandUpdate = (brand: BrandListItem) => {
     cacheBrandItem(brand);
     setBrands((prev) =>
@@ -613,6 +611,10 @@ export function BrandsPage() {
       window.history.replaceState(window.history.state, "", brandListPath(next));
       return next;
     });
+    setCursor(null);
+    setCursorStack([]);
+    setNextCursor(null);
+    setHasMore(false);
   };
   const setReplyDueRange = (from: string, to: string) => {
     setFilters((prev) => {
@@ -620,6 +622,10 @@ export function BrandsPage() {
       window.history.replaceState(window.history.state, "", brandListPath(next));
       return next;
     });
+    setCursor(null);
+    setCursorStack([]);
+    setNextCursor(null);
+    setHasMore(false);
   };
   const clearReplyDueFilter = () => setReplyDueRange("", "");
   const replyDueSelected: DateRange | undefined =
@@ -629,6 +635,8 @@ export function BrandsPage() {
   useEffect(() => {
     const onPopState = () => {
       setFilters(brandListFiltersFromSearch(new URLSearchParams(window.location.search)));
+      setCursor(null);
+      setCursorStack([]);
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
@@ -658,39 +666,52 @@ export function BrandsPage() {
       cancelled = true;
     };
   }, [isAdmin]);
+
+  const brandsFilterKey = useMemo(() => {
+    const params = new URLSearchParams();
+    if (debouncedQuery.trim()) params.set("q", debouncedQuery.trim());
+    if (cp !== "all") params.set("cp", cp);
+    if (isAdmin && effectiveStatus !== "all") params.set("status", effectiveStatus);
+    if (isAdmin && owner !== "all") params.set("owner", owner);
+    if (replyFrom) params.set("replyFrom", replyFrom);
+    if (replyTo) params.set("replyTo", replyTo);
+    return params.toString();
+  }, [debouncedQuery, cp, effectiveStatus, owner, replyFrom, replyTo, isAdmin]);
+
   useEffect(() => {
     let cancelled = false;
-    const cached = ownerQuery ? [] : getCachedBrandList();
-    if (cached.length) {
-      setBrands(cached);
-      setLoading(false);
-      setRefreshing(true);
-    } else {
-      setBrands([]);
-      setLoading(true);
-      setRefreshing(false);
-    }
-    fetch(brandsPath)
+    setLoading(true);
+    setRefreshing(false);
+    setError(undefined);
+    const params = new URLSearchParams(brandsFilterKey);
+    params.set("limit", String(DEFAULT_BRAND_PAGE_SIZE));
+    if (cursor) params.set("cursor", cursor);
+    fetch(`/api/brands?${params.toString()}`)
       .then(async (response) => {
         const payload = (await response.json()) as {
           brands?: BrandListItem[];
+          nextCursor?: string | null;
+          hasMore?: boolean;
           error?: string;
         };
         if (!response.ok) throw new Error(payload.error || "Failed to load brands");
-        return { brands: payload.brands || [] };
+        return payload;
       })
       .then((payload) => {
         if (cancelled) return;
-        if (ownerQuery) payload.brands.forEach(cacheBrandItem);
-        else cacheBrandList(payload.brands);
-        setBrands(payload.brands);
+        const items = payload.brands || [];
+        items.forEach(cacheBrandItem);
+        setBrands(items);
+        setNextCursor(payload.nextCursor || null);
+        setHasMore(Boolean(payload.hasMore && payload.nextCursor));
         setError(undefined);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        if (!cached.length) {
-          setError(err instanceof Error ? err.message : "Failed to load brands");
-        }
+        setError(err instanceof Error ? err.message : "Failed to load brands");
+        setBrands([]);
+        setNextCursor(null);
+        setHasMore(false);
       })
       .finally(() => {
         if (cancelled) return;
@@ -700,38 +721,23 @@ export function BrandsPage() {
     return () => {
       cancelled = true;
     };
-  }, [brandsPath, ownerQuery, state.currentRole]);
-  const filtered = useMemo(
-    () =>
-      brands
-        .filter(
-          (c) =>
-            (isAdmin || (c.status !== "Paused" && c.status !== "Completed")) &&
-            (effectiveStatus === "all" || c.status === effectiveStatus) &&
-            (cp === "all" || c.currentCp === cp) &&
-            (isAdmin
-              ? owner === "all" ||
-                (owner === "unassigned" ? !c.ownerId : c.ownerId === owner)
-              : true) &&
-            c.name.toLowerCase().includes(query.toLowerCase()) &&
-            (!hasReplyDueFilter ||
-              (Boolean(c.needsReply) &&
-                replyDueInRange(c.replyDueAt || c.replyUpdatedAt, replyFrom, replyTo))),
-        )
-        .sort((a, b) => {
-          const replyRank = (item: BrandListItem) => (item.needsReply ? 1 : 0);
-          const aTime = a.replyDueAt || a.replyUpdatedAt || a.lastInteractionAt || "";
-          const bTime = b.replyDueAt || b.replyUpdatedAt || b.lastInteractionAt || "";
-          return (
-            replyRank(b) - replyRank(a) ||
-            // Among Reply needed: earliest due first
-            (a.needsReply && b.needsReply ? aTime.localeCompare(bTime) : 0) ||
-            bTime.localeCompare(aTime) ||
-            a.name.localeCompare(b.name)
-          );
-        }),
-    [brands, effectiveStatus, cp, owner, query, isAdmin, hasReplyDueFilter, replyFrom, replyTo],
-  );
+  }, [brandsFilterKey, cursor, state.currentRole]);
+
+  const goNextPage = () => {
+    if (!nextCursor || !hasMore || loading) return;
+    setCursorStack((stack) => [...stack, cursor]);
+    setCursor(nextCursor);
+  };
+  const goPrevPage = () => {
+    if (!cursorStack.length || loading) return;
+    const stack = [...cursorStack];
+    const prev = stack.pop() ?? null;
+    setCursorStack(stack);
+    setCursor(prev);
+  };
+
+  const filtered = brands;
+  const pageNumber = cursorStack.length + 1;
   const owners = useMemo(() => {
     if (ownerOptions.length) return ownerOptions;
     const seen = new Map<string, string>();
@@ -810,7 +816,7 @@ export function BrandsPage() {
   return (
     <div className="mx-auto max-w-[1480px]">
       <PageHeader
-        eyebrow={`${loading ? "Loading" : refreshing ? "Updating" : `${brands.length} records`}`}
+        eyebrow={`${loading ? "Loading" : refreshing ? "Updating" : `${brands.length} on this page`}`}
         title="Brands"
       />
       {isAdmin && selected.length > 0 && (
@@ -1105,10 +1111,37 @@ export function BrandsPage() {
             </EmptyHeader>
           </Empty>
         )}
-        <div className="flex items-center justify-between px-5 py-4 text-xs text-slate-500">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 text-xs text-slate-500">
           <span>
-            Showing {filtered.length} of {brands.length}
+            {brands.length === 0
+              ? "No records"
+              : `Showing ${brands.length} brand${brands.length === 1 ? "" : "s"} (page size ${DEFAULT_BRAND_PAGE_SIZE})`}
           </span>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={brandsBusy || cursorStack.length === 0}
+              onClick={goPrevPage}
+            >
+              <ChevronLeft className="size-4" />
+              Previous
+            </Button>
+            <span className="min-w-20 text-center font-medium text-slate-600">
+              Page {pageNumber}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={brandsBusy || !hasMore}
+              onClick={goNextPage}
+            >
+              Next
+              <ChevronRight className="size-4" />
+            </Button>
+          </div>
         </div>
       </div>
     </div>

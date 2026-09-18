@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   andFilters,
+  followupClientListFilter,
   nonTestClientFilter,
   ownerPageIdFromQueryParam,
   ownerRelationFilter,
@@ -61,6 +62,38 @@ describe("nonTestClientFilter", () => {
       property: "Is Test",
       checkbox: { equals: true },
     });
+  });
+});
+
+describe("followupClientListFilter", () => {
+  it("always excludes Is Test unless includeTest", () => {
+    assert.deepEqual(followupClientListFilter({ includeTest: false }), {
+      property: "Is Test",
+      checkbox: { equals: false },
+    });
+    assert.equal(followupClientListFilter({ includeTest: true }), undefined);
+  });
+
+  it("combines owner, status, title, and non-test", () => {
+    assert.deepEqual(
+      followupClientListFilter({
+        ownerPageId: "owner-1",
+        status: "In Progress",
+        excludeStatuses: ["Paused"],
+        titleContains: "Acme",
+        currentCpPageId: "cp-1",
+      }),
+      {
+        and: [
+          { property: "Owner", relation: { contains: "owner-1" } },
+          { property: "Is Test", checkbox: { equals: false } },
+          { property: "Follow-up Status", status: { equals: "In Progress" } },
+          { property: "Follow-up Status", status: { does_not_equal: "Paused" } },
+          { property: "Follow-up Client", title: { contains: "Acme" } },
+          { property: "Current CP", relation: { contains: "cp-1" } },
+        ],
+      },
+    );
   });
 });
 

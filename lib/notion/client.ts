@@ -1,10 +1,5 @@
 import { getFollowupClientDbId, getNotionApiKey, NOTION_VERSION } from "./config";
-import {
-  andFilters,
-  nonTestClientFilter,
-  ownerRelationFilter,
-  testClientFilter,
-} from "./owner-filter";
+import { followupClientListFilter, testClientFilter } from "./owner-filter";
 import { notionRetry, runWithNotionLimit } from "./rate-limit";
 
 const NOTION_API = "https://api.notion.com/v1";
@@ -181,15 +176,54 @@ export async function queryDatabasePages(
 
 export async function queryFollowupClientPages(
   ownerPageId?: string | null,
-  options?: { includeTest?: boolean },
+  options?: {
+    includeTest?: boolean;
+    status?: string | null;
+    excludeStatuses?: string[];
+    titleContains?: string | null;
+    currentCpPageId?: string | null;
+  },
 ) {
   return queryDatabasePages(
     getFollowupClientDbId(),
-    andFilters(
-      ownerRelationFilter(ownerPageId),
-      options?.includeTest ? undefined : nonTestClientFilter(),
-    ),
+    followupClientListFilter({
+      ownerPageId,
+      includeTest: options?.includeTest,
+      status: options?.status,
+      excludeStatuses: options?.excludeStatuses,
+      titleContains: options?.titleContains,
+      currentCpPageId: options?.currentCpPageId,
+    }),
   );
+}
+
+/** One Notion page of Follow-up Clients (true server-side pagination). */
+export async function queryFollowupClientPagesPage(options: {
+  filter?: Record<string, unknown>;
+  startCursor?: string | null;
+  pageSize?: number;
+  sorts?: Array<{ property: string; direction: "ascending" | "descending" }>;
+}) {
+  const pageSize = Math.min(Math.max(options.pageSize ?? 10, 1), 100);
+  const data = await notionFetch<{
+    results: NotionPage[];
+    has_more?: boolean;
+    next_cursor?: string | null;
+  }>(`/databases/${getFollowupClientDbId()}/query`, {
+    method: "POST",
+    body: JSON.stringify({
+      page_size: pageSize,
+      ...(options.startCursor ? { start_cursor: options.startCursor } : {}),
+      ...(options.filter ? { filter: options.filter } : {}),
+      ...(options.sorts?.length ? { sorts: options.sorts } : {}),
+    }),
+  });
+  const nextCursor = data.has_more && data.next_cursor ? data.next_cursor : null;
+  return {
+    pages: data.results,
+    nextCursor,
+    hasMore: Boolean(nextCursor),
+  };
 }
 
 /** Page IDs of Follow-up Clients with `Is Test` checked (for task list exclusion). */
