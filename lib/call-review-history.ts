@@ -1,9 +1,11 @@
 import type { CallReviewStatus } from "./call-review-metadata";
 
+export type CallReviewRoundStatus = CallReviewStatus | "Archived";
+
 export type CallReviewRound = {
   id: string;
   round: number;
-  status: CallReviewStatus;
+  status: CallReviewRoundStatus;
   submittedAt?: string;
   reviewedAt?: string;
   reviewerName?: string;
@@ -35,7 +37,7 @@ function normalizeRound(value: unknown): CallReviewRound | null {
   if (
     typeof item.id !== "string" ||
     typeof item.round !== "number" ||
-    (item.status !== "Awaiting Review" && item.status !== "Qualified" && item.status !== "Unqualified")
+    (item.status !== "Awaiting Review" && item.status !== "Qualified" && item.status !== "Unqualified" && item.status !== "Archived")
   ) return null;
   return {
     id: item.id,
@@ -200,8 +202,31 @@ export function historyFromTask(input: {
 }
 
 export function nextReviewRound(history: CallReviewRound[]) {
-  const last = history.at(-1);
+  const last = [...history].reverse().find((round) => round.status !== "Archived");
   return last ? last.round + (last.status === "Unqualified" ? 1 : 0) : 1;
+}
+
+/** Unselected calls belong in Review history, not the round sent to AccountManager. */
+export function mergeUnselectedCallsIntoHistory(history: CallReviewRound[], leftoverCallIds: string[]) {
+  const leftover = unusedCallIds(history, leftoverCallIds);
+  if (!leftover.length) return history;
+  const archived = history.find((round) => round.status === "Archived");
+  if (archived) {
+    return history.map((round) => (
+      round.id === archived.id
+        ? { ...round, callIds: [...round.callIds, ...leftover.filter((id) => !round.callIds.includes(id))] }
+        : round
+    ));
+  }
+  return [
+    {
+      id: `archived-${Date.now()}`,
+      round: 0,
+      status: "Archived" as const,
+      callIds: leftover,
+    },
+    ...history,
+  ];
 }
 
 export function reviewRoundId(round: number) {
@@ -229,7 +254,7 @@ export function withInheritedCallIds(history: CallReviewRound[], allCallIds: str
 
 export type ReviewRoundDisplay = {
   round: number;
-  status: CallReviewStatus | "In Progress";
+  status: CallReviewRoundStatus | "In Progress";
   isCurrent: boolean;
   recalled: boolean;
   submittedAt?: string;
@@ -261,7 +286,7 @@ export function reviewRoundsForTask(history: CallReviewRound[]): {
   current: ReviewRoundDisplay;
   history: ReviewRoundDisplay[];
 } {
-  const last = history.at(-1);
+  const last = [...history].reverse().find((round) => round.status !== "Archived");
   if (!last) {
     return {
       current: {
@@ -271,7 +296,7 @@ export function reviewRoundsForTask(history: CallReviewRound[]): {
         recalled: false,
         callIds: [],
       },
-      history: [],
+      history: [...history].reverse().map((item) => toDisplay(item, false)),
     };
   }
 
@@ -298,7 +323,7 @@ export function reviewRoundsForTask(history: CallReviewRound[]): {
 }
 
 export function isCallInCurrentRound(callId: string | undefined, history: CallReviewRound[]) {
-  const last = history.at(-1);
+  const last = [...history].reverse().find((round) => round.status !== "Archived");
   if (!last || last.status === "Unqualified") {
     if (!callId) return true;
     return !history.some((round) => round.callIds.includes(callId));
@@ -379,14 +404,47 @@ export function partitionRoundCalls<T>(
     }
   }
 
+  const lastClosed = [...historyOldestFirst].reverse().find((round) => round.status !== "Archived");
+  const cutoff = view.current.status === "In Progress"
+    ? (lastClosed?.reviewedAt || lastClosed?.submittedAt || "")
+    : "";
+  const archiveRound = historyOldestFirst.find((round) => round.status === "Archived");
+  const archiveKey = archiveRound?.round ?? 0;
+  const lastHistory = historyOldestFirst.at(-1);
   for (const item of leftover) {
     // A submitted/reviewed round should only show the call the Caller picked.
-    if (view.current.status !== "In Progress" && view.current.callIds.length) break;
+    // Unselected leftovers belong in Review history / Earlier calls.
+    if (view.current.status !== "In Progress" && view.current.callIds.length) {
+      if (archiveRound) assign(archiveKey, item);
+      else if (lastHistory) assign(lastHistory.round, item);
+      continue;
+    }
+    if (cutoff && getCreatedAt(item) <= cutoff) {
+      assign(archiveKey, item);
+      continue;
+    }
     assign(view.current.round, item);
+  }
+
+  const history = view.history.map((round) => ({ round, calls: byRound.get(round.round) || [] }));
+  if (!archiveRound) {
+    const earlierCalls = byRound.get(archiveKey) || [];
+    if (earlierCalls.length) {
+      history.push({
+        round: {
+          round: 0,
+          status: "Archived",
+          isCurrent: false,
+          recalled: false,
+          callIds: earlierCalls.map(getCallId).filter((id): id is string => !!id),
+        },
+        calls: earlierCalls,
+      });
+    }
   }
 
   return {
     current: byRound.get(view.current.round) || [],
-    history: view.history.map((round) => ({ round, calls: byRound.get(round.round) || [] })),
+    history,
   };
 }

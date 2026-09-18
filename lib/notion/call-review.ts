@@ -6,6 +6,7 @@ import { listConversationsByIds } from "./conversations";
 import {
   encodeCallReviewHistory,
   historyFromTask,
+  mergeUnselectedCallsIntoHistory,
   nextReviewRound,
   reviewRoundId,
   stripCallReviewHistoryFromNotes,
@@ -77,7 +78,9 @@ export async function submitCallReview(input: {
   if (history.some((round) => round.callIds.includes(selectedCallId))) {
     throw new CallReviewError("This call was already submitted in a previous round", 409);
   }
-  const round = nextReviewRound(history);
+  const leftoverCallIds = unusedCallIds(history, allCallIds).filter((id) => id !== selectedCallId);
+  const closedHistory = mergeUnselectedCallsIntoHistory(history, leftoverCallIds);
+  const round = nextReviewRound(closedHistory);
   const reviewRound: CallReviewRound = {
     id: reviewRoundId(round),
     round,
@@ -95,7 +98,7 @@ export async function submitCallReview(input: {
     status: "Completed",
     endedAt: now,
     notes: humanNotes(task.notes, submissionNote),
-    callReviewHistory: encodeCallReviewHistory([...history, reviewRound]),
+    callReviewHistory: encodeCallReviewHistory([...closedHistory, reviewRound]),
   });
 
   return retrieveFollowupTask(task.id);

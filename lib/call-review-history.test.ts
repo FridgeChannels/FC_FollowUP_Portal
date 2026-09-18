@@ -1,11 +1,16 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  encodeCallReviewHistory,
   historyFromTask,
   isCallInCurrentRound,
+  latestQualifiedAt,
+  latestUnqualifiedReason,
   nextReviewRound,
+  parseCallReviewHistoryColumn,
   partitionRoundCalls,
   reviewRoundsForTask,
+  stripCallReviewHistoryFromNotes,
   unusedCallIds,
   withInheritedCallIds,
   writeCallReviewHistory,
@@ -104,7 +109,8 @@ describe("call review rounds", () => {
       (item) => item.id,
       (item) => item.at,
     );
-    assert.deepEqual(partitioned.history[0]?.calls.map((item) => item.id), ["call-1"]);
+    // Unselected leftovers stay in review history, not the AM current round.
+    assert.deepEqual(partitioned.history[0]?.calls.map((item) => item.id), ["call-1", "call-3"]);
     assert.deepEqual(partitioned.current.map((item) => item.id), ["call-2"]);
   });
 
@@ -198,11 +204,38 @@ describe("call review rounds", () => {
     assert.doesNotMatch(cleaned, /call-new/);
   });
 
-  it("stores structured history without flattening reason into Notes", () => {
-    const notes = writeCallReviewHistory("Existing brief", [
-      round({ round: 1, status: "Unqualified", reason: "Need owner", note: "Ask again" }),
-    ]);
-    assert.match(notes, /\[CALL_REVIEW_HISTORY_V1\]/);
-    assert.doesNotMatch(notes.replace(/\[CALL_REVIEW_HISTORY_V1\][\s\S]*\[\/CALL_REVIEW_HISTORY_V1\]/, ""), /Need owner/);
+  it("stores structured history on the dedicated column without polluting Notes", () => {
+    const history = [round({ round: 1, status: "Unqualified", reason: "Need owner", note: "Ask again" })];
+    const column = encodeCallReviewHistory(history);
+    const notes = stripCallReviewHistoryFromNotes(
+      `Existing brief\n[CALL_REVIEW_HISTORY_V1]\n${column}\n[/CALL_REVIEW_HISTORY_V1]`,
+    );
+    assert.equal(notes, "Existing brief");
+    assert.doesNotMatch(notes, /Need owner/);
+    assert.deepEqual(parseCallReviewHistoryColumn(column)[0]?.reason, "Need owner");
+  });
+
+  it("prefers Call Review History column over Notes embedding", () => {
+    const fromColumn = [round({ round: 1, status: "Qualified", reviewedAt: "2026-09-18T12:00:00.000Z", callIds: ["call-col"] })];
+    const notesBlock = `[CALL_REVIEW_HISTORY_V1]\n${JSON.stringify([
+      round({ round: 1, status: "Unqualified", reason: "stale", callIds: ["call-notes"] }),
+    ])}\n[/CALL_REVIEW_HISTORY_V1]`;
+    const parsed = historyFromTask({
+      id: "t1",
+      notes: notesBlock,
+      callReviewHistoryText: encodeCallReviewHistory(fromColumn),
+    });
+    assert.equal(parsed[0]?.status, "Qualified");
+    assert.deepEqual(parsed[0]?.callIds, ["call-col"]);
+  });
+
+  it("exposes latest unqualified reason and qualified at helpers", () => {
+    const history = [
+      round({ round: 1, status: "Unqualified", reason: "first" }),
+      round({ round: 2, status: "Qualified", reviewedAt: "2026-09-18T10:00:00.000Z" }),
+      round({ round: 3, status: "Unqualified", reason: "不合格 重新打" }),
+    ];
+    assert.equal(latestUnqualifiedReason(history), "不合格 重新打");
+    assert.equal(latestQualifiedAt(history), "2026-09-18T10:00:00.000Z");
   });
 });

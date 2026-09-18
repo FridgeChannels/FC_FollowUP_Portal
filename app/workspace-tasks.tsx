@@ -54,6 +54,8 @@ type UnifiedTask = {
   cp?: Customer["cp"];
   remote?: boolean;
   callReviewStatus?: CallReviewStatus | null;
+  callReviewReason?: string | null;
+  callQualifiedAt?: string | null;
   callReviewHistory?: CallReviewRound[];
 };
 
@@ -98,6 +100,8 @@ function fromNotionTask(task: BrandTask): UnifiedTask {
     cp: taskCp(task.sourceBombCp),
     remote: true,
     callReviewStatus: task.callReviewStatus || null,
+    callReviewReason: task.callReviewReason || null,
+    callQualifiedAt: task.callQualifiedAt || null,
     callReviewHistory: task.callReviewHistory,
   };
 }
