@@ -97,8 +97,8 @@ function CallActionButton({ phone, state, onCallOpening }: { phone: string; stat
   return <Button disabled><Phone className="mr-2 size-4"/>Call with Quo</Button>;
 }
 
-function ReviewBadge({ status }: { status?: CallReviewStatus | null | "In Progress" }) {
-  if (!status || status === "In Progress") return null;
+function ReviewBadge({ status }: { status?: CallReviewStatus | null | "In Progress" | "Archived" }) {
+  if (!status || status === "In Progress" || status === "Archived") return null;
   const className =
     status === "Qualified" ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-100"
     : status === "Unqualified" ? "bg-rose-100 text-rose-800 hover:bg-rose-100"
@@ -410,14 +410,14 @@ function ReviewRoundCard({
   children?: ReactNode;
 }) {
   const inProgress = round.status === "In Progress";
-  if (current && !calls.length) return null;
+  if (current && !calls.length && !hint && !children) return null;
   const showCalls = !inProgress || calls.length > 0;
   return <article className={`rounded-xl border bg-white ${current ? "border-blue-200" : "border-slate-200"}`}>
     {current ? null : (
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs font-semibold tracking-wide text-slate-700">
-            Round {round.round}
+            {round.status === "Archived" ? "Earlier calls" : `Round ${round.round}`}
           </span>
           <ReviewBadge status={round.status}/>
           {round.reviewedAt ? <span className="text-[11px] text-slate-400">{formatReviewDay(round.reviewedAt)}</span> : null}
@@ -445,7 +445,7 @@ function ReviewRoundCard({
           />
         </div>
       ) : null}
-      {!inProgress ? <ReviewDecision round={round}/> : null}
+      {!inProgress && round.status !== "Archived" ? <ReviewDecision round={round}/> : null}
       {children}
     </div>
   </article>;
@@ -561,7 +561,7 @@ function PhoneTaskBlock({
       </div>}
     </div>
 
-    {currentCalls.length ? (
+    {currentCalls.length || (showCallerReview && currentRound.recalled) ? (
     <div className="mt-5">
       <ReviewRoundCard
         current
@@ -588,7 +588,7 @@ function PhoneTaskBlock({
             </Button>
           </div>
         ) : canSubmitThisRound ? (
-          <Button size="sm" className="bg-amber-500 text-white hover:bg-amber-600" onClick={() => { setSelectingCall(true); setSelectedCallId(""); }}>Submit for review</Button>
+          <Button size="sm" className="bg-amber-500 text-white hover:bg-amber-600" onClick={() => { setSelectingCall(true); setSelectedCallId(""); }}>Submit as qualified communication</Button>
         ) : null}
         {showReviewActions ? recallOpen ? (
           <UnqualifiedRecallForm

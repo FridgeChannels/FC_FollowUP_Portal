@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   historyFromTask,
   isCallInCurrentRound,
+  mergeUnselectedCallsIntoHistory,
   nextReviewRound,
   partitionRoundCalls,
   reviewRoundsForTask,
@@ -104,8 +105,86 @@ describe("call review rounds", () => {
       (item) => item.id,
       (item) => item.at,
     );
-    assert.deepEqual(partitioned.history[0]?.calls.map((item) => item.id), ["call-1"]);
+    assert.deepEqual(partitioned.history[0]?.calls.map((item) => item.id), ["call-1", "call-3"]);
     assert.deepEqual(partitioned.current.map((item) => item.id), ["call-2"]);
+  });
+
+  it("moves leftover pre-recall calls into Earlier calls instead of the new current round", () => {
+    const view = reviewRoundsForTask([
+      round({ round: 1, status: "Unqualified", callIds: ["call-1"] }),
+      round({
+        round: 3,
+        status: "Unqualified",
+        callIds: ["call-selected"],
+        submittedAt: "2026-09-18T09:00:40.000Z",
+        reviewedAt: "2026-09-18T09:09:27.000Z",
+      }),
+    ]);
+    const partitioned = partitionRoundCalls(
+      [
+        { id: "call-1", at: "2026-09-18T02:46:00.000Z" },
+        { id: "call-unselected", at: "2026-09-18T08:54:00.000Z" },
+        { id: "call-selected", at: "2026-09-18T08:57:00.000Z" },
+        { id: "call-new", at: "2026-09-18T10:00:00.000Z" },
+      ],
+      view,
+      (item) => item.id,
+      (item) => item.at,
+    );
+    assert.deepEqual(partitioned.current.map((item) => item.id), ["call-new"]);
+    assert.deepEqual(
+      partitioned.history.find((item) => item.round.status === "Archived")?.calls.map((item) => item.id),
+      ["call-unselected"],
+    );
+  });
+
+  it("shows persisted unselected calls under archived history, not the submitted round", () => {
+    const archived = round({ id: "archived-1", round: 0, status: "Archived", callIds: ["call-3"] });
+    const view = reviewRoundsForTask([
+      archived,
+      round({ round: 1, status: "Unqualified", callIds: ["call-1"] }),
+      round({ round: 2, status: "Awaiting Review", callIds: ["call-2"] }),
+    ]);
+    const partitioned = partitionRoundCalls(
+      [
+        { id: "call-1", at: "2026-09-17T00:00:00.000Z" },
+        { id: "call-2", at: "2026-09-18T00:00:00.000Z" },
+        { id: "call-3", at: "2026-09-18T01:00:00.000Z" },
+      ],
+      view,
+      (item) => item.id,
+      (item) => item.at,
+    );
+    assert.equal(view.current.callIds[0], "call-2");
+    assert.deepEqual(
+      partitioned.history.find((item) => item.round.status === "Archived")?.calls.map((item) => item.id),
+      ["call-3"],
+    );
+    assert.deepEqual(partitioned.current.map((item) => item.id), ["call-2"]);
+  });
+
+  it("archives unselected calls into an Earlier calls history round", () => {
+    const merged = mergeUnselectedCallsIntoHistory(
+      [round({ round: 1, status: "Unqualified", callIds: ["call-1"] })],
+      ["call-3", "call-4"],
+    );
+    assert.equal(merged[0]?.status, "Archived");
+    assert.deepEqual(merged[0]?.callIds, ["call-3", "call-4"]);
+    assert.deepEqual(merged[1]?.callIds, ["call-1"]);
+  });
+
+  it("archives unselected calls as earlier history when there is no prior round", () => {
+    const merged = mergeUnselectedCallsIntoHistory([], ["call-a", "call-b"]);
+    assert.equal(merged[0]?.status, "Archived");
+    assert.equal(merged[0]?.round, 0);
+    assert.deepEqual(merged[0]?.callIds, ["call-a", "call-b"]);
+    const view = reviewRoundsForTask([
+      merged[0],
+      round({ round: 1, status: "Awaiting Review", callIds: ["call-c"] }),
+    ]);
+    assert.equal(view.current.callIds[0], "call-c");
+    assert.equal(view.history[0]?.status, "Archived");
+    assert.deepEqual(view.history[0]?.callIds, ["call-a", "call-b"]);
   });
 
   it("puts legacy recalled calls on the closed round so history cards keep Call results", () => {
