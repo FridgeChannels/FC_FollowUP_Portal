@@ -707,8 +707,8 @@ export function BrandDetail({customerId}:{customerId:string}){
     const payload=await response.json() as {error?:string};
     if(!response.ok)throw new Error(payload.error||"Unable to save call review");
     await refreshBrandAndActivities();
-  }:undefined} onCancelBomb={async instance=>{if(!notionBacked){const result=cancelBomb(c.id,instance.id);if(!result.ok)throw new Error(result.message);toast.success(result.message);return;}const response=await fetch(`/api/brands/${c.id}/bombs/${instance.templateId}/cancel`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId:instance.targetContactId,omniReachRunId:instance.id.startsWith("run:")?instance.id.slice(4):undefined})});const payload=await response.json() as {cancelledTaskIds?:string[];error?:string};if(!response.ok)throw new Error(payload.error||"Unable to stop OmniReach");const cancelled=new Set(payload.cancelledTaskIds||[]);if(cancelled.size){setRemote(prev=>prev?{...prev,tasks:prev.tasks.map(task=>cancelled.has(task.id)?{...task,status:"Cancelled"}:task),handlingMode:prev.handlingMode==="Human"?prev.handlingMode:"Human"}:prev);}toast.success(`${payload.cancelledTaskIds?.length||0} remaining task${payload.cancelledTaskIds?.length===1?"":"s"} cancelled`);void Promise.all([refreshRemote(),fetchActivitiesPage(null,"replace")]);}} onSend={notionBacked?async (contactId,channel,content,taskId,threadId,subject)=>{
-    const response=await fetch(`/api/brands/${c.id}/messages`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId,channel,content,taskId,threadId,object:channel==="Email"?subject:undefined})});
+  }:undefined} onCancelBomb={async instance=>{if(!notionBacked){const result=cancelBomb(c.id,instance.id);if(!result.ok)throw new Error(result.message);toast.success(result.message);return;}const response=await fetch(`/api/brands/${c.id}/bombs/${instance.templateId}/cancel`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId:instance.targetContactId,omniReachRunId:instance.id.startsWith("run:")?instance.id.slice(4):undefined})});const payload=await response.json() as {cancelledTaskIds?:string[];error?:string};if(!response.ok)throw new Error(payload.error||"Unable to stop OmniReach");const cancelled=new Set(payload.cancelledTaskIds||[]);if(cancelled.size){setRemote(prev=>prev?{...prev,tasks:prev.tasks.map(task=>cancelled.has(task.id)?{...task,status:"Cancelled"}:task),handlingMode:prev.handlingMode==="Human"?prev.handlingMode:"Human"}:prev);}toast.success(`${payload.cancelledTaskIds?.length||0} remaining task${payload.cancelledTaskIds?.length===1?"":"s"} cancelled`);void Promise.all([refreshRemote(),fetchActivitiesPage(null,"replace")]);}}   onSend={notionBacked?async (contactId,channel,content,taskId,threadId,subject,deliveryMode)=>{
+    const response=await fetch(`/api/brands/${c.id}/messages`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId,channel,content,taskId,threadId,object:channel==="Email"?subject:undefined,deliveryMode})});
     const payload=await response.json() as {error?:string};
     if(!response.ok)throw new Error(payload.error||"Send failed");
     await Promise.all([refreshRemote(),fetchActivitiesPage(null,"replace")]);
@@ -716,8 +716,8 @@ export function BrandDetail({customerId}:{customerId:string}){
   {notionBacked&&activitiesHasMore&&activitiesCursor&&(remote?.activities.length||0)>=ACTIVITY_PAGE_SIZE?<div className="border-t border-slate-100 p-3"><Button variant="outline" size="sm" className="w-full" disabled={activitiesLoadingMore||activitiesLoading} onClick={loadMoreActivities}>{activitiesLoadingMore?<span className="inline-flex items-center gap-2"><Spinner className="size-3.5"/>Loading…</span>:"Load more activity"}</Button></div>:null}
   </div></section>
     {(c.cp==="CP3"||partnershipContext)&&partnershipContext&&<aside><section className="rounded-2xl bg-emerald-50 p-5"><div className="text-xs font-semibold tracking-wide text-emerald-700">CP3 · Partnership context</div><h2 className="mt-2 font-bold text-emerald-950">{partnershipContext.headline}</h2><p className="mt-2 text-sm leading-6 text-emerald-900">{partnershipContext.summary}</p><div className="mt-4 space-y-2">{partnershipContext.signals.map(signal=><div key={signal} className="rounded-lg bg-white/70 px-3 py-2 text-xs leading-5 text-slate-700">{signal}</div>)}</div><div className="mt-3 text-[11px] text-emerald-700">Updated {dateOnly(partnershipContext.updatedAt)}</div></section></aside>}</div>
-  <LaunchBombDialog customerId={c.id} open={launch} onOpenChange={setLaunch} contacts={notionBacked?c.contacts:undefined} currentCp={notionBacked&&remote?remote.currentCp:undefined} companyName={c.name} productDescription={notionBacked?remote?.productDescription:undefined} matchedCategory={notionBacked?remote?.matchedCategory:undefined} followupExhibition={notionBacked?remote?.followupExhibition:undefined} previewOnly={notionBacked} hasActiveOmniReach={hasActiveOmniReach} onLaunched={notionBacked?()=>{void refreshBrandAndActivities()}:undefined}/><ReplyDialog customerId={c.id} open={reply} onOpenChange={setReply} contacts={notionBacked?c.contacts:undefined} onSend={notionBacked?async (contactId,channel,content,object)=>{
-    const response=await fetch(`/api/brands/${c.id}/messages`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId,channel,content,object})});
+  <LaunchBombDialog customerId={c.id} open={launch} onOpenChange={setLaunch} contacts={notionBacked?c.contacts:undefined} currentCp={notionBacked&&remote?remote.currentCp:undefined} companyName={c.name} productDescription={notionBacked?remote?.productDescription:undefined} matchedCategory={notionBacked?remote?.matchedCategory:undefined} followupExhibition={notionBacked?remote?.followupExhibition:undefined} previewOnly={notionBacked} hasActiveOmniReach={hasActiveOmniReach} onLaunched={notionBacked?()=>{void refreshBrandAndActivities()}:undefined}/><ReplyDialog customerId={c.id} open={reply} onOpenChange={setReply} contacts={notionBacked?c.contacts:undefined} onSend={notionBacked?async (contactId,channel,content,object,deliveryMode)=>{
+    const response=await fetch(`/api/brands/${c.id}/messages`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId,channel,content,object,deliveryMode})});
     const payload=await response.json() as {error?:string};
     if(!response.ok)throw new Error(payload.error||"Send failed");
     await Promise.all([refreshRemote(),fetchActivitiesPage(null,"replace")]);
@@ -928,7 +928,13 @@ export function ReplyDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
   contacts?: Contact[];
-  onSend?: (contactId: string, channel: Channel, content: string, object?: string) => Promise<void>;
+  onSend?: (
+    contactId: string,
+    channel: Channel,
+    content: string,
+    object?: string,
+    deliveryMode?: DeliveryMode,
+  ) => Promise<void>;
 }) {
   const { state, sendHumanReply } = useWorkspace();
   const local = state.customers.find((x) => x.id === customerId);
@@ -938,7 +944,7 @@ export function ReplyDialog({
   const [object, setObject] = useState("");
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
-  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("immediate");
+  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("scheduled");
   const [linkedinGate, setLinkedinGate] = useState<{
     available: boolean;
     reason: string | null;
@@ -951,7 +957,7 @@ export function ReplyDialog({
     setChannel(people[0]?.preferredChannel || "Email");
     setObject("");
     setContent("");
-    setDeliveryMode("immediate");
+    setDeliveryMode("scheduled");
     setLinkedinGate(null);
   }, [open, customerId]);
 
@@ -979,7 +985,7 @@ export function ReplyDialog({
     void (async () => {
       try {
         const response = await fetch(
-          `/api/brands/${customerId}/linkedin-availability?contactId=${encodeURIComponent(contact.id)}`,
+          `/api/brands/${customerId}/linkedin-availability?contactId=${encodeURIComponent(contact.id)}&deliveryMode=${encodeURIComponent(deliveryMode)}`,
         );
         const payload = (await response.json()) as {
           available?: boolean;
@@ -1012,7 +1018,7 @@ export function ReplyDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, notionBacked, customerId, contact?.id, contact?.linkedin]);
+  }, [open, notionBacked, customerId, contact?.id, contact?.linkedin, deliveryMode]);
 
   const linkedInAllowed =
     !!contact &&
@@ -1128,6 +1134,7 @@ export function ReplyDialog({
                       effective,
                       content,
                       emailNeedsObject ? object.trim() : undefined,
+                      deliveryMode,
                     );
                     toast.success("Message saved as pending");
                     setObject("");

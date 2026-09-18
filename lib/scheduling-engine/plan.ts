@@ -37,6 +37,11 @@ export function previewSchedule(input: ScheduleInput): SchedulePlan {
 
   const window = resolveWindow(request.preferredStartDate, request.latestDate, request.maxHorizonDays);
   const board = createCapacityBoard(snapshot.dailyMax, snapshot.existingTasks, snapshot.timeInterval);
+  // OmniReach (Automated): stagger channels within this commit only.
+  // Manual Send: ignore client-per-day; only channel Daily Max / intervals apply.
+  const placement = {
+    enforceClientDaySpread: request.creationMethod === "Automated",
+  };
   const scheduled: ScheduledTask[] = [];
   const unscheduled: UnscheduledItem[] = [];
 
@@ -53,6 +58,7 @@ export function previewSchedule(input: ScheduleInput): SchedulePlan {
       window.start,
       window.end,
       now,
+      placement,
     );
     if (!scheduledAt) {
       unscheduled.push(toUnscheduled(candidate, "NO_SLOT_IN_WINDOW", "No available US business-day slot in the scheduling window"));
@@ -60,7 +66,7 @@ export function previewSchedule(input: ScheduleInput): SchedulePlan {
     }
 
     const { dateOnly, minuteOfDay } = parseScheduledAt(scheduledAt);
-    place(board, dateOnly, candidate.channel, candidate.clientId, minuteOfDay);
+    place(board, dateOnly, candidate.channel, candidate.clientId, minuteOfDay, placement);
     scheduled.push(toScheduled(candidate, scheduledAt));
   }
 

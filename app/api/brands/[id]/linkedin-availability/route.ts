@@ -14,10 +14,12 @@ export async function GET(request: Request, { params }: Params) {
       return Response.json({ error: "Sign in required" }, { status: 401 });
     }
     const { id } = await params;
-    const contactId = new URL(request.url).searchParams.get("contactId")?.trim() || "";
+    const url = new URL(request.url);
+    const contactId = url.searchParams.get("contactId")?.trim() || "";
     if (!contactId) {
       return Response.json({ error: "contactId is required" }, { status: 400 });
     }
+    const deliveryMode = url.searchParams.get("deliveryMode") === "immediate" ? "immediate" : "scheduled";
 
     const page = await retrievePage(id);
     const brand = await mapFollowupClientPage(page);
@@ -41,13 +43,19 @@ export async function GET(request: Request, { params }: Params) {
       return Response.json({ error: "Contact not found on this brand" }, { status: 400 });
     }
 
-    const result = await evaluateLinkedInSendability({ contactId });
+    const result = await evaluateLinkedInSendability({
+      contactId,
+      // Cold Daily Max only blocks immediate send; scheduled mode can pick a later day.
+      // Reply (followup_after_reply) never checks bandwidth inside evaluateLinkedInSendability.
+      checkBandwidth: deliveryMode === "immediate",
+    });
     return Response.json({
       contactId,
       available: result.available,
       reason: result.reason || null,
       outreachKind: result.outreachKind || null,
       activeAccount: result.activeAccount || null,
+      deliveryMode,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";

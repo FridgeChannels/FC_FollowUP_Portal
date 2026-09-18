@@ -46,8 +46,18 @@ export type CapacityBoard = {
   dailyMax: Partial<Record<Channel, number>>;
   timeInterval: Partial<Record<Channel, number>>;
   allocated: Map<string, number>;
+  /**
+   * Tracks client/day occupancy for the *current* schedule run only.
+   * Historical tasks do not seed this set — "one channel per client per day"
+   * only spreads channels within a single OmniReach commitSchedule.
+   */
   clientDays: Set<string>;
   occupiedMinutes: Map<string, number[]>;
+};
+
+export type SlotPlacementOptions = {
+  /** When true, skip days already used by this client in the current run. */
+  enforceClientDaySpread?: boolean;
 };
 
 export function createCapacityBoard(
@@ -64,7 +74,7 @@ export function createCapacityBoard(
     const { dateOnly, minuteOfDay } = parseScheduledAt(task.scheduledAt);
     const key = capacityKey(dateOnly, task.channel);
     allocated.set(key, (allocated.get(key) ?? 0) + 1);
-    clientDays.add(clientDayKey(dateOnly, task.clientId));
+    // Do not seed clientDays from history — Daily Max / minute occupancy still count.
     const minutes = occupiedMinutes.get(key) ?? [];
     minutes.push(minuteOfDay);
     occupiedMinutes.set(key, minutes);
@@ -89,10 +99,17 @@ export function clientHasChannelOn(board: CapacityBoard, date: string, clientId:
   return board.clientDays.has(clientDayKey(date, clientId));
 }
 
-export function canPlace(board: CapacityBoard, date: string, channel: Channel, clientId: string): boolean {
-  return isUsBusinessDay(date)
-    && availableOn(board, date, channel) > 0
-    && !clientHasChannelOn(board, date, clientId);
+export function canPlace(
+  board: CapacityBoard,
+  date: string,
+  channel: Channel,
+  clientId: string,
+  options: SlotPlacementOptions = {},
+): boolean {
+  if (!isUsBusinessDay(date)) return false;
+  if (availableOn(board, date, channel) <= 0) return false;
+  if (options.enforceClientDaySpread && clientHasChannelOn(board, date, clientId)) return false;
+  return true;
 }
 
 export function place(
@@ -101,10 +118,13 @@ export function place(
   channel: Channel,
   clientId: string,
   minuteOfDay: number,
+  options: SlotPlacementOptions = {},
 ): void {
   const key = capacityKey(date, channel);
   board.allocated.set(key, allocatedOn(board, date, channel) + 1);
-  board.clientDays.add(clientDayKey(date, clientId));
+  if (options.enforceClientDaySpread) {
+    board.clientDays.add(clientDayKey(date, clientId));
+  }
   const minutes = board.occupiedMinutes.get(key) ?? [];
   minutes.push(minuteOfDay);
   minutes.sort((a, b) => a - b);
@@ -145,6 +165,7 @@ export function findEarliestSlot(
   startDate: string,
   endDate: string,
   now: Date = new Date(),
+  options: SlotPlacementOptions = {},
 ): string | undefined {
   if (dailyMaxFor(board.dailyMax, channel) === 0) return undefined;
   if (compareDateOnly(startDate, endDate) > 0) return undefined;
@@ -155,7 +176,7 @@ export function findEarliestSlot(
 
   let date = firstUsBusinessDayOnOrAfter(effectiveStart);
   while (compareDateOnly(date, endDate) <= 0) {
-    if (canPlace(board, date, channel, clientId)) {
+    if (canPlace(board, date, channel, clientId, options)) {
       let earliestMinute = WORK_WINDOW_START_MINUTES;
       if (date === todayEt) {
         earliestMinute = Math.max(WORK_WINDOW_START_MINUTES, nowMinuteCeil);

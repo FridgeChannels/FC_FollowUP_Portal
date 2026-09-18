@@ -790,8 +790,8 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
     </div>
 
     <LaunchBombDialog customerId={customer.id} open={launch} onOpenChange={setLaunch} contacts={task.remote ? customer.contacts : undefined} currentCp={remote?.brand?.currentCp} companyName={remote?.brand?.name || customer.name} productDescription={remote?.brand?.productDescription} matchedCategory={remote?.brand?.matchedCategory} followupExhibition={remote?.brand?.followupExhibition} previewOnly={task.remote} hasActiveOmniReach={task.remote ? brandHasActiveOmniReach(remote?.brand?.tasks || []) : (!!customer.activeBombId || customer.status === "Bomb Running")}/>
-    <ReplyDialog customerId={customer.id} open={sendMessage} onOpenChange={setSendMessage} contacts={task.remote ? customer.contacts : undefined} onSend={task.remote ? async (contactId, channel, content, object) => {
-      const response = await fetch(`/api/brands/${customer.id}/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contactId, channel, content, object, taskId: task.id }) });
+    <ReplyDialog customerId={customer.id} open={sendMessage} onOpenChange={setSendMessage} contacts={task.remote ? customer.contacts : undefined} onSend={task.remote ? async (contactId, channel, content, object, deliveryMode) => {
+      const response = await fetch(`/api/brands/${customer.id}/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contactId, channel, content, object, taskId: task.id, deliveryMode }) });
       const payload = await response.json() as { error?: string };
       if (!response.ok) throw new Error(payload.error || "Send failed");
       const nextResponse = await fetch(`/api/tasks/${task.id}`);

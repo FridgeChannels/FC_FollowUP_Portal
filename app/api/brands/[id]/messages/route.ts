@@ -1,12 +1,20 @@
 import { canWriteBrand } from "@/lib/brand-access";
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
-import { firstRelationId, relationIds, retrievePage, titleFromProperties } from "@/lib/notion/client";
+import { firstRelationId, propertyText, relationIds, retrievePage, titleFromProperties } from "@/lib/notion/client";
 import { listFollowupContactIds } from "@/lib/notion/contacts";
 import { mapFollowupClientPage } from "@/lib/notion/followup-clients";
-import { createHumanOutbound, markFollowupClientEngaged } from "@/lib/notion/followup-writes";
+import {
+  createHumanOutbound,
+  markFollowupClientEngaged,
+  type DeliveryMode,
+} from "@/lib/notion/followup-writes";
 import { interactionCpCode } from "@/lib/outreach-domain";
 
 type Params = { params: Promise<{ id: string }> };
+
+function asDeliveryMode(value?: string | null): DeliveryMode {
+  return value === "immediate" ? "immediate" : "scheduled";
+}
 
 export async function POST(request: Request, { params }: Params) {
   try {
@@ -23,6 +31,7 @@ export async function POST(request: Request, { params }: Params) {
       subject?: string;
       taskId?: string;
       threadId?: string;
+      deliveryMode?: string;
     };
     const contactId = body.contactId?.trim() || "";
     if (!contactId) {
@@ -34,6 +43,7 @@ export async function POST(request: Request, { params }: Params) {
     if (!canWriteBrand(viewer, brand)) {
       return Response.json({ error: "You do not have access to this brand" }, { status: 403 });
     }
+    const brandPriority = propertyText(page.properties?.Priority) || null;
 
     const relatedContactIds = relationIds(page.properties?.["Follow-up Contacts"]);
     let contactAllowed = relatedContactIds.includes(contactId);
@@ -51,6 +61,8 @@ export async function POST(request: Request, { params }: Params) {
       return Response.json({ error: "Contact not found on this brand" }, { status: 400 });
     }
     const contactName = titleFromProperties(contactPage.properties) || "Contact";
+    const contactFollowupStatus = propertyText(contactPage.properties?.["Follow-up Status"]) || null;
+    const contactFollowupMode = propertyText(contactPage.properties?.["Follow-up Mode"]) || null;
 
     const channel = body.channel || "";
     const object = (body.object ?? body.subject)?.trim() || "";
@@ -58,11 +70,17 @@ export async function POST(request: Request, { params }: Params) {
       return Response.json({ error: "object (email subject) is required for Email" }, { status: 400 });
     }
 
+    const deliveryMode = asDeliveryMode(body.deliveryMode);
     const created = await createHumanOutbound({
+      brandId: id,
       brandName: brand.name,
       brandOwnerId: brand.ownerId,
+      brandStatus: brand.status,
+      brandPriority,
       contactId,
       contactName,
+      contactFollowupStatus,
+      contactFollowupMode,
       channel,
       content: body.content || "",
       subject: channel === "Email" ? object : undefined,
@@ -71,6 +89,7 @@ export async function POST(request: Request, { params }: Params) {
       threadId: body.threadId,
       cpId: brand.currentCpId,
       cpAtInteraction: interactionCpCode(brand.currentCp),
+      deliveryMode,
     });
 
     await markFollowupClientEngaged(id, {
@@ -83,13 +102,15 @@ export async function POST(request: Request, { params }: Params) {
       ok: true,
       taskId: created.taskId,
       conversationId: created.conversationId,
+      scheduledAt: created.scheduledAt,
+      deliveryMode: created.deliveryMode,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
     const status =
       message.includes("404")
         ? 404
-        : /LinkedIn|quota|capacity|reply|open LinkedIn|Daily Max|active sender|paused/i.test(message)
+        : /LinkedIn|quota|capacity|reply|open LinkedIn|Daily Max|active sender|paused|No available send slot|needs review|Channel Daily Max|Unsupported channel/i.test(message)
           ? 400
           : 500;
     return Response.json({ error: message }, { status });

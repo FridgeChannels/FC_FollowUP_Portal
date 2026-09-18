@@ -89,7 +89,7 @@ export function BrandReplyBox({
   interactions?: Interaction[];
   actions?: ScheduledAction[];
   taskId?: string;
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string) => Promise<void>;
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: DeliveryMode) => Promise<void>;
 }) {
   const { state, can, sendHumanReply } = useWorkspace();
   const customer = state.customers.find(item => item.id === customerId);
@@ -99,7 +99,7 @@ export function BrandReplyBox({
     interaction.channel === "Email" && interaction.title !== "Email" ? interaction.title : "",
   );
   const [saving, setSaving] = useState(false);
-  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("immediate");
+  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("scheduled");
   const contact = people.find(item => item.id === interaction.contactId) || people[0];
   const channel = interaction.channel;
   const notionBacked = !!onSend;
@@ -122,7 +122,7 @@ export function BrandReplyBox({
           <Button className="h-9 px-3" disabled={!content.trim() || (channel === "Email" && !subject.trim()) || saving} onClick={() => {
           if (onSend) {
             setSaving(true);
-            void onSend(contact.id, channel, content, replyTaskId, interaction.threadId, subject)
+            void onSend(contact.id, channel, content, replyTaskId, interaction.threadId, subject, deliveryMode)
               .then(() => { toast.success("Message saved as pending"); setContent(""); setSubject(""); })
               .catch(error => toast.error(error instanceof Error ? error.message : "Send failed"))
               .finally(() => setSaving(false));
@@ -150,7 +150,7 @@ export function ChannelSendBox({
   channel: Channel;
   contacts: Contact[];
   interactions: Interaction[];
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string) => Promise<void>;
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: DeliveryMode) => Promise<void>;
 }) {
   const { state, can, sendHumanReply } = useWorkspace();
   const people = contacts.filter(item => channelAvailable(item, channel));
@@ -160,7 +160,7 @@ export function ChannelSendBox({
   const [contactId, setContactId] = useState(latest?.contactId || people[0]?.id || "");
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
-  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("immediate");
+  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("scheduled");
   useEffect(() => {
     setContactId(latest?.contactId || people[0]?.id || "");
     setContent("");
@@ -203,7 +203,7 @@ export function ChannelSendBox({
             if (!contact) return;
             if (onSend) {
               setSaving(true);
-              void onSend(contact.id, channel, content, taskId, threadId)
+              void onSend(contact.id, channel, content, taskId, threadId, undefined, deliveryMode)
                 .then(() => { toast.success("Message saved as pending"); setContent(""); })
                 .catch(error => toast.error(error instanceof Error ? error.message : "Send failed"))
                 .finally(() => setSaving(false));

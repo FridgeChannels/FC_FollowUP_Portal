@@ -266,10 +266,11 @@ test("Daily Max 为 0 时该渠道任务 Unscheduled", () => {
   assert.equal(plan.unscheduled[0]?.code, "CHANNEL_PAUSED");
 });
 
-test("同一客户每天只排 1 个渠道，5 个渠道至少跨 5 个工作日", () => {
+test("OmniReach：同一客户每天只排 1 个渠道，5 个渠道至少跨 5 个工作日", () => {
   const channels: Channel[] = ["Email", "LinkedIn", "SMS", "WhatsApp", "Phone"];
   const plan = previewSchedule(input({
     start: "2026-09-14",
+    method: "Automated",
     clients: [client({
       clientId: "c1",
       contacts: [{
@@ -284,25 +285,48 @@ test("同一客户每天只排 1 个渠道，5 个渠道至少跨 5 个工作日
   assert.equal(new Set(dates).size, 5);
 });
 
-test("客户当天已有未取消任务时，即使其他渠道有容量也必须顺延", () => {
+test("人工 Send：忽略客户每日一渠，多渠道可同日落在渠道容量内", () => {
+  const channels: Channel[] = ["Email", "LinkedIn", "SMS", "WhatsApp", "Phone"];
   const plan = previewSchedule(input({
     start: "2026-09-14",
+    method: "Manual",
     clients: [client({
       clientId: "c1",
-      contacts: [{ contactId: "ct-1", followUpStatus: "Not Contacted", channels: [channel("SMS")] }],
+      contacts: [{
+        contactId: "ct-1",
+        followUpStatus: "Not Contacted",
+        channels: channels.map(name => channel(name)),
+      }],
     })],
-    snapshot: {
-      ...OPEN_CAPACITY,
-      existingTasks: [{ clientId: "c1", channel: "Email", scheduledAt: "2026-09-14", status: "Pending" }],
-    },
   }));
-  assert.equal(plan.scheduled[0]?.channel, "SMS");
-  assert.equal(etDate(plan.scheduled[0]?.scheduledAt), "2026-09-15");
+  assert.equal(plan.scheduled.length, 5);
+  assert.equal(new Set(plan.scheduled.map(task => etDate(task.scheduledAt))).size, 1);
+  assert.equal(etDate(plan.scheduled[0]?.scheduledAt), "2026-09-14");
 });
 
-test("客户每日 1 渠道按客户维度计算，不因联系人不同而重置", () => {
+test("历史任务不挡客户每日一渠：同客户当天已有 Email，SMS 仍可排当天", () => {
+  for (const method of ["Manual", "Automated"] as const) {
+    const plan = previewSchedule(input({
+      start: "2026-09-14",
+      method,
+      clients: [client({
+        clientId: "c1",
+        contacts: [{ contactId: "ct-1", followUpStatus: "Not Contacted", channels: [channel("SMS")] }],
+      })],
+      snapshot: {
+        ...OPEN_CAPACITY,
+        existingTasks: [{ clientId: "c1", channel: "Email", scheduledAt: "2026-09-14", status: "Pending" }],
+      },
+    }));
+    assert.equal(plan.scheduled[0]?.channel, "SMS");
+    assert.equal(etDate(plan.scheduled[0]?.scheduledAt), "2026-09-14", method);
+  }
+});
+
+test("OmniReach：客户每日 1 渠道按客户维度计算，不因联系人不同而重置", () => {
   const plan = previewSchedule(input({
     start: "2026-09-14",
+    method: "Automated",
     clients: [client({
       clientId: "c1",
       contacts: [
@@ -364,10 +388,11 @@ test("同一 Task Priority 内按客户 Priority 再排序", () => {
   assert.equal(etDate(plan.scheduled[1]?.scheduledAt), "2026-09-15");
 });
 
-test("超出最晚日期则 Unscheduled", () => {
+test("OmniReach：超出最晚日期则 Unscheduled", () => {
   const plan = previewSchedule(input({
     start: "2026-09-14",
     latest: "2026-09-14",
+    method: "Automated",
     clients: [client({
       clientId: "c1",
       contacts: [{
@@ -398,9 +423,10 @@ test("多个客户共享同一渠道 Daily Max", () => {
   assert.equal(etDate(plan.scheduled.find(task => task.clientId === "c2")?.scheduledAt), "2026-09-15");
 });
 
-test("跨周末顺延：周五已占客户日，下一槽是下周一", () => {
+test("OmniReach：跨周末顺延——周五已占客户日，下一槽是下周一", () => {
   const plan = previewSchedule(input({
     start: "2026-09-18",
+    method: "Automated",
     clients: [client({
       clientId: "c1",
       contacts: [{

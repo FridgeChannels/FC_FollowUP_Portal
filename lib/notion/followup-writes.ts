@@ -7,13 +7,23 @@ import {
 } from "../linkedin";
 import { conversationCpRelation, resolveCheckpoint } from "./cps";
 import { createPage, propertyText, retrievePage, richText, updatePage } from "./client";
-import { getFollowupConversationDbId, getFollowupTaskDbId } from "./config";
+import { getFollowupConversationDbId, getFollowupTaskDbId, isScheduleTestMode } from "./config";
 import {
   easternDateOnly,
   easternDateTimeIso,
   easternMinuteOfDayCeil,
 } from "../scheduling-engine/calendar";
+import { commitSchedule } from "../scheduling-engine";
+import type {
+  Channel as ScheduleChannel,
+  ClientFollowUpStatus,
+  ContactFollowUpStatus,
+  FollowUpMode,
+  Priority,
+} from "../scheduling-engine/types";
+import { CHANNELS as SCHEDULE_CHANNELS } from "../scheduling-engine/types";
 import { notionScheduledAtProperty } from "./scheduled-at";
+import { listChannelCapacityConfig } from "./capacity";
 import { chooseConversationThreadId } from "./conversation-thread";
 import { listFollowupConversations } from "./conversations";
 import { asExtendedParameters } from "./extended-parameters";
@@ -27,6 +37,7 @@ import {
 import { pickReplyTaskForChannel } from "./reply-target";
 import {
   listContactBombTasksLite,
+  listExistingTasksForSchedule,
   listFollowupTasks,
   listFollowupTasksByBomb,
   retrieveFollowupTask,
@@ -36,6 +47,88 @@ const TASK_STATUSES = new Set(["Pending", "In Progress", "Completed", "Failed", 
 const CALL_RESULTS = new Set(["Connected", "No Answer", "Voicemail", "Declined", "Invalid Number"]);
 
 const CHANNELS = new Set(["Email", "LinkedIn", "SMS", "WhatsApp", "Phone"]);
+
+export type DeliveryMode = "immediate" | "scheduled";
+
+function asScheduleChannel(value?: string | null): ScheduleChannel | null {
+  return value && SCHEDULE_CHANNELS.includes(value as ScheduleChannel)
+    ? (value as ScheduleChannel)
+    : null;
+}
+
+function asClientStatus(value?: string | null): ClientFollowUpStatus | undefined {
+  if (value === "Unassigned" || value === "In Progress" || value === "Completed" || value === "Terminated") {
+    return value;
+  }
+  if (value === "Ready" || value === "Not Started") return "Not Started";
+  return undefined;
+}
+
+function asContactStatus(value?: string | null): ContactFollowUpStatus {
+  if (value === "In Progress" || value === "Completed" || value === "Terminated") return value;
+  return "Not Contacted";
+}
+
+function asFollowUpMode(value?: string | null): FollowUpMode | undefined {
+  return value === "Automated" || value === "Manual" ? value : undefined;
+}
+
+function asPriority(value?: string | null): Priority | undefined {
+  return value === "P0" || value === "P1" || value === "P2" ? value : undefined;
+}
+
+async function resolveHumanScheduledAt(input: {
+  deliveryMode: DeliveryMode;
+  brandId: string;
+  brandOwnerId: string;
+  brandStatus?: string | null;
+  brandPriority?: string | null;
+  contactId: string;
+  contactFollowupStatus?: string | null;
+  contactFollowupMode?: string | null;
+  channel: ScheduleChannel;
+}) {
+  if (input.deliveryMode === "immediate") {
+    return scheduledAtNow();
+  }
+
+  const [capacity, existingTasks] = await Promise.all([
+    listChannelCapacityConfig(),
+    listExistingTasksForSchedule(),
+  ]);
+  const result = commitSchedule({
+    request: {
+      preferredStartDate: easternDateOnly(),
+      creationMethod: "Manual",
+      testMode: isScheduleTestMode(),
+      clients: [{
+        clientId: input.brandId,
+        ownerId: input.brandOwnerId,
+        clientPriority: asPriority(input.brandPriority),
+        followUpStatus: asClientStatus(input.brandStatus),
+        contacts: [{
+          contactId: input.contactId,
+          followUpStatus: asContactStatus(input.contactFollowupStatus),
+          followUpMode: asFollowUpMode(input.contactFollowupMode),
+          channels: [{ channel: input.channel, reachable: true }],
+        }],
+      }],
+    },
+    snapshot: {
+      dailyMax: capacity.dailyMax,
+      timeInterval: capacity.timeInterval,
+      existingTasks,
+    },
+  });
+
+  if (result.needsReview.length && !result.writes.length) {
+    throw new Error(result.needsReview[0]?.reason || "Send needs review");
+  }
+  if (!result.writes.length) {
+    throw new Error(result.unscheduled[0]?.reason || "No available send slot for this channel");
+  }
+  return result.writes[0].scheduledAt;
+}
 
 function uniqueRecordId(prefix: string, channel: string) {
   const token =
@@ -514,10 +607,15 @@ function pickThreadExtendedParameters(
 }
 
 export async function createHumanOutbound(input: {
+  brandId: string;
   brandName: string;
   brandOwnerId?: string | null;
+  brandStatus?: string | null;
+  brandPriority?: string | null;
   contactId: string;
   contactName: string;
+  contactFollowupStatus?: string | null;
+  contactFollowupMode?: string | null;
   channel: string;
   content: string;
   subject?: string | null;
@@ -526,21 +624,39 @@ export async function createHumanOutbound(input: {
   threadId?: string | null;
   cpId?: string | null;
   cpAtInteraction?: string | null;
+  deliveryMode?: DeliveryMode;
 }) {
   const isReply = !!(input.threadId?.trim() || input.existingTaskId);
+  const deliveryMode: DeliveryMode = input.deliveryMode === "immediate" ? "immediate" : "scheduled";
+  const channel = asScheduleChannel(input.channel);
+  if (!channel) throw new Error(`Unsupported channel: ${input.channel || "(empty)"}`);
+
   const threadActivities = await listFollowupConversations([input.contactId]);
   const ownerId = input.brandOwnerId;
   if (!ownerId) throw new Error("Owner is required to create a follow-up task");
-  if (input.channel === "Email" && !input.subject?.trim()) {
+  if (channel === "Email" && !input.subject?.trim()) {
     throw new Error("object (email subject) is required for Email");
   }
-  const scheduledAt = scheduledAtNow();
+
+  const scheduledAt = await resolveHumanScheduledAt({
+    deliveryMode,
+    brandId: input.brandId,
+    brandOwnerId: ownerId,
+    brandStatus: input.brandStatus,
+    brandPriority: input.brandPriority,
+    contactId: input.contactId,
+    contactFollowupStatus: input.contactFollowupStatus,
+    contactFollowupMode: input.contactFollowupMode,
+    channel,
+  });
 
   let linkedIn = null as Awaited<ReturnType<typeof prepareLinkedInOutbound>> | null;
-  if (input.channel === "LinkedIn") {
+  if (channel === "LinkedIn") {
     linkedIn = await prepareLinkedInOutbound({
       contactId: input.contactId,
       activities: threadActivities,
+      // Immediate cold send must honor today's Daily Max; scheduled lets the engine pick a later day.
+      checkBandwidth: deliveryMode === "immediate",
     });
   }
 
@@ -556,7 +672,7 @@ export async function createHumanOutbound(input: {
       contactId: input.contactId,
       contactName: input.contactName,
       ownerId,
-      channel: input.channel,
+      channel,
       scheduledAt,
       priority: "P0",
       creationMethod: "Manual",
@@ -567,7 +683,7 @@ export async function createHumanOutbound(input: {
     // Customer /api/replies stamps from outbound CP in inbound-reply.ts.
     const repliedInbound = isReply
       ? pickRepliedInbound(threadActivities, {
-          channel: input.channel,
+          channel,
           threadId: input.threadId,
           taskId: input.existingTaskId,
         })
@@ -576,7 +692,7 @@ export async function createHumanOutbound(input: {
       brandName: input.brandName,
       contactId: input.contactId,
       contactName: input.contactName,
-      channel: input.channel,
+      channel,
       content: input.content,
       subject: input.subject,
       sender,
@@ -588,7 +704,7 @@ export async function createHumanOutbound(input: {
         : input.cpAtInteraction,
       extendedParameters: isReply
         ? pickThreadExtendedParameters(threadActivities, {
-            channel: input.channel,
+            channel,
             threadId: input.threadId,
             taskId: input.existingTaskId,
           })
@@ -608,14 +724,14 @@ export async function createHumanOutbound(input: {
       await markInboundsReplied(
         {
           contactId: input.contactId,
-          channel: input.channel,
+          channel,
           taskId: input.existingTaskId,
           threadId: input.threadId,
         },
         threadActivities,
       );
     }
-    return { conversationId: page.id, taskId };
+    return { conversationId: page.id, taskId, scheduledAt, deliveryMode };
   } catch (error) {
     if (linkedIn?.countsAgainstQuota) {
       await releaseLinkedInColdQuota(linkedIn.senderAccount).catch(() => null);

@@ -110,11 +110,10 @@ TaskDB 现有的 Channel、Scheduled At 和 Task Status 已足够完成渠道容
 - 每个选中渠道生成一条独立的候选 Follow-up Task；未选择的渠道不生成任务。
 - 如果任一选中渠道缺少有效联系方式或存在禁止继续联系的规则，则整位联系人进入 Needs Review，该联系人的所有候选任务均不写入 TaskDB。
 - 系统不自动跳过不可用渠道，也不自动替换为未选择的渠道。
-- 每条候选任务根据所属 Channel 的剩余容量、Time interval、美国工作窗口和同一客户每日渠道限制，寻找从 Preferred Start Date 开始的最早可用分钟槽。
-- 同一 Follow-up Client 默认在同一工作日只安排 1 个渠道任务；计算时包含该客户当天已经存在且 Task Status 不为 Cancelled 的任务。
-- 如果目标日期已经安排了该客户的一个渠道，即使其他渠道仍有容量，剩余候选任务也必须自动顺延到下一个工作日。
-- 选择几个渠道，默认就至少分布在几个工作日；选择 5 个渠道时默认分布在至少 5 个工作日。
-- 该限制按照客户维度计算，不因联系人或 Owner 不同而重新计算。
+- 每条候选任务根据所属 Channel 的剩余容量、Time interval、美国工作窗口，以及（仅 Automated）同一次排班内的客户每日渠道限制，寻找从 Preferred Start Date 开始的最早可用分钟槽。
+- **Manual（人工 Send，含关 Send now 的排班）**：完全忽略「客户每日一渠」，只按渠道 Daily Max / Time interval / 工作窗口排。
+- **Automated（OmniReach）**：同一 Follow-up Client 在**同一次** `commitSchedule` 内，默认同一工作日只安排 1 个渠道任务；多渠道在本次排班的多步之间互相错开。不读取该客户历史任务来挡「每天一渠」（历史任务仍占用渠道 Daily Max 与分钟间隔计数）。
+- 因此 OmniReach 选择几个渠道，默认就至少分布在几个工作日；选择 5 个渠道时默认分布在至少 5 个工作日。该限制按客户维度、仅在本次 run 内计算，不因联系人或 Owner 不同而重置。
 
 ### 6.3 Task Priority 规则
 
