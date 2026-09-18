@@ -6,7 +6,9 @@ import {
   nonTestClientFilter,
   ownerPageIdFromQueryParam,
   ownerRelationFilter,
+  parseDateOnlyParam,
   parseTaskStatusScope,
+  scheduledAtRangeFilters,
   taskListFilter,
   taskQueryForViewer,
   taskStatusFilter,
@@ -175,5 +177,40 @@ describe("taskListFilter", () => {
 
   it("filters completed statuses", () => {
     assert.deepEqual(taskListFilter({ statusScope: "completed" }), taskStatusFilter("completed"));
+  });
+
+  it("adds inclusive Scheduled At range for due dates", () => {
+    assert.deepEqual(
+      taskListFilter({ channel: "Phone", statusScope: "all", dueFrom: "2026-09-18", dueTo: "2026-09-20" }),
+      {
+        and: [
+          { property: "Channel", select: { equals: "Phone" } },
+          { property: "Scheduled At", date: { on_or_after: "2026-09-18" } },
+          { property: "Scheduled At", date: { before: "2026-09-21" } },
+        ],
+      },
+    );
+  });
+});
+
+describe("scheduledAtRangeFilters", () => {
+  it("returns nothing without valid dates", () => {
+    assert.deepEqual(scheduledAtRangeFilters(), []);
+    assert.deepEqual(scheduledAtRangeFilters("nope", "also-nope"), []);
+    assert.equal(parseDateOnlyParam("2026-13-40"), undefined);
+  });
+
+  it("swaps inverted ranges and uses next-day exclusive end", () => {
+    assert.deepEqual(scheduledAtRangeFilters("2026-09-20", "2026-09-18"), [
+      { property: "Scheduled At", date: { on_or_after: "2026-09-18" } },
+      { property: "Scheduled At", date: { before: "2026-09-21" } },
+    ]);
+  });
+
+  it("filters a single day inclusively", () => {
+    assert.deepEqual(scheduledAtRangeFilters("2026-09-18", "2026-09-18"), [
+      { property: "Scheduled At", date: { on_or_after: "2026-09-18" } },
+      { property: "Scheduled At", date: { before: "2026-09-19" } },
+    ]);
   });
 });

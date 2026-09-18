@@ -3,9 +3,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { enUS } from "date-fns/locale";
 import {
-  ArrowLeft, Check, CheckCircle2, MessageCircle, Phone, Search, Send, UserRound,
+  ArrowLeft, CalendarClock, Check, CheckCircle2, MessageCircle, Phone, Search, Send, UserRound,
 } from "lucide-react";
+import { type DateRange } from "react-day-picker";
 import { toast } from "sonner";
 import type { BrandActivity, BrandContact, BrandDetail, BrandTask, CurrentCpOption } from "@/lib/brand-list";
 import { listApplicableCps } from "@/lib/brand-list";
@@ -16,12 +18,12 @@ import { useWorkspace } from "./workspace-store";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Calendar } from "@/components/ui/calendar";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
-import { Textarea } from "@/components/ui/textarea";
 import { DEFAULT_TASK_PAGE_SIZE } from "@/lib/notion/owner-filter";
 import { ChangeCPDialog, LaunchBombDialog, LaunchOmniReachButton, ReplyDialog, ACTIVE_OMNIREACH_BLOCK_REASON } from "./workspace-customer";
 import { InteractionFeed } from "./interaction-feed";
@@ -124,6 +126,48 @@ const isDue = (task: UnifiedTask, now: string) => {
   return dateOnly(task.dueAt) <= dateOnly(now);
 };
 
+function parseDateOnly(value: string): Date | undefined {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
+function formatDateOnly(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatDateOnlyLabel(value: string) {
+  const date = parseDateOnly(value);
+  if (!date) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+}
+
+function dueDateRangeLabel(from: string, to: string) {
+  if (from && to && from !== to) return `${formatDateOnlyLabel(from)} – ${formatDateOnlyLabel(to)}`;
+  if (from) return formatDateOnlyLabel(from) || "Due date";
+  if (to) return `Until ${formatDateOnlyLabel(to)}`;
+  return "Due date";
+}
+
+function matchesDueRange(task: UnifiedTask, from: string, to: string) {
+  if (!from && !to) return true;
+  const day = dateOnly(task.dueAt);
+  if (!day) return false;
+  const start = from && to && from > to ? to : from;
+  const end = from && to && from > to ? from : to;
+  if (start && day < start) return false;
+  if (end && day > end) return false;
+  return true;
+}
+
 /** Caller ReplyTask is brand-scoped: keep the first (already sorted) Phone row per brand. */
 function dedupeCallerTasksByBrand(tasks: UnifiedTask[]): UnifiedTask[] {
   const seen = new Set<string>();
@@ -144,7 +188,15 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
   const [type, setType] = useState<TaskType | "All">(state.currentRole === "Caller" ? "Call" : "All");
   const [assignee, setAssignee] = useState("all");
   const [status, setStatus] = useState<"Open" | "Completed" | "All">("Open");
+  const [dueFrom, setDueFrom] = useState("");
+  const [dueTo, setDueTo] = useState("");
   const [query, setQuery] = useState("");
+  const isCaller = state.currentRole === "Caller";
+  const hasDueDateFilter = Boolean(dueFrom || dueTo);
+  const dueDateSelected: DateRange | undefined =
+    dueFrom || dueTo
+      ? { from: parseDateOnly(dueFrom), to: parseDateOnly(dueTo || dueFrom) }
+      : undefined;
   const [remoteTasks, setRemoteTasks] = useState<UnifiedTask[] | null>(null);
   const [remoteLoading, setRemoteLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -155,6 +207,8 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
   useEffect(() => {
     setType(state.currentRole === "Caller" ? "Call" : "All");
     setAssignee("all");
+    setDueFrom("");
+    setDueTo("");
   }, [state.currentRole]);
 
   const taskListQuery = useMemo(() => {
@@ -164,9 +218,11 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
       "status",
       status === "Completed" ? "completed" : status === "All" ? "all" : "open",
     );
+    if (isCaller && dueFrom) params.set("dueFrom", dueFrom);
+    if (isCaller && dueTo) params.set("dueTo", dueTo);
     params.set("limit", String(DEFAULT_TASK_PAGE_SIZE));
     return params.toString();
-  }, [manager, assignee, status]);
+  }, [manager, assignee, status, isCaller, dueFrom, dueTo]);
 
   useEffect(() => {
     let cancelled = false;
@@ -252,7 +308,8 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
       const matchesAssignee = assignee === "all" || (assignee === "unassigned" ? !task.assigneeId : task.assigneeId === assignee);
       const matchesStatus = status === "All" || status === "Open" && !isDone(task) || status === "Completed" && isDone(task);
       const matchesReplyOpen = !(task.remote && status === "Open" && task.type === "Reply" && task.status !== "Needs Reply" && task.status !== "Waiting for Reply");
-      return matchesQuery && matchesScope && matchesType && matchesAssignee && matchesStatus && matchesReplyOpen;
+      const matchesDue = !isCaller || matchesDueRange(task, dueFrom, dueTo);
+      return matchesQuery && matchesScope && matchesType && matchesAssignee && matchesStatus && matchesReplyOpen && matchesDue;
     }).sort((a, b) => {
       if (isDone(a) !== isDone(b)) return isDone(a) ? 1 : -1;
       const aDue = isDue(a, state.simulatedDate);
@@ -262,8 +319,8 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
       return a.dueAt.localeCompare(b.dueAt);
     });
     // Caller queue is brand-level: one list row per Follow-up Client.
-    return state.currentRole === "Caller" ? dedupeCallerTasksByBrand(filtered) : filtered;
-  }, [allTasks, state, query, type, assignee, status]);
+    return isCaller ? dedupeCallerTasksByBrand(filtered) : filtered;
+  }, [allTasks, state, query, type, assignee, status, isCaller, dueFrom, dueTo]);
 
   const selectedFromList = selectedId ? allTasks.find(task => task.id === selectedId) : undefined;
   const selectedTask = selectedFromList || detailTask || undefined;
@@ -295,6 +352,48 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
       <div className="relative min-w-56 flex-1 lg:max-w-sm"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400"/><Input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search brand or task…" className="pl-9"/></div>
       {state.currentRole !== "Caller" && <Select value={type} onValueChange={value => setType(value as TaskType | "All")}><SelectTrigger className="w-full lg:w-40"><SelectValue/></SelectTrigger><SelectContent>{["All", "Call", "Reply"].map(value => <SelectItem key={value} value={value}>{value === "All" ? "All types" : value}</SelectItem>)}</SelectContent></Select>}
       {manager && <Select value={assignee} onValueChange={setAssignee}><SelectTrigger className="w-full lg:w-44"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">All AccountManagers</SelectItem><SelectItem value="unassigned">Unassigned</SelectItem>{state.users.map(user => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}</SelectContent></Select>}
+      {isCaller && <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto">
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              className={`w-full justify-start font-normal lg:w-[16.5rem] ${hasDueDateFilter ? "" : "text-muted-foreground"}`}
+            >
+              <CalendarClock className="size-4 text-slate-400"/>
+              {dueDateRangeLabel(dueFrom, dueTo)}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-auto p-0" lang="en">
+            <Calendar
+              mode="range"
+              locale={enUS}
+              numberOfMonths={1}
+              selected={dueDateSelected}
+              defaultMonth={dueDateSelected?.from || dueDateSelected?.to}
+              onSelect={(range) => {
+                const from = range?.from ? formatDateOnly(range.from) : "";
+                const to = range?.to ? formatDateOnly(range.to) : from;
+                setDueFrom(from);
+                setDueTo(to);
+              }}
+              formatters={{
+                formatCaption: (date) =>
+                  new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" }).format(date),
+                formatWeekdayName: (date) =>
+                  new Intl.DateTimeFormat("en-US", { weekday: "short" }).format(date),
+                formatMonthDropdown: (date) =>
+                  new Intl.DateTimeFormat("en-US", { month: "short" }).format(date),
+              }}
+            />
+          </PopoverContent>
+        </Popover>
+        {hasDueDateFilter ? (
+          <Button type="button" variant="ghost" size="sm" className="text-slate-500" onClick={() => { setDueFrom(""); setDueTo(""); }}>
+            Clear
+          </Button>
+        ) : null}
+      </div>}
       <Select value={status} onValueChange={value => setStatus(value as typeof status)}><SelectTrigger className="w-full lg:w-36"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="Open">Open</SelectItem><SelectItem value="Completed">Completed</SelectItem><SelectItem value="All">All statuses</SelectItem></SelectContent></Select>
     </div>
 
@@ -441,8 +540,6 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
   const [sendMessage, setSendMessage] = useState(false);
   const [changeCP, setChangeCP] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [submitReviewOpen, setSubmitReviewOpen] = useState(false);
-  const [reviewNote, setReviewNote] = useState("");
   const [submittingReview, setSubmittingReview] = useState(false);
   const [owners, setOwners] = useState<Array<{id:string;name:string}>>([]);
   const [liveTask, setLiveTask] = useState(task);
@@ -674,10 +771,6 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
   const hasConnectedCall = currentRoundCalls.some((item) => item.callResult === "Connected");
   const awaitingAccountManagerReview = liveTask.callReviewStatus === "Awaiting Review";
   const recalledByAccountManager = liveTask.callReviewStatus === "Unqualified";
-  const recallReason = recalledByAccountManager
-    ? [...reviewHistory].reverse().find((round) => round.status === "Unqualified")?.reason
-      || liveTask.notes?.split("\n").find((line) => line.startsWith("Unqualified reason:"))?.replace("Unqualified reason:", "").trim()
-    : null;
   const canSubmitCallerReview = callerPhoneOnly
     && !!task.remote
     && liveTask.type === "Call"
@@ -685,20 +778,18 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
     && liveTask.callReviewStatus !== "Qualified"
     && (recalledByAccountManager || !isDone(liveTask))
     && hasConnectedCall;
-  const submitCallerReview = async () => {
+  const submitCallerReview = async (callId: string) => {
     if (!task.remote || !canSubmitCallerReview) return;
     setSubmittingReview(true);
     try {
       const response = await fetch(`/api/tasks/${task.id}/submit-review`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ note: reviewNote.trim() || undefined }),
+        body: JSON.stringify({ callId }),
       });
       const payload = await response.json() as TaskPayload;
       if (!response.ok) throw new Error(payload.error || "Unable to submit call review");
       applyTaskPayload(payload);
-      setSubmitReviewOpen(false);
-      setReviewNote("");
       toast.success("Submitted for AccountManager review");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to submit call review");
@@ -815,34 +906,12 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
               callerReviewTaskId={liveTask.id}
               callerReviewHasConnectedCall={hasConnectedCall}
               callerReviewCanSubmit={canSubmitCallerReview}
-              callerReviewReason={recallReason}
-              onSubmitCallerReview={() => setSubmitReviewOpen(true)}
+              onSubmitCallerReview={(callId) => void submitCallerReview(callId)}
+              submittingCallerReview={submittingReview}
               onRefreshQuo={task.remote ? refreshQuo : undefined}
               quoRefreshingCallId={quoRefreshingCallId}
             />
             </div>
-            <Dialog open={submitReviewOpen} onOpenChange={(open) => { if (!submittingReview) setSubmitReviewOpen(open); }}>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Submit call for review</DialogTitle>
-                  <DialogDescription>
-                    This will stop further dialing for this task until an AccountManager reviews it.
-                  </DialogDescription>
-                </DialogHeader>
-                <Textarea
-                  value={reviewNote}
-                  onChange={(event) => setReviewNote(event.target.value)}
-                  placeholder="Optional context for the AccountManager…"
-                  className="min-h-24 resize-none"
-                />
-                <DialogFooter>
-                  <Button variant="outline" disabled={submittingReview} onClick={() => setSubmitReviewOpen(false)}>Keep calling</Button>
-                  <Button disabled={submittingReview} onClick={() => void submitCallerReview()}>
-                    {submittingReview ? "Submitting…" : "Submit for review"}
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
           </div>
         ) : (
           <>

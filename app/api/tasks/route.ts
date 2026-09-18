@@ -21,13 +21,15 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const ownerParam = url.searchParams.get("owner");
     const statusParam = url.searchParams.get("status");
+    const dueFrom = url.searchParams.get("dueFrom");
+    const dueTo = url.searchParams.get("dueTo");
     const cursor = url.searchParams.get("cursor");
     const limitRaw = Number(url.searchParams.get("limit") || DEFAULT_TASK_PAGE_SIZE);
     const pageSize = Number.isFinite(limitRaw) ? limitRaw : DEFAULT_TASK_PAGE_SIZE;
     const onlyTest = isTestOnlyViewer(viewer);
 
     const listed = await listFollowupTasksForViewerPage(
-      taskQueryForViewer(viewer, ownerParam, statusParam),
+      { ...taskQueryForViewer(viewer, ownerParam, statusParam), dueFrom, dueTo },
       { cursor, pageSize, includeTest: canAccessTestBrands(viewer), onlyTest },
     );
     // List path: annotate open non-Phone only; skip Notion backfill (detail/inbound handle writes).

@@ -31,17 +31,21 @@ export async function POST(request: Request, { params }: Params) {
     // Lightweight Connected check: only this task's linked conversations.
     // (Previously loaded the full brand Caller payload twice — very slow on Notion.)
     const phoneActivities = await listConversationsByIds(task.conversationIds);
-    const hasConnectedCall = phoneActivities.some(
-      (activity) =>
-        activity.channel === "Phone"
-        && activity.callResult === "Connected"
-        && (!activity.taskId || sameNotionId(activity.taskId, id)),
-    );
-    if (!hasConnectedCall) {
+    const body = (await request.json().catch(() => ({}))) as { note?: string; callId?: string };
+    const selectedCallId = body.callId?.trim();
+    if (!selectedCallId) {
+      throw new CallReviewError("Select one call to submit for review", 400);
+    }
+    const selectedCall = phoneActivities.find((activity) => activity.quo?.callId === selectedCallId);
+    if (
+      !selectedCall
+      || (selectedCall.taskId && !sameNotionId(selectedCall.taskId, id))
+    ) {
+      throw new CallReviewError("The selected call is not part of this Phone task", 400);
+    }
+    if (selectedCall.callResult !== "Connected") {
       throw new CallReviewError("A connected call is required before submitting for review", 409);
     }
-
-    const body = (await request.json().catch(() => ({}))) as { note?: string };
     const callIds = [...new Set(
       phoneActivities.map((item) => item.quo?.callId).filter((id): id is string => !!id),
     )];
@@ -51,6 +55,7 @@ export async function POST(request: Request, { params }: Params) {
       callerName: viewer.name,
       note: body.note,
       callIds,
+      selectedCallId,
     });
 
     return Response.json(await buildCallerTaskDetailPayload(id));

@@ -231,10 +231,6 @@ export function reviewRoundsForTask(history: CallReviewRound[]): {
         status: "In Progress",
         isCurrent: true,
         recalled: true,
-        reviewedAt: last.reviewedAt,
-        reviewerName: last.reviewerName,
-        reason: last.reason,
-        note: last.note,
         callIds: [],
       },
       history: [...history].reverse().map((item) => toDisplay(item, false)),
@@ -332,7 +328,11 @@ export function partitionRoundCalls<T>(
     }
   }
 
-  for (const item of leftover) assign(view.current.round, item);
+  for (const item of leftover) {
+    // A submitted/reviewed round should only show the call the Caller picked.
+    if (view.current.status !== "In Progress" && view.current.callIds.length) break;
+    assign(view.current.round, item);
+  }
 
   return {
     current: byRound.get(view.current.round) || [],

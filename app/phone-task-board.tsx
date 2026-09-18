@@ -17,6 +17,7 @@ import { ChannelIcon } from "./channel-icon";
 import { QuoCallPanel } from "./quo-call-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 
 export type PhoneBoardTask = {
@@ -123,17 +124,13 @@ function quoCallId(item: Interaction) {
 
 export function UnqualifiedRecallForm({
   reason,
-  note,
   onReason,
-  onNote,
   onCancel,
   onConfirm,
   confirming,
 }: {
   reason: string;
-  note: string;
   onReason: (value: string) => void;
-  onNote: (value: string) => void;
   onCancel: () => void;
   onConfirm: () => void;
   confirming?: boolean;
@@ -146,17 +143,6 @@ export function UnqualifiedRecallForm({
         onChange={(event) => onReason(event.target.value)}
         className="min-h-20 resize-none bg-white"
         placeholder="Give Caller a clear reason to retry…"
-      />
-    </div>
-    <div className="space-y-1.5">
-      <label className="text-xs font-semibold text-slate-700">
-        AccountManager note <span className="font-normal text-slate-400">optional</span>
-      </label>
-      <Textarea
-        value={note}
-        onChange={(event) => onNote(event.target.value)}
-        className="min-h-16 resize-none bg-white"
-        placeholder="Optional guidance for the next attempt…"
       />
     </div>
     <div className="flex flex-wrap justify-end gap-2">
@@ -185,8 +171,8 @@ export function PhoneTaskBoard({
   callerReviewTaskId,
   callerReviewHasConnectedCall = false,
   callerReviewCanSubmit = false,
-  callerReviewReason,
   onSubmitCallerReview,
+  submittingCallerReview = false,
   showDial = true,
 }: {
   phoneTasks: PhoneBoardTask[];
@@ -205,8 +191,8 @@ export function PhoneTaskBoard({
   callerReviewTaskId?: string | null;
   callerReviewHasConnectedCall?: boolean;
   callerReviewCanSubmit?: boolean;
-  callerReviewReason?: string | null;
-  onSubmitCallerReview?: () => void;
+  onSubmitCallerReview?: (callId: string) => void | Promise<void>;
+  submittingCallerReview?: boolean;
   showDial?: boolean;
 }) {
   const [reviewingTaskId, setReviewingTaskId] = useState<string | null>(null);
@@ -272,8 +258,8 @@ export function PhoneTaskBoard({
         callerReviewTaskId={callerReviewTaskId}
         callerReviewHasConnectedCall={callerReviewHasConnectedCall}
         callerReviewCanSubmit={callerReviewCanSubmit}
-        callerReviewReason={callerReviewReason}
         onSubmitCallerReview={onSubmitCallerReview}
+        submittingCallerReview={submittingCallerReview}
         onFocusTask={active || !onSelectTask ? undefined : () => onSelectTask(item.id)}
         onReview={(status, reviewReason, reviewNote) => void handleReview(item.id, status, reviewReason, reviewNote)}
         onCallOpening={() => {
@@ -319,36 +305,50 @@ function CallResultList({
   emptyLabel,
   onRefreshQuo,
   quoRefreshingCallId,
+  selectable = false,
+  selectedCallId,
+  onSelectCall,
 }: {
   items: Interaction[];
   emptyLabel: string;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
+  selectable?: boolean;
+  selectedCallId?: string;
+  onSelectCall?: (callId: string) => void;
 }) {
   if (!items.length) {
     return <p className="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-5 text-sm text-slate-500">{emptyLabel}</p>;
   }
-  return <div className="space-y-3">
-    {items.map((item) => {
-      const callId = item.quo?.callId;
-      const canRefresh = !!callId && !callId.startsWith("ACsim") && !!onRefreshQuo;
-      return <article key={item.id} className="rounded-xl border border-slate-200 bg-white p-4">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="secondary" className="text-[10px]">{item.direction || "Outbound"}</Badge>
-            {item.callResult ? <Badge variant="outline" className="text-[10px]">{item.callResult}</Badge> : null}
-          </div>
-          <time dateTime={item.createdAt} className="font-mono text-[11px] text-slate-500">{formatEasternDateTime(item.createdAt)}</time>
+  const cards = items.map((item) => {
+    const callId = item.quo?.callId;
+    const selected = selectable && !!callId && selectedCallId === callId;
+    const card = <article className={`rounded-xl border bg-white p-4 ${selectable && selected ? "border-amber-400 ring-2 ring-amber-200" : "border-slate-200"} ${selectable && callId ? "cursor-pointer" : ""}`}>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {selectable ? <RadioGroupItem value={callId || item.id} disabled={!callId} /> : null}
+          <Badge variant="secondary" className="text-[10px]">{item.direction || "Outbound"}</Badge>
+          {item.callResult ? <Badge variant="outline" className="text-[10px]">{item.callResult}</Badge> : null}
         </div>
-        <QuoCallPanel
-          compact
-          data={item.quo || null}
-          refreshing={quoRefreshingCallId === callId}
-          onRefresh={canRefresh ? () => onRefreshQuo?.(callId!) : undefined}
-        />
-      </article>;
-    })}
-  </div>;
+        <time dateTime={item.createdAt} className="font-mono text-[11px] text-slate-500">{formatEasternDateTime(item.createdAt)}</time>
+      </div>
+      <QuoCallPanel
+        compact
+        data={item.quo || null}
+        refreshing={quoRefreshingCallId === callId}
+        onRefresh={canRefreshQuo(callId, onRefreshQuo) ? () => onRefreshQuo?.(callId!) : undefined}
+      />
+    </article>;
+    return selectable ? <label key={item.id} className="block">{card}</label> : <div key={item.id}>{card}</div>;
+  });
+  if (!selectable) return <div className="space-y-3">{cards}</div>;
+  return <RadioGroup className="gap-3" value={selectedCallId || ""} onValueChange={(value) => onSelectCall?.(value)}>
+    {cards}
+  </RadioGroup>;
+}
+
+function canRefreshQuo(callId: string | undefined, onRefreshQuo?: (callId: string) => void) {
+  return !!callId && !callId.startsWith("ACsim") && !!onRefreshQuo;
 }
 
 function ReviewDecision({ round }: { round: ReviewRoundDisplay }) {
@@ -365,10 +365,6 @@ function ReviewDecision({ round }: { round: ReviewRoundDisplay }) {
         {round.reason ? <div className="mt-3">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-rose-700">Reason</div>
           <p className="mt-1 text-sm leading-6 text-rose-950">{round.reason}</p>
-        </div> : null}
-        {round.note ? <div className="mt-3">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-rose-700">AccountManager note</div>
-          <p className="mt-1 text-sm leading-6 text-rose-950">{round.note}</p>
         </div> : null}
         {reviewedBy ? <p className="mt-3 text-[11px] text-rose-700">{reviewedBy}</p> : null}
       </div>
@@ -396,6 +392,9 @@ function ReviewRoundCard({
   hint,
   onRefreshQuo,
   quoRefreshingCallId,
+  selectableCalls = false,
+  selectedCallId,
+  onSelectCall,
   children,
 }: {
   round: ReviewRoundDisplay;
@@ -405,23 +404,27 @@ function ReviewRoundCard({
   hint?: ReactNode;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
+  selectableCalls?: boolean;
+  selectedCallId?: string;
+  onSelectCall?: (callId: string) => void;
   children?: ReactNode;
 }) {
   const inProgress = round.status === "In Progress";
-  const showCalls = inProgress ? calls.length > 0 : true;
+  if (current && !calls.length) return null;
+  const showCalls = !inProgress || calls.length > 0;
   return <article className={`rounded-xl border bg-white ${current ? "border-blue-200" : "border-slate-200"}`}>
-    <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className={`text-xs font-semibold tracking-wide ${current ? "text-blue-700" : "text-slate-700"}`}>
-          {current ? `Review round ${round.round}` : `Round ${round.round}`}
-        </span>
-        {current ? <Badge className="bg-violet-600 text-[10px] text-white hover:bg-violet-600">Current</Badge> : null}
-        <ReviewBadge status={round.status}/>
-        {!current && round.reviewedAt ? <span className="text-[11px] text-slate-400">{formatReviewDay(round.reviewedAt)}</span> : null}
+    {current ? null : (
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-semibold tracking-wide text-slate-700">
+            Round {round.round}
+          </span>
+          <ReviewBadge status={round.status}/>
+          {round.reviewedAt ? <span className="text-[11px] text-slate-400">{formatReviewDay(round.reviewedAt)}</span> : null}
+        </div>
       </div>
-      {round.recalled ? <span className="text-[11px] font-medium text-rose-700">Recalled for another attempt</span> : null}
-    </div>
-    <div className="space-y-4 border-t border-slate-100 px-4 py-4">
+    )}
+    <div className={`space-y-4 px-4 py-4 ${current ? "" : "border-t border-slate-100"}`}>
       {hint}
       {showCalls ? (
         <div className="space-y-3">
@@ -436,10 +439,13 @@ function ReviewRoundCard({
             emptyLabel={emptyLabel}
             onRefreshQuo={onRefreshQuo}
             quoRefreshingCallId={quoRefreshingCallId}
+            selectable={selectableCalls}
+            selectedCallId={selectedCallId}
+            onSelectCall={onSelectCall}
           />
         </div>
       ) : null}
-      {!inProgress || round.recalled ? <ReviewDecision round={round}/> : null}
+      {!inProgress ? <ReviewDecision round={round}/> : null}
       {children}
     </div>
   </article>;
@@ -464,8 +470,8 @@ function PhoneTaskBlock({
   callerReviewTaskId,
   callerReviewHasConnectedCall,
   callerReviewCanSubmit,
-  callerReviewReason,
   onSubmitCallerReview,
+  submittingCallerReview = false,
 }: {
   task: PhoneBoardTask;
   contact?: Contact;
@@ -485,31 +491,34 @@ function PhoneTaskBlock({
   callerReviewTaskId?: string | null;
   callerReviewHasConnectedCall: boolean;
   callerReviewCanSubmit: boolean;
-  callerReviewReason?: string | null;
-  onSubmitCallerReview?: () => void;
+  onSubmitCallerReview?: (callId: string) => void | Promise<void>;
+  submittingCallerReview?: boolean;
 }) {
   const [scriptOpen, setScriptOpen] = useState(active || !isDone(task.status));
   const [historyOpen, setHistoryOpen] = useState(false);
   const [recallOpen, setRecallOpen] = useState(false);
   const [recallReason, setRecallReason] = useState("");
-  const [recallNote, setRecallNote] = useState("");
+  const [selectingCall, setSelectingCall] = useState(false);
+  const [selectedCallId, setSelectedCallId] = useState("");
   const phone = (devCallPhoneOnClient() || contact?.phone || task.contactPhone || "").trim();
   const actionState = dialState(task.status, reviewStatus);
   const rounds = reviewRoundsForTask(task.callReviewHistory || []);
   const partitioned = partitionRoundCalls(quoResults, rounds, quoCallId, (item) => item.createdAt);
   const historyCalls = partitioned.history;
   const currentCalls = partitioned.current;
-  const currentRound = {
-    ...rounds.current,
-    reason: rounds.current.reason || (rounds.current.recalled ? callerReviewReason || undefined : undefined),
-  };
+  const currentRound = rounds.current;
   const showReviewActions = canReviewCalls && reviewStatus === "Awaiting Review";
   const showCallerReview = callerReviewTaskId === task.id;
   const currentHasConnectedCall = currentCalls.some((item) => item.callResult === "Connected") || (
     !task.callReviewHistory?.length && callerReviewHasConnectedCall && currentRound.round === 1 && !currentRound.recalled
   );
   const canSubmitThisRound = showCallerReview && callerReviewCanSubmit && currentHasConnectedCall && currentRound.status === "In Progress";
-  const callerHint = currentRound.status === "Awaiting Review"
+  const pickingCall = selectingCall && canSubmitThisRound;
+  const selectedCall = currentCalls.find((item) => item.quo?.callId === selectedCallId);
+  const canConfirmSelection = selectedCall?.callResult === "Connected";
+  const callerHint = pickingCall
+    ? "Select one connected call to send to AccountManager."
+    : currentRound.status === "Awaiting Review"
     ? "AccountManager will decide whether this task is Qualified."
     : currentRound.recalled && !currentCalls.length
       ? "Call again for this round, then submit it for review."
@@ -552,28 +561,42 @@ function PhoneTaskBlock({
       </div>}
     </div>
 
+    {currentCalls.length ? (
     <div className="mt-5">
       <ReviewRoundCard
         current
         round={currentRound}
         calls={currentCalls}
         emptyLabel={currentRound.recalled ? "No new Quo call for this round yet." : "No Quo call has been linked to this task yet."}
-        hint={showCallerReview && currentRound.status !== "Qualified" && callerHint !== "Recalled for another attempt" ? <p className="text-xs leading-5 text-slate-600">{callerHint}</p> : null}
+        hint={showCallerReview && currentRound.status !== "Qualified" ? <p className="text-xs leading-5 text-slate-600">{callerHint}</p> : null}
         onRefreshQuo={onRefreshQuo}
         quoRefreshingCallId={quoRefreshingCallId}
+        selectableCalls={pickingCall}
+        selectedCallId={selectedCallId}
+        onSelectCall={setSelectedCallId}
       >
-        {canSubmitThisRound ? (
-          <Button size="sm" className="bg-amber-500 text-white hover:bg-amber-600" onClick={onSubmitCallerReview}>Submit for review</Button>
+        {pickingCall ? (
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button size="sm" variant="ghost" disabled={submittingCallerReview} onClick={() => { setSelectingCall(false); setSelectedCallId(""); }}>Cancel</Button>
+            <Button
+              size="sm"
+              className="bg-amber-500 text-white hover:bg-amber-600"
+              disabled={submittingCallerReview || !canConfirmSelection}
+              onClick={() => { if (selectedCallId && canConfirmSelection) void Promise.resolve(onSubmitCallerReview?.(selectedCallId)); }}
+            >
+              {submittingCallerReview ? "Submitting…" : "Confirm selection"}
+            </Button>
+          </div>
+        ) : canSubmitThisRound ? (
+          <Button size="sm" className="bg-amber-500 text-white hover:bg-amber-600" onClick={() => { setSelectingCall(true); setSelectedCallId(""); }}>Submit for review</Button>
         ) : null}
         {showReviewActions ? recallOpen ? (
           <UnqualifiedRecallForm
             reason={recallReason}
-            note={recallNote}
             onReason={setRecallReason}
-            onNote={setRecallNote}
             confirming={reviewing}
-            onCancel={() => { setRecallOpen(false); setRecallReason(""); setRecallNote(""); }}
-            onConfirm={() => onReview("Unqualified", recallReason.trim(), recallNote.trim() || undefined)}
+            onCancel={() => { setRecallOpen(false); setRecallReason(""); }}
+            onConfirm={() => onReview("Unqualified", recallReason.trim())}
           />
         ) : (
           <div className="flex flex-wrap gap-2">
@@ -587,6 +610,7 @@ function PhoneTaskBlock({
         ) : null}
       </ReviewRoundCard>
     </div>
+    ) : null}
 
     {historyCalls.length ? (
       <div className="mt-4 rounded-xl border border-slate-200 bg-white">
