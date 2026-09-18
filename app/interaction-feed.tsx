@@ -168,8 +168,8 @@ export function InteractionFeed({
   callerReviewTaskId,
   callerReviewHasConnectedCall = false,
   callerReviewCanSubmit = false,
-  callerReviewReason,
   onSubmitCallerReview,
+  submittingCallerReview = false,
   scriptsLoading = false,
 }: {
   interactions: Interaction[];
@@ -212,8 +212,8 @@ export function InteractionFeed({
   callerReviewTaskId?: string | null;
   callerReviewHasConnectedCall?: boolean;
   callerReviewCanSubmit?: boolean;
-  callerReviewReason?: string | null;
-  onSubmitCallerReview?: () => void;
+  onSubmitCallerReview?: (callId: string) => void | Promise<void>;
+  submittingCallerReview?: boolean;
   scriptsLoading?: boolean;
 }) {
   const { state } = useWorkspace();
@@ -377,8 +377,8 @@ export function InteractionFeed({
         callerReviewTaskId={callerReviewTaskId}
         callerReviewHasConnectedCall={callerReviewHasConnectedCall}
         callerReviewCanSubmit={callerReviewCanSubmit}
-        callerReviewReason={callerReviewReason}
         onSubmitCallerReview={onSubmitCallerReview}
+        submittingCallerReview={submittingCallerReview}
         scriptsLoading={scriptsLoading}
       />
     ) : (
@@ -583,7 +583,6 @@ function ThreadMessages({
 }) {
   const [recallTaskId, setRecallTaskId] = useState<string | null>(null);
   const [recallReason, setRecallReason] = useState("");
-  const [recallNote, setRecallNote] = useState("");
   return <div className="space-y-3">
     {thread.map(item => {
       const inbound = item.direction === "Inbound";
@@ -661,7 +660,7 @@ function ThreadMessages({
             onRefresh={canRefresh ? () => onRefreshQuo?.(callId!) : undefined}
           />
         </div> : null}
-        {phoneCall && item.quo && canReviewCalls && callReview?.status === "Awaiting Review" ? recallTaskId === (item.taskId || item.id) ? <div className="mt-4"><UnqualifiedRecallForm reason={recallReason} note={recallNote} onReason={setRecallReason} onNote={setRecallNote} confirming={reviewingTaskId===item.taskId} onCancel={() => { setRecallTaskId(null); setRecallReason(""); setRecallNote(""); }} onConfirm={() => { void Promise.resolve(onReviewCall(item.id, item.taskId, "Unqualified", recallReason.trim(), recallNote.trim() || undefined)).then(() => { setRecallTaskId(null); setRecallReason(""); setRecallNote(""); }); }}/></div> : <div className="mt-4 flex flex-wrap gap-2"><Button size="sm" className="bg-emerald-600 text-white hover:bg-emerald-700" disabled={reviewingTaskId===item.taskId} onClick={() => void onReviewCall(item.id, item.taskId, "Qualified")}><CheckCircle2 className="mr-1.5 size-3.5"/>{reviewingTaskId===item.taskId?"Saving…":"Mark as Qualified"}</Button><Button size="sm" className="bg-rose-600 text-white hover:bg-rose-700" disabled={reviewingTaskId===item.taskId} onClick={() => { setRecallTaskId(item.taskId || item.id); setRecallReason(""); setRecallNote(""); }}><RotateCcw className="mr-1.5 size-3.5"/>Unqualified & Recall</Button></div> : null}
+        {phoneCall && item.quo && canReviewCalls && callReview?.status === "Awaiting Review" ? recallTaskId === (item.taskId || item.id) ? <div className="mt-4"><UnqualifiedRecallForm reason={recallReason} onReason={setRecallReason} confirming={reviewingTaskId===item.taskId} onCancel={() => { setRecallTaskId(null); setRecallReason(""); }} onConfirm={() => { void Promise.resolve(onReviewCall(item.id, item.taskId, "Unqualified", recallReason.trim())).then(() => { setRecallTaskId(null); setRecallReason(""); }); }}/></div> : <div className="mt-4 flex flex-wrap gap-2"><Button size="sm" className="bg-emerald-600 text-white hover:bg-emerald-700" disabled={reviewingTaskId===item.taskId} onClick={() => void onReviewCall(item.id, item.taskId, "Qualified")}><CheckCircle2 className="mr-1.5 size-3.5"/>{reviewingTaskId===item.taskId?"Saving…":"Mark as Qualified"}</Button><Button size="sm" className="bg-rose-600 text-white hover:bg-rose-700" disabled={reviewingTaskId===item.taskId} onClick={() => { setRecallTaskId(item.taskId || item.id); setRecallReason(""); }}><RotateCcw className="mr-1.5 size-3.5"/>Unqualified & Recall</Button></div> : null}
         {inbound && !phoneCall && contact && (
           <BrandReplyBox
             customerId={item.customerId}

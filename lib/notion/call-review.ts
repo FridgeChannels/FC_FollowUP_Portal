@@ -41,6 +41,7 @@ export async function submitCallReview(input: {
   note?: string | null;
   /** Skip re-fetching conversations when the caller already loaded callIds. */
   callIds?: string[];
+  selectedCallId?: string;
 }) {
   const task = await retrieveFollowupTask(input.taskId);
   if (task.channel !== "Phone") {
@@ -61,6 +62,16 @@ export async function submitCallReview(input: {
   const now = new Date().toISOString();
   const allCallIds = input.callIds ?? await callIdsForTask(task);
   const history = withInheritedCallIds(historyFromTask(task), allCallIds);
+  const selectedCallId = input.selectedCallId?.trim();
+  if (!selectedCallId) {
+    throw new CallReviewError("Select one call to submit for review", 400);
+  }
+  if (!allCallIds.includes(selectedCallId)) {
+    throw new CallReviewError("The selected call is not part of this Phone task", 400);
+  }
+  if (history.some((round) => round.callIds.includes(selectedCallId))) {
+    throw new CallReviewError("This call was already submitted in a previous round", 409);
+  }
   const round = nextReviewRound(history);
   const reviewRound: CallReviewRound = {
     id: reviewRoundId(round),
@@ -70,7 +81,7 @@ export async function submitCallReview(input: {
     callerName: input.callerName?.trim() || undefined,
     callerEmail: input.callerEmail?.trim() || undefined,
     callerNote: note || undefined,
-    callIds: unusedCallIds(history, allCallIds),
+    callIds: [selectedCallId],
   };
   const submissionNote = `Caller ${caller} submitted round ${round} for AccountManager review.`;
 

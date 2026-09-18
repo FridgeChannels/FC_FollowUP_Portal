@@ -132,6 +132,42 @@ export function taskStatusFilter(scope: TaskStatusScope = "open") {
   };
 }
 
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+export function parseDateOnlyParam(value?: string | null): string | undefined {
+  const trimmed = value?.trim() || "";
+  if (!DATE_ONLY.test(trimmed)) return undefined;
+  const [year, month, day] = trimmed.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year
+    || date.getUTCMonth() !== month - 1
+    || date.getUTCDate() !== day
+  ) {
+    return undefined;
+  }
+  return trimmed;
+}
+
+function nextDateOnly(value: string) {
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day + 1));
+  return date.toISOString().slice(0, 10);
+}
+
+/** Inclusive YYYY-MM-DD range on Task `Scheduled At` (datetime-safe via next-day exclusive end). */
+export function scheduledAtRangeFilters(from?: string | null, to?: string | null) {
+  const startRaw = parseDateOnlyParam(from);
+  const endRaw = parseDateOnlyParam(to);
+  if (!startRaw && !endRaw) return [];
+  const start = startRaw && endRaw && startRaw > endRaw ? endRaw : startRaw;
+  const end = startRaw && endRaw && startRaw > endRaw ? startRaw : endRaw;
+  const filters: Record<string, unknown>[] = [];
+  if (start) filters.push({ property: "Scheduled At", date: { on_or_after: start } });
+  if (end) filters.push({ property: "Scheduled At", date: { before: nextDateOnly(end) } });
+  return filters;
+}
+
 export type TaskListQuery = {
   ownerPageId?: string | null;
   /** Single channel (e.g. Phone). Ignored when `channels` is set. */
@@ -140,6 +176,10 @@ export type TaskListQuery = {
   channels?: string[];
   /** Defaults to open when omitted. */
   statusScope?: TaskStatusScope;
+  /** Inclusive due-date start (YYYY-MM-DD), filters `Scheduled At`. */
+  dueFrom?: string | null;
+  /** Inclusive due-date end (YYYY-MM-DD), filters `Scheduled At`. */
+  dueTo?: string | null;
 };
 
 export function taskListFilter(query: TaskListQuery = {}) {
@@ -162,6 +202,7 @@ export function taskListFilter(query: TaskListQuery = {}) {
   }
   const status = taskStatusFilter(query.statusScope ?? "open");
   if (status) filters.push(status);
+  filters.push(...scheduledAtRangeFilters(query.dueFrom, query.dueTo));
   if (!filters.length) return undefined;
   if (filters.length === 1) return filters[0];
   return { and: filters };

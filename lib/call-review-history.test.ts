@@ -39,8 +39,7 @@ describe("call review rounds", () => {
     assert.equal(view.current.round, 2);
     assert.equal(view.current.status, "In Progress");
     assert.equal(view.current.recalled, true);
-    assert.equal(view.current.reason, "Need owner");
-    assert.equal(view.current.note, "Ask again");
+    assert.equal(view.current.reason, undefined);
     assert.equal(view.history.length, 1);
     assert.equal(view.history[0].round, 1);
     assert.equal(view.history[0].reason, "Need owner");
@@ -90,7 +89,7 @@ describe("call review rounds", () => {
     assert.deepEqual(partitioned.current.map((item) => item.id), ["call-2"]);
   });
 
-  it("keeps leftover calls on the current round after submit", () => {
+  it("keeps leftover calls off a submitted round so AccountManager only sees the selected call", () => {
     const view = reviewRoundsForTask([
       round({ round: 1, status: "Unqualified", callIds: ["call-1"] }),
       round({ round: 2, status: "Awaiting Review", callIds: ["call-2"] }),
@@ -105,7 +104,8 @@ describe("call review rounds", () => {
       (item) => item.id,
       (item) => item.at,
     );
-    assert.deepEqual(partitioned.current.map((item) => item.id), ["call-2", "call-3"]);
+    assert.deepEqual(partitioned.history[0]?.calls.map((item) => item.id), ["call-1"]);
+    assert.deepEqual(partitioned.current.map((item) => item.id), ["call-2"]);
   });
 
   it("puts legacy recalled calls on the closed round so history cards keep Call results", () => {
