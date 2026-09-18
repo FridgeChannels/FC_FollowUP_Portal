@@ -18,7 +18,7 @@ export async function POST(request: Request, { params }: Params) {
     }
 
     const { id } = await params;
-    const body = (await request.json()) as { status?: CallReviewStatus; reviewReason?: string };
+    const body = (await request.json()) as { status?: CallReviewStatus; reviewReason?: string; reviewNote?: string };
     if (body.status !== "Qualified" && body.status !== "Unqualified") {
       return Response.json({ error: "status must be Qualified or Unqualified" }, { status: 400 });
     }
@@ -38,6 +38,7 @@ export async function POST(request: Request, { params }: Params) {
       reviewerEmail: viewer.email,
       reviewerName: viewer.name,
       reviewReason: body.reviewReason,
+      reviewNote: body.reviewNote,
     });
     return Response.json({ task: updated });
   } catch (error) {

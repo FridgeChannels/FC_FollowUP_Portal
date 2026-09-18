@@ -112,9 +112,6 @@ export async function POST(request: Request, { params }: Params) {
     if (task.status === "Pending" || task.callReviewStatus === "Unqualified") {
       await updateFollowupTask(task.id, {
         status: "In Progress",
-        ...(task.callReviewStatus === "Unqualified"
-          ? { callReviewStatus: null, endedAt: null }
-          : {}),
       });
     }
     return Response.json(await taskPayload(id, litePayloadForViewer(viewer, request)));

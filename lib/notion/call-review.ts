@@ -2,6 +2,16 @@ import { CALL_REVIEW_CALLER_EMAIL, type CallReviewStatus } from "../call-review-
 import { findOwnerByAccount } from "./owners";
 import { retrieveFollowupTask } from "./tasks";
 import { markInboundsReplied, updateFollowupTask } from "./followup-writes";
+import { listConversationsByIds } from "./conversations";
+import {
+  historyFromTask,
+  nextReviewRound,
+  reviewRoundId,
+  unusedCallIds,
+  withInheritedCallIds,
+  writeCallReviewHistory,
+  type CallReviewRound,
+} from "../call-review-history";
 
 export type { CallReviewStatus };
 
@@ -18,6 +28,12 @@ function appendNote(existing: string | null | undefined, line: string) {
   return [existing?.trim() || null, line].filter(Boolean).join("\n");
 }
 
+async function callIdsForTask(task: { conversationIds: string[] }) {
+  if (!task.conversationIds.length) return [];
+  const activities = await listConversationsByIds(task.conversationIds).catch(() => []);
+  return [...new Set(activities.map((item) => item.quo?.callId).filter((id): id is string => !!id))];
+}
+
 export async function submitCallReview(input: {
   taskId: string;
   callerEmail?: string | null;
@@ -28,11 +44,11 @@ export async function submitCallReview(input: {
   if (task.channel !== "Phone") {
     throw new CallReviewError("Review submission is only valid for Phone tasks", 400);
   }
-  if (task.callReviewStatus) {
-    throw new CallReviewError(
-      `This Phone task is already ${task.callReviewStatus === "Awaiting Review" ? "waiting for review" : `marked ${task.callReviewStatus}`}`,
-      409,
-    );
+  if (task.callReviewStatus === "Awaiting Review") {
+    throw new CallReviewError("This Phone task is already waiting for review", 409);
+  }
+  if (task.callReviewStatus === "Qualified") {
+    throw new CallReviewError("This Phone task is already marked Qualified", 409);
   }
   if (task.status === "Cancelled" || task.status === "Failed") {
     throw new CallReviewError("Cancelled or failed Phone tasks cannot be submitted for review", 409);
@@ -41,16 +57,29 @@ export async function submitCallReview(input: {
   const caller = input.callerName?.trim() || input.callerEmail?.trim() || "Caller";
   const note = input.note?.trim();
   const now = new Date().toISOString();
-  const submissionNote = [
-    `Caller ${caller} submitted this call for AccountManager review.`,
-    note ? `Caller note: ${note}` : null,
-  ].filter(Boolean).join("\n");
+  const allCallIds = await callIdsForTask(task);
+  const history = withInheritedCallIds(historyFromTask(task), allCallIds);
+  const round = nextReviewRound(history);
+  const reviewRound: CallReviewRound = {
+    id: reviewRoundId(round),
+    round,
+    status: "Awaiting Review",
+    submittedAt: now,
+    callerName: input.callerName?.trim() || undefined,
+    callerEmail: input.callerEmail?.trim() || undefined,
+    callerNote: note || undefined,
+    callIds: unusedCallIds(history, allCallIds),
+  };
+  const submissionNote = `Caller ${caller} submitted round ${round} for AccountManager review.`;
 
   await updateFollowupTask(task.id, {
     callReviewStatus: "Awaiting Review",
     status: "Completed",
     endedAt: now,
-    notes: appendNote(task.notes, submissionNote),
+    notes: writeCallReviewHistory(
+      appendNote(task.notes, submissionNote),
+      [...history, reviewRound],
+    ),
   });
 
   return retrieveFollowupTask(task.id);
@@ -62,18 +91,54 @@ export async function applyCallReview(input: {
   reviewerEmail?: string | null;
   reviewerName?: string | null;
   reviewReason?: string | null;
+  reviewNote?: string | null;
 }) {
   const task = await retrieveFollowupTask(input.taskId);
   if (task.channel !== "Phone") {
     throw new CallReviewError("Call review is only valid for Phone tasks", 400);
   }
-  if (task.callReviewStatus === "Qualified" || task.callReviewStatus === "Unqualified") {
-    throw new CallReviewError(`This Phone task is already marked ${task.callReviewStatus}`, 409);
+  if (task.callReviewStatus !== "Awaiting Review") {
+    throw new CallReviewError(
+      task.callReviewStatus
+        ? `This Phone task is already marked ${task.callReviewStatus}`
+        : "This Phone task is not waiting for review",
+      409,
+    );
   }
 
   const reviewer = input.reviewerName?.trim() || input.reviewerEmail?.trim() || "Account Manager";
   const now = new Date().toISOString();
   const reviewReason = input.reviewReason?.trim() || "";
+  const reviewNote = input.reviewNote?.trim() || "";
+  const allCallIds = await callIdsForTask(task);
+  const history = withInheritedCallIds(historyFromTask(task), allCallIds);
+  const currentRound = history.at(-1)?.status === "Awaiting Review"
+    ? history.at(-1)!
+    : {
+        id: reviewRoundId(nextReviewRound(history)),
+        round: nextReviewRound(history),
+        status: "Awaiting Review" as const,
+        callIds: unusedCallIds(history, allCallIds),
+      };
+  const reviewedRound: CallReviewRound = {
+    ...currentRound,
+    status: input.status,
+    reviewedAt: now,
+    reviewerName: input.reviewerName?.trim() || undefined,
+    reviewerEmail: input.reviewerEmail?.trim() || undefined,
+    reason: reviewReason || undefined,
+    note: reviewNote || undefined,
+    callIds: currentRound.callIds.length
+      ? currentRound.callIds
+      : unusedCallIds(
+          history.filter((item) => item.id !== currentRound.id),
+          allCallIds,
+        ),
+  };
+  const nextHistory = [
+    ...history.filter((item) => item.id !== currentRound.id),
+    reviewedRound,
+  ];
 
   if (input.status === "Unqualified" && !reviewReason) {
     throw new CallReviewError("An unqualified reason is required before recalling the task", 400);
@@ -84,7 +149,10 @@ export async function applyCallReview(input: {
       callReviewStatus: "Qualified",
       status: "Completed",
       endedAt: now,
-      notes: appendNote(task.notes, `通话已评审为 Qualified（${reviewer}）。`),
+      notes: writeCallReviewHistory(
+        appendNote(task.notes, `AccountManager ${reviewer} marked round ${reviewedRound.round} Qualified.`),
+        nextHistory,
+      ),
     });
   } else {
     const caller = await findOwnerByAccount(CALL_REVIEW_CALLER_EMAIL);
@@ -100,12 +168,12 @@ export async function applyCallReview(input: {
       endedAt: null,
       ownerId: caller.id,
       priority: "P0",
-      notes: appendNote(
-        task.notes,
-        [
-          `通话评审 Unqualified，已召回改派给 ${caller.name}（${reviewer}）。`,
-          `Unqualified reason: ${reviewReason}`,
-        ].join("\n"),
+      notes: writeCallReviewHistory(
+        appendNote(
+          task.notes,
+          `AccountManager ${reviewer} marked round ${reviewedRound.round} Unqualified and recalled the task to ${caller.name}.`,
+        ),
+        nextHistory,
       ),
     });
   }

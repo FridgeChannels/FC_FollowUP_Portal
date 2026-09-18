@@ -29,6 +29,7 @@ import { callScriptFromConversations } from "./phone-task-board";
 import { Status } from "./workspace-pages";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { devCallPhoneOnClient } from "@/lib/quo/dev-call-phone";
+import { partitionRoundCalls, reviewRoundsForTask, type CallReviewRound } from "@/lib/call-review-history";
 import { taskStatusForCallReview, type CallReviewMetadata, type CallReviewStatus } from "@/lib/call-review-metadata";
 import { useSession } from "./use-session";
 
@@ -51,6 +52,7 @@ type UnifiedTask = {
   cp?: Customer["cp"];
   remote?: boolean;
   callReviewStatus?: CallReviewStatus | null;
+  callReviewHistory?: CallReviewRound[];
 };
 
 type TaskPayload = {
@@ -94,6 +96,7 @@ function fromNotionTask(task: BrandTask): UnifiedTask {
     cp: taskCp(task.sourceBombCp),
     remote: true,
     callReviewStatus: task.callReviewStatus || null,
+    callReviewHistory: task.callReviewHistory,
   };
 }
 
@@ -425,7 +428,7 @@ function shouldPollCallTask(input: {
 
   if (Date.now() >= input.quoPollUntil) return false;
   if (input.timeline.some((item) => item.taskId === input.taskId && item.quo)) return false;
-  if (input.callReviewStatus) return false;
+  if (input.callReviewStatus === "Awaiting Review" || input.callReviewStatus === "Qualified") return false;
   if (isClosedTaskStatus(input.status)) return false;
   return true;
 }
@@ -603,11 +606,11 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
   const callTask = liveTask.source === "call" ? state.callTasks.find(call => call.id === liveTask.id) : undefined;
   const taskReview = reviewFromNotion(liveTask);
   const reviewedTask = taskWithCallReview(liveTask, taskReview);
-  const persistCallReview = async (taskId: string, status: CallReviewStatus, reviewReason?: string) => {
+  const persistCallReview = async (taskId: string, status: CallReviewStatus, reviewReason?: string, reviewNote?: string) => {
     const response = await fetch(`/api/tasks/${taskId}/call-review`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status, reviewReason }),
+      body: JSON.stringify({ status, reviewReason, reviewNote }),
     });
     const payload = await response.json() as TaskPayload;
     if (!response.ok) throw new Error(payload.error || "Unable to save call review");
@@ -656,22 +659,30 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
   const callers = state.users.filter(user => user.role === "Caller");
   const callerPhoneOnly = user?.role === "Caller" || state.currentRole === "Caller";
   const canReviewCalls = task.remote && !callerPhoneOnly && can("reply");
-  const hasConnectedCall = timeline.some((item) =>
-    item.taskId === liveTask.id
+  const reviewHistory = liveTask.callReviewHistory || [];
+  const currentRoundCalls = partitionRoundCalls(
+    timeline.filter((item) =>
+      item.taskId === liveTask.id
       && item.channel === "Phone"
-      && item.callResult === "Connected",
-  );
+      && !!item.quo,
+    ),
+    reviewRoundsForTask(reviewHistory),
+    (item) => item.quo?.callId,
+    (item) => item.createdAt,
+  ).current;
+  const hasConnectedCall = currentRoundCalls.some((item) => item.callResult === "Connected");
   const awaitingAccountManagerReview = liveTask.callReviewStatus === "Awaiting Review";
   const recalledByAccountManager = liveTask.callReviewStatus === "Unqualified";
   const recallReason = recalledByAccountManager
-    ? liveTask.notes?.split("\n").find((line) => line.startsWith("Unqualified reason:"))?.replace("Unqualified reason:", "").trim()
+    ? [...reviewHistory].reverse().find((round) => round.status === "Unqualified")?.reason
+      || liveTask.notes?.split("\n").find((line) => line.startsWith("Unqualified reason:"))?.replace("Unqualified reason:", "").trim()
     : null;
   const canSubmitCallerReview = callerPhoneOnly
     && !!task.remote
     && liveTask.type === "Call"
     && !awaitingAccountManagerReview
-    && !liveTask.callReviewStatus
-    && !isDone(liveTask)
+    && liveTask.callReviewStatus !== "Qualified"
+    && (recalledByAccountManager || !isDone(liveTask))
     && hasConnectedCall;
   const submitCallerReview = async () => {
     if (!task.remote || !canSubmitCallerReview) return;
@@ -696,7 +707,18 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
   };
   const reviewTasks = [
     ...(remote?.brand?.tasks || []),
-    ...(liveTask.callReviewStatus || liveTask.type === "Call" ? [{ id: liveTask.id, callReviewStatus: liveTask.callReviewStatus }] : []),
+    ...(liveTask.callReviewStatus || liveTask.type === "Call" ? [{
+      id: liveTask.id,
+      channel: liveTask.type === "Call" ? "Phone" : undefined,
+      title: liveTask.summary,
+      status: liveTask.status,
+      contactId: liveTask.contactId,
+      contactPhone: liveTask.contactPhone,
+      scheduledAt: liveTask.dueAt,
+      callReviewStatus: liveTask.callReviewStatus,
+      callReviewHistory: liveTask.callReviewHistory,
+      remote: true,
+    }] : []),
   ];
   const onCallOpening = () => {
     if (!task.remote) return;
@@ -735,6 +757,7 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
         templateId: item.templateId,
         scheduledAt: item.scheduledAt,
         callReviewStatus: item.callReviewStatus,
+        callReviewHistory: item.callReviewHistory,
         channel: "Phone" as const,
         remote: true,
       }));
@@ -748,6 +771,7 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
       templateId: liveTask.templateId,
       scheduledAt: liveTask.dueAt,
       callReviewStatus: liveTask.callReviewStatus,
+      callReviewHistory: liveTask.callReviewHistory,
       channel: "Phone" as const,
       remote: true,
     };

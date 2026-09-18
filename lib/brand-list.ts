@@ -1,4 +1,5 @@
 import type { QuoCallData } from "./quo/types";
+import type { CallReviewRound } from "./call-review-history";
 
 export const FOLLOW_UP_STATUSES = [
   "Unassigned",
@@ -242,6 +243,7 @@ export type BrandTask = {
   sourceBombName?: string | null;
   sourceBombCp?: string | null;
   callReviewStatus?: "Awaiting Review" | "Qualified" | "Unqualified" | null;
+  callReviewHistory?: CallReviewRound[];
   contactPhone?: string | null;
   inboxStatus?: "Needs Reply" | null;
   preview?: string | null;
