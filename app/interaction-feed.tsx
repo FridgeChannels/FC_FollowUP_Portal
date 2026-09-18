@@ -1,7 +1,7 @@
 "use client";
 
-import { Fragment, useState, type ReactNode } from "react";
-import { Bomb, CheckCircle2, ChevronRight, RotateCcw, UserRound } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { Bomb, CheckCircle2, RotateCcw, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import { callReviewsFromTasks, type CallReviewStatus } from "@/lib/call-review-metadata";
 import type { BrandTask } from "@/lib/brand-list";
@@ -269,23 +269,19 @@ export function InteractionFeed({
 
   return <div className={maxHeight ? `${maxHeight} overflow-y-auto` : undefined}>
     <div className="px-5 py-4">
-      <div className="flex items-center">{visibleCps.map((cp, index) => {
+      <div className="grid grid-cols-3 gap-2">{visibleCps.map((cp, index) => {
         const current = cp === displayCurrentCp;
         const completed = index < currentIndex;
         const selected = cp === selectedCp;
         const selectable = index <= currentIndex;
-        const reached = index < currentIndex;
         const goal = cpGoals?.[cp] || state.cps.find(item => item.code === cp)?.goal;
-        return <Fragment key={cp}>
-          <button type="button" disabled={!selectable} aria-pressed={selected} onClick={() => selectable && setSelectedCp(cp)} className={`min-w-0 flex-1 rounded-xl px-3 py-2 text-left transition ${selected ? "bg-violet-50" : selectable ? "hover:bg-slate-50" : "cursor-not-allowed opacity-55"}`}>
+        return <button key={cp} type="button" disabled={!selectable} aria-pressed={selected} onClick={() => selectable && setSelectedCp(cp)} className={`min-w-0 rounded-xl px-3 py-2 text-left transition ${current ? "bg-violet-600 shadow-[0_8px_20px_rgb(124_58_237/25%)]" : selected ? "bg-violet-50 ring-1 ring-violet-200" : selectable ? "hover:bg-slate-50" : "cursor-not-allowed opacity-55"}`}>
             <div className="flex min-w-0 items-baseline gap-2">
-              <span className={`shrink-0 text-xs font-bold ${selected ? "text-violet-700" : completed ? "text-emerald-700" : "text-slate-400"}`}>{cp}</span>
-              {goal && <span className={`truncate text-xs font-semibold ${selected ? "text-slate-950" : "text-slate-500"}`}>{goal}</span>}
+              <span className={`shrink-0 text-xs font-bold ${current ? "text-white" : selected ? "text-violet-700" : completed ? "text-emerald-700" : "text-slate-400"}`}>{cp}</span>
+              {goal && <span className={`min-w-0 truncate text-xs font-semibold ${current ? "text-white" : selected ? "text-slate-950" : "text-slate-500"}`}>{goal}</span>}
             </div>
-            <div className="mt-0.5 truncate text-[10px] text-slate-500">{current ? "Current" : completed ? "Completed" : "Upcoming"}</div>
-          </button>
-          {index < visibleCps.length - 1 && <span className="grid w-6 shrink-0 place-items-center" aria-hidden><ChevronRight className={`size-4 ${reached ? "text-emerald-500" : current ? "text-violet-400" : "text-slate-300"}`}/></span>}
-        </Fragment>;
+            <div className={`mt-0.5 truncate text-[10px] ${current ? "font-semibold text-violet-100" : "text-slate-500"}`}>{current ? "Current CP" : completed ? "Completed" : "Upcoming"}</div>
+          </button>;
       })}</div>
     </div>
 

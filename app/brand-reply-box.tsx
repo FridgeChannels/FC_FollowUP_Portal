@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { SendTimingToggle, type DeliveryMode } from "./send-timing-toggle";
 
 const show = (result: { ok: boolean; message: string }) => result.ok ? toast.success(result.message) : toast.error(result.message);
 const channelAvailable = (contact: Contact, channel: Channel) =>
@@ -98,6 +99,7 @@ export function BrandReplyBox({
     interaction.channel === "Email" && interaction.title !== "Email" ? interaction.title : "",
   );
   const [saving, setSaving] = useState(false);
+  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("immediate");
   const contact = people.find(item => item.id === interaction.contactId) || people[0];
   const channel = interaction.channel;
   const notionBacked = !!onSend;
@@ -112,12 +114,12 @@ export function BrandReplyBox({
         <div className="text-xs font-medium text-slate-600">{contact.name} · {channel}</div>
         <span className="text-xs text-slate-400">Reply needed</span>
       </div>
-      <div className="flex gap-2">
-        <div className="min-w-0 flex-1 space-y-2">
-          {channel === "Email" && <Input value={subject} onChange={event => setSubject(event.target.value)} placeholder="Email subject" />}
-          <Textarea value={content} onChange={event => setContent(event.target.value)} className="min-h-20 resize-none" placeholder="Write a reply…"/>
-        </div>
-        <Button className="h-auto px-5" disabled={!content.trim() || (channel === "Email" && !subject.trim()) || saving} onClick={() => {
+      <div className="min-w-0 space-y-2">
+        {channel === "Email" && <Input value={subject} onChange={event => setSubject(event.target.value)} placeholder="Email subject" />}
+        <Textarea value={content} onChange={event => setContent(event.target.value)} className="min-h-20 resize-none" placeholder="Write a reply…"/>
+        <div className="flex items-center justify-end gap-2">
+          <SendTimingToggle value={deliveryMode} onValueChange={setDeliveryMode} />
+          <Button className="h-9 px-3" disabled={!content.trim() || (channel === "Email" && !subject.trim()) || saving} onClick={() => {
           if (onSend) {
             setSaving(true);
             void onSend(contact.id, channel, content, replyTaskId, interaction.threadId, subject)
@@ -130,7 +132,8 @@ export function BrandReplyBox({
           const result = sendHumanReply(customer.id, contact.id, channel, content, bombInstanceId || interaction.bombInstanceId);
           show(result);
           if (result.ok) setContent("");
-        }}><Send className="size-4"/></Button>
+          }}><Send className="size-4"/></Button>
+        </div>
       </div>
     </div>
   );
@@ -157,6 +160,7 @@ export function ChannelSendBox({
   const [contactId, setContactId] = useState(latest?.contactId || people[0]?.id || "");
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
+  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("immediate");
   useEffect(() => {
     setContactId(latest?.contactId || people[0]?.id || "");
     setContent("");
@@ -186,14 +190,16 @@ export function ChannelSendBox({
           </Select>
           <span className="text-xs text-slate-400">Send {channel}</span>
         </div>
-        <div className="flex gap-2">
+        <div className="space-y-2">
           <Textarea
             value={content}
             onChange={event => setContent(event.target.value)}
             className="min-h-20 resize-none"
             placeholder={`Write ${channel === "Phone" ? "a call note" : `a ${channel} message`}…`}
           />
-          <Button className="h-20 px-5" disabled={!contact || !content.trim() || saving} onClick={() => {
+          <div className="flex items-center justify-end gap-2">
+            <SendTimingToggle value={deliveryMode} onValueChange={setDeliveryMode} />
+            <Button className="h-9 px-3" disabled={!contact || !content.trim() || saving} onClick={() => {
             if (!contact) return;
             if (onSend) {
               setSaving(true);
@@ -206,7 +212,8 @@ export function ChannelSendBox({
             const result = sendHumanReply(customerId, contact.id, channel, content, latestOutbound?.bombInstanceId);
             show(result);
             if (result.ok) setContent("");
-          }}><Send className="size-4"/></Button>
+            }}><Send className="size-4"/></Button>
+          </div>
         </div>
       </div>
     </div>

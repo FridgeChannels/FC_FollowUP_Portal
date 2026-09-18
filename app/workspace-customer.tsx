@@ -25,6 +25,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { InteractionFeed } from "./interaction-feed";
 import { ChannelIcon, ChannelOption } from "./channel-icon";
+import { SendTimingToggle, type DeliveryMode } from "./send-timing-toggle";
 import { buildTemplateVariableContext, resolveLaunchStepCopy } from "@/lib/template-variables";
 import { brandHasActiveOmniReach } from "@/lib/notion/reply-inbox";
 import { buildInteractionCpFallbacks, resolveInteractionDisplayCp } from "@/lib/interaction-cp";
@@ -937,6 +938,7 @@ export function ReplyDialog({
   const [object, setObject] = useState("");
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
+  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("immediate");
   const [linkedinGate, setLinkedinGate] = useState<{
     available: boolean;
     reason: string | null;
@@ -949,6 +951,7 @@ export function ReplyDialog({
     setChannel(people[0]?.preferredChannel || "Email");
     setObject("");
     setContent("");
+    setDeliveryMode("immediate");
     setLinkedinGate(null);
   }, [open, customerId]);
 
@@ -1101,6 +1104,9 @@ export function ReplyDialog({
           onChange={(e) => setContent(e.target.value)}
           placeholder="Write a reply…"
         />
+        <div className="flex justify-end">
+          <SendTimingToggle value={deliveryMode} onValueChange={setDeliveryMode} />
+        </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
