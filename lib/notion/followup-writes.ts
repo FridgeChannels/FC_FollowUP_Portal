@@ -30,6 +30,7 @@ import { asExtendedParameters, parseExtendedParametersObject } from "./extended-
 import {
   captionForAttachments,
   channelSupportsMedia,
+  mediaFieldsFromAttachments,
   sanitizeMediaAttachments,
   type MediaAttachment,
 } from "../media-attachments";
@@ -306,8 +307,13 @@ function encodeOutboundExtendedParameters(
   attachments: MediaAttachment[] = [],
 ) {
   const base = parseExtendedParametersObject(inherited) || {};
-  if (attachments.length) {
-    return asExtendedParameters({ ...base, attachments });
+  const media = mediaFieldsFromAttachments(attachments);
+  if (media) {
+    const rest = { ...base };
+    delete rest.attachments;
+    delete rest.mediaUrl;
+    delete rest.mediaType;
+    return asExtendedParameters({ ...rest, ...media });
   }
   if (!inherited?.trim()) return null;
   try {

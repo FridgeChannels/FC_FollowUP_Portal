@@ -27,22 +27,81 @@ function acceptFor(kind: MediaKind) {
   return kind === "image" ? "image/jpeg,image/png,image/webp,image/gif" : "video/mp4,video/quicktime,video/3gpp";
 }
 
+async function readResponsePayload(response: Response) {
+  const text = await response.text();
+  if (!text) return {} as Record<string, unknown>;
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    if (response.status === 413 || /payload too large/i.test(text)) {
+      return { error: "File is too large for the upload proxy. Try a smaller file." };
+    }
+    return { error: text.slice(0, 200) || `Upload failed (${response.status})` };
+  }
+}
+
 export async function uploadMediaFile(file: File, kind: MediaKind): Promise<MediaAttachment> {
-  const form = new FormData();
-  form.set("file", file);
-  form.set("kind", kind);
-  const response = await fetch("/api/media", { method: "POST", body: form });
-  const payload = (await response.json()) as MediaAttachment & { error?: string };
-  if (!response.ok || !payload.url) {
-    throw new Error(payload.error || "Upload failed");
+  const initResponse = await fetch("/api/media", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      kind,
+      mimeType: file.type,
+      fileName: file.name,
+      size: file.size,
+    }),
+  });
+  const init = await readResponsePayload(initResponse);
+  const uploadId = typeof init.uploadId === "string" ? init.uploadId : "";
+  const chunkSize = typeof init.chunkSize === "number" && init.chunkSize > 0
+    ? init.chunkSize
+    : 512 * 1024;
+  const totalChunks = typeof init.totalChunks === "number" && init.totalChunks > 0
+    ? init.totalChunks
+    : Math.max(1, Math.ceil(file.size / chunkSize));
+  if (!initResponse.ok || !uploadId) {
+    throw new Error(typeof init.error === "string" ? init.error : "Upload failed");
+  }
+
+  const buffer = await file.arrayBuffer();
+  let completed: Record<string, unknown> | null = null;
+  for (let index = 0; index < totalChunks; index += 1) {
+    const start = index * chunkSize;
+    const end = Math.min(buffer.byteLength, start + chunkSize);
+    const chunkResponse = await fetch(
+      `/api/media/${encodeURIComponent(uploadId)}/chunk?index=${index}&total=${totalChunks}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: buffer.slice(start, end),
+      },
+    );
+    const payload = await readResponsePayload(chunkResponse);
+    if (!chunkResponse.ok) {
+      throw new Error(typeof payload.error === "string" ? payload.error : `Upload chunk ${index + 1}/${totalChunks} failed`);
+    }
+    if (payload.done) completed = payload;
+  }
+
+  const mediaUrl = typeof completed?.mediaUrl === "string"
+    ? completed.mediaUrl
+    : typeof completed?.url === "string"
+      ? completed.url
+      : typeof init.mediaUrl === "string"
+        ? init.mediaUrl
+        : typeof init.url === "string"
+          ? init.url
+          : "";
+  if (!completed?.done || !mediaUrl) {
+    throw new Error("Upload did not complete");
   }
   return {
-    id: payload.id,
+    id: typeof completed.id === "string" ? completed.id : uploadId,
     kind,
-    name: payload.name || file.name,
-    mimeType: payload.mimeType || file.type,
-    size: payload.size || file.size,
-    url: payload.url,
+    name: typeof completed.name === "string" ? completed.name : file.name,
+    mimeType: typeof completed.mimeType === "string" ? completed.mimeType : file.type,
+    size: typeof completed.size === "number" ? completed.size : file.size,
+    url: mediaUrl,
   };
 }
 
@@ -124,7 +183,6 @@ export function MessageMediaAddButton({
         ref={imageInput}
         type="file"
         accept={acceptFor("image")}
-        multiple
         className="hidden"
         onChange={(event) => {
           if (event.target.files?.length) onPick(event.target.files, "image");
@@ -135,7 +193,6 @@ export function MessageMediaAddButton({
         ref={videoInput}
         type="file"
         accept={acceptFor("video")}
-        multiple
         className="hidden"
         onChange={(event) => {
           if (event.target.files?.length) onPick(event.target.files, "video");
@@ -240,7 +297,7 @@ export function useMessageMedia(channel?: Channel | string | null) {
     const room = MAX_MEDIA_ATTACHMENTS - attachments.length;
     const files = [...list].slice(0, room);
     if (!files.length) {
-      toast.error(`You can attach up to ${MAX_MEDIA_ATTACHMENTS} files.`);
+      toast.error("WhatsApp allows one image or video per message.");
       return;
     }
     for (const file of files) {

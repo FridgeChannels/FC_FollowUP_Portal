@@ -10,21 +10,12 @@ import {
 } from "@/lib/notion/followup-writes";
 import { channelSupportsMedia, sanitizeMediaAttachments } from "@/lib/media-attachments";
 import { interactionCpCode } from "@/lib/outreach-domain";
+import { isAllowedS3MediaUrl } from "@/lib/s3-media";
 
 type Params = { params: Promise<{ id: string }> };
 
 function asDeliveryMode(value?: string | null): DeliveryMode {
   return value === "immediate" ? "immediate" : "scheduled";
-}
-
-function isPortalMediaUrl(url: string, requestUrl: string) {
-  try {
-    const origin = new URL(requestUrl).origin;
-    const parsed = new URL(url, origin);
-    return parsed.origin === origin && /^\/api\/media\/[a-zA-Z0-9]+$/.test(parsed.pathname);
-  } catch {
-    return false;
-  }
 }
 
 export async function POST(request: Request, { params }: Params) {
@@ -82,7 +73,7 @@ export async function POST(request: Request, { params }: Params) {
       return Response.json({ error: "object (email subject) is required for Email" }, { status: 400 });
     }
     const attachments = channelSupportsMedia(channel)
-      ? sanitizeMediaAttachments(body.attachments).filter((item) => isPortalMediaUrl(item.url, request.url))
+      ? sanitizeMediaAttachments(body.attachments).filter((item) => isAllowedS3MediaUrl(item.url))
       : [];
     if (attachments.length && !channelSupportsMedia(channel)) {
       return Response.json({ error: "Media is only supported on WhatsApp" }, { status: 400 });

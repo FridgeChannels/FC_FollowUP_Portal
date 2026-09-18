@@ -52,6 +52,17 @@ export default defineConfig(async ({ mode }) => {
     loadedEnv.DISPLAY_TIME_ZONE ||
     "America/New_York";
   const senderName = process.env.SENDER_NAME || loadedEnv.SENDER_NAME || "";
+  const awsAccessKeyId =
+    process.env.AWS_ACCESS_KEY_ID || loadedEnv.AWS_ACCESS_KEY_ID;
+  const awsSecretAccessKey =
+    process.env.AWS_SECRET_ACCESS_KEY || loadedEnv.AWS_SECRET_ACCESS_KEY;
+  const awsDefaultRegion =
+    process.env.AWS_DEFAULT_REGION || loadedEnv.AWS_DEFAULT_REGION;
+  const s3Bucket = process.env.S3_BUCKET || loadedEnv.S3_BUCKET;
+  const s3KeyPrefix = process.env.S3_KEY_PREFIX || loadedEnv.S3_KEY_PREFIX;
+  const s3VideoPrefix = process.env.S3_VIDEO_PREFIX || loadedEnv.S3_VIDEO_PREFIX;
+  const s3CreatorPrefix =
+    process.env.S3_CREATOR_PREFIX || loadedEnv.S3_CREATOR_PREFIX;
   const rawDevAllowedHosts =
     process.env.DEV_ALLOWED_HOSTS || loadedEnv.DEV_ALLOWED_HOSTS || "";
   // `true` / `*` / `all` disables Vite host checks (needed for reverse-proxy domains).
@@ -106,6 +117,15 @@ export default defineConfig(async ({ mode }) => {
         : {}),
       DISPLAY_TIME_ZONE: displayTimeZone,
       ...(senderName ? { SENDER_NAME: senderName } : {}),
+      ...(awsAccessKeyId ? { AWS_ACCESS_KEY_ID: awsAccessKeyId } : {}),
+      ...(awsSecretAccessKey
+        ? { AWS_SECRET_ACCESS_KEY: awsSecretAccessKey }
+        : {}),
+      ...(awsDefaultRegion ? { AWS_DEFAULT_REGION: awsDefaultRegion } : {}),
+      ...(s3Bucket ? { S3_BUCKET: s3Bucket } : {}),
+      ...(s3KeyPrefix ? { S3_KEY_PREFIX: s3KeyPrefix } : {}),
+      ...(s3VideoPrefix ? { S3_VIDEO_PREFIX: s3VideoPrefix } : {}),
+      ...(s3CreatorPrefix ? { S3_CREATOR_PREFIX: s3CreatorPrefix } : {}),
     },
     d1_databases: d1
       ? [
@@ -141,6 +161,10 @@ export default defineConfig(async ({ mode }) => {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
+    optimizeDeps: {
+      // AWS SDK browser chunks break Vite RSC dep optimization in this stack.
+      exclude: ["@aws-sdk/client-s3", "@aws-sdk/s3-request-presigner"],
+    },
     define: {
       "import.meta.env.SKIP_UNAVAILABLE_CHANNELS": JSON.stringify(
         skipUnavailableChannels ?? "",

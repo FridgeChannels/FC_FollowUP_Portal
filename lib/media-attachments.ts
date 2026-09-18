@@ -14,7 +14,8 @@ export const IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"
 export const VIDEO_MIME_TYPES = new Set(["video/mp4", "video/quicktime", "video/3gpp"]);
 export const IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 export const VIDEO_MAX_BYTES = 16 * 1024 * 1024;
-export const MAX_MEDIA_ATTACHMENTS = 5;
+/** WhatsApp outbound allows a single media file per message. */
+export const MAX_MEDIA_ATTACHMENTS = 1;
 
 export function channelSupportsMedia(channel?: string | null) {
   return MEDIA_CHANNELS.has((channel || "").trim());
@@ -84,14 +85,26 @@ function asAttachment(value: unknown): MediaAttachment | null {
   return { id, kind, name, mimeType, size, url };
 }
 
+function attachmentFromMediaFields(parsed: Record<string, unknown>): MediaAttachment | null {
+  const mediaUrl = typeof parsed.mediaUrl === "string" ? parsed.mediaUrl.trim() : "";
+  const mediaType = parsed.mediaType === "video" ? "video" : parsed.mediaType === "image" ? "image" : null;
+  if (!mediaUrl || !mediaType) return null;
+  return {
+    id: mediaUrl,
+    kind: mediaType,
+    name: mediaType === "video" ? "Video" : "Image",
+    mimeType: mediaType === "video" ? "video/mp4" : "image/jpeg",
+    size: 0,
+    url: mediaUrl,
+  };
+}
+
+/** Reads downstream media fields: {"mediaUrl":"...","mediaType":"image|video"}. */
 export function attachmentsFromExtendedParameters(value?: string | null): MediaAttachment[] {
   const parsed = parseJsonObject(value);
-  const raw = parsed?.attachments;
-  if (!Array.isArray(raw)) return [];
-  return raw.flatMap((item) => {
-    const attachment = asAttachment(item);
-    return attachment ? [attachment] : [];
-  });
+  if (!parsed) return [];
+  const attachment = attachmentFromMediaFields(parsed);
+  return attachment ? [attachment] : [];
 }
 
 export function sanitizeMediaAttachments(value: unknown): MediaAttachment[] {
@@ -100,4 +113,13 @@ export function sanitizeMediaAttachments(value: unknown): MediaAttachment[] {
     const attachment = asAttachment(item);
     return attachment ? [attachment] : [];
   }).slice(0, MAX_MEDIA_ATTACHMENTS);
+}
+
+export function mediaFieldsFromAttachments(attachments: MediaAttachment[]) {
+  const first = attachments[0];
+  if (!first) return null;
+  return {
+    mediaUrl: first.url,
+    mediaType: first.kind as "image" | "video",
+  };
 }
