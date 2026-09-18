@@ -155,7 +155,7 @@ export default function OutreachWorkspace({ children }: { children?: ReactNode }
       void Promise.resolve(context.registerTool({
         name: "navigate_outreach_workspace",
         title: "Navigate workspace",
-        description: "Open a primary Outreach Control workspace.",
+        description: "Open a primary Super FollowUP workspace.",
         inputSchema: { type: "object", properties: { path: { type: "string", enum: ["/customers", "/tasks", "/omnireach"] } }, required: ["path"], additionalProperties: false },
         annotations: { readOnlyHint: true, untrustedContentHint: false },
         execute(input: unknown) {
@@ -199,8 +199,7 @@ export default function OutreachWorkspace({ children }: { children?: ReactNode }
               <Zap className="size-4 fill-current" />
             </span>
             <span className="min-w-0 group-data-[collapsible=icon]:hidden">
-              <span className="block truncate text-sm font-bold text-white">Outreach Control</span>
-              <span className="block truncate text-[11px] text-slate-400">FC Operations</span>
+              <span className="block truncate text-sm font-bold text-white">Super FollowUP</span>
             </span>
           </button>
         </SidebarHeader>

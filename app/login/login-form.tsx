@@ -64,7 +64,7 @@ export function LoginForm() {
               <Zap className="size-5 fill-current" />
             </span>
             <div>
-              <div className="text-lg font-bold tracking-tight text-slate-900">Outreach Control</div>
+              <div className="text-lg font-bold tracking-tight text-slate-900">Super FollowUP</div>
               <div className="text-sm text-slate-500">FC Operations</div>
             </div>
           </div>

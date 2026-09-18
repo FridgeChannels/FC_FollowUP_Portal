@@ -4,8 +4,8 @@ import { WorkspaceProvider } from "./workspace-store";
 
 export const metadata: Metadata = {
   title: {
-    default: "Outreach Control",
-    template: "%s · Outreach Control",
+    default: "Super FollowUP",
+    template: "%s · Super FollowUP",
   },
   description: "CP-driven multi-channel outreach operations workspace.",
   icons: {

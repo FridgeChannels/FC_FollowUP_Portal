@@ -4,7 +4,7 @@ import { LoginForm } from "./login-form";
 
 export const metadata: Metadata = {
   title: "Sign in",
-  description: "Sign in to Outreach Control with your work email and password.",
+  description: "Sign in to Super FollowUP with your work email and password.",
 };
 
 export default function LoginPage() {

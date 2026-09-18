@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { createSeedState } from "./outreach-domain";
 
-export const APP_NAME = "Outreach Control";
+export const APP_NAME = "Super FollowUP";
 export const APP_DESCRIPTION =
   "CP-driven multi-channel outreach operations workspace.";
 
@@ -84,7 +84,7 @@ export function brandListMetadata(filters: BrandListFilters = {}): PageMeta {
       ? `No brands match the current filters${details.length ? ` (${details.join(", ")})` : ""}.`
       : details.length
         ? `Browse brands filtered by ${details.join(", ")}.`
-        : "Browse every brand, CP stage, outreach status, and owner in Outreach Control.",
+        : "Browse every brand, CP stage, outreach status, and owner in Super FollowUP.",
   };
 }
 
