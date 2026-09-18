@@ -186,6 +186,9 @@ export type BrandListItem = {
   /** Follow-up Client `Is Test` — Portal ACL hides these from all roles. */
   isTest?: boolean;
   needsReply?: boolean;
+  /** A completed Phone task is waiting for an AccountManager qualification decision. */
+  needsQualification?: boolean;
+  qualificationTaskCount?: number;
   replyPreview?: string | null;
   /** @deprecated Prefer replyDueAt — kept as alias for list cache merges. */
   replyUpdatedAt?: string | null;

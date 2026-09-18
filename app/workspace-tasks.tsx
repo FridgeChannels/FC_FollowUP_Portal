@@ -16,10 +16,12 @@ import { useWorkspace } from "./workspace-store";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { Textarea } from "@/components/ui/textarea";
 import { DEFAULT_TASK_PAGE_SIZE } from "@/lib/notion/owner-filter";
 import { ChangeCPDialog, LaunchBombDialog, LaunchOmniReachButton, ReplyDialog, ACTIVE_OMNIREACH_BLOCK_REASON } from "./workspace-customer";
 import { InteractionFeed } from "./interaction-feed";
@@ -389,8 +391,8 @@ function taskPollUrl(taskId: string) {
   return `/api/tasks/${encodeURIComponent(taskId)}?lite=1`;
 }
 
-function timelineQuoCallId(timeline: Interaction[]) {
-  return timeline.find((item) => item.quo?.callId)?.quo?.callId;
+function timelineQuoCallId(timeline: Interaction[], taskId?: string) {
+  return timeline.find((item) => (!taskId || item.taskId === taskId) && item.quo?.callId)?.quo?.callId;
 }
 
 function quoArtifactsMissing(timeline: Interaction[], callId: string) {
@@ -416,7 +418,7 @@ function shouldPollCallTask(input: {
   if (!input.remote || input.type !== "Call") return false;
 
   const awaitingReview = input.callReviewStatus === "Awaiting Review";
-  const callId = timelineQuoCallId(input.timeline);
+  const callId = timelineQuoCallId(input.timeline, input.taskId);
   if (awaitingReview && callId && !callId.startsWith("ACsim") && quoArtifactsMissing(input.timeline, callId)) {
     return true;
   }
@@ -436,6 +438,9 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
   const [sendMessage, setSendMessage] = useState(false);
   const [changeCP, setChangeCP] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [submitReviewOpen, setSubmitReviewOpen] = useState(false);
+  const [reviewNote, setReviewNote] = useState("");
+  const [submittingReview, setSubmittingReview] = useState(false);
   const [owners, setOwners] = useState<Array<{id:string;name:string}>>([]);
   const [liveTask, setLiveTask] = useState(task);
   const [quoRefreshingCallId, setQuoRefreshingCallId] = useState<string | null>(null);
@@ -598,11 +603,11 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
   const callTask = liveTask.source === "call" ? state.callTasks.find(call => call.id === liveTask.id) : undefined;
   const taskReview = reviewFromNotion(liveTask);
   const reviewedTask = taskWithCallReview(liveTask, taskReview);
-  const persistCallReview = async (taskId: string, status: CallReviewStatus) => {
+  const persistCallReview = async (taskId: string, status: CallReviewStatus, reviewReason?: string) => {
     const response = await fetch(`/api/tasks/${taskId}/call-review`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ status, reviewReason }),
     });
     const payload = await response.json() as TaskPayload;
     if (!response.ok) throw new Error(payload.error || "Unable to save call review");
@@ -636,7 +641,7 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
   };
   useEffect(() => {
     if (!task.remote || liveTask.callReviewStatus !== "Awaiting Review" || !remote?.timeline.length) return;
-    const callId = timelineQuoCallId(remote.timeline);
+    const callId = timelineQuoCallId(remote.timeline, liveTask.id);
     if (!callId || callId.startsWith("ACsim")) return;
     if (autoRefreshedQuoCallId.current === callId) return;
     if (!quoArtifactsMissing(remote.timeline, callId)) return;
@@ -651,6 +656,44 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
   const callers = state.users.filter(user => user.role === "Caller");
   const callerPhoneOnly = user?.role === "Caller" || state.currentRole === "Caller";
   const canReviewCalls = task.remote && !callerPhoneOnly && can("reply");
+  const hasConnectedCall = timeline.some((item) =>
+    item.taskId === liveTask.id
+      && item.channel === "Phone"
+      && item.callResult === "Connected",
+  );
+  const awaitingAccountManagerReview = liveTask.callReviewStatus === "Awaiting Review";
+  const recalledByAccountManager = liveTask.callReviewStatus === "Unqualified";
+  const recallReason = recalledByAccountManager
+    ? liveTask.notes?.split("\n").find((line) => line.startsWith("Unqualified reason:"))?.replace("Unqualified reason:", "").trim()
+    : null;
+  const canSubmitCallerReview = callerPhoneOnly
+    && !!task.remote
+    && liveTask.type === "Call"
+    && !awaitingAccountManagerReview
+    && !liveTask.callReviewStatus
+    && !isDone(liveTask)
+    && hasConnectedCall;
+  const submitCallerReview = async () => {
+    if (!task.remote || !canSubmitCallerReview) return;
+    setSubmittingReview(true);
+    try {
+      const response = await fetch(`/api/tasks/${task.id}/submit-review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note: reviewNote.trim() || undefined }),
+      });
+      const payload = await response.json() as TaskPayload;
+      if (!response.ok) throw new Error(payload.error || "Unable to submit call review");
+      applyTaskPayload(payload);
+      setSubmitReviewOpen(false);
+      setReviewNote("");
+      toast.success("Submitted for AccountManager review");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to submit call review");
+    } finally {
+      setSubmittingReview(false);
+    }
+  };
   const reviewTasks = [
     ...(remote?.brand?.tasks || []),
     ...(liveTask.callReviewStatus || liveTask.type === "Call" ? [{ id: liveTask.id, callReviewStatus: liveTask.callReviewStatus }] : []),
@@ -663,6 +706,8 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "quo-attempt" }),
       keepalive: true,
+    }).then(async (response) => {
+      if (response.ok) applyTaskPayload(await response.json() as TaskPayload);
     }).catch(() => undefined);
   };
   const callBrief = reviewedTask.type === "Call" && !callerPhoneOnly
@@ -725,7 +770,8 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
     <div className={callerPhoneOnly ? "grid" : "grid lg:grid-cols-[minmax(0,1fr)_290px]"}>
       <div className="min-w-0 p-5 lg:p-7">
         {callerPhoneOnly && reviewedTask.type === "Call" ? (
-          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+          <div className="space-y-4">
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
             <InteractionFeed
               key={`${customer.id}-${customer.cp}`}
               callerPhoneOnly
@@ -741,9 +787,37 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
               headerContactName={contact.name}
               onSelectTask={(taskId) => router.push(`/tasks/${encodeURIComponent(taskId)}`)}
               onCallOpening={onCallOpening}
+              callerReviewTaskId={liveTask.id}
+              callerReviewHasConnectedCall={hasConnectedCall}
+              callerReviewCanSubmit={canSubmitCallerReview}
+              callerReviewReason={recallReason}
+              onSubmitCallerReview={() => setSubmitReviewOpen(true)}
               onRefreshQuo={task.remote ? refreshQuo : undefined}
               quoRefreshingCallId={quoRefreshingCallId}
             />
+            </div>
+            <Dialog open={submitReviewOpen} onOpenChange={(open) => { if (!submittingReview) setSubmitReviewOpen(open); }}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Submit call for review</DialogTitle>
+                  <DialogDescription>
+                    This will stop further dialing for this task until an AccountManager reviews it.
+                  </DialogDescription>
+                </DialogHeader>
+                <Textarea
+                  value={reviewNote}
+                  onChange={(event) => setReviewNote(event.target.value)}
+                  placeholder="Optional context for the AccountManager…"
+                  className="min-h-24 resize-none"
+                />
+                <DialogFooter>
+                  <Button variant="outline" disabled={submittingReview} onClick={() => setSubmitReviewOpen(false)}>Keep calling</Button>
+                  <Button disabled={submittingReview} onClick={() => void submitCallerReview()}>
+                    {submittingReview ? "Submitting…" : "Submit for review"}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </div>
         ) : (
           <>

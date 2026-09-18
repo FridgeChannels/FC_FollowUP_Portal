@@ -105,8 +105,10 @@ export async function recordQuoDialAttempt(input: {
     channel: input.channel || "Phone",
     dialedAt: new Date().toISOString(),
   };
-  const attempts = (await loadAttempts()).filter((item) => item.taskId !== input.taskId);
-  await saveAttempts([next, ...attempts]);
+  // Keep every recent attempt for a task. Quo can deliver callbacks out of
+  // order, so retaining only the latest attempt loses earlier calls.
+  const attempts = await loadAttempts();
+  await saveAttempts([next, ...attempts].slice(0, 100));
   return next;
 }
 
@@ -123,12 +125,22 @@ export async function findRecentQuoDialAttempt(
   const matches = (await loadAttempts()).filter(
     (item) => numbers.has(item.phone) && isFresh(item, eventTime),
   );
-  return matches.sort((left, right) => right.dialedAt.localeCompare(left.dialedAt))[0] || null;
+  return matches.sort((left, right) => {
+    const leftDistance = Math.abs(eventTime - new Date(left.dialedAt).getTime());
+    const rightDistance = Math.abs(eventTime - new Date(right.dialedAt).getTime());
+    if (leftDistance !== rightDistance) return leftDistance - rightDistance;
+    return right.dialedAt.localeCompare(left.dialedAt);
+  })[0] || null;
 }
 
-export async function removeQuoDialAttempt(taskId: string) {
-  const id = taskId.trim();
+export async function removeQuoDialAttempt(
+  input: string | { taskId: string; dialedAt?: string | null },
+) {
+  const id = (typeof input === "string" ? input : input.taskId).trim();
   if (!id) return [];
-  const remaining = (await loadAttempts()).filter((item) => item.taskId !== id);
+  const dialedAt = typeof input === "string" ? null : input.dialedAt?.trim() || null;
+  const remaining = (await loadAttempts()).filter((item) =>
+    item.taskId !== id || (dialedAt ? item.dialedAt !== dialedAt : false),
+  );
   return saveAttempts(remaining);
 }

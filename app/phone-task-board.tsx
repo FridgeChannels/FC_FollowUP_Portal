@@ -11,6 +11,7 @@ import { ChannelIcon } from "./channel-icon";
 import { QuoCallPanel } from "./quo-call-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 
 export type PhoneBoardTask = {
   id: string;
@@ -111,6 +112,11 @@ export function PhoneTaskBoard({
   quoRefreshingCallId,
   onSelectTask,
   onCallOpening,
+  callerReviewTaskId,
+  callerReviewHasConnectedCall = false,
+  callerReviewCanSubmit = false,
+  callerReviewReason,
+  onSubmitCallerReview,
   showDial = true,
 }: {
   phoneTasks: PhoneBoardTask[];
@@ -121,11 +127,16 @@ export function PhoneTaskBoard({
   headerContactName?: string;
   showChannelTab?: boolean;
   canReviewCalls?: boolean;
-  onPersistCallReview?: (taskId: string, status: CallReviewStatus) => Promise<void>;
+  onPersistCallReview?: (taskId: string, status: CallReviewStatus, reviewReason?: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
   onSelectTask?: (taskId: string) => void;
   onCallOpening?: () => void;
+  callerReviewTaskId?: string | null;
+  callerReviewHasConnectedCall?: boolean;
+  callerReviewCanSubmit?: boolean;
+  callerReviewReason?: string | null;
+  onSubmitCallerReview?: () => void;
   showDial?: boolean;
 }) {
   const [reviewingTaskId, setReviewingTaskId] = useState<string | null>(null);
@@ -143,14 +154,14 @@ export function PhoneTaskBoard({
     [tasks],
   );
 
-  const handleReview = async (taskId: string, status: CallReviewStatus) => {
+  const handleReview = async (taskId: string, status: CallReviewStatus, reviewReason?: string) => {
     if (!onPersistCallReview) {
       toast.error("Call review requires a Follow-up Task backed by Notion");
       return;
     }
     setReviewingTaskId(taskId);
     try {
-      await onPersistCallReview(taskId, status);
+      await onPersistCallReview(taskId, status, reviewReason);
       toast.success(status === "Qualified" ? "Call marked as qualified" : "Call marked as unqualified and reopened for Beril");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to save call review");
@@ -188,8 +199,13 @@ export function PhoneTaskBoard({
         reviewing={reviewingTaskId === item.id}
         quoRefreshingCallId={quoRefreshingCallId}
         onRefreshQuo={onRefreshQuo}
+        callerReviewTaskId={callerReviewTaskId}
+        callerReviewHasConnectedCall={callerReviewHasConnectedCall}
+        callerReviewCanSubmit={callerReviewCanSubmit}
+        callerReviewReason={callerReviewReason}
+        onSubmitCallerReview={onSubmitCallerReview}
         onFocusTask={active || !onSelectTask ? undefined : () => onSelectTask(item.id)}
-        onReview={(status) => void handleReview(item.id, status)}
+        onReview={(status, reviewReason) => void handleReview(item.id, status, reviewReason)}
         onCallOpening={() => {
           if (item.remote === false) return;
           if (onCallOpening) {
@@ -244,6 +260,11 @@ function PhoneTaskBlock({
   onReview,
   onRefreshQuo,
   quoRefreshingCallId,
+  callerReviewTaskId,
+  callerReviewHasConnectedCall,
+  callerReviewCanSubmit,
+  callerReviewReason,
+  onSubmitCallerReview,
 }: {
   task: PhoneBoardTask;
   contact?: Contact;
@@ -257,14 +278,29 @@ function PhoneTaskBlock({
   reviewing: boolean;
   onCallOpening: () => void;
   onFocusTask?: () => void;
-  onReview: (status: CallReviewStatus) => void;
+  onReview: (status: CallReviewStatus, reviewReason?: string) => void;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
+  callerReviewTaskId?: string | null;
+  callerReviewHasConnectedCall: boolean;
+  callerReviewCanSubmit: boolean;
+  callerReviewReason?: string | null;
+  onSubmitCallerReview?: () => void;
 }) {
   const [scriptOpen, setScriptOpen] = useState(active || !isDone(task.status));
+  const [recallOpen, setRecallOpen] = useState(false);
+  const [recallReason, setRecallReason] = useState("");
   const phone = (devCallPhoneOnClient() || contact?.phone || task.contactPhone || "").trim();
   const actionState = dialState(task.status, reviewStatus);
-  const showReviewActions = canReviewCalls && !!quoResults.length && (!reviewStatus || reviewStatus === "Awaiting Review");
+  const showReviewActions = canReviewCalls && !!quoResults.length && reviewStatus === "Awaiting Review";
+  const showCallerReview = callerReviewTaskId === task.id;
+  const callerReviewMessage = reviewStatus === "Awaiting Review"
+    ? "AccountManager will decide whether this task is Qualified."
+    : reviewStatus === "Unqualified"
+      ? `AccountManager marked this task Unqualified${callerReviewReason ? `: ${callerReviewReason}` : "."} You can call again and submit this task for review when ready.`
+      : callerReviewHasConnectedCall
+        ? "You can keep calling for this task until it is complete, or submit this task for review now."
+        : "Complete a connected call for this task before submitting it for review.";
 
   return <section className={`rounded-2xl border p-5 ${active ? "border-blue-300 bg-blue-50/70 shadow-sm" : "border-slate-200 bg-slate-50/70"}`}>
     <div className="flex flex-wrap items-start justify-between gap-4">
@@ -283,6 +319,11 @@ function PhoneTaskBlock({
       </div>
       {showDial ? <div className="flex shrink-0"><CallActionButton phone={phone} state={actionState} onCallOpening={onCallOpening}/></div> : null}
     </div>
+
+    {showCallerReview ? <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-blue-50 px-4 py-3">
+      <p className="min-w-0 flex-1 text-xs leading-5 text-blue-900/80">{callerReviewMessage}</p>
+      {callerReviewCanSubmit ? <Button size="sm" className="shrink-0 bg-amber-500 text-white hover:bg-amber-600" onClick={onSubmitCallerReview}>Submit for review</Button> : null}
+    </div> : null}
 
     <div className={`mt-5 rounded-xl border ${active ? "border-blue-100/80 bg-white/70" : "border-slate-200 bg-white"}`}>
       <button
@@ -327,12 +368,20 @@ function PhoneTaskBlock({
         </article>;
       }) : <p className="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-5 text-sm text-slate-500">No Quo call has been linked to this task yet.</p>}
 
-      {showReviewActions ? <div className="flex flex-wrap gap-2">
+      {showReviewActions ? recallOpen ? <div className="space-y-2">
+        <Textarea value={recallReason} onChange={(event) => setRecallReason(event.target.value)} className="min-h-20 resize-none" placeholder="Unqualified reason for Caller…" />
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button size="sm" variant="ghost" disabled={reviewing} onClick={() => { setRecallOpen(false); setRecallReason(""); }}>Cancel</Button>
+          <Button size="sm" className="bg-rose-600 text-white hover:bg-rose-700" disabled={reviewing || !recallReason.trim()} onClick={() => onReview("Unqualified", recallReason.trim())}>
+            <RotateCcw className="mr-1.5 size-3.5"/>{reviewing ? "Saving…" : "Confirm recall"}
+          </Button>
+        </div>
+      </div> : <div className="flex flex-wrap gap-2">
         <Button size="sm" className="bg-emerald-600 text-white hover:bg-emerald-700" disabled={reviewing} onClick={() => onReview("Qualified")}>
           <CheckCircle2 className="mr-1.5 size-3.5"/>{reviewing ? "Saving…" : "Mark as Qualified"}
         </Button>
-        <Button size="sm" className="bg-rose-600 text-white hover:bg-rose-700" disabled={reviewing} onClick={() => onReview("Unqualified")}>
-          <RotateCcw className="mr-1.5 size-3.5"/>{reviewing ? "Saving…" : "Unqualified & Recall"}
+        <Button size="sm" className="bg-rose-600 text-white hover:bg-rose-700" disabled={reviewing} onClick={() => setRecallOpen(true)}>
+          <RotateCcw className="mr-1.5 size-3.5"/>Unqualified & Recall
         </Button>
       </div> : null}
     </div>

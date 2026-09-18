@@ -99,7 +99,7 @@ export function BrandReplyBox({
     interaction.channel === "Email" && interaction.title !== "Email" ? interaction.title : "",
   );
   const [saving, setSaving] = useState(false);
-  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("immediate");
+  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("scheduled");
   const contact = people.find(item => item.id === interaction.contactId) || people[0];
   const channel = interaction.channel;
   const notionBacked = !!onSend;
@@ -160,7 +160,7 @@ export function ChannelSendBox({
   const [contactId, setContactId] = useState(latest?.contactId || people[0]?.id || "");
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
-  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("immediate");
+  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("scheduled");
   useEffect(() => {
     setContactId(latest?.contactId || people[0]?.id || "");
     setContent("");

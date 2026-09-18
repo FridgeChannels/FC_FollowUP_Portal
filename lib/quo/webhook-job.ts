@@ -3,7 +3,7 @@ import {
   resolveFollowupTaskForQuoWebhook,
   upsertQuoCallActivity,
 } from "../notion/quo-calls";
-import { findRecentQuoDialAttempt, removeQuoDialAttempt } from "./dial-attempts";
+import { removeQuoDialAttempt } from "./dial-attempts";
 import type { HandledQuoWebhookType } from "./webhook-event";
 import type { QuoCallData } from "./types";
 import {
@@ -45,17 +45,43 @@ export async function processQuoWebhookEvent(
       phones,
       eventAt: data.call?.createdAt || data.lastEventAt || null,
     });
-    const attempt = await findRecentQuoDialAttempt(
-      phones,
-      data.call?.createdAt || data.lastEventAt,
-    );
+    // Persist the call as soon as ringing is linked. The Call ID then becomes
+    // the durable association key for completed, recording, transcript, and
+    // summary callbacks, even when several calls share one task.
+    const resolved = await resolveFollowupTaskForQuoWebhook({
+      callId: data.callId,
+      call: data.call,
+      eventAt: data.lastEventAt,
+    });
+    if (!resolved.task) {
+      const body = {
+        ok: true,
+        pending: true,
+        linked: false,
+        taskId: null,
+        callId: data.callId,
+        matchedBy: null,
+      };
+      console.info("Quo webhook ringing unresolved", body);
+      return { status: 200, body };
+    }
+
+    const created = !resolved.existing;
+    await upsertQuoCallActivity({ task: resolved.task, data, eventType: type });
+    if (resolved.attempt) {
+      await removeQuoDialAttempt({
+        taskId: resolved.task.id,
+        dialedAt: resolved.attempt.dialedAt,
+      });
+    }
     const body = {
       ok: true,
       pending: true,
-      linked: !!attempt,
-      taskId: attempt?.taskId || null,
+      linked: true,
+      taskId: resolved.task.id,
       callId: data.callId,
-      matchedBy: attempt ? "dial-attempt" as const : null,
+      matchedBy: resolved.matchedBy,
+      created,
     };
     console.info("Quo webhook ringing resolved", body);
     return { status: 200, body };
@@ -97,7 +123,12 @@ export async function processQuoWebhookEvent(
     recordingCount: data.recordings?.length || 0,
   });
   await upsertQuoCallActivity({ task: resolved.task, data, eventType: type });
-  await removeQuoDialAttempt(resolved.task.id);
+  if (resolved.attempt) {
+    await removeQuoDialAttempt({
+      taskId: resolved.task.id,
+      dialedAt: resolved.attempt.dialedAt,
+    });
+  }
   const body = {
     ok: true,
     linked: true,

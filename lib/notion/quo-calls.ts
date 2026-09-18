@@ -1,7 +1,7 @@
 import type { BrandTask } from "../brand-list";
 import { findQuoCallConversation } from "./conversations";
 import { serializeQuoCallData } from "../quo/call-payload";
-import { createOutboundConversation, updateFollowupTask } from "./followup-writes";
+import { createOutboundConversation } from "./followup-writes";
 import { firstRelationId, retrievePage, richText, updatePage } from "./client";
 import { resolveCheckpoint } from "./cps";
 import { retrieveFollowupTask } from "./tasks";
@@ -127,7 +127,12 @@ export async function resolveFollowupTaskForQuoWebhook(input: {
         dialedAt: attempt.dialedAt,
         phone: attempt.phone,
       });
-      return { task, existing: existing || null, matchedBy: "dial-attempt" as const };
+      return {
+        task,
+        existing: existing || null,
+        matchedBy: "dial-attempt" as const,
+        attempt,
+      };
     }
   } else {
     console.info("Quo webhook resolve step: no dial attempt matched", {
@@ -220,35 +225,15 @@ export async function upsertQuoCallActivity(input: {
   }
 
   if (result === "Connected") {
-    console.info("Quo webhook mark task awaiting review", {
+    console.info("Quo webhook recorded connected call; Caller decides when to submit review", {
       callId: data.callId,
       taskId: input.task.id,
       previousStatus: input.task.status,
       previousCallReviewStatus: input.task.callReviewStatus,
     });
-    await markPhoneTaskAwaitingReview(input.task);
   }
 
   return retrieveFollowupTask(input.task.id);
-}
-
-async function markPhoneTaskAwaitingReview(task: BrandTask) {
-  if (task.channel !== "Phone") return;
-  if (task.callReviewStatus === "Qualified") return;
-  if (task.status === "Cancelled" || task.status === "Failed") return;
-  if (task.callReviewStatus === "Awaiting Review" && task.status === "Completed") return;
-
-  const now = new Date().toISOString();
-  const note =
-    task.callReviewStatus === "Unqualified"
-      ? "召回通话已接通（Connected），任务进入待评审。"
-      : "通话已接通（Connected），任务进入待评审。";
-  await updateFollowupTask(task.id, {
-    callReviewStatus: "Awaiting Review",
-    status: "Completed",
-    endedAt: now,
-    notes: [task.notes?.trim() || null, note].filter(Boolean).join("\n"),
-  });
 }
 
 export function quoDataFromActivity(activity: { quo?: QuoCallData | null }) {
