@@ -1,4 +1,4 @@
-import { canAccessTestBrands } from "@/lib/brand-access";
+import { canAccessTestBrands, isTestOnlyViewer } from "@/lib/brand-access";
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { syncReplyInbox } from "@/lib/notion/followup-writes";
 import { taskQueryForViewer } from "@/lib/notion/owner-filter";
@@ -24,10 +24,11 @@ export async function GET(request: Request) {
     const cursor = url.searchParams.get("cursor");
     const limitRaw = Number(url.searchParams.get("limit") || DEFAULT_TASK_PAGE_SIZE);
     const pageSize = Number.isFinite(limitRaw) ? limitRaw : DEFAULT_TASK_PAGE_SIZE;
+    const onlyTest = isTestOnlyViewer(viewer);
 
     const listed = await listFollowupTasksForViewerPage(
       taskQueryForViewer(viewer, ownerParam, statusParam),
-      { cursor, pageSize, includeTest: canAccessTestBrands(viewer) },
+      { cursor, pageSize, includeTest: canAccessTestBrands(viewer), onlyTest },
     );
     // List path: annotate open non-Phone only; skip Notion backfill (detail/inbound handle writes).
     const tasks =

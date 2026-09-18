@@ -74,6 +74,13 @@ describe("followupClientListFilter", () => {
     assert.equal(followupClientListFilter({ includeTest: true }), undefined);
   });
 
+  it("onlyTest forces Is Test checkbox equals true", () => {
+    assert.deepEqual(followupClientListFilter({ onlyTest: true, includeTest: true }), {
+      property: "Is Test",
+      checkbox: { equals: true },
+    });
+  });
+
   it("combines owner, status, title, and non-test", () => {
     assert.deepEqual(
       followupClientListFilter({

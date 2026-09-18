@@ -178,6 +178,7 @@ export async function queryFollowupClientPages(
   ownerPageId?: string | null,
   options?: {
     includeTest?: boolean;
+    onlyTest?: boolean;
     status?: string | null;
     excludeStatuses?: string[];
     titleContains?: string | null;
@@ -189,6 +190,7 @@ export async function queryFollowupClientPages(
     followupClientListFilter({
       ownerPageId,
       includeTest: options?.includeTest,
+      onlyTest: options?.onlyTest,
       status: options?.status,
       excludeStatuses: options?.excludeStatuses,
       titleContains: options?.titleContains,

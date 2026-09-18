@@ -192,6 +192,7 @@ async function enrichBrandPage(pages: NotionPage[]) {
 export type ListFollowupClientsPageInput = {
   ownerPageId?: string | null;
   includeTest?: boolean;
+  onlyTest?: boolean;
   status?: string | null;
   excludeStatuses?: string[];
   q?: string | null;
@@ -239,6 +240,7 @@ export async function listFollowupClientsForViewerPage(
   const filter = followupClientListFilter({
     ownerPageId: input.ownerPageId,
     includeTest: input.includeTest,
+    onlyTest: input.onlyTest,
     status: input.status,
     excludeStatuses: input.excludeStatuses,
     titleContains: input.q,
@@ -285,7 +287,8 @@ async function listFollowupClientsByReplyDuePage(
   const q = input.q?.trim().toLowerCase() || "";
   const cp = input.cp?.trim() || "all";
   brands = brands.filter((brand) => {
-    if (input.includeTest === false && brand.isTest) return false;
+    if (input.onlyTest && !brand.isTest) return false;
+    if (!input.onlyTest && input.includeTest === false && brand.isTest) return false;
     if (input.ownerPageId === null && brand.ownerId) return false;
     if (input.ownerPageId && brand.ownerId !== input.ownerPageId) return false;
     if (input.status && input.status !== "all" && brand.status !== input.status) return false;

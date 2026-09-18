@@ -123,11 +123,15 @@ async function brandIdsByContact(contactIds: string[]) {
   return brandByContact;
 }
 
-/** Drop task pages whose Follow-up Client has `Is Test` checked. */
-async function excludeTestBrandTaskPages(pages: NotionPage[]) {
+type TestBrandScope = { includeTest?: boolean; onlyTest?: boolean };
+
+/** Keep / drop task pages by Follow-up Client `Is Test`. */
+async function scopeTestBrandTaskPages(pages: NotionPage[], options: TestBrandScope) {
   if (!pages.length) return pages;
+  if (!options.onlyTest && options.includeTest) return pages;
+
   const testIds = await queryTestFollowupClientIds().catch(() => new Set<string>());
-  if (!testIds.size) return pages;
+  if (!testIds.size) return options.onlyTest ? [] : pages;
 
   const contactIds = [
     ...new Set(
@@ -141,19 +145,21 @@ async function excludeTestBrandTaskPages(pages: NotionPage[]) {
   return pages.filter((page) => {
     const contactId = firstRelationId(page.properties?.["Follow-up Contact"]) || null;
     const brandId = contactId ? brandByContact.get(contactId) : null;
-    if (!brandId) return true;
-    return !testIds.has(brandId);
+    if (!brandId) return !options.onlyTest;
+    return options.onlyTest ? testIds.has(brandId) : !testIds.has(brandId);
   });
 }
 
-function withoutTestBrandTasks(tasks: BrandTask[]) {
-  return tasks.filter((task) => !task.brandIsTest);
+function scopeTestBrandTasks(tasks: BrandTask[], options: TestBrandScope) {
+  if (options.onlyTest) return tasks.filter((task) => Boolean(task.brandIsTest));
+  if (!options.includeTest) return tasks.filter((task) => !task.brandIsTest);
+  return tasks;
 }
 
-/** Open Phone count — optionally excludes tasks on `Is Test` Follow-up Clients. */
+/** Open Phone count — optionally excludes / restricts to `Is Test` Follow-up Clients. */
 export async function countOpenPhoneTasksForViewer(
   query: TaskListQuery,
-  options: { includeTest?: boolean } = {},
+  options: TestBrandScope = {},
 ) {
   let pages: NotionPage[] = [];
   try {
@@ -168,7 +174,7 @@ export async function countOpenPhoneTasksForViewer(
   } catch {
     return 0;
   }
-  if (!options.includeTest) pages = await excludeTestBrandTaskPages(pages);
+  pages = await scopeTestBrandTaskPages(pages, options);
   return pages.length;
 }
 
@@ -178,7 +184,7 @@ export async function countOpenPhoneTasksForViewer(
  */
 export async function countOpenPhoneBrandsForViewer(
   query: TaskListQuery,
-  options: { includeTest?: boolean } = {},
+  options: TestBrandScope = {},
 ) {
   let pages: NotionPage[] = [];
   try {
@@ -193,7 +199,7 @@ export async function countOpenPhoneBrandsForViewer(
   } catch {
     return 0;
   }
-  if (!options.includeTest) pages = await excludeTestBrandTaskPages(pages);
+  pages = await scopeTestBrandTaskPages(pages, options);
   if (!pages.length) return 0;
 
   const contactIds = [
@@ -222,7 +228,7 @@ export async function countOpenPhoneBrandsForViewer(
  */
 export async function listOpenReplyTaskStubsForViewer(
   query: TaskListQuery,
-  options: { includeTest?: boolean } = {},
+  options: TestBrandScope = {},
 ) {
   const replyChannels = CHANNELS.filter((channel) => channel !== "Phone");
   let pages: NotionPage[] = [];
@@ -238,7 +244,7 @@ export async function listOpenReplyTaskStubsForViewer(
   } catch {
     pages = [];
   }
-  if (!options.includeTest) pages = await excludeTestBrandTaskPages(pages);
+  pages = await scopeTestBrandTaskPages(pages, options);
   return pages.map(stubTaskFromPage);
 }
 
@@ -702,7 +708,7 @@ export async function listFollowupTasksByBomb(bombId: string): Promise<BrandTask
 
 export async function listFollowupTasksForViewer(
   query: TaskListQuery = {},
-  options: { includeTest?: boolean } = {},
+  options: TestBrandScope = {},
 ) {
   let pages: NotionPage[] = [];
   try {
@@ -711,14 +717,34 @@ export async function listFollowupTasksForViewer(
     pages = [];
   }
   const mapped = await mapTaskPages(pages);
-  return sortTasks(options.includeTest ? mapped : withoutTestBrandTasks(mapped));
+  return sortTasks(scopeTestBrandTasks(mapped, options));
 }
 
 export async function listFollowupTasksForViewerPage(
   query: TaskListQuery = {},
-  options: { cursor?: string | null; pageSize?: number; includeTest?: boolean } = {},
+  options: { cursor?: string | null; pageSize?: number } & TestBrandScope = {},
 ) {
   const pageSize = Math.min(Math.max(options.pageSize ?? DEFAULT_TASK_PAGE_SIZE, 1), 100);
+
+  // Test-only viewers: keep only Is Test Phone rows. Dataset is small, so filter
+  // the full open list then offset-page (Notion cursor + post-filter would skip rows).
+  if (options.onlyTest) {
+    const all = await listFollowupTasksForViewer(query, {
+      includeTest: true,
+      onlyTest: true,
+    });
+    const offset = Math.max(0, Number(options.cursor || 0) || 0);
+    const tasks = all.slice(offset, offset + pageSize);
+    const nextOffset = offset + pageSize;
+    const hasMore = nextOffset < all.length;
+    return {
+      tasks,
+      nextCursor: hasMore ? String(nextOffset) : null,
+      hasMore,
+      pageSize,
+    };
+  }
+
   let batch = { pages: [] as NotionPage[], nextCursor: null as string | null, hasMore: false };
   try {
     batch = await queryTaskPagesOnce({
@@ -731,7 +757,7 @@ export async function listFollowupTasksForViewerPage(
     batch = { pages: [], nextCursor: null, hasMore: false };
   }
   const mapped = await mapTaskPages(batch.pages);
-  const tasks = options.includeTest ? mapped : withoutTestBrandTasks(mapped);
+  const tasks = scopeTestBrandTasks(mapped, options);
   return {
     tasks,
     nextCursor: batch.nextCursor,

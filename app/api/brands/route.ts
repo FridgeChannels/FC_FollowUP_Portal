@@ -1,4 +1,4 @@
-import { canAccessTestBrands } from "@/lib/brand-access";
+import { canAccessTestBrands, isTestOnlyViewer } from "@/lib/brand-access";
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { listCheckpoints } from "@/lib/notion/cps";
 import { listFollowupClientsForViewerPage } from "@/lib/notion/followup-clients";
@@ -48,6 +48,7 @@ export async function GET(request: Request) {
       listFollowupClientsForViewerPage({
         ownerPageId,
         includeTest: canAccessTestBrands(viewer),
+        onlyTest: isTestOnlyViewer(viewer),
         status,
         excludeStatuses,
         q: qParam,

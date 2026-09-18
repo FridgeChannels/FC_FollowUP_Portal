@@ -43,6 +43,8 @@ export const DEFAULT_BRAND_PAGE_SIZE = 10;
 export function followupClientListFilter(options: {
   ownerPageId?: string | null;
   includeTest?: boolean;
+  /** When true, only Follow-up Clients with `Is Test` checked (overrides includeTest). */
+  onlyTest?: boolean;
   /** Exact Follow-up Status name, or omit / "all" for any. */
   status?: string | null;
   /** Extra statuses to exclude (e.g. Paused/Completed for non-Admin). */
@@ -52,9 +54,14 @@ export function followupClientListFilter(options: {
   /** Current CP relation page id. */
   currentCpPageId?: string | null;
 } = {}) {
+  const testScope = options.onlyTest
+    ? testClientFilter()
+    : options.includeTest
+      ? undefined
+      : nonTestClientFilter();
   const filters: Array<Record<string, unknown> | undefined | null> = [
     ownerRelationFilter(options.ownerPageId),
-    options.includeTest ? undefined : nonTestClientFilter(),
+    testScope,
   ];
   const status = options.status?.trim();
   if (status && status !== "all") {
