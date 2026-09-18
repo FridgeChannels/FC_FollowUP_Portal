@@ -1,3 +1,4 @@
+import { canAccessTestBrands } from "@/lib/brand-access";
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { queryFollowupClientPages } from "@/lib/notion/client";
 import {
@@ -33,7 +34,9 @@ export async function GET(request: Request) {
     );
     const [cps, pages] = await Promise.all([
       listCheckpoints(),
-      queryFollowupClientPages(ownerPageId),
+      queryFollowupClientPages(ownerPageId, {
+        includeTest: canAccessTestBrands(viewer),
+      }),
     ]);
     // Last interaction comes from each brand's Conversation records (not ClientDB rollup).
     // Reply-needed badges still come from the Needs Reply query.

@@ -183,6 +183,8 @@ export type BrandListItem = {
   ownerId: string | null;
   ownerName: string | null;
   ownerEmail: string | null;
+  /** Follow-up Client `Is Test` — Portal ACL hides these from all roles. */
+  isTest?: boolean;
   needsReply?: boolean;
   replyPreview?: string | null;
   /** @deprecated Prefer replyDueAt — kept as alias for list cache merges. */
@@ -217,6 +219,8 @@ export type BrandTask = {
   brandId: string | null;
   brandName: string | null;
   brandOwnerId: string | null;
+  /** True when the related Follow-up Client has `Is Test` checked. */
+  brandIsTest?: boolean;
   ownerId: string | null;
   ownerName: string | null;
   channel: string | null;

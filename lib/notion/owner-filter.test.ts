@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  andFilters,
+  nonTestClientFilter,
   ownerPageIdFromQueryParam,
   ownerRelationFilter,
   parseTaskStatusScope,
   taskListFilter,
   taskQueryForViewer,
   taskStatusFilter,
+  testClientFilter,
 } from "./owner-filter.ts";
 
 describe("ownerRelationFilter", () => {
@@ -25,6 +28,38 @@ describe("ownerRelationFilter", () => {
     assert.deepEqual(ownerRelationFilter("owner-1"), {
       property: "Owner",
       relation: { contains: "owner-1" },
+    });
+  });
+});
+
+describe("nonTestClientFilter", () => {
+  it("filters Is Test checkbox equals false", () => {
+    assert.deepEqual(nonTestClientFilter(), {
+      property: "Is Test",
+      checkbox: { equals: false },
+    });
+  });
+
+  it("andFilters combines owner + non-test", () => {
+    assert.deepEqual(andFilters(ownerRelationFilter("owner-1"), nonTestClientFilter()), {
+      and: [
+        { property: "Owner", relation: { contains: "owner-1" } },
+        { property: "Is Test", checkbox: { equals: false } },
+      ],
+    });
+  });
+
+  it("andFilters returns non-test alone for admin all-owners", () => {
+    assert.deepEqual(andFilters(ownerRelationFilter(undefined), nonTestClientFilter()), {
+      property: "Is Test",
+      checkbox: { equals: false },
+    });
+  });
+
+  it("testClientFilter selects checked Is Test", () => {
+    assert.deepEqual(testClientFilter(), {
+      property: "Is Test",
+      checkbox: { equals: true },
     });
   });
 });

@@ -73,7 +73,9 @@ export function pickCurrentContact(contacts: BrandContact[], tasks: BrandTask[] 
 export async function findFollowupClientsByName(name: string) {
   const query = normalizeName(name);
   if (!query) return [];
-  const brands = await mapFollowupClientPages(await queryFollowupClientPages());
+  const brands = await mapFollowupClientPages(
+    await queryFollowupClientPages(undefined, { includeTest: true }),
+  );
   const exact = brands.filter((item) => normalizeName(item.name) === query);
   if (exact.length) return exact;
   return brands.filter((item) => {

@@ -1,5 +1,10 @@
 import { getFollowupClientDbId, getNotionApiKey, NOTION_VERSION } from "./config";
-import { ownerRelationFilter } from "./owner-filter";
+import {
+  andFilters,
+  nonTestClientFilter,
+  ownerRelationFilter,
+  testClientFilter,
+} from "./owner-filter";
 import { notionRetry, runWithNotionLimit } from "./rate-limit";
 
 const NOTION_API = "https://api.notion.com/v1";
@@ -90,6 +95,16 @@ export function propertyNumber(property?: NotionProperty) {
   return typeof property?.number === "number" ? property.number : null;
 }
 
+export function propertyCheckbox(property?: NotionProperty) {
+  return Boolean(property?.checkbox);
+}
+
+/** True when Follow-up Client `Is Test` checkbox is checked. */
+export function isTestFollowupClientPage(page?: NotionPage | null) {
+  if (!page?.properties) return false;
+  return propertyCheckbox(page.properties["Is Test"]);
+}
+
 export function propertyText(property?: NotionProperty) {
   if (!property) return "";
   if (property.type === "title") return plainText(property.title);
@@ -164,8 +179,23 @@ export async function queryDatabasePages(
   return pages;
 }
 
-export async function queryFollowupClientPages(ownerPageId?: string | null) {
-  return queryDatabasePages(getFollowupClientDbId(), ownerRelationFilter(ownerPageId));
+export async function queryFollowupClientPages(
+  ownerPageId?: string | null,
+  options?: { includeTest?: boolean },
+) {
+  return queryDatabasePages(
+    getFollowupClientDbId(),
+    andFilters(
+      ownerRelationFilter(ownerPageId),
+      options?.includeTest ? undefined : nonTestClientFilter(),
+    ),
+  );
+}
+
+/** Page IDs of Follow-up Clients with `Is Test` checked (for task list exclusion). */
+export async function queryTestFollowupClientIds() {
+  const pages = await queryDatabasePages(getFollowupClientDbId(), testClientFilter());
+  return new Set(pages.map((page) => page.id));
 }
 
 export async function retrievePage(pageId: string) {

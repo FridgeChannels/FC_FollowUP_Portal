@@ -1,3 +1,4 @@
+import { canAccessTestBrands } from "@/lib/brand-access";
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { syncReplyInbox } from "@/lib/notion/followup-writes";
 import { taskQueryForViewer } from "@/lib/notion/owner-filter";
@@ -19,16 +20,17 @@ export async function GET(request: Request) {
     }
 
     const query = taskQueryForViewer(viewer, null, "open");
+    const includeTest = canAccessTestBrands(viewer);
 
     if (viewer.role === "Caller") {
       // Caller ReplyTask is brand-scoped: one badge unit per Follow-up Client.
-      const openCount = await countOpenPhoneBrandsForViewer(query);
+      const openCount = await countOpenPhoneBrandsForViewer(query, { includeTest });
       return Response.json({ openCount });
     }
 
     const [phoneOpenCount, replyStubs] = await Promise.all([
-      countOpenPhoneTasksForViewer(query),
-      listOpenReplyTaskStubsForViewer(query),
+      countOpenPhoneTasksForViewer(query, { includeTest }),
+      listOpenReplyTaskStubsForViewer(query, { includeTest }),
     ]);
     const annotated = await syncReplyInbox(replyStubs, { backfill: false });
     const needsReplyCount = annotated.filter((item) => item.inboxStatus === "Needs Reply").length;

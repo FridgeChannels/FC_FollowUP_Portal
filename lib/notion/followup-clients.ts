@@ -9,6 +9,7 @@ import {
 import { checkpointShortName, resolveCheckpoint } from "./cps";
 import {
   firstRelationId,
+  isTestFollowupClientPage,
   propertyText,
   relationIds,
   retrievePage,
@@ -124,6 +125,7 @@ export async function mapFollowupClientPage(
     ownerId: owner?.id || ownerId || null,
     ownerName: owner?.name || null,
     ownerEmail: owner?.account || null,
+    isTest: isTestFollowupClientPage(page),
   };
 }
 
@@ -180,6 +182,7 @@ export async function mapFollowupClientDetail(
       id: brand.id,
       name: brandName,
       ownerId: brand.ownerId,
+      isTest: brand.isTest,
     },
   };
   const [activities, tasks] = await Promise.all([

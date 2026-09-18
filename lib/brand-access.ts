@@ -14,6 +14,24 @@ function normalizeEmail(value?: string | null) {
   return value?.trim().toLowerCase() || null;
 }
 
+/** Explicit accounts that may see `Is Test` brands even when Admin. */
+const TEST_DATA_VIEWER_EMAILS = new Set(["peter@fridgechannels.com"]);
+
+/**
+ * Admin / Caller hide test brands by default.
+ * AccountManager see them (still owner-scoped).
+ * Allowlisted accounts (e.g. peter) always see them.
+ */
+export function canAccessTestBrands(
+  viewer: Pick<BrandViewer, "isAdmin" | "role" | "email" | "name">,
+) {
+  const email = normalizeEmail(viewer.email);
+  if (email && TEST_DATA_VIEWER_EMAILS.has(email)) return true;
+  if (viewer.name?.trim().toLowerCase() === "peter") return true;
+  if (viewer.role === "AccountManager") return true;
+  return false;
+}
+
 export async function resolveBrandViewer(input: {
   email?: string | null;
   name?: string | null;
@@ -41,6 +59,7 @@ export async function resolveBrandViewer(input: {
 }
 
 export function canViewBrand(viewer: BrandViewer, brand: BrandListItem, tasks?: BrandTask[]) {
+  if (brand.isTest && !canAccessTestBrands(viewer)) return false;
   if (viewer.isAdmin) return true;
   if (viewer.ownerId && brand.ownerId === viewer.ownerId) return true;
   if (viewer.email && brand.ownerEmail?.toLowerCase() === viewer.email) return true;
@@ -49,6 +68,7 @@ export function canViewBrand(viewer: BrandViewer, brand: BrandListItem, tasks?: 
 }
 
 export function canWriteBrand(viewer: BrandViewer, brand: BrandListItem) {
+  if (brand.isTest && !canAccessTestBrands(viewer)) return false;
   if (viewer.role === "Caller") return false;
   if (viewer.isAdmin) return true;
   if (viewer.ownerId && brand.ownerId === viewer.ownerId) return true;
@@ -61,6 +81,7 @@ export function canAssignBrandOwner(viewer: BrandViewer) {
 }
 
 export function canViewTask(viewer: BrandViewer, task: BrandTask) {
+  if (task.brandIsTest && !canAccessTestBrands(viewer)) return false;
   if (viewer.isAdmin) return true;
   if (viewer.role === "Caller") {
     return task.channel === "Phone";

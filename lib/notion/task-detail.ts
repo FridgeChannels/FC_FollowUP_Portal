@@ -103,6 +103,7 @@ export async function buildCallerTaskDetailPayload(id: string): Promise<TaskDeta
           id: brandId,
           name: task.brandName || brandList?.name || "Untitled brand",
           ownerId: task.brandOwnerId || brandList?.ownerId || null,
+          isTest: task.brandIsTest || brandList?.isTest,
         },
         contactsById,
       }

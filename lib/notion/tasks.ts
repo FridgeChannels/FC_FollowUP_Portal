@@ -3,9 +3,11 @@ import { isLinkedInColdCapacityTask } from "../linkedin/notes.ts";
 import { CHANNELS, type Channel, type ExistingTask, type TaskStatus } from "../scheduling-engine/types";
 import {
   firstRelationId,
+  isTestFollowupClientPage,
   notionFetch,
   propertyDate,
   propertyText,
+  queryTestFollowupClientIds,
   relationIds,
   retrievePage,
   titleFromProperties,
@@ -86,6 +88,7 @@ function stubTaskFromPage(page: NotionPage): BrandTask {
     brandId: null,
     brandName: null,
     brandOwnerId: null,
+    brandIsTest: false,
     ownerId: firstRelationId(properties.Owner) || null,
     ownerName: null,
     channel: propertyText(properties.Channel) || null,
@@ -102,60 +105,7 @@ function stubTaskFromPage(page: NotionPage): BrandTask {
   };
 }
 
-async function countTaskPages(filter?: Record<string, unknown>) {
-  let count = 0;
-  let cursor: string | undefined;
-  do {
-    const batch = await queryTaskPagesOnce({
-      filter,
-      startCursor: cursor,
-      pageSize: 100,
-    });
-    count += batch.pages.length;
-    cursor = batch.nextCursor || undefined;
-  } while (cursor);
-  return count;
-}
-
-/** Open Phone count — page IDs only, no Contact/Brand mapping. */
-export async function countOpenPhoneTasksForViewer(query: TaskListQuery) {
-  return countTaskPages(
-    taskListFilter({
-      ...query,
-      channel: "Phone",
-      channels: undefined,
-      statusScope: "open",
-    }),
-  );
-}
-
-/**
- * Open Phone brand count for Caller ReplyTask badge.
- * Same brand with multiple Phone tasks counts as 1.
- */
-export async function countOpenPhoneBrandsForViewer(query: TaskListQuery) {
-  let pages: NotionPage[] = [];
-  try {
-    pages = await queryTaskPages(
-      taskListFilter({
-        ...query,
-        channel: "Phone",
-        channels: undefined,
-        statusScope: "open",
-      }),
-    );
-  } catch {
-    return 0;
-  }
-  if (!pages.length) return 0;
-
-  const contactIds = [
-    ...new Set(
-      pages
-        .map((page) => firstRelationId(page.properties?.["Follow-up Contact"]) || null)
-        .filter((id): id is string => !!id),
-    ),
-  ];
+async function brandIdsByContact(contactIds: string[]) {
   const brandByContact = new Map<string, string | null>();
   await Promise.all(
     contactIds.map(async (contactId) => {
@@ -170,6 +120,90 @@ export async function countOpenPhoneBrandsForViewer(query: TaskListQuery) {
       }
     }),
   );
+  return brandByContact;
+}
+
+/** Drop task pages whose Follow-up Client has `Is Test` checked. */
+async function excludeTestBrandTaskPages(pages: NotionPage[]) {
+  if (!pages.length) return pages;
+  const testIds = await queryTestFollowupClientIds().catch(() => new Set<string>());
+  if (!testIds.size) return pages;
+
+  const contactIds = [
+    ...new Set(
+      pages
+        .map((page) => firstRelationId(page.properties?.["Follow-up Contact"]) || null)
+        .filter((id): id is string => !!id),
+    ),
+  ];
+  const brandByContact = await brandIdsByContact(contactIds);
+
+  return pages.filter((page) => {
+    const contactId = firstRelationId(page.properties?.["Follow-up Contact"]) || null;
+    const brandId = contactId ? brandByContact.get(contactId) : null;
+    if (!brandId) return true;
+    return !testIds.has(brandId);
+  });
+}
+
+function withoutTestBrandTasks(tasks: BrandTask[]) {
+  return tasks.filter((task) => !task.brandIsTest);
+}
+
+/** Open Phone count — optionally excludes tasks on `Is Test` Follow-up Clients. */
+export async function countOpenPhoneTasksForViewer(
+  query: TaskListQuery,
+  options: { includeTest?: boolean } = {},
+) {
+  let pages: NotionPage[] = [];
+  try {
+    pages = await queryTaskPages(
+      taskListFilter({
+        ...query,
+        channel: "Phone",
+        channels: undefined,
+        statusScope: "open",
+      }),
+    );
+  } catch {
+    return 0;
+  }
+  if (!options.includeTest) pages = await excludeTestBrandTaskPages(pages);
+  return pages.length;
+}
+
+/**
+ * Open Phone brand count for Caller ReplyTask badge.
+ * Same brand with multiple Phone tasks counts as 1.
+ */
+export async function countOpenPhoneBrandsForViewer(
+  query: TaskListQuery,
+  options: { includeTest?: boolean } = {},
+) {
+  let pages: NotionPage[] = [];
+  try {
+    pages = await queryTaskPages(
+      taskListFilter({
+        ...query,
+        channel: "Phone",
+        channels: undefined,
+        statusScope: "open",
+      }),
+    );
+  } catch {
+    return 0;
+  }
+  if (!options.includeTest) pages = await excludeTestBrandTaskPages(pages);
+  if (!pages.length) return 0;
+
+  const contactIds = [
+    ...new Set(
+      pages
+        .map((page) => firstRelationId(page.properties?.["Follow-up Contact"]) || null)
+        .filter((id): id is string => !!id),
+    ),
+  ];
+  const brandByContact = await brandIdsByContact(contactIds);
 
   const keys = new Set<string>();
   for (const page of pages) {
@@ -186,7 +220,10 @@ export async function countOpenPhoneBrandsForViewer(query: TaskListQuery) {
  * Open non-Phone task stubs for badge Needs Reply annotation.
  * Reads Task properties only — skips Contact/Brand N+1.
  */
-export async function listOpenReplyTaskStubsForViewer(query: TaskListQuery) {
+export async function listOpenReplyTaskStubsForViewer(
+  query: TaskListQuery,
+  options: { includeTest?: boolean } = {},
+) {
   const replyChannels = CHANNELS.filter((channel) => channel !== "Phone");
   let pages: NotionPage[] = [];
   try {
@@ -201,6 +238,7 @@ export async function listOpenReplyTaskStubsForViewer(query: TaskListQuery) {
   } catch {
     pages = [];
   }
+  if (!options.includeTest) pages = await excludeTestBrandTaskPages(pages);
   return pages.map(stubTaskFromPage);
 }
 
@@ -232,11 +270,18 @@ async function listFromContactRelations(contactIds: string[]) {
   return pages.filter((page): page is NotionPage => !!page);
 }
 
+type TaskBrandInfo = {
+  id: string;
+  name: string;
+  ownerId: string | null;
+  isTest: boolean;
+};
+
 type TaskCaches = {
   titles: Map<string, string>;
   owners: Map<string, FollowupOwner | null>;
   contacts: Map<string, NotionPage | null>;
-  brands: Map<string, { id: string; name: string; ownerId: string | null } | null>;
+  brands: Map<string, TaskBrandInfo | null>;
 };
 
 function emptyCaches(): TaskCaches {
@@ -319,6 +364,7 @@ async function prefetchBrands(clientIds: string[], caches: TaskCaches) {
       id: page.id,
       name,
       ownerId: firstRelationId(properties.Owner) || null,
+      isTest: isTestFollowupClientPage(page),
     });
   }
 }
@@ -329,7 +375,14 @@ async function warmCachesForTaskPages(
   caches: TaskCaches,
   hints?: TaskResolveHints,
 ) {
-  if (hints?.brand) caches.brands.set(hints.brand.id, hints.brand);
+  if (hints?.brand) {
+    caches.brands.set(hints.brand.id, {
+      id: hints.brand.id,
+      name: hints.brand.name,
+      ownerId: hints.brand.ownerId,
+      isTest: Boolean(hints.brand.isTest),
+    });
+  }
 
   const contactIds: string[] = [];
   const ownerIds: string[] = [];
@@ -413,10 +466,11 @@ async function resolveBrandFromContact(contact: NotionPage | null, caches: TaskC
       (await relatedTitle(firstRelationId(properties.Client), caches)) ||
       titleFromProperties(properties) ||
       "Untitled Client";
-    const mapped = {
+    const mapped: TaskBrandInfo = {
       id: page.id,
       name,
       ownerId: firstRelationId(properties.Owner) || null,
+      isTest: isTestFollowupClientPage(page),
     };
     caches.brands.set(clientId, mapped);
     return mapped;
@@ -457,7 +511,7 @@ export type TaskResolveHints = {
   /** Skip Contact/KeyPerson retrieves when the detail path already loaded contacts. */
   contactsById?: Map<string, { name: string | null; phone: string | null }>;
   /** Skip Follow-up Client retrieves when mapping tasks for a known brand. */
-  brand?: { id: string; name: string; ownerId: string | null };
+  brand?: { id: string; name: string; ownerId: string | null; isTest?: boolean };
 };
 
 async function mapTaskPage(
@@ -480,7 +534,14 @@ async function mapTaskPage(
 
   let contactName = hintedContact?.name ?? null;
   let contactPhone = hintedContact?.phone ?? null;
-  let brand = hints?.brand || null;
+  let brand: TaskBrandInfo | null = hints?.brand
+    ? {
+        id: hints.brand.id,
+        name: hints.brand.name,
+        ownerId: hints.brand.ownerId,
+        isTest: Boolean(hints.brand.isTest),
+      }
+    : null;
 
   if (!hintedContact || !brand) {
     const contact = await resolveContactPage(contactId || undefined, caches);
@@ -504,6 +565,7 @@ async function mapTaskPage(
     brandId: brand?.id || null,
     brandName: brand?.name || null,
     brandOwnerId: brand?.ownerId || null,
+    brandIsTest: Boolean(brand?.isTest),
     ownerId: owner?.id || ownerId,
     ownerName: owner?.name || null,
     contactPhone,
@@ -638,19 +700,23 @@ export async function listFollowupTasksByBomb(bombId: string): Promise<BrandTask
   return sortTasks(await mapTaskPages(pages));
 }
 
-export async function listFollowupTasksForViewer(query: TaskListQuery = {}) {
+export async function listFollowupTasksForViewer(
+  query: TaskListQuery = {},
+  options: { includeTest?: boolean } = {},
+) {
   let pages: NotionPage[] = [];
   try {
     pages = await queryTaskPages(taskListFilter(query));
   } catch {
     pages = [];
   }
-  return sortTasks(await mapTaskPages(pages));
+  const mapped = await mapTaskPages(pages);
+  return sortTasks(options.includeTest ? mapped : withoutTestBrandTasks(mapped));
 }
 
 export async function listFollowupTasksForViewerPage(
   query: TaskListQuery = {},
-  options: { cursor?: string | null; pageSize?: number } = {},
+  options: { cursor?: string | null; pageSize?: number; includeTest?: boolean } = {},
 ) {
   const pageSize = Math.min(Math.max(options.pageSize ?? DEFAULT_TASK_PAGE_SIZE, 1), 100);
   let batch = { pages: [] as NotionPage[], nextCursor: null as string | null, hasMore: false };
@@ -664,7 +730,8 @@ export async function listFollowupTasksForViewerPage(
   } catch {
     batch = { pages: [], nextCursor: null, hasMore: false };
   }
-  const tasks = await mapTaskPages(batch.pages);
+  const mapped = await mapTaskPages(batch.pages);
+  const tasks = options.includeTest ? mapped : withoutTestBrandTasks(mapped);
   return {
     tasks,
     nextCursor: batch.nextCursor,

@@ -1,5 +1,33 @@
 import type { PortalRole } from "./owner-role";
 
+/** Follow-up ClientDB checkbox — Portal hides these clients and their tasks. */
+export const FOLLOWUP_CLIENT_IS_TEST_PROPERTY = "Is Test";
+
+export function andFilters(
+  ...parts: Array<Record<string, unknown> | undefined | null>
+): Record<string, unknown> | undefined {
+  const filters = parts.filter((part): part is Record<string, unknown> => !!part);
+  if (!filters.length) return undefined;
+  if (filters.length === 1) return filters[0];
+  return { and: filters };
+}
+
+/** Exclude Follow-up Clients marked as test data. */
+export function nonTestClientFilter() {
+  return {
+    property: FOLLOWUP_CLIENT_IS_TEST_PROPERTY,
+    checkbox: { equals: false },
+  };
+}
+
+/** Only Follow-up Clients marked as test data. */
+export function testClientFilter() {
+  return {
+    property: FOLLOWUP_CLIENT_IS_TEST_PROPERTY,
+    checkbox: { equals: true },
+  };
+}
+
 /** `undefined` = all owners, `null` = Owner is empty, string = specific Owner page. */
 export function ownerRelationFilter(ownerPageId?: string | null) {
   if (ownerPageId === undefined) return undefined;
