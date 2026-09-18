@@ -4,12 +4,14 @@ import {
   parseApplicableCp,
   type BrandDetail,
   type BrandListItem,
+  type BrandMeetingNote,
   type HandlingMode,
 } from "../brand-list";
 import { checkpointShortName, listCheckpoints, resolveCheckpoint } from "./cps";
 import {
   firstRelationId,
   isTestFollowupClientPage,
+  notionPageUrl,
   propertyText,
   queryFollowupClientPagesPage,
   relationIds,
@@ -325,6 +327,28 @@ async function resolveBombMeta(pageId: string) {
   }
 }
 
+async function resolveMeetingNotes(pageIds: string[]): Promise<BrandMeetingNote[]> {
+  const pages = await Promise.all(
+    pageIds.map(async (id) => {
+      try {
+        return await retrievePage(id);
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return pages
+    .filter((page): page is NotionPage => !!page)
+    .map((page) => ({
+      id: page.id,
+      title: titleFromProperties(page.properties) || "Meeting note",
+      url: notionPageUrl(page),
+      sortAt: notionDate(page.properties?.["Meeting Time"]) || page.last_edited_time || "",
+    }))
+    .sort((a, b) => b.sortAt.localeCompare(a.sortAt) || a.title.localeCompare(b.title))
+    .map(({ id, title, url }) => ({ id, title, url }));
+}
+
 export type MapFollowupClientDetailOptions = {
   /** Default false — brand shell loads first; timeline uses /activities. */
   includeActivities?: boolean;
@@ -335,11 +359,12 @@ export async function mapFollowupClientDetail(
   options: MapFollowupClientDetailOptions = {},
 ): Promise<BrandDetail> {
   const properties = page.properties || {};
-  const [brand, contacts, company, followupExhibition] = await Promise.all([
+  const [brand, contacts, company, followupExhibition, meetingNotes] = await Promise.all([
     mapFollowupClientPage(page),
     listFollowupContacts(page.id, relationIds(properties["Follow-up Contacts"])),
     resolveClientCompany(firstRelationId(properties.Client)),
     resolveFollowupExhibition(page),
+    resolveMeetingNotes(relationIds(properties["FC3.0-FollowUp-NotionAIMeetings"])),
   ]);
   const cpMeta =
     (brand.currentCpId ? await resolveCheckpoint(brand.currentCpId) : null) ||
@@ -375,6 +400,7 @@ export async function mapFollowupClientDetail(
     productDescription: company.productDescription,
     matchedCategory: company.matchedCategory,
     followupExhibition,
+    meetingNotes,
     priority: propertyText(properties.Priority) || null,
     notes: propertyText(properties.Notes) || null,
     createdAt: page.created_time || properties["Created At"]?.created_time || null,

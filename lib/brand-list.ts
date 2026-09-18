@@ -288,6 +288,12 @@ export function lastReplyAtFromActivities(
     .at(-1) || null;
 }
 
+export type BrandMeetingNote = {
+  id: string;
+  title: string;
+  url: string;
+};
+
 export type BrandDetail = BrandListItem & {
   priority: string | null;
   notes: string | null;
@@ -298,6 +304,7 @@ export type BrandDetail = BrandListItem & {
   productDescription: string | null;
   matchedCategory: string | null;
   followupExhibition: string | null;
+  meetingNotes: BrandMeetingNote[];
   contacts: BrandContact[];
   tasks: BrandTask[];
   activities: BrandActivity[];
