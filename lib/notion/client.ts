@@ -40,10 +40,15 @@ export type NotionProperty = {
 
 export type NotionPage = {
   id: string;
+  url?: string;
   created_time?: string;
   last_edited_time?: string;
   properties?: Record<string, NotionProperty>;
 };
+
+export function notionPageUrl(page: Pick<NotionPage, "id" | "url">) {
+  return page.url || `https://www.notion.so/${page.id.replace(/-/g, "")}`;
+}
 
 function notionHeaders() {
   const key = getNotionApiKey();
