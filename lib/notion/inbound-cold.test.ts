@@ -4,19 +4,21 @@ import { InboundReplyError } from "./inbound-errors.ts";
 import { normalizeInboundColdInput } from "./inbound-cold-input.ts";
 
 describe("normalizeInboundColdInput", () => {
-  it("accepts contactId path for Email with object", () => {
+  it("accepts FollowUpClientId + sender for Email", () => {
     const normalized = normalizeInboundColdInput({
       channel: "Email",
       object: "Magnet inquiry",
       content: "We saw your Magnet offer…",
-      contactId: "contact-1",
+      FollowUpClientId: "brand-1",
+      sender: "buyer@acme.com",
     });
     assert.equal(normalized.channel, "Email");
     assert.equal(normalized.object, "Magnet inquiry");
-    assert.equal(normalized.contactId, "contact-1");
+    assert.equal(normalized.brandId, "brand-1");
+    assert.equal(normalized.sender, "buyer@acme.com");
   });
 
-  it("accepts brandId + sender path", () => {
+  it("accepts brandId as alias for FollowUpClientId", () => {
     const normalized = normalizeInboundColdInput({
       channel: "SMS",
       content: "Got the sample.",
@@ -28,13 +30,24 @@ describe("normalizeInboundColdInput", () => {
     assert.equal(normalized.object, "");
   });
 
+  it("allows Email with sender only (no FollowUpClientId)", () => {
+    const normalized = normalizeInboundColdInput({
+      channel: "Email",
+      object: "Magnet inquiry",
+      content: "Hello",
+      sender: "buyer@acme.com",
+    });
+    assert.equal(normalized.brandId, "");
+    assert.equal(normalized.sender, "buyer@acme.com");
+  });
+
   it("requires object for Email", () => {
     assert.throws(
       () =>
         normalizeInboundColdInput({
           channel: "Email",
           content: "Hello",
-          contactId: "contact-1",
+          sender: "buyer@acme.com",
         }),
       (error: unknown) =>
         error instanceof InboundReplyError && error.status === 400 && /object/.test(error.message),
@@ -48,7 +61,8 @@ describe("normalizeInboundColdInput", () => {
           channel: "SMS",
           object: "should not appear",
           content: "Hi",
-          contactId: "contact-1",
+          brandId: "brand-1",
+          sender: "+14155550182",
         }),
       (error: unknown) =>
         error instanceof InboundReplyError && error.status === 400 && /only valid for Email/.test(error.message),
@@ -62,7 +76,7 @@ describe("normalizeInboundColdInput", () => {
           channel: "Email",
           object: "Subject",
           content: "Body",
-          contactId: "contact-1",
+          sender: "buyer@acme.com",
           taskId: "task-1",
         }),
       (error: unknown) =>
@@ -72,24 +86,54 @@ describe("normalizeInboundColdInput", () => {
     );
   });
 
-  it("allows Phone without content", () => {
+  it("rejects contactId", () => {
+    assert.throws(
+      () =>
+        normalizeInboundColdInput({
+          channel: "Email",
+          object: "Subject",
+          content: "Body",
+          contactId: "contact-1",
+          sender: "buyer@acme.com",
+        }),
+      (error: unknown) =>
+        error instanceof InboundReplyError && error.status === 400 && /contactId/.test(error.message),
+    );
+  });
+
+  it("allows Phone without content when brand + sender present", () => {
     const normalized = normalizeInboundColdInput({
       channel: "Phone",
-      contactId: "contact-1",
+      FollowUpClientId: "brand-1",
+      sender: "+14155550182",
     });
     assert.equal(normalized.content, "Inbound call");
   });
 
-  it("requires contactId or brandId+sender", () => {
+  it("requires FollowUpClientId for non-Email", () => {
     assert.throws(
       () =>
         normalizeInboundColdInput({
           channel: "LinkedIn",
           content: "Hello",
-          brandId: "brand-1",
+          sender: "linkedin.com/in/someone",
         }),
       (error: unknown) =>
-        error instanceof InboundReplyError && error.status === 422,
+        error instanceof InboundReplyError && error.status === 422 && /FollowUpClientId/.test(error.message),
+    );
+  });
+
+  it("requires sender", () => {
+    assert.throws(
+      () =>
+        normalizeInboundColdInput({
+          channel: "Email",
+          object: "Subject",
+          content: "Body",
+          FollowUpClientId: "brand-1",
+        }),
+      (error: unknown) =>
+        error instanceof InboundReplyError && error.status === 422 && /sender/.test(error.message),
     );
   });
 });

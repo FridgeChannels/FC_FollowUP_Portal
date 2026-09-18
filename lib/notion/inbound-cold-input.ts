@@ -6,10 +6,15 @@ export type InboundColdInput = {
   channel?: string;
   content?: string;
   object?: string | null;
-  contactId?: string | null;
+  /** Preferred brand id for adapters. */
+  FollowUpClientId?: string | null;
+  /** Legacy alias for FollowUpClientId. */
   brandId?: string | null;
+  /** Counterparty identity: email / phone / LinkedIn URL depending on channel. */
   sender?: string | null;
   taskId?: string | null;
+  /** @deprecated Removed — cold inbound resolves via FollowUpClientId + sender. */
+  contactId?: string | null;
 };
 
 /** Pure validation for /api/inbound. */
@@ -17,6 +22,13 @@ export function normalizeInboundColdInput(input: InboundColdInput) {
   if (input.taskId != null && String(input.taskId).trim()) {
     throw new InboundReplyError(
       "taskId is not allowed on /api/inbound. Use POST /api/replies for replies to a sent Follow-up Task.",
+      400,
+    );
+  }
+
+  if (input.contactId != null && String(input.contactId).trim()) {
+    throw new InboundReplyError(
+      "contactId is not supported on /api/inbound. Provide FollowUpClientId (or brandId) + sender, or sender alone for Email.",
       400,
     );
   }
@@ -38,31 +50,36 @@ export function normalizeInboundColdInput(input: InboundColdInput) {
     throw new InboundReplyError("Message content is required", 400);
   }
 
-  const contactId = input.contactId?.trim() || "";
-  const brandId = input.brandId?.trim() || "";
+  const brandId = input.FollowUpClientId?.trim() || input.brandId?.trim() || "";
   const sender = input.sender?.trim() || "";
 
-  if (contactId) {
-    return {
-      channel,
-      content: content || "Inbound call",
-      object: channel === "Email" ? object : "",
-      contactId,
-      brandId: "",
-      sender,
-    };
+  if (!sender) {
+    throw new InboundReplyError("sender is required", 422);
   }
 
-  if (brandId && sender) {
+  if (channel === "Email") {
+    // FollowUpClientId optional: empty → resolve contact globally by email.
     return {
       channel,
-      content: content || "Inbound call",
-      object: channel === "Email" ? object : "",
-      contactId: "",
+      content,
+      object,
       brandId,
       sender,
     };
   }
 
-  throw new InboundReplyError("Provide contactId, or brandId + sender", 422);
+  if (!brandId) {
+    throw new InboundReplyError(
+      "FollowUpClientId (or brandId) is required for non-Email cold inbound",
+      422,
+    );
+  }
+
+  return {
+    channel,
+    content: content || "Inbound call",
+    object: "",
+    brandId,
+    sender,
+  };
 }

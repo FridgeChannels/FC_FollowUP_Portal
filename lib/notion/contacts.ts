@@ -1,14 +1,15 @@
 import type { BrandContact } from "../brand-list";
+import { getFollowupContactDbId, getKeyPersonDbId } from "./config";
 import {
   firstRelationId,
   notionFetch,
   propertyText,
+  queryDatabasePages,
   retrievePage,
   rollupDate,
   titleFromProperties,
   type NotionPage,
 } from "./client";
-import { getFollowupContactDbId } from "./config";
 
 const VERIFIED_EMAIL_STATUSES = new Set(["Verified", "Icypeas Verified"]);
 const CONTACT_ORDER: Record<string, number> = {
@@ -136,4 +137,47 @@ export async function listFollowupContactIds(
   }
   if (pages.length) return pages.map((page) => page.id);
   return relatedIds;
+}
+
+async function queryKeyPersonsByEmail(email: string) {
+  const normalized = email.trim().toLowerCase();
+  if (!normalized) return [];
+  // Notion email.equals is exact; try lowercase first, then original trim.
+  const variants = [...new Set([normalized, email.trim()].filter(Boolean))];
+  const byId = new Map<string, NotionPage>();
+  for (const value of variants) {
+    const pages = await queryDatabasePages(getKeyPersonDbId(), {
+      property: "Email",
+      email: { equals: value },
+    }).catch(() => [] as NotionPage[]);
+    for (const page of pages) byId.set(page.id, page);
+  }
+  return [...byId.values()];
+}
+
+async function queryContactsByKeyPerson(keyPersonId: string) {
+  return queryDatabasePages(getFollowupContactDbId(), {
+    property: "Key Person",
+    relation: { contains: keyPersonId },
+  }).catch(() => [] as NotionPage[]);
+}
+
+/**
+ * Resolve Follow-up Contacts whose Key Person Email equals `email` (any brand).
+ * Used by Email cold inbound when FollowUpClientId is omitted.
+ */
+export async function findFollowupContactsByEmail(email: string): Promise<BrandContact[]> {
+  const people = await queryKeyPersonsByEmail(email);
+  if (!people.length) return [];
+  const contactPages: NotionPage[] = [];
+  const seen = new Set<string>();
+  for (const person of people) {
+    const pages = await queryContactsByKeyPerson(person.id);
+    for (const page of pages) {
+      if (seen.has(page.id)) continue;
+      seen.add(page.id);
+      contactPages.push(page);
+    }
+  }
+  return Promise.all(contactPages.map(mapFollowupContact));
 }

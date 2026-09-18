@@ -6,7 +6,7 @@ import {
   titleFromProperties,
 } from "./client";
 import { getFollowupConversationDbId } from "./config";
-import { listFollowupContacts } from "./contacts";
+import { findFollowupContactsByEmail, listFollowupContacts } from "./contacts";
 import { conversationCpRelation } from "./cps";
 import { mapFollowupClientPage } from "./followup-clients";
 import { markFollowupClientEngaged, resolveConversationThread } from "./followup-writes";
@@ -48,8 +48,10 @@ async function loadContactContext(contactId: string, channel: string): Promise<R
   const contactPage = await retrievePage(contactId).catch(() => null);
   if (!contactPage) throw new InboundReplyError("Contact not found", 404);
   const brandId = firstRelationId(contactPage.properties?.["Follow-up Client"]);
-  if (!brandId) throw new InboundReplyError("Contact has no Follow-up Client", 422);
-  const brand = await mapFollowupClientPage(await retrievePage(brandId));
+  if (!brandId) throw new InboundReplyError("Brand not found", 404);
+  const brandPage = await retrievePage(brandId).catch(() => null);
+  if (!brandPage) throw new InboundReplyError("Brand not found", 404);
+  const brand = await mapFollowupClientPage(brandPage);
   const contacts = await listFollowupContacts(brandId, [contactId]);
   const contact = contacts.find((item) => item.id === contactId);
   return {
@@ -63,7 +65,7 @@ async function loadContactContext(contactId: string, channel: string): Promise<R
   };
 }
 
-async function resolveBySender(brandId: string, channel: string, sender: string) {
+async function resolveBySenderInBrand(brandId: string, channel: string, sender: string) {
   const brandPage = await retrievePage(brandId).catch(() => null);
   if (!brandPage) throw new InboundReplyError("Brand not found", 404);
   const contacts = await listFollowupContacts(brandId);
@@ -72,18 +74,31 @@ async function resolveBySender(brandId: string, channel: string, sender: string)
     throw new InboundReplyError("Multiple contacts match this sender", 409);
   }
   if (!matches[0]) {
-    throw new InboundReplyError("No Follow-up Contact matches this sender", 422);
+    throw new InboundReplyError("Contact not found", 404);
   }
   return loadContactContext(matches[0].id, channel);
+}
+
+/** Email only: FollowUpClientId empty → KeyPerson email → Follow-up Contact(s) → brand. */
+async function resolveByEmailGlobally(sender: string) {
+  const matches = await findFollowupContactsByEmail(sender);
+  if (matches.length > 1) {
+    throw new InboundReplyError("Multiple contacts match this sender", 409);
+  }
+  if (!matches[0]) {
+    throw new InboundReplyError("Contact not found", 404);
+  }
+  return loadContactContext(matches[0].id, "Email");
 }
 
 async function resolveInboundColdTarget(
   input: ReturnType<typeof normalizeInboundColdInput>,
 ): Promise<ResolvedTarget> {
-  if (input.contactId) {
-    return loadContactContext(input.contactId, input.channel);
+  if (input.brandId) {
+    return resolveBySenderInBrand(input.brandId, input.channel, input.sender);
   }
-  return resolveBySender(input.brandId, input.channel, input.sender);
+  // Only Email may omit FollowUpClientId (validated in normalizeInboundColdInput).
+  return resolveByEmailGlobally(input.sender);
 }
 
 export async function ingestInboundCold(

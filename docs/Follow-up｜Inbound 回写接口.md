@@ -31,50 +31,58 @@ Authorization: Bearer <REPLY_INGEST_TOKEN>
 | | `/api/replies` | `/api/inbound` |
 | --- | --- | --- |
 | 场景 | 已发 Follow-up 的回复 | 无已发 Task / 客户先联系 |
-| 定位 | `taskId` + `threadId` | `contactId`，或 `brandId` + `sender` |
+| 定位 | `taskId` + `threadId` | `FollowUpClientId` + `sender`（Email 可仅 `sender`） |
 | Follow-up Task | 必挂 | **留空** |
 | 取消同 OmniReach 未发任务 | 是 | **否** |
 | Client → Human | 是 | 是 |
 
-误把 `taskId` 传到本接口会返回 **400**，请改调 `/api/replies`。
+误把 `taskId` 或 `contactId` 传到本接口会返回 **400**。有已发 Task 的回复请改调 `/api/replies`。
 
 ---
 
-## 入参（精简）
+## 入参
 
-### 路径 A：已知 Contact（推荐）
+### Email（推荐）
 
 ```json
 {
   "channel": "Email",
   "object": "Magnet inquiry",
   "content": "We saw your Magnet offer…",
-  "contactId": "<Follow-up Contact 页面 ID>"
-}
-```
-
-### 路径 B：品牌 + 来信标识
-
-```json
-{
-  "channel": "SMS",
-  "content": "Got the sample.",
-  "brandId": "<Follow-up Client 页面 ID>",
-  "sender": "+14155550182"
+  "sender": "buyer@acme.com",
+  "FollowUpClientId": "<Follow-up Client 页面 ID，可空>"
 }
 ```
 
 | 字段 | 必填 | 说明 |
 | --- | --- | --- |
-| `channel` | 是 | `Email` / `LinkedIn` / `SMS` / `WhatsApp` / `Phone` |
-| `content` | 条件 | 非 Phone 必填。Phone 可空，空则写入 `Inbound call` |
-| `object` | 仅 Email | **邮件主题**，写入 Conversation `Subject`。Email **必填**；其它渠道**禁止**传 |
-| `contactId` | 二选一 | Follow-up Contact 页面 ID（优先） |
-| `brandId` + `sender` | 二选一 | 无 `contactId` 时成对必填。`sender` 按渠道匹配邮箱 / 手机 / LinkedIn |
+| `channel` | 是 | `Email` |
+| `object` | 是 | 邮件主题 → Conversation `Subject` |
+| `content` | 是 | 正文 |
+| `sender` | 是 | **对方发信人邮箱**（KeyPerson `Email`） |
+| `FollowUpClientId` | 否 | Follow-up Client 页面 ID。也接受别名 `brandId` |
+
+解析：
+
+1. **有 `FollowUpClientId`**：定位品牌 → 品牌内按邮箱匹配 Contact  
+2. **无 `FollowUpClientId`**：按邮箱全局查 KeyPerson → Follow-up Contact → 品牌（本轮仅 Email）  
+3. 品牌 / 联系人找不到 → **404**；多 Contact 匹配同一邮箱 → **409**
+
+### 其它渠道
+
+需同时提供 `FollowUpClientId`（或 `brandId`）+ `sender`（手机号 / LinkedIn URL）。**不支持**仅凭 `sender` 全局查找。
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `channel` | 是 | `LinkedIn` / `SMS` / `WhatsApp` / `Phone` |
+| `content` | 条件 | 非 Phone 必填。Phone 可空 → `Inbound call` |
+| `object` | 禁止 | 仅 Email 可用 |
+| `sender` | 是 | 按渠道匹配手机 / LinkedIn |
+| `FollowUpClientId` | 是 | 或别名 `brandId` |
 
 服务端自动处理（调用方不要传）：
 
-- `threadId`：一律新建系统 `THR-…`（Cold Inbound 视为新话题，不挂到原有对话线）
+- `threadId`：一律新建系统 `THR-…`（Cold Inbound 视为新话题）
 - `messageId`：生成 `IN-{channel}-{timestamp}`
 - `occurredAt`：服务器时间
 - Follow-up Task：**不关联**
@@ -85,6 +93,7 @@ Authorization: Bearer <REPLY_INGEST_TOKEN>
 ## Email
 
 ```bash
+# 已知品牌
 curl -sS -X POST "http://127.0.0.1:5173/api/inbound" \
   -H "Authorization: Bearer local-reply-ingest" \
   -H "Content-Type: application/json" \
@@ -92,7 +101,19 @@ curl -sS -X POST "http://127.0.0.1:5173/api/inbound" \
     "channel": "Email",
     "object": "Magnet inquiry",
     "content": "We saw your Magnet offer…",
-    "contactId": "<Follow-up Contact 页面 ID>"
+    "sender": "buyer@acme.com",
+    "FollowUpClientId": "<Follow-up Client 页面 ID>"
+  }'
+
+# 仅邮箱（全局定位 Contact → Brand）
+curl -sS -X POST "http://127.0.0.1:5173/api/inbound" \
+  -H "Authorization: Bearer local-reply-ingest" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "channel": "Email",
+    "object": "Magnet inquiry",
+    "content": "We saw your Magnet offer…",
+    "sender": "buyer@acme.com"
   }'
 ```
 
@@ -109,7 +130,8 @@ curl -sS -X POST "http://127.0.0.1:5173/api/inbound" \
   -d '{
     "channel": "LinkedIn",
     "content": "Interested in learning more about Magnet.",
-    "contactId": "<Follow-up Contact 页面 ID>"
+    "FollowUpClientId": "<Follow-up Client 页面 ID>",
+    "sender": "linkedin.com/in/someone"
   }'
 ```
 
@@ -124,7 +146,7 @@ curl -sS -X POST "http://127.0.0.1:5173/api/inbound" \
   -d '{
     "channel": "SMS",
     "content": "Got the sample.",
-    "brandId": "<Follow-up Client 页面 ID>",
+    "FollowUpClientId": "<Follow-up Client 页面 ID>",
     "sender": "+14155550182"
   }'
 ```
@@ -140,7 +162,8 @@ curl -sS -X POST "http://127.0.0.1:5173/api/inbound" \
   -d '{
     "channel": "WhatsApp",
     "content": "Can we schedule a call?",
-    "contactId": "<Follow-up Contact 页面 ID>"
+    "FollowUpClientId": "<Follow-up Client 页面 ID>",
+    "sender": "+14155550182"
   }'
 ```
 
@@ -155,7 +178,8 @@ curl -sS -X POST "http://127.0.0.1:5173/api/inbound" \
   -d '{
     "channel": "Phone",
     "content": "Asked about pricing",
-    "contactId": "<Follow-up Contact 页面 ID>"
+    "FollowUpClientId": "<Follow-up Client 页面 ID>",
+    "sender": "+14155550182"
   }'
 ```
 
@@ -191,10 +215,10 @@ Phone 时 `inboxStatus` 为 `null`。
 
 | HTTP | 含义 |
 | --- | --- |
-| 400 | 字段不合法（缺 channel、Email 缺 object、非 Email 传了 object、误传 taskId 等） |
+| 400 | 字段不合法（缺 channel、Email 缺 object、误传 taskId/contactId 等） |
 | 401 | 未鉴权 |
 | 403 | 登录用户无权写该品牌 |
-| 404 | Brand / Contact 不存在 |
+| 404 | Brand / Contact 不存在或不匹配 sender |
 | 409 | 多个 Contact 匹配同一 sender |
-| 422 | 无法定位 Contact（缺 contactId 且无完整 brandId+sender，或 sender 无匹配） |
+| 422 | 缺 `sender`；或非 Email 缺 `FollowUpClientId` |
 | 500 | 写入失败 |
