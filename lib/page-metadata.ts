@@ -70,11 +70,11 @@ export function brandListMetadata(filters: BrandListFilters = {}): PageMeta {
   }
   if (filters.owner === "unassigned") {
     crumbs.push("Unassigned");
-    details.push("unassigned FC-Owner");
+    details.push("unassigned AccountManager");
   } else if (filters.owner && filters.owner !== "all") {
     const name = filters.ownerName || "Owner";
     crumbs.push(name);
-    details.push(`FC-Owner ${name}`);
+    details.push(`AccountManager ${name}`);
   }
   if (filters.empty) crumbs.push("No matches");
 

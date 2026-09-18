@@ -787,7 +787,7 @@ export function BrandsPage() {
           ? { status: "Ready" }
           : {}),
       }),
-      "FC-Owner assigned",
+      "AccountManager assigned",
     );
   };
   const pauseSelected = () => {
@@ -819,7 +819,7 @@ export function BrandsPage() {
           {can("assignOwner") && (
             <Select disabled={busy} onValueChange={assignSelected}>
               <SelectTrigger size="sm" className="bg-white">
-                <SelectValue placeholder="Assign FC-Owner" />
+                <SelectValue placeholder="Assign AccountManager" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="unassigned">Unassigned</SelectItem>
@@ -886,7 +886,7 @@ export function BrandsPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All FC-Owners</SelectItem>
+                <SelectItem value="all">All AccountManagers</SelectItem>
                 <SelectItem value="unassigned">Unassigned</SelectItem>
                 {owners.map((item) => (
                   <SelectItem key={item.id} value={item.id}>
@@ -1001,7 +1001,7 @@ export function BrandsPage() {
                   <TableHead>Last interaction</TableHead>
                   <TableHead className="whitespace-nowrap">Days since last interaction</TableHead>
                   <TableHead className="whitespace-nowrap pr-5">Days since last reply</TableHead>
-                  {isAdmin && <TableHead>FC-Owner</TableHead>}
+                  {isAdmin && <TableHead>AccountManager</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1305,7 +1305,7 @@ function AddBrandDialog({
               />
             </label>
             <label className="grid gap-2 text-sm font-medium">
-              FC-Owner
+              AccountManager
               <Select value={ownerId} onValueChange={setOwnerId}>
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Unassigned" />
@@ -1418,7 +1418,7 @@ function ImportCsvDialog({
           <DialogDescription>
             Use one row per contact. Rows with the same Brand are grouped into
             one brand with multiple contacts. Imported brands start at CP1 and
-            remain unassigned until an Admin selects an FC-Owner.
+            remain unassigned until an Admin selects an AccountManager.
           </DialogDescription>
         </DialogHeader>
         {!headers.length ? (
