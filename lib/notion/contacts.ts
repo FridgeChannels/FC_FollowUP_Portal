@@ -146,11 +146,22 @@ async function queryKeyPersonsByEmail(email: string) {
   const variants = [...new Set([normalized, email.trim()].filter(Boolean))];
   const byId = new Map<string, NotionPage>();
   for (const value of variants) {
-    const pages = await queryDatabasePages(getKeyPersonDbId(), {
-      property: "Email",
-      email: { equals: value },
-    }).catch(() => [] as NotionPage[]);
-    for (const page of pages) byId.set(page.id, page);
+    try {
+      const pages = await queryDatabasePages(getKeyPersonDbId(), {
+        property: "Email",
+        email: { equals: value },
+      });
+      for (const page of pages) byId.set(page.id, page);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      // Misconfigured / unshared KeyPerson DB must not look like "contact missing".
+      if (/could not find database|404|unauthorized|forbidden/i.test(message)) {
+        throw new Error(
+          `KeyPerson database unavailable for email lookup (${getKeyPersonDbId()}): ${message}`,
+        );
+      }
+      throw error;
+    }
   }
   return [...byId.values()];
 }

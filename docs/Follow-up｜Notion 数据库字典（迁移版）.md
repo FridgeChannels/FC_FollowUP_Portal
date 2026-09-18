@@ -28,7 +28,7 @@
 | Notion 库名 | Data Source | Portal 用途 |
 | --- | --- | --- |
 | FC2.0-ClientDB / FC3.0-ClientDB | `1f107371-3833-4e84-9b30-179a2aa817aa` | 品牌名、产品描述、品类等；`Follow-up Client.Client` 关联 |
-| FC3.0-KeyPersonDB | `cd09166f-d9fd-836c-864b-073b80032dce` | 联系人姓名、Email/Phone/LinkedIn、验证状态；`Follow-up Contact.Key Person` 关联 |
+| FC3.0-KeyPersonDB | `0189166f-d9fd-8373-9626-01cc3dddd878` | 联系人姓名、Email/Phone/LinkedIn、验证状态；`Follow-up Contact.Key Person` 关联 |
 | FC3.0-ExhibitionDB | `3989166f-d9fd-8098-96e8-000b692cd932` | 展会名称；`Follow-up Client.Follow-up Exhibition` 关联 |
 
 主数据表字段极多（ClientDB / ExhibitionDB 各数十列）。迁移时建议：**全量导出主数据**，但应用层只映射 Portal 实际读取的子集（见第 12–14 节）。
