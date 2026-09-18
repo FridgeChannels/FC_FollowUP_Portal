@@ -164,10 +164,12 @@ function replyDueInRange(dueAt: string | null | undefined, from?: string | null,
 
 function sortBrandListItems(brands: BrandListItem[]) {
   return [...brands].sort((a, b) => {
+    const qualificationRank = (item: BrandListItem) => (item.needsQualification ? 1 : 0);
     const replyRank = (item: BrandListItem) => (item.needsReply ? 1 : 0);
     const aTime = a.replyDueAt || a.replyUpdatedAt || a.lastInteractionAt || "";
     const bTime = b.replyDueAt || b.replyUpdatedAt || b.lastInteractionAt || "";
     return (
+      qualificationRank(b) - qualificationRank(a) ||
       replyRank(b) - replyRank(a) ||
       (a.needsReply && b.needsReply ? aTime.localeCompare(bTime) : 0) ||
       bTime.localeCompare(aTime) ||

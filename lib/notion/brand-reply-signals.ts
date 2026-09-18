@@ -28,6 +28,8 @@ export type BrandInteractionSignal = Pick<
   | "lastInteractionStatus"
   | "lastInteractionCallResult"
   | "lastReplyAt"
+  | "needsQualification"
+  | "qualificationTaskCount"
 >;
 
 function interactionOccurredAt(item: BrandActivity) {
@@ -178,6 +180,8 @@ export async function listBrandInteractionSignals(pages: NotionPage[]) {
           lastInteractionStatus: null,
           lastInteractionCallResult: null,
           lastReplyAt: null,
+          needsQualification: false,
+          qualificationTaskCount: 0,
         });
         return;
       }
@@ -187,6 +191,9 @@ export async function listBrandInteractionSignals(pages: NotionPage[]) {
           listFollowupTasks(contactIds),
         ]);
         const taskStatusById = new Map(tasks.map((task) => [task.id, task.status]));
+        const qualificationTaskCount = tasks.filter(
+          (task) => task.channel === "Phone" && task.callReviewStatus === "Awaiting Review",
+        ).length;
         const latest = conversations.find((item) => isCompletedInteraction(item, taskStatusById));
         const lastReplyAt = lastReplyAtFromActivities(conversations);
         signals.set(page.id, {
@@ -196,6 +203,8 @@ export async function listBrandInteractionSignals(pages: NotionPage[]) {
           lastInteractionStatus: latest ? interactionStatusLabel(latest, taskStatusById) : null,
           lastInteractionCallResult: latest?.callResult ?? null,
           lastReplyAt,
+          needsQualification: qualificationTaskCount > 0,
+          qualificationTaskCount,
         });
       } catch {
         // Leave unset so attach keeps any Notion rollup fallback.

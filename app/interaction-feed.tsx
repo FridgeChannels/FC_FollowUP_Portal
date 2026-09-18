@@ -3,13 +3,13 @@
 import { useState, type ReactNode } from "react";
 import { Bomb, CheckCircle2, RotateCcw, UserRound } from "lucide-react";
 import { toast } from "sonner";
+import type { CallReviewRound } from "@/lib/call-review-history";
 import { callReviewsFromTasks, type CallReviewStatus } from "@/lib/call-review-metadata";
-import type { BrandTask } from "@/lib/brand-list";
 import { BombInstance, Channel, Contact, CPCode, CP_CODES, Interaction, ScheduledAction, interactionPageAt, interactionSortAt } from "@/lib/outreach-domain";
 import { BombExecutionPlan, formatEasternDateTime } from "./bomb-plan";
 import { BrandReplyBox, inboundNeedsComposer } from "./brand-reply-box";
 import { ChannelIcon } from "./channel-icon";
-import { PhoneTaskBoard } from "./phone-task-board";
+import { PhoneTaskBoard, UnqualifiedRecallForm } from "./phone-task-board";
 import { QuoCallPanel } from "./quo-call-panel";
 import { useWorkspace } from "./workspace-store";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -122,7 +122,7 @@ function phoneTaskIdsForCp(
   // even when Conversation CP stamps disagree (e.g. Quo stamped CP4, script stamped CP3).
   if (fallbackCp === cp) {
     for (const task of tasks) {
-      if (task.channel === "Phone" && task.callReviewStatus === "Awaiting Review") ids.add(task.id);
+      if (task.channel === "Phone" && (task.callReviewStatus === "Awaiting Review" || task.callReviewStatus === "Unqualified")) ids.add(task.id);
     }
   }
   return ids;
@@ -154,6 +154,11 @@ export function InteractionFeed({
   headerContactName,
   onSelectTask,
   onCallOpening,
+  callerReviewTaskId,
+  callerReviewHasConnectedCall = false,
+  callerReviewCanSubmit = false,
+  callerReviewReason,
+  onSubmitCallerReview,
   scriptsLoading = false,
 }: {
   interactions: Interaction[];
@@ -174,13 +179,30 @@ export function InteractionFeed({
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
   canReviewCalls?: boolean;
-  tasks?: Array<Pick<BrandTask, "id" | "channel" | "title" | "status" | "contactId" | "contactPhone" | "templateId" | "scheduledAt" | "callReviewStatus"> & { remote?: boolean }>;
-  onPersistCallReview?: (taskId: string, status: CallReviewStatus) => Promise<void>;
+  tasks?: Array<{
+    id: string;
+    channel?: string | null;
+    title?: string;
+    status?: string | null;
+    contactId?: string | null;
+    contactPhone?: string | null;
+    templateId?: string | null;
+    scheduledAt?: string | null;
+    callReviewStatus?: CallReviewStatus | null;
+    callReviewHistory?: CallReviewRound[];
+    remote?: boolean;
+  }>;
+  onPersistCallReview?: (taskId: string, status: CallReviewStatus, reviewReason?: string, reviewNote?: string) => Promise<void>;
   loading?: boolean;
   activeTaskId?: string | null;
   headerContactName?: string;
   onSelectTask?: (taskId: string) => void;
   onCallOpening?: () => void;
+  callerReviewTaskId?: string | null;
+  callerReviewHasConnectedCall?: boolean;
+  callerReviewCanSubmit?: boolean;
+  callerReviewReason?: string | null;
+  onSubmitCallerReview?: () => void;
   scriptsLoading?: boolean;
 }) {
   const { state } = useWorkspace();
@@ -190,7 +212,7 @@ export function InteractionFeed({
     if (!taskId) return undefined;
     return notionReviews[taskId];
   };
-  const handleReviewCall = async (_interactionId: string, taskId: string | undefined, status: CallReviewStatus) => {
+  const handleReviewCall = async (_interactionId: string, taskId: string | undefined, status: CallReviewStatus, reviewReason?: string, reviewNote?: string) => {
     if (!taskId) {
       toast.error("This call is not linked to a Follow-up Task");
       return;
@@ -201,7 +223,7 @@ export function InteractionFeed({
     }
     setReviewingTaskId(taskId);
     try {
-      await onPersistCallReview(taskId, status);
+      await onPersistCallReview(taskId, status, reviewReason, reviewNote);
       toast.success(status === "Qualified" ? "Call marked as qualified" : "Call marked as unqualified and reopened for Beril");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to save call review");
@@ -230,13 +252,14 @@ export function InteractionFeed({
     .filter((item) => item.channel === "Phone" && [...taskIdsForCp].some((id) => sameNotionId(id, item.id)))
     .map((item) => ({
       id: item.id,
-      title: item.title,
+      title: item.title || "Phone task",
       status: item.status || "Pending",
       dueAt: item.scheduledAt,
-      contactId: item.contactId,
-      contactPhone: item.contactPhone,
-      templateId: item.templateId,
+      contactId: item.contactId || null,
+      contactPhone: item.contactPhone || null,
+      templateId: item.templateId || null,
       callReviewStatus: item.callReviewStatus,
+      callReviewHistory: item.callReviewHistory,
       remote: item.remote !== false,
     }));
   const phoneBoardTaskIds = phoneTasks.map((item) => item.id);
@@ -340,6 +363,11 @@ export function InteractionFeed({
         headerContactName={headerContactName}
         onSelectTask={onSelectTask}
         onCallOpening={onCallOpening}
+        callerReviewTaskId={callerReviewTaskId}
+        callerReviewHasConnectedCall={callerReviewHasConnectedCall}
+        callerReviewCanSubmit={callerReviewCanSubmit}
+        callerReviewReason={callerReviewReason}
+        onSubmitCallerReview={onSubmitCallerReview}
         scriptsLoading={scriptsLoading}
       />
     ) : (
@@ -420,7 +448,7 @@ function ChannelTranscript({
   resolveReview: (taskId?: string | null) => { status: CallReviewStatus; recallRequested?: boolean } | undefined;
   canReviewCalls: boolean;
   reviewingTaskId: string | null;
-  onReviewCall: (interactionId: string, taskId: string | undefined, status: CallReviewStatus) => void | Promise<void>;
+  onReviewCall: (interactionId: string, taskId: string | undefined, status: CallReviewStatus, reviewReason?: string, reviewNote?: string) => void | Promise<void>;
 }) {
   const contactGroups = groupByContact(messages, contacts);
   return <div>
@@ -487,7 +515,7 @@ function ContactThreads({
   resolveReview: (taskId?: string | null) => { status: CallReviewStatus; recallRequested?: boolean } | undefined;
   canReviewCalls: boolean;
   reviewingTaskId: string | null;
-  onReviewCall: (interactionId: string, taskId: string | undefined, status: CallReviewStatus) => void | Promise<void>;
+  onReviewCall: (interactionId: string, taskId: string | undefined, status: CallReviewStatus, reviewReason?: string, reviewNote?: string) => void | Promise<void>;
 }) {
   const endpoint = group.contact ? contactPoint(group.contact, channel) : undefined;
   const threads = groupByThread(group.messages);
@@ -540,8 +568,11 @@ function ThreadMessages({
   resolveReview: (taskId?: string | null) => { status: CallReviewStatus; recallRequested?: boolean } | undefined;
   canReviewCalls: boolean;
   reviewingTaskId: string | null;
-  onReviewCall: (interactionId: string, taskId: string | undefined, status: CallReviewStatus) => void | Promise<void>;
+  onReviewCall: (interactionId: string, taskId: string | undefined, status: CallReviewStatus, reviewReason?: string, reviewNote?: string) => void | Promise<void>;
 }) {
+  const [recallTaskId, setRecallTaskId] = useState<string | null>(null);
+  const [recallReason, setRecallReason] = useState("");
+  const [recallNote, setRecallNote] = useState("");
   return <div className="space-y-3">
     {thread.map(item => {
       const inbound = item.direction === "Inbound";
@@ -566,7 +597,7 @@ function ThreadMessages({
             {source && <SourceBadge source={source}/>}
             {!inbound && !timing && (outboundStatus(item) ? <SendStatusBadge status={outboundStatus(item)!}/> : <Badge variant="outline" className="text-[10px] text-slate-500">No send status</Badge>)}
             {phoneCall && item.callResult ? <SendStatusBadge status={item.callResult}/> : null}
-            {callReview ? <Badge className={callReview.status === "Qualified" ? "bg-emerald-100 text-[10px] text-emerald-800 hover:bg-emerald-100" : "bg-rose-100 text-[10px] text-rose-800 hover:bg-rose-100"}>{callReview.status.toLowerCase()}</Badge> : null}
+            {callReview ? <Badge className={callReview.status === "Qualified" ? "bg-emerald-100 text-[10px] text-emerald-800 hover:bg-emerald-100" : callReview.status === "Awaiting Review" ? "bg-amber-100 text-[10px] text-amber-900 hover:bg-amber-100" : "bg-rose-100 text-[10px] text-rose-800 hover:bg-rose-100"}>{callReview.status.toLowerCase()}</Badge> : null}
           </div>
           {pageAt ? (
             <time dateTime={pageAt} className="font-mono text-[11px] text-slate-500">
@@ -614,7 +645,7 @@ function ThreadMessages({
             onRefresh={canRefresh ? () => onRefreshQuo?.(callId!) : undefined}
           />
         </div> : null}
-        {phoneCall && item.quo && canReviewCalls && !callReview ? <div className="mt-4 flex flex-wrap gap-2"><Button size="sm" className="bg-emerald-600 text-white hover:bg-emerald-700" disabled={reviewingTaskId===item.taskId} onClick={() => void onReviewCall(item.id, item.taskId, "Qualified")}><CheckCircle2 className="mr-1.5 size-3.5"/>{reviewingTaskId===item.taskId?"Saving…":"Mark as Qualified"}</Button><Button size="sm" className="bg-rose-600 text-white hover:bg-rose-700" disabled={reviewingTaskId===item.taskId} onClick={() => void onReviewCall(item.id, item.taskId, "Unqualified")}><RotateCcw className="mr-1.5 size-3.5"/>{reviewingTaskId===item.taskId?"Saving…":"Unqualified & Recall"}</Button></div> : null}
+        {phoneCall && item.quo && canReviewCalls && callReview?.status === "Awaiting Review" ? recallTaskId === (item.taskId || item.id) ? <div className="mt-4"><UnqualifiedRecallForm reason={recallReason} note={recallNote} onReason={setRecallReason} onNote={setRecallNote} confirming={reviewingTaskId===item.taskId} onCancel={() => { setRecallTaskId(null); setRecallReason(""); setRecallNote(""); }} onConfirm={() => { void Promise.resolve(onReviewCall(item.id, item.taskId, "Unqualified", recallReason.trim(), recallNote.trim() || undefined)).then(() => { setRecallTaskId(null); setRecallReason(""); setRecallNote(""); }); }}/></div> : <div className="mt-4 flex flex-wrap gap-2"><Button size="sm" className="bg-emerald-600 text-white hover:bg-emerald-700" disabled={reviewingTaskId===item.taskId} onClick={() => void onReviewCall(item.id, item.taskId, "Qualified")}><CheckCircle2 className="mr-1.5 size-3.5"/>{reviewingTaskId===item.taskId?"Saving…":"Mark as Qualified"}</Button><Button size="sm" className="bg-rose-600 text-white hover:bg-rose-700" disabled={reviewingTaskId===item.taskId} onClick={() => { setRecallTaskId(item.taskId || item.id); setRecallReason(""); setRecallNote(""); }}><RotateCcw className="mr-1.5 size-3.5"/>Unqualified & Recall</Button></div> : null}
         {inbound && !phoneCall && contact && (
           <BrandReplyBox
             customerId={item.customerId}

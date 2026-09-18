@@ -549,6 +549,8 @@ function mergeBrandListItem(current: BrandListItem, next: BrandListItem): BrandL
     currentCp: next.currentCp,
     currentCpId: next.currentCpId,
     needsReply: next.needsReply ?? current.needsReply,
+    needsQualification: next.needsQualification ?? current.needsQualification,
+    qualificationTaskCount: next.qualificationTaskCount ?? current.qualificationTaskCount,
     replyPreview: next.replyPreview ?? current.replyPreview,
     replyDueAt: next.replyDueAt ?? current.replyDueAt,
     replyUpdatedAt: next.replyDueAt ?? next.replyUpdatedAt ?? current.replyDueAt ?? current.replyUpdatedAt,
@@ -574,6 +576,7 @@ export function BrandsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const isAdmin = state.currentRole === "Admin";
+  const canReviewQualification = state.currentRole !== "Caller";
   const [filters, setFilters] = useState<BrandListFilters>(() =>
     brandListFiltersFromSearch(searchParams),
   );
@@ -1011,10 +1014,13 @@ export function BrandsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.map((c) => (
+                {filtered.map((c) => {
+                  const needsQualification = canReviewQualification && Boolean(c.needsQualification);
+                  const needsAttention = Boolean(c.needsReply) || needsQualification;
+                  return (
                     <TableRow
                       key={c.id}
-                      className={`cursor-pointer hover:bg-violet-50/30 ${c.needsReply ? "bg-rose-50/40" : ""}`}
+                      className={`cursor-pointer hover:bg-violet-50/30 ${needsAttention ? "bg-rose-50/40" : ""}`}
                       onClick={() => router.push(`/customers/${c.id}`)}
                     >
                       {isAdmin && (
@@ -1040,15 +1046,19 @@ export function BrandsPage() {
                           </Avatar>
                           <div className="min-w-0">
                             <div className="flex items-center gap-2 text-sm font-semibold">
-                              {c.needsReply ? (
+                              {needsAttention ? (
                                 <span
                                   className="size-2 shrink-0 rounded-full bg-rose-500"
-                                  aria-label="Reply needed"
+                                  aria-label={needsQualification ? "Call needs qualification" : "Reply needed"}
                                 />
                               ) : null}
                               <span className="truncate">{c.name}</span>
                             </div>
-                            {c.needsReply ? (
+                            {needsQualification ? (
+                              <div className="mt-0.5 truncate text-xs font-medium text-rose-700">
+                                Call needs qualification{c.qualificationTaskCount && c.qualificationTaskCount > 1 ? ` · ${c.qualificationTaskCount} tasks` : ""}
+                              </div>
+                            ) : c.needsReply ? (
                               <div className="mt-0.5 truncate text-xs font-medium text-rose-700">
                                 Reply needed
                                 {(c.replyDueAt || c.replyUpdatedAt)
@@ -1094,7 +1104,8 @@ export function BrandsPage() {
                         </TableCell>
                       )}
                     </TableRow>
-                  ))}
+                  );
+                })}
               </TableBody>
             </Table>
           </div>

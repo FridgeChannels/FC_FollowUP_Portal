@@ -1,9 +1,15 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { CheckCircle2, ChevronDown, ChevronRight, Phone, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { callReviewsFromTasks, type CallReviewStatus } from "@/lib/call-review-metadata";
+import {
+  partitionRoundCalls,
+  reviewRoundsForTask,
+  type CallReviewRound,
+  type ReviewRoundDisplay,
+} from "@/lib/call-review-history";
 import { isCancelledTaskStatus, isClosedTaskStatus, type Contact, type Interaction } from "@/lib/outreach-domain";
 import { devCallPhoneOnClient } from "@/lib/quo/dev-call-phone";
 import { formatEasternDateTime } from "./bomb-plan";
@@ -11,6 +17,7 @@ import { ChannelIcon } from "./channel-icon";
 import { QuoCallPanel } from "./quo-call-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 
 export type PhoneBoardTask = {
   id: string;
@@ -21,6 +28,7 @@ export type PhoneBoardTask = {
   contactPhone?: string | null;
   templateId?: string | null;
   callReviewStatus?: CallReviewStatus | null;
+  callReviewHistory?: CallReviewRound[];
   remote?: boolean;
 };
 
@@ -88,13 +96,76 @@ function CallActionButton({ phone, state, onCallOpening }: { phone: string; stat
   return <Button disabled><Phone className="mr-2 size-4"/>Call with Quo</Button>;
 }
 
-function ReviewBadge({ status }: { status?: CallReviewStatus | null }) {
-  if (!status) return null;
+function ReviewBadge({ status }: { status?: CallReviewStatus | null | "In Progress" }) {
+  if (!status || status === "In Progress") return null;
   const className =
     status === "Qualified" ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-100"
     : status === "Unqualified" ? "bg-rose-100 text-rose-800 hover:bg-rose-100"
     : "bg-amber-100 text-amber-900 hover:bg-amber-100";
   return <Badge className={className}>{status === "Awaiting Review" ? "awaiting review" : status.toLowerCase()}</Badge>;
+}
+
+function formatReviewDay(iso?: string) {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso.slice(0, 10);
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "America/New_York",
+  }).format(date);
+}
+
+function quoCallId(item: Interaction) {
+  return item.quo?.callId;
+}
+
+export function UnqualifiedRecallForm({
+  reason,
+  note,
+  onReason,
+  onNote,
+  onCancel,
+  onConfirm,
+  confirming,
+}: {
+  reason: string;
+  note: string;
+  onReason: (value: string) => void;
+  onNote: (value: string) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+  confirming?: boolean;
+}) {
+  return <div className="space-y-3 rounded-xl border border-rose-100 bg-rose-50/70 p-4">
+    <div className="space-y-1.5">
+      <label className="text-xs font-semibold text-slate-700">Unqualified reason</label>
+      <Textarea
+        value={reason}
+        onChange={(event) => onReason(event.target.value)}
+        className="min-h-20 resize-none bg-white"
+        placeholder="Give Caller a clear reason to retry…"
+      />
+    </div>
+    <div className="space-y-1.5">
+      <label className="text-xs font-semibold text-slate-700">
+        AccountManager note <span className="font-normal text-slate-400">optional</span>
+      </label>
+      <Textarea
+        value={note}
+        onChange={(event) => onNote(event.target.value)}
+        className="min-h-16 resize-none bg-white"
+        placeholder="Optional guidance for the next attempt…"
+      />
+    </div>
+    <div className="flex flex-wrap justify-end gap-2">
+      <Button size="sm" variant="ghost" disabled={confirming} onClick={onCancel}>Cancel</Button>
+      <Button size="sm" className="bg-rose-600 text-white hover:bg-rose-700" disabled={confirming || !reason.trim()} onClick={onConfirm}>
+        <RotateCcw className="mr-1.5 size-3.5"/>{confirming ? "Saving…" : "Confirm recall"}
+      </Button>
+    </div>
+  </div>;
 }
 
 export function PhoneTaskBoard({
@@ -111,6 +182,11 @@ export function PhoneTaskBoard({
   quoRefreshingCallId,
   onSelectTask,
   onCallOpening,
+  callerReviewTaskId,
+  callerReviewHasConnectedCall = false,
+  callerReviewCanSubmit = false,
+  callerReviewReason,
+  onSubmitCallerReview,
   showDial = true,
 }: {
   phoneTasks: PhoneBoardTask[];
@@ -121,11 +197,16 @@ export function PhoneTaskBoard({
   headerContactName?: string;
   showChannelTab?: boolean;
   canReviewCalls?: boolean;
-  onPersistCallReview?: (taskId: string, status: CallReviewStatus) => Promise<void>;
+  onPersistCallReview?: (taskId: string, status: CallReviewStatus, reviewReason?: string, reviewNote?: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
   onSelectTask?: (taskId: string) => void;
   onCallOpening?: () => void;
+  callerReviewTaskId?: string | null;
+  callerReviewHasConnectedCall?: boolean;
+  callerReviewCanSubmit?: boolean;
+  callerReviewReason?: string | null;
+  onSubmitCallerReview?: () => void;
   showDial?: boolean;
 }) {
   const [reviewingTaskId, setReviewingTaskId] = useState<string | null>(null);
@@ -143,14 +224,14 @@ export function PhoneTaskBoard({
     [tasks],
   );
 
-  const handleReview = async (taskId: string, status: CallReviewStatus) => {
+  const handleReview = async (taskId: string, status: CallReviewStatus, reviewReason?: string, reviewNote?: string) => {
     if (!onPersistCallReview) {
       toast.error("Call review requires a Follow-up Task backed by Notion");
       return;
     }
     setReviewingTaskId(taskId);
     try {
-      await onPersistCallReview(taskId, status);
+      await onPersistCallReview(taskId, status, reviewReason, reviewNote);
       toast.success(status === "Qualified" ? "Call marked as qualified" : "Call marked as unqualified and reopened for Beril");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to save call review");
@@ -188,8 +269,13 @@ export function PhoneTaskBoard({
         reviewing={reviewingTaskId === item.id}
         quoRefreshingCallId={quoRefreshingCallId}
         onRefreshQuo={onRefreshQuo}
+        callerReviewTaskId={callerReviewTaskId}
+        callerReviewHasConnectedCall={callerReviewHasConnectedCall}
+        callerReviewCanSubmit={callerReviewCanSubmit}
+        callerReviewReason={callerReviewReason}
+        onSubmitCallerReview={onSubmitCallerReview}
         onFocusTask={active || !onSelectTask ? undefined : () => onSelectTask(item.id)}
-        onReview={(status) => void handleReview(item.id, status)}
+        onReview={(status, reviewReason, reviewNote) => void handleReview(item.id, status, reviewReason, reviewNote)}
         onCallOpening={() => {
           if (item.remote === false) return;
           if (onCallOpening) {
@@ -228,6 +314,137 @@ export function PhoneTaskBoard({
   </div>;
 }
 
+function CallResultList({
+  items,
+  emptyLabel,
+  onRefreshQuo,
+  quoRefreshingCallId,
+}: {
+  items: Interaction[];
+  emptyLabel: string;
+  onRefreshQuo?: (callId: string) => void;
+  quoRefreshingCallId?: string | null;
+}) {
+  if (!items.length) {
+    return <p className="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-5 text-sm text-slate-500">{emptyLabel}</p>;
+  }
+  return <div className="space-y-3">
+    {items.map((item) => {
+      const callId = item.quo?.callId;
+      const canRefresh = !!callId && !callId.startsWith("ACsim") && !!onRefreshQuo;
+      return <article key={item.id} className="rounded-xl border border-slate-200 bg-white p-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="secondary" className="text-[10px]">{item.direction || "Outbound"}</Badge>
+            {item.callResult ? <Badge variant="outline" className="text-[10px]">{item.callResult}</Badge> : null}
+          </div>
+          <time dateTime={item.createdAt} className="font-mono text-[11px] text-slate-500">{formatEasternDateTime(item.createdAt)}</time>
+        </div>
+        <QuoCallPanel
+          compact
+          data={item.quo || null}
+          refreshing={quoRefreshingCallId === callId}
+          onRefresh={canRefresh ? () => onRefreshQuo?.(callId!) : undefined}
+        />
+      </article>;
+    })}
+  </div>;
+}
+
+function ReviewDecision({ round }: { round: ReviewRoundDisplay }) {
+  if (round.status !== "Unqualified" && !round.recalled && round.status !== "Qualified") {
+    if (!round.callerNote) return null;
+  }
+  const reviewedBy = [round.reviewerName ? `Reviewed by ${round.reviewerName}` : null, formatReviewDay(round.reviewedAt)]
+    .filter(Boolean)
+    .join(" · ");
+  return <div className="space-y-3">
+    {round.recalled || round.status === "Unqualified" ? (
+      <div className="rounded-xl border border-rose-100 bg-rose-50/80 px-4 py-3">
+        <p className="text-xs font-semibold text-rose-800">AccountManager marked this task Unqualified</p>
+        {round.reason ? <div className="mt-3">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-rose-700">Reason</div>
+          <p className="mt-1 text-sm leading-6 text-rose-950">{round.reason}</p>
+        </div> : null}
+        {round.note ? <div className="mt-3">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-rose-700">AccountManager note</div>
+          <p className="mt-1 text-sm leading-6 text-rose-950">{round.note}</p>
+        </div> : null}
+        {reviewedBy ? <p className="mt-3 text-[11px] text-rose-700">{reviewedBy}</p> : null}
+      </div>
+    ) : null}
+    {round.status === "Qualified" ? (
+      <div className="rounded-xl border border-emerald-100 bg-emerald-50/80 px-4 py-3">
+        <p className="text-xs font-semibold text-emerald-800">AccountManager marked this task Qualified</p>
+        {reviewedBy ? <p className="mt-2 text-[11px] text-emerald-700">{reviewedBy}</p> : null}
+      </div>
+    ) : null}
+    {round.callerNote ? (
+      <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Caller note</div>
+        <p className="mt-1 text-sm leading-6 text-slate-800">{round.callerNote}</p>
+      </div>
+    ) : null}
+  </div>;
+}
+
+function ReviewRoundCard({
+  round,
+  calls,
+  current = false,
+  emptyLabel,
+  hint,
+  onRefreshQuo,
+  quoRefreshingCallId,
+  children,
+}: {
+  round: ReviewRoundDisplay;
+  calls: Interaction[];
+  current?: boolean;
+  emptyLabel: string;
+  hint?: ReactNode;
+  onRefreshQuo?: (callId: string) => void;
+  quoRefreshingCallId?: string | null;
+  children?: ReactNode;
+}) {
+  const inProgress = round.status === "In Progress";
+  const showCalls = inProgress ? calls.length > 0 : true;
+  return <article className={`rounded-xl border bg-white ${current ? "border-blue-200" : "border-slate-200"}`}>
+    <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className={`text-xs font-semibold tracking-wide ${current ? "text-blue-700" : "text-slate-700"}`}>
+          {current ? `Review round ${round.round}` : `Round ${round.round}`}
+        </span>
+        {current ? <Badge className="bg-violet-600 text-[10px] text-white hover:bg-violet-600">Current</Badge> : null}
+        <ReviewBadge status={round.status}/>
+        {!current && round.reviewedAt ? <span className="text-[11px] text-slate-400">{formatReviewDay(round.reviewedAt)}</span> : null}
+      </div>
+      {round.recalled ? <span className="text-[11px] font-medium text-rose-700">Recalled for another attempt</span> : null}
+    </div>
+    <div className="space-y-4 border-t border-slate-100 px-4 py-4">
+      {hint}
+      {showCalls ? (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className={`text-xs font-semibold tracking-wide ${current ? "text-blue-700" : "text-slate-500"}`}>
+              {inProgress ? "Call details" : "Call results"}
+            </div>
+            <span className="text-[11px] text-slate-400">{calls.length} call{calls.length === 1 ? "" : "s"}</span>
+          </div>
+          <CallResultList
+            items={calls}
+            emptyLabel={emptyLabel}
+            onRefreshQuo={onRefreshQuo}
+            quoRefreshingCallId={quoRefreshingCallId}
+          />
+        </div>
+      ) : null}
+      {!inProgress || round.recalled ? <ReviewDecision round={round}/> : null}
+      {children}
+    </div>
+  </article>;
+}
+
 function PhoneTaskBlock({
   task,
   contact,
@@ -244,6 +461,11 @@ function PhoneTaskBlock({
   onReview,
   onRefreshQuo,
   quoRefreshingCallId,
+  callerReviewTaskId,
+  callerReviewHasConnectedCall,
+  callerReviewCanSubmit,
+  callerReviewReason,
+  onSubmitCallerReview,
 }: {
   task: PhoneBoardTask;
   contact?: Contact;
@@ -257,14 +479,43 @@ function PhoneTaskBlock({
   reviewing: boolean;
   onCallOpening: () => void;
   onFocusTask?: () => void;
-  onReview: (status: CallReviewStatus) => void;
+  onReview: (status: CallReviewStatus, reviewReason?: string, reviewNote?: string) => void;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
+  callerReviewTaskId?: string | null;
+  callerReviewHasConnectedCall: boolean;
+  callerReviewCanSubmit: boolean;
+  callerReviewReason?: string | null;
+  onSubmitCallerReview?: () => void;
 }) {
   const [scriptOpen, setScriptOpen] = useState(active || !isDone(task.status));
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [recallOpen, setRecallOpen] = useState(false);
+  const [recallReason, setRecallReason] = useState("");
+  const [recallNote, setRecallNote] = useState("");
   const phone = (devCallPhoneOnClient() || contact?.phone || task.contactPhone || "").trim();
   const actionState = dialState(task.status, reviewStatus);
-  const showReviewActions = canReviewCalls && !!quoResults.length && (!reviewStatus || reviewStatus === "Awaiting Review");
+  const rounds = reviewRoundsForTask(task.callReviewHistory || []);
+  const partitioned = partitionRoundCalls(quoResults, rounds, quoCallId, (item) => item.createdAt);
+  const historyCalls = partitioned.history;
+  const currentCalls = partitioned.current;
+  const currentRound = {
+    ...rounds.current,
+    reason: rounds.current.reason || (rounds.current.recalled ? callerReviewReason || undefined : undefined),
+  };
+  const showReviewActions = canReviewCalls && reviewStatus === "Awaiting Review";
+  const showCallerReview = callerReviewTaskId === task.id;
+  const currentHasConnectedCall = currentCalls.some((item) => item.callResult === "Connected") || (
+    !task.callReviewHistory?.length && callerReviewHasConnectedCall && currentRound.round === 1 && !currentRound.recalled
+  );
+  const canSubmitThisRound = showCallerReview && callerReviewCanSubmit && currentHasConnectedCall && currentRound.status === "In Progress";
+  const callerHint = currentRound.status === "Awaiting Review"
+    ? "AccountManager will decide whether this task is Qualified."
+    : currentRound.recalled && !currentCalls.length
+      ? "Call again for this round, then submit it for review."
+      : currentHasConnectedCall
+        ? "You can keep calling for this task until it is complete, or submit this task for review now."
+        : "Complete a connected call for this task before submitting it for review.";
 
   return <section className={`rounded-2xl border p-5 ${active ? "border-blue-300 bg-blue-50/70 shadow-sm" : "border-slate-200 bg-slate-50/70"}`}>
     <div className="flex flex-wrap items-start justify-between gap-4">
@@ -298,43 +549,72 @@ function PhoneTaskBlock({
         {scriptLoading ? <p className="text-slate-500">Loading call script…</p>
           : script ? <p className="whitespace-pre-wrap leading-6 text-slate-700">{script.content || "No call content yet."}</p>
           : <p className="text-slate-500">No call content yet.</p>}
-        {reviewStatus === "Unqualified" ? <p className="mt-3 text-xs font-semibold text-rose-700">Recall requested · Reassigned to Beril</p>
-          : reviewStatus === "Qualified" ? <p className="mt-3 text-xs font-semibold text-emerald-700">Call review completed · qualified</p>
-          : reviewStatus === "Awaiting Review" ? <p className="mt-3 text-xs font-semibold text-amber-800">Connected · awaiting Account Manager review</p>
-          : null}
       </div>}
     </div>
 
-    <div className="mt-5 space-y-3">
-      <div className={`text-xs font-semibold tracking-wide ${active ? "text-blue-700" : "text-slate-500"}`}>Call results</div>
-      {quoResults.length ? quoResults.map((item) => {
-        const callId = item.quo?.callId;
-        const canRefresh = !!callId && !callId.startsWith("ACsim") && !!onRefreshQuo;
-        return <article key={item.id} className="rounded-xl border border-slate-200 bg-white p-4">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="secondary" className="text-[10px]">{item.direction || "Outbound"}</Badge>
-              {item.callResult ? <Badge variant="outline" className="text-[10px]">{item.callResult}</Badge> : null}
-            </div>
-            <time dateTime={item.createdAt} className="font-mono text-[11px] text-slate-500">{formatEasternDateTime(item.createdAt)}</time>
-          </div>
-          <QuoCallPanel
-            compact
-            data={item.quo || null}
-            refreshing={quoRefreshingCallId === callId}
-            onRefresh={canRefresh ? () => onRefreshQuo?.(callId!) : undefined}
+    <div className="mt-5">
+      <ReviewRoundCard
+        current
+        round={currentRound}
+        calls={currentCalls}
+        emptyLabel={currentRound.recalled ? "No new Quo call for this round yet." : "No Quo call has been linked to this task yet."}
+        hint={showCallerReview && currentRound.status !== "Qualified" && callerHint !== "Recalled for another attempt" ? <p className="text-xs leading-5 text-slate-600">{callerHint}</p> : null}
+        onRefreshQuo={onRefreshQuo}
+        quoRefreshingCallId={quoRefreshingCallId}
+      >
+        {canSubmitThisRound ? (
+          <Button size="sm" className="bg-amber-500 text-white hover:bg-amber-600" onClick={onSubmitCallerReview}>Submit for review</Button>
+        ) : null}
+        {showReviewActions ? recallOpen ? (
+          <UnqualifiedRecallForm
+            reason={recallReason}
+            note={recallNote}
+            onReason={setRecallReason}
+            onNote={setRecallNote}
+            confirming={reviewing}
+            onCancel={() => { setRecallOpen(false); setRecallReason(""); setRecallNote(""); }}
+            onConfirm={() => onReview("Unqualified", recallReason.trim(), recallNote.trim() || undefined)}
           />
-        </article>;
-      }) : <p className="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-5 text-sm text-slate-500">No Quo call has been linked to this task yet.</p>}
-
-      {showReviewActions ? <div className="flex flex-wrap gap-2">
-        <Button size="sm" className="bg-emerald-600 text-white hover:bg-emerald-700" disabled={reviewing} onClick={() => onReview("Qualified")}>
-          <CheckCircle2 className="mr-1.5 size-3.5"/>{reviewing ? "Saving…" : "Mark as Qualified"}
-        </Button>
-        <Button size="sm" className="bg-rose-600 text-white hover:bg-rose-700" disabled={reviewing} onClick={() => onReview("Unqualified")}>
-          <RotateCcw className="mr-1.5 size-3.5"/>{reviewing ? "Saving…" : "Unqualified & Recall"}
-        </Button>
-      </div> : null}
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" className="bg-emerald-600 text-white hover:bg-emerald-700" disabled={reviewing} onClick={() => onReview("Qualified")}>
+              <CheckCircle2 className="mr-1.5 size-3.5"/>{reviewing ? "Saving…" : "Mark as Qualified"}
+            </Button>
+            <Button size="sm" className="bg-rose-600 text-white hover:bg-rose-700" disabled={reviewing} onClick={() => setRecallOpen(true)}>
+              <RotateCcw className="mr-1.5 size-3.5"/>Unqualified & Recall
+            </Button>
+          </div>
+        ) : null}
+      </ReviewRoundCard>
     </div>
+
+    {historyCalls.length ? (
+      <div className="mt-4 rounded-xl border border-slate-200 bg-white">
+        <button
+          type="button"
+          className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+          onClick={() => setHistoryOpen((open) => !open)}
+          aria-expanded={historyOpen}
+        >
+          <span className="text-xs font-semibold tracking-wide text-slate-500">Review history</span>
+          <span className="flex items-center gap-2 text-[11px] text-slate-400">
+            {historyCalls.length} round{historyCalls.length === 1 ? "" : "s"}
+            {historyOpen ? <ChevronDown className="size-4 text-slate-500"/> : <ChevronRight className="size-4 text-slate-500"/>}
+          </span>
+        </button>
+        {historyOpen ? <div className="space-y-3 border-t border-slate-100 px-4 py-4">
+          {historyCalls.map(({ round, calls }) => (
+            <ReviewRoundCard
+              key={`${round.round}-${round.reviewedAt || round.submittedAt || "past"}`}
+              round={round}
+              calls={calls}
+              emptyLabel="No Quo call was linked to this round."
+              onRefreshQuo={onRefreshQuo}
+              quoRefreshingCallId={quoRefreshingCallId}
+            />
+          ))}
+        </div> : null}
+      </div>
+    ) : null}
   </section>;
 }

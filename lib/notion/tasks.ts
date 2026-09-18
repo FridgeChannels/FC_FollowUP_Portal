@@ -16,6 +16,7 @@ import {
 import { getFollowupTaskDbId } from "./config";
 import { taskListFilter, type TaskListQuery, DEFAULT_TASK_PAGE_SIZE } from "./owner-filter";
 import { retrieveOwner, type FollowupOwner } from "./owners";
+import { historyFromTask } from "../call-review-history";
 
 const CONTACT_TASK_KEYS = ["Follow-up Tasks", "Tasks"];
 
@@ -588,6 +589,12 @@ async function mapTaskPage(
     sourceBombId: firstRelationId(properties["Source Bomb"]) || null,
     omniReachRunId: propertyText(properties["OmniReach Run Id"]) || null,
     callReviewStatus: asCallReviewStatus(propertyText(properties["Call Review Status"])),
+    callReviewHistory: historyFromTask({
+      id: page.id,
+      notes: propertyText(properties.Notes) || null,
+      endedAt: propertyDate(properties["Ended At"]),
+      callReviewStatus: asCallReviewStatus(propertyText(properties["Call Review Status"])),
+    }),
   };
 }
 

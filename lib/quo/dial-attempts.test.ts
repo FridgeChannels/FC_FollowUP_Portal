@@ -49,6 +49,27 @@ describe("Quo dial attempts", () => {
     });
   });
 
+  it("keeps multiple attempts for the same task", async () => {
+    await withStore(async () => {
+      await recordQuoDialAttempt({ taskId: "task-1", phone: "+19729000833" });
+      await recordQuoDialAttempt({ taskId: "task-1", phone: "+19729000833" });
+      const raw = JSON.parse(await readFile(process.env.QUO_DIAL_ATTEMPTS_PATH || "", "utf8"));
+      assert.equal(raw.attempts.filter((item: { taskId: string }) => item.taskId === "task-1").length, 2);
+    });
+  });
+
+  it("removes only the matched attempt when its timestamp is provided", async () => {
+    await withStore(async () => {
+      const first = await recordQuoDialAttempt({ taskId: "task-1", phone: "+19729000833" });
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      await recordQuoDialAttempt({ taskId: "task-1", phone: "+19729000833" });
+      await removeQuoDialAttempt({ taskId: "task-1", dialedAt: first.dialedAt });
+      const raw = JSON.parse(await readFile(process.env.QUO_DIAL_ATTEMPTS_PATH || "", "utf8"));
+      assert.equal(raw.attempts.filter((item: { taskId: string }) => item.taskId === "task-1").length, 1);
+      assert.equal(raw.attempts.some((item: { dialedAt: string }) => item.dialedAt === first.dialedAt), false);
+    });
+  });
+
   it("ignores attempts older than 30 minutes", async () => {
     await withStore(async () => {
       await recordQuoDialAttempt({ taskId: "task-old", phone: "+19729000833" });

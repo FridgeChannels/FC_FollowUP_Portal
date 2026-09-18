@@ -11,7 +11,7 @@ import { recordQuoDialAttempt } from "@/lib/quo/dial-attempts";
 
 type Params = { params: Promise<{ id: string }> };
 
-function useLitePayload(viewer: { role: string }, request: Request) {
+function litePayloadForViewer(viewer: { role: string }, request: Request) {
   if (viewer.role === "Caller") return true;
   const url = new URL(request.url);
   return url.searchParams.get("lite") === "1";
@@ -28,7 +28,7 @@ export async function GET(request: Request, { params }: Params) {
       return Response.json({ error: "Sign in required" }, { status: 401 });
     }
     const { id } = await params;
-    const lite = useLitePayload(viewer, request);
+    const lite = litePayloadForViewer(viewer, request);
     const payload = await taskPayload(id, lite);
     if (!canViewTask(viewer, payload.task)) {
       return Response.json({ error: "You do not have access to this task" }, { status: 403 });
@@ -72,7 +72,7 @@ export async function PATCH(request: Request, { params }: Params) {
         ? new Date().toISOString()
         : undefined,
     });
-    return Response.json(await taskPayload(id, useLitePayload(viewer, request)));
+    return Response.json(await taskPayload(id, litePayloadForViewer(viewer, request)));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
     const status = message.includes("404") ? 404 : 500;
@@ -109,7 +109,12 @@ export async function POST(request: Request, { params }: Params) {
       contactName: task.contactName,
       channel: task.channel,
     });
-    return Response.json(await taskPayload(id, useLitePayload(viewer, request)));
+    if (task.status === "Pending" || task.callReviewStatus === "Unqualified") {
+      await updateFollowupTask(task.id, {
+        status: "In Progress",
+      });
+    }
+    return Response.json(await taskPayload(id, litePayloadForViewer(viewer, request)));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
     const status = message.includes("404") ? 404 : 500;

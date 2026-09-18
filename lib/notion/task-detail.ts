@@ -7,6 +7,27 @@ import { listCheckpoints } from "./cps";
 import { mapFollowupClientDetail, mapFollowupClientPage } from "./followup-clients";
 import { annotateTasksWithReplyInbox } from "./reply-inbox";
 import { listFollowupTasks, retrieveFollowupTask, type TaskResolveHints } from "./tasks";
+import { updateFollowupTask } from "./followup-writes";
+import { historyFromTask, withInheritedCallIds, writeCallReviewHistory } from "../call-review-history";
+
+function callIdsFromActivities(task: BrandTask, activities: BrandActivity[]) {
+  return [...new Set(
+    activities
+      .filter((item) => item.taskId === task.id || (!item.taskId && task.conversationIds.includes(item.id)))
+      .map((item) => item.quo?.callId)
+      .filter((id): id is string => !!id),
+  )];
+}
+
+async function hydrateTaskReviewRounds(task: BrandTask, activities: BrandActivity[]): Promise<BrandTask> {
+  const history = withInheritedCallIds(historyFromTask(task), callIdsFromActivities(task, activities));
+  const previous = historyFromTask(task);
+  const changed = JSON.stringify(history) !== JSON.stringify(previous);
+  if (!changed) return { ...task, callReviewHistory: history };
+  const notes = writeCallReviewHistory(task.notes, history);
+  await updateFollowupTask(task.id, { notes }).catch(() => undefined);
+  return { ...task, notes, callReviewHistory: history };
+}
 
 export type TaskDetailPayload = {
   task: BrandTask;
@@ -71,7 +92,8 @@ export async function buildTaskDetailPayload(id: string): Promise<TaskDetailPayl
     return true;
   });
   const [annotated] = annotateTasksWithReplyInbox([task], activities);
-  return { task: annotated || task, activities, brand, cps };
+  const hydrated = await hydrateTaskReviewRounds(annotated || task, activities);
+  return { task: hydrated, activities, brand, cps };
 }
 
 /**
@@ -161,5 +183,12 @@ export async function buildCallerTaskDetailPayload(id: string): Promise<TaskDeta
       }
     : brandShellFromTask(task, contacts, tasks);
 
-  return { task, activities: phoneActivities, brand, cps: listApplicableCps() };
+  const hydrated = await hydrateTaskReviewRounds(task, phoneActivities);
+  const nextTasks = tasks.map((item) => item.id === hydrated.id ? hydrated : item);
+  return {
+    task: hydrated,
+    activities: phoneActivities,
+    brand: brand ? { ...brand, tasks: nextTasks } : brand,
+    cps: listApplicableCps(),
+  };
 }

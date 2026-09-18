@@ -1,4 +1,5 @@
 import type { QuoCallData } from "./quo/types";
+import type { CallReviewRound } from "./call-review-history";
 
 export const FOLLOW_UP_STATUSES = [
   "Unassigned",
@@ -186,6 +187,9 @@ export type BrandListItem = {
   /** Follow-up Client `Is Test` — Portal ACL hides these from all roles. */
   isTest?: boolean;
   needsReply?: boolean;
+  /** A completed Phone task is waiting for an AccountManager qualification decision. */
+  needsQualification?: boolean;
+  qualificationTaskCount?: number;
   replyPreview?: string | null;
   /** @deprecated Prefer replyDueAt — kept as alias for list cache merges. */
   replyUpdatedAt?: string | null;
@@ -239,6 +243,7 @@ export type BrandTask = {
   sourceBombName?: string | null;
   sourceBombCp?: string | null;
   callReviewStatus?: "Awaiting Review" | "Qualified" | "Unqualified" | null;
+  callReviewHistory?: CallReviewRound[];
   contactPhone?: string | null;
   inboxStatus?: "Needs Reply" | null;
   preview?: string | null;
