@@ -26,7 +26,13 @@ import { notionScheduledAtProperty } from "./scheduled-at";
 import { listChannelCapacityConfig } from "./capacity";
 import { chooseConversationThreadId } from "./conversation-thread";
 import { listFollowupConversations } from "./conversations";
-import { asExtendedParameters } from "./extended-parameters";
+import { asExtendedParameters, parseExtendedParametersObject } from "./extended-parameters";
+import {
+  captionForAttachments,
+  channelSupportsMedia,
+  sanitizeMediaAttachments,
+  type MediaAttachment,
+} from "../media-attachments";
 import { retrieveOwner } from "./owners";
 import {
   annotateTasksWithReplyInbox,
@@ -295,6 +301,22 @@ export async function markFollowupClientEngaged(
   return updateFollowupClient(pageId, patch);
 }
 
+function encodeOutboundExtendedParameters(
+  inherited?: string | null,
+  attachments: MediaAttachment[] = [],
+) {
+  const base = parseExtendedParametersObject(inherited) || {};
+  if (attachments.length) {
+    return asExtendedParameters({ ...base, attachments });
+  }
+  if (!inherited?.trim()) return null;
+  try {
+    return asExtendedParameters(inherited) || inherited.trim();
+  } catch {
+    return inherited.trim();
+  }
+}
+
 export async function createOutboundConversation(input: {
   brandName: string;
   contactId: string;
@@ -319,9 +341,13 @@ export async function createOutboundConversation(input: {
   existingConversations?: BrandActivity[];
   /** When true, always allocate a fresh Thread (cold inbound). Default reuses last interaction. */
   forceNewThread?: boolean;
+  attachments?: MediaAttachment[];
 }) {
   if (!CHANNELS.has(input.channel)) throw new Error("Invalid channel");
-  const content = input.content.trim();
+  const attachments = channelSupportsMedia(input.channel)
+    ? sanitizeMediaAttachments(input.attachments)
+    : [];
+  const content = input.content.trim() || captionForAttachments(attachments);
   if (!content) throw new Error("Message content is required");
 
   const suffix = input.titleSuffix || "Pending";
@@ -366,15 +392,9 @@ export async function createOutboundConversation(input: {
   }
   const cp = await conversationCpRelation(input.cpId || input.cpAtInteraction);
   if (cp) properties.CP = cp;
-  const inherited = input.extendedParameters?.trim();
-  if (inherited) {
-    let encoded = inherited;
-    try {
-      encoded = asExtendedParameters(inherited) || inherited;
-    } catch {
-      encoded = inherited;
-    }
-    properties["Extended Parameters"] = { rich_text: richText(encoded) };
+  const encodedExtended = encodeOutboundExtendedParameters(input.extendedParameters, attachments);
+  if (encodedExtended) {
+    properties["Extended Parameters"] = { rich_text: richText(encodedExtended) };
   }
 
   return createPage(getFollowupConversationDbId(), properties);
@@ -625,6 +645,7 @@ export async function createHumanOutbound(input: {
   cpId?: string | null;
   cpAtInteraction?: string | null;
   deliveryMode?: DeliveryMode;
+  attachments?: MediaAttachment[];
 }) {
   const isReply = !!(input.threadId?.trim() || input.existingTaskId);
   const deliveryMode: DeliveryMode = input.deliveryMode === "immediate" ? "immediate" : "scheduled";
@@ -715,6 +736,7 @@ export async function createHumanOutbound(input: {
         ? "人工追加回复，尚未实际发送。"
         : "人工消息，尚未实际发送。",
       forceNewThread: false,
+      attachments: input.attachments,
     });
     // New task has no Conversations yet; conversation already links Follow-up Task on create.
     await updatePage(taskId, {

@@ -8,12 +8,23 @@ import {
   markFollowupClientEngaged,
   type DeliveryMode,
 } from "@/lib/notion/followup-writes";
+import { channelSupportsMedia, sanitizeMediaAttachments } from "@/lib/media-attachments";
 import { interactionCpCode } from "@/lib/outreach-domain";
 
 type Params = { params: Promise<{ id: string }> };
 
 function asDeliveryMode(value?: string | null): DeliveryMode {
   return value === "immediate" ? "immediate" : "scheduled";
+}
+
+function isPortalMediaUrl(url: string, requestUrl: string) {
+  try {
+    const origin = new URL(requestUrl).origin;
+    const parsed = new URL(url, origin);
+    return parsed.origin === origin && /^\/api\/media\/[a-zA-Z0-9]+$/.test(parsed.pathname);
+  } catch {
+    return false;
+  }
 }
 
 export async function POST(request: Request, { params }: Params) {
@@ -32,6 +43,7 @@ export async function POST(request: Request, { params }: Params) {
       taskId?: string;
       threadId?: string;
       deliveryMode?: string;
+      attachments?: unknown;
     };
     const contactId = body.contactId?.trim() || "";
     if (!contactId) {
@@ -69,6 +81,15 @@ export async function POST(request: Request, { params }: Params) {
     if (channel === "Email" && !object) {
       return Response.json({ error: "object (email subject) is required for Email" }, { status: 400 });
     }
+    const attachments = channelSupportsMedia(channel)
+      ? sanitizeMediaAttachments(body.attachments).filter((item) => isPortalMediaUrl(item.url, request.url))
+      : [];
+    if (attachments.length && !channelSupportsMedia(channel)) {
+      return Response.json({ error: "Media is only supported on WhatsApp" }, { status: 400 });
+    }
+    if (!String(body.content || "").trim() && !attachments.length) {
+      return Response.json({ error: "Message content is required" }, { status: 400 });
+    }
 
     const deliveryMode = asDeliveryMode(body.deliveryMode);
     const created = await createHumanOutbound({
@@ -90,6 +111,7 @@ export async function POST(request: Request, { params }: Params) {
       cpId: brand.currentCpId,
       cpAtInteraction: interactionCpCode(brand.currentCp),
       deliveryMode,
+      attachments,
     });
 
     await markFollowupClientEngaged(id, {

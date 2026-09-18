@@ -10,6 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { SendTimingToggle, type DeliveryMode } from "./send-timing-toggle";
+import { MessageMediaInputFrame, useMessageMedia } from "./message-media";
+import type { MediaAttachment } from "@/lib/media-attachments";
 
 const show = (result: { ok: boolean; message: string }) => result.ok ? toast.success(result.message) : toast.error(result.message);
 const channelAvailable = (contact: Contact, channel: Channel) =>
@@ -89,7 +91,7 @@ export function BrandReplyBox({
   interactions?: Interaction[];
   actions?: ScheduledAction[];
   taskId?: string;
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: DeliveryMode) => Promise<void>;
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: DeliveryMode, attachments?: MediaAttachment[]) => Promise<void>;
 }) {
   const { state, can, sendHumanReply } = useWorkspace();
   const customer = state.customers.find(item => item.id === customerId);
@@ -102,12 +104,14 @@ export function BrandReplyBox({
   const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("scheduled");
   const contact = people.find(item => item.id === interaction.contactId) || people[0];
   const channel = interaction.channel;
+  const media = useMessageMedia(channel);
   const notionBacked = !!onSend;
   if (!can("reply") || !people.length) return null;
   if (!notionBacked && customer?.status === "Closed") return null;
   if (!inboundNeedsComposer(state, interaction, interactions)) return null;
   if (!contact || !channel) return null;
   const replyTaskId = interaction.taskId || actions?.find(item => item.bombInstanceId === bombInstanceId && item.channel === channel)?.id || taskId;
+  const canSend = (!!content.trim() || media.readyAttachments.length > 0) && !(channel === "Email" && !subject.trim()) && !saving && !media.uploading;
   return (
     <div className="mt-3 rounded-xl bg-slate-50 p-3">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
@@ -116,14 +120,17 @@ export function BrandReplyBox({
       </div>
       <div className="min-w-0 space-y-2">
         {channel === "Email" && <Input value={subject} onChange={event => setSubject(event.target.value)} placeholder="Email subject" />}
-        <Textarea value={content} onChange={event => setContent(event.target.value)} className="min-h-20 resize-none" placeholder="Write a reply…"/>
+        <MessageMediaInputFrame channel={channel} media={media} disabled={saving}>
+          <Textarea value={content} onChange={event => setContent(event.target.value)} className="min-h-20 resize-none" placeholder="Write a reply…"/>
+        </MessageMediaInputFrame>
         <div className="flex items-center justify-end gap-2">
+          <div className="flex items-center gap-2">
           <SendTimingToggle value={deliveryMode} onValueChange={setDeliveryMode} />
-          <Button className="h-9 px-3" disabled={!content.trim() || (channel === "Email" && !subject.trim()) || saving} onClick={() => {
+          <Button className="h-9 px-3" disabled={!canSend} onClick={() => {
           if (onSend) {
             setSaving(true);
-            void onSend(contact.id, channel, content, replyTaskId, interaction.threadId, subject, deliveryMode)
-              .then(() => { toast.success("Message saved as pending"); setContent(""); setSubject(""); })
+            void onSend(contact.id, channel, content, replyTaskId, interaction.threadId, subject, deliveryMode, media.readyAttachments)
+              .then(() => { toast.success("Message saved as pending"); setContent(""); setSubject(""); media.reset(); })
               .catch(error => toast.error(error instanceof Error ? error.message : "Send failed"))
               .finally(() => setSaving(false));
             return;
@@ -131,8 +138,9 @@ export function BrandReplyBox({
           if (!customer) return;
           const result = sendHumanReply(customer.id, contact.id, channel, content, bombInstanceId || interaction.bombInstanceId);
           show(result);
-          if (result.ok) setContent("");
+          if (result.ok) { setContent(""); media.reset(); }
           }}><Send className="size-4"/></Button>
+          </div>
         </div>
       </div>
     </div>
@@ -150,7 +158,7 @@ export function ChannelSendBox({
   channel: Channel;
   contacts: Contact[];
   interactions: Interaction[];
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: DeliveryMode) => Promise<void>;
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: DeliveryMode, attachments?: MediaAttachment[]) => Promise<void>;
 }) {
   const { state, can, sendHumanReply } = useWorkspace();
   const people = contacts.filter(item => channelAvailable(item, channel));
@@ -161,9 +169,11 @@ export function ChannelSendBox({
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
   const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("scheduled");
+  const media = useMessageMedia(channel);
   useEffect(() => {
     setContactId(latest?.contactId || people[0]?.id || "");
     setContent("");
+    media.reset();
   }, [channel, customerId]);
   const contact = people.find(item => item.id === contactId) || people[0];
   const customer = state.customers.find(item => item.id === customerId);
@@ -191,28 +201,32 @@ export function ChannelSendBox({
           <span className="text-xs text-slate-400">Send {channel}</span>
         </div>
         <div className="space-y-2">
-          <Textarea
-            value={content}
-            onChange={event => setContent(event.target.value)}
-            className="min-h-20 resize-none"
-            placeholder={`Write ${channel === "Phone" ? "a call note" : `a ${channel} message`}…`}
-          />
+          <MessageMediaInputFrame channel={channel} media={media} disabled={saving}>
+            <Textarea
+              value={content}
+              onChange={event => setContent(event.target.value)}
+              className="min-h-20 resize-none"
+              placeholder={`Write ${channel === "Phone" ? "a call note" : `a ${channel} message`}…`}
+            />
+          </MessageMediaInputFrame>
           <div className="flex items-center justify-end gap-2">
+            <div className="flex items-center gap-2">
             <SendTimingToggle value={deliveryMode} onValueChange={setDeliveryMode} />
-            <Button className="h-9 px-3" disabled={!contact || !content.trim() || saving} onClick={() => {
+            <Button className="h-9 px-3" disabled={!contact || (!content.trim() && !media.readyAttachments.length) || saving || media.uploading} onClick={() => {
             if (!contact) return;
             if (onSend) {
               setSaving(true);
-              void onSend(contact.id, channel, content, taskId, threadId, undefined, deliveryMode)
-                .then(() => { toast.success("Message saved as pending"); setContent(""); })
+              void onSend(contact.id, channel, content, taskId, threadId, undefined, deliveryMode, media.readyAttachments)
+                .then(() => { toast.success("Message saved as pending"); setContent(""); media.reset(); })
                 .catch(error => toast.error(error instanceof Error ? error.message : "Send failed"))
                 .finally(() => setSaving(false));
               return;
             }
             const result = sendHumanReply(customerId, contact.id, channel, content, latestOutbound?.bombInstanceId);
             show(result);
-            if (result.ok) setContent("");
+            if (result.ok) { setContent(""); media.reset(); }
             }}><Send className="size-4"/></Button>
+            </div>
           </div>
         </div>
       </div>

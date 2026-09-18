@@ -15,6 +15,7 @@ import { getFollowupConversationDbId } from "./config";
 import { listCheckpoints } from "./cps";
 import { isRetryableNotionError } from "./rate-limit";
 import { parseQuoCallData, quoFromMessageId } from "../quo/call-payload";
+import { attachmentsFromExtendedParameters } from "../media-attachments";
 
 const CONTACT_CONVERSATION_KEYS = ["Interactions", "Conversations", "Conversation Records"];
 
@@ -54,6 +55,7 @@ function mapConversation(
     threadId: propertyText(properties["Thread ID"]) || null,
     messageId,
     extendedParameters: options.trimPayload ? null : extendedParameters,
+    attachments: attachmentsFromExtendedParameters(extendedParameters),
     replyStatus: asReplyStatus(propertyText(properties["Reply Status"])),
     cpId: firstRelationId(properties.CP) || null,
     cpAtInteraction: null,

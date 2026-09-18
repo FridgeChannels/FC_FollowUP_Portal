@@ -26,6 +26,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { InteractionFeed } from "./interaction-feed";
 import { ChannelIcon, ChannelOption } from "./channel-icon";
 import { SendTimingToggle, type DeliveryMode } from "./send-timing-toggle";
+import { MessageMediaInputFrame, useMessageMedia } from "./message-media";
+import type { MediaAttachment } from "@/lib/media-attachments";
 import { buildTemplateVariableContext, resolveLaunchStepCopy } from "@/lib/template-variables";
 import { brandHasActiveOmniReach } from "@/lib/notion/reply-inbox";
 import { buildInteractionCpFallbacks, resolveInteractionDisplayCp } from "@/lib/interaction-cp";
@@ -434,6 +436,7 @@ function toInteractions(
       || undefined,
     callResult: item.callResult || undefined,
     quo: item.quo || null,
+    attachments: item.attachments,
   }));
 }
 
@@ -737,8 +740,8 @@ export function BrandDetail({customerId}:{customerId:string}){
     const payload=await response.json() as {error?:string};
     if(!response.ok)throw new Error(payload.error||"Unable to save call review");
     await refreshBrandAndActivities();
-  }:undefined} onCancelBomb={async instance=>{if(!notionBacked){const result=cancelBomb(c.id,instance.id);if(!result.ok)throw new Error(result.message);toast.success(result.message);return;}const response=await fetch(`/api/brands/${c.id}/bombs/${instance.templateId}/cancel`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId:instance.targetContactId,omniReachRunId:instance.id.startsWith("run:")?instance.id.slice(4):undefined})});const payload=await response.json() as {cancelledTaskIds?:string[];error?:string};if(!response.ok)throw new Error(payload.error||"Unable to stop OmniReach");const cancelled=new Set(payload.cancelledTaskIds||[]);if(cancelled.size){setRemote(prev=>prev?{...prev,tasks:prev.tasks.map(task=>cancelled.has(task.id)?{...task,status:"Cancelled"}:task),handlingMode:prev.handlingMode==="Human"?prev.handlingMode:"Human"}:prev);}toast.success(`${payload.cancelledTaskIds?.length||0} remaining task${payload.cancelledTaskIds?.length===1?"":"s"} cancelled`);void Promise.all([refreshRemote(),fetchActivitiesPage(null,"replace")]);}}   onSend={notionBacked?async (contactId,channel,content,taskId,threadId,subject,deliveryMode)=>{
-    const response=await fetch(`/api/brands/${c.id}/messages`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId,channel,content,taskId,threadId,object:channel==="Email"?subject:undefined,deliveryMode})});
+  }:undefined} onCancelBomb={async instance=>{if(!notionBacked){const result=cancelBomb(c.id,instance.id);if(!result.ok)throw new Error(result.message);toast.success(result.message);return;}const response=await fetch(`/api/brands/${c.id}/bombs/${instance.templateId}/cancel`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId:instance.targetContactId,omniReachRunId:instance.id.startsWith("run:")?instance.id.slice(4):undefined})});const payload=await response.json() as {cancelledTaskIds?:string[];error?:string};if(!response.ok)throw new Error(payload.error||"Unable to stop OmniReach");const cancelled=new Set(payload.cancelledTaskIds||[]);if(cancelled.size){setRemote(prev=>prev?{...prev,tasks:prev.tasks.map(task=>cancelled.has(task.id)?{...task,status:"Cancelled"}:task),handlingMode:prev.handlingMode==="Human"?prev.handlingMode:"Human"}:prev);}toast.success(`${payload.cancelledTaskIds?.length||0} remaining task${payload.cancelledTaskIds?.length===1?"":"s"} cancelled`);void Promise.all([refreshRemote(),fetchActivitiesPage(null,"replace")]);}}   onSend={notionBacked?async (contactId,channel,content,taskId,threadId,subject,deliveryMode,attachments)=>{
+    const response=await fetch(`/api/brands/${c.id}/messages`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId,channel,content,taskId,threadId,object:channel==="Email"?subject:undefined,deliveryMode,attachments})});
     const payload=await response.json() as {error?:string};
     if(!response.ok)throw new Error(payload.error||"Send failed");
     await Promise.all([refreshRemote(),fetchActivitiesPage(null,"replace")]);
@@ -746,8 +749,8 @@ export function BrandDetail({customerId}:{customerId:string}){
   {notionBacked&&activitiesHasMore&&activitiesCursor&&(remote?.activities.length||0)>=ACTIVITY_PAGE_SIZE?<div className="border-t border-slate-100 p-3"><Button variant="outline" size="sm" className="w-full" disabled={activitiesLoadingMore||activitiesLoading} onClick={loadMoreActivities}>{activitiesLoadingMore?<span className="inline-flex items-center gap-2"><Spinner className="size-3.5"/>Loading…</span>:"Load more activity"}</Button></div>:null}
   </div></section>
     {(c.cp==="CP3"||partnershipContext)&&partnershipContext&&<aside><section className="rounded-2xl bg-emerald-50 p-5"><div className="text-xs font-semibold tracking-wide text-emerald-700">CP3 · Partnership context</div><h2 className="mt-2 font-bold text-emerald-950">{partnershipContext.headline}</h2><p className="mt-2 text-sm leading-6 text-emerald-900">{partnershipContext.summary}</p><div className="mt-4 space-y-2">{partnershipContext.signals.map(signal=><div key={signal} className="rounded-lg bg-white/70 px-3 py-2 text-xs leading-5 text-slate-700">{signal}</div>)}</div><div className="mt-3 text-[11px] text-emerald-700">Updated {dateOnly(partnershipContext.updatedAt)}</div></section></aside>}</div>
-  <LaunchBombDialog customerId={c.id} open={launch} onOpenChange={setLaunch} contacts={notionBacked?c.contacts:undefined} currentCp={notionBacked&&remote?remote.currentCp:undefined} companyName={c.name} productDescription={notionBacked?remote?.productDescription:undefined} matchedCategory={notionBacked?remote?.matchedCategory:undefined} followupExhibition={notionBacked?remote?.followupExhibition:undefined} previewOnly={notionBacked} hasActiveOmniReach={hasActiveOmniReach} onLaunched={notionBacked?()=>{void refreshBrandAndActivities()}:undefined}/><ReplyDialog customerId={c.id} open={reply} onOpenChange={setReply} contacts={notionBacked?c.contacts:undefined} onSend={notionBacked?async (contactId,channel,content,object,deliveryMode)=>{
-    const response=await fetch(`/api/brands/${c.id}/messages`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId,channel,content,object,deliveryMode})});
+  <LaunchBombDialog customerId={c.id} open={launch} onOpenChange={setLaunch} contacts={notionBacked?c.contacts:undefined} currentCp={notionBacked&&remote?remote.currentCp:undefined} companyName={c.name} productDescription={notionBacked?remote?.productDescription:undefined} matchedCategory={notionBacked?remote?.matchedCategory:undefined} followupExhibition={notionBacked?remote?.followupExhibition:undefined} previewOnly={notionBacked} hasActiveOmniReach={hasActiveOmniReach} onLaunched={notionBacked?()=>{void refreshBrandAndActivities()}:undefined}/><ReplyDialog customerId={c.id} open={reply} onOpenChange={setReply} contacts={notionBacked?c.contacts:undefined} onSend={notionBacked?async (contactId,channel,content,object,deliveryMode,attachments)=>{
+    const response=await fetch(`/api/brands/${c.id}/messages`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId,channel,content,object,deliveryMode,attachments})});
     const payload=await response.json() as {error?:string};
     if(!response.ok)throw new Error(payload.error||"Send failed");
     await Promise.all([refreshRemote(),fetchActivitiesPage(null,"replace")]);
@@ -964,6 +967,7 @@ export function ReplyDialog({
     content: string,
     object?: string,
     deliveryMode?: DeliveryMode,
+    attachments?: MediaAttachment[],
   ) => Promise<void>;
 }) {
   const { state, sendHumanReply } = useWorkspace();
@@ -975,6 +979,7 @@ export function ReplyDialog({
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
   const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("scheduled");
+  const media = useMessageMedia(channel);
   const [linkedinGate, setLinkedinGate] = useState<{
     available: boolean;
     reason: string | null;
@@ -989,6 +994,7 @@ export function ReplyDialog({
     setContent("");
     setDeliveryMode("scheduled");
     setLinkedinGate(null);
+    media.reset();
   }, [open, customerId]);
 
   const contact = people.find((x) => x.id === contactId) || people[0];
@@ -1064,10 +1070,11 @@ export function ReplyDialog({
   const emailNeedsObject = effective === "Email";
   const canSubmit =
     !!contact &&
-    !!content.trim() &&
+    (!!content.trim() || media.readyAttachments.length > 0) &&
     !!effective &&
     (!emailNeedsObject || !!object.trim()) &&
-    !saving;
+    !saving &&
+    !media.uploading;
 
   const linkedInBlockedReason =
     linkedinGate?.reason ||
@@ -1134,12 +1141,14 @@ export function ReplyDialog({
         {emailNeedsObject ? (
           <Input value={object} onChange={(e) => setObject(e.target.value)} placeholder="Email subject" />
         ) : null}
-        <Textarea
-          className="min-h-32"
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          placeholder="Write a reply…"
-        />
+        <MessageMediaInputFrame channel={effective} media={media} disabled={saving}>
+          <Textarea
+            className="min-h-32"
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            placeholder="Write a reply…"
+          />
+        </MessageMediaInputFrame>
         <div className="flex justify-end">
           <SendTimingToggle value={deliveryMode} onValueChange={setDeliveryMode} />
         </div>
@@ -1165,10 +1174,12 @@ export function ReplyDialog({
                       content,
                       emailNeedsObject ? object.trim() : undefined,
                       deliveryMode,
+                      media.readyAttachments,
                     );
                     toast.success("Message saved as pending");
                     setObject("");
                     setContent("");
+                    media.reset();
                     onOpenChange(false);
                   } catch (error) {
                     toast.error(error instanceof Error ? error.message : "Send failed");

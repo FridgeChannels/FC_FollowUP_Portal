@@ -275,6 +275,7 @@ export type BrandActivity = {
   scheduledAt?: string | null;
   replyDueAt?: string | null;
   quo?: QuoCallData | null;
+  attachments?: import("./media-attachments").MediaAttachment[];
 };
 
 export function lastReplyAtFromActivities(

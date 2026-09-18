@@ -50,6 +50,7 @@ export type Interaction = {
   creationMethod?: "Automated" | "Manual"; threadId?: string; taskId?: string; replyStatus?: "Needs Reply" | "Replied";
   taskStatus?: string; scheduledAt?: string; callResult?: string;
   quo?: QuoCallData | null;
+  attachments?: import("./media-attachments").MediaAttachment[];
 };
 
 /**

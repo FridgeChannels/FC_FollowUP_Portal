@@ -1,5 +1,17 @@
 export class ExtendedParametersError extends Error {}
 
+export function parseExtendedParametersObject(value?: string | null): Record<string, unknown> | null {
+  const text = value?.trim();
+  if (!text) return null;
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
 export function asExtendedParameters(value?: unknown) {
   if (value == null) return null;
   if (typeof value === "string") {

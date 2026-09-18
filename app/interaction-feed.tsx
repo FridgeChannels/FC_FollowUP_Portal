@@ -12,6 +12,7 @@ import { ChannelIcon } from "./channel-icon";
 import { PhoneTaskBoard, UnqualifiedRecallForm } from "./phone-task-board";
 import { QuoCallPanel } from "./quo-call-panel";
 import { useWorkspace } from "./workspace-store";
+import { MessageMediaPreview, MessageMediaThumbnails } from "./message-media";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -61,6 +62,16 @@ function SourceBadge({ source }: { source: string }) {
     <Badge className={source === "Human" ? "bg-violet-100 text-[10px] text-violet-800 hover:bg-violet-100" : "bg-blue-100 text-[10px] text-blue-800 hover:bg-blue-100"}>
       {source}
     </Badge>
+  );
+}
+
+function ThreadMedia({ attachments }: { attachments: NonNullable<Interaction["attachments"]> }) {
+  const [preview, setPreview] = useState<NonNullable<Interaction["attachments"]>[number] | null>(null);
+  return (
+    <>
+      <MessageMediaThumbnails attachments={attachments} onPreview={setPreview} />
+      <MessageMediaPreview item={preview} onOpenChange={(open) => { if (!open) setPreview(null); }} />
+    </>
   );
 }
 
@@ -169,7 +180,7 @@ export function InteractionFeed({
   maxHeight?: string;
   bombInstances?: BombInstance[];
   actions?: ScheduledAction[];
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode) => Promise<void>;
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, attachments?: import("@/lib/media-attachments").MediaAttachment[]) => Promise<void>;
   onCancelBomb?: (instance: BombInstance) => Promise<void>;
   initialChannel?: Channel;
   initialCp?: CPCode;
@@ -442,7 +453,7 @@ function ChannelTranscript({
   contacts: Contact[];
   channel: Channel;
   bombInstances: BombInstance[];
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode) => Promise<void>;
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, attachments?: import("@/lib/media-attachments").MediaAttachment[]) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
   resolveReview: (taskId?: string | null) => { status: CallReviewStatus; recallRequested?: boolean } | undefined;
@@ -509,7 +520,7 @@ function ContactThreads({
   replyPool: Interaction[];
   channel: Channel;
   bombInstances: BombInstance[];
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode) => Promise<void>;
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, attachments?: import("@/lib/media-attachments").MediaAttachment[]) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
   resolveReview: (taskId?: string | null) => { status: CallReviewStatus; recallRequested?: boolean } | undefined;
@@ -562,7 +573,7 @@ function ThreadMessages({
   channel: Channel;
   endpoint?: string;
   bombInstances: BombInstance[];
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode) => Promise<void>;
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, attachments?: import("@/lib/media-attachments").MediaAttachment[]) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
   resolveReview: (taskId?: string | null) => { status: CallReviewStatus; recallRequested?: boolean } | undefined;
@@ -635,6 +646,11 @@ function ThreadMessages({
               </p>
             )}
             {item.content ? <p className="whitespace-pre-wrap text-sm leading-6 text-slate-700">{item.content}</p> : null}
+            {item.attachments?.length ? (
+              <div className="pt-1">
+                <ThreadMedia attachments={item.attachments} />
+              </div>
+            ) : null}
           </div>
         )}
         {item.quo ? <div className="mt-3">
