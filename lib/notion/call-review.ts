@@ -4,12 +4,13 @@ import { retrieveFollowupTask } from "./tasks";
 import { markInboundsReplied, updateFollowupTask } from "./followup-writes";
 import { listConversationsByIds } from "./conversations";
 import {
+  encodeCallReviewHistory,
   historyFromTask,
   nextReviewRound,
   reviewRoundId,
+  stripCallReviewHistoryFromNotes,
   unusedCallIds,
   withInheritedCallIds,
-  writeCallReviewHistory,
   type CallReviewRound,
 } from "../call-review-history";
 
@@ -26,6 +27,10 @@ export class CallReviewError extends Error {
 
 function appendNote(existing: string | null | undefined, line: string) {
   return [existing?.trim() || null, line].filter(Boolean).join("\n");
+}
+
+function humanNotes(existing: string | null | undefined, line: string) {
+  return stripCallReviewHistoryFromNotes(appendNote(existing, line));
 }
 
 async function callIdsForTask(task: { conversationIds: string[] }) {
@@ -89,10 +94,8 @@ export async function submitCallReview(input: {
     callReviewStatus: "Awaiting Review",
     status: "Completed",
     endedAt: now,
-    notes: writeCallReviewHistory(
-      appendNote(task.notes, submissionNote),
-      [...history, reviewRound],
-    ),
+    notes: humanNotes(task.notes, submissionNote),
+    callReviewHistory: encodeCallReviewHistory([...history, reviewRound]),
   });
 
   return retrieveFollowupTask(task.id);
@@ -152,6 +155,7 @@ export async function applyCallReview(input: {
     ...history.filter((item) => item.id !== currentRound.id),
     reviewedRound,
   ];
+  const historyText = encodeCallReviewHistory(nextHistory);
 
   if (input.status === "Unqualified" && !reviewReason) {
     throw new CallReviewError("An unqualified reason is required before recalling the task", 400);
@@ -162,10 +166,10 @@ export async function applyCallReview(input: {
       callReviewStatus: "Qualified",
       status: "Completed",
       endedAt: now,
-      notes: writeCallReviewHistory(
-        appendNote(task.notes, `AccountManager ${reviewer} marked round ${reviewedRound.round} Qualified.`),
-        nextHistory,
-      ),
+      callReviewReason: null,
+      callQualifiedAt: now,
+      callReviewHistory: historyText,
+      notes: humanNotes(task.notes, `AccountManager ${reviewer} marked round ${reviewedRound.round} Qualified.`),
     });
   } else {
     const caller = await findOwnerByAccount(CALL_REVIEW_CALLER_EMAIL);
@@ -181,12 +185,12 @@ export async function applyCallReview(input: {
       endedAt: null,
       ownerId: caller.id,
       priority: "P0",
-      notes: writeCallReviewHistory(
-        appendNote(
-          task.notes,
-          `AccountManager ${reviewer} marked round ${reviewedRound.round} Unqualified and recalled the task to ${caller.name}.`,
-        ),
-        nextHistory,
+      callReviewReason: reviewReason,
+      callQualifiedAt: null,
+      callReviewHistory: historyText,
+      notes: humanNotes(
+        task.notes,
+        `AccountManager ${reviewer} marked round ${reviewedRound.round} Unqualified and recalled the task to ${caller.name}.`,
       ),
     });
   }

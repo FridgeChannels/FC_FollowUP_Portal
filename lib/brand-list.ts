@@ -243,6 +243,12 @@ export type BrandTask = {
   sourceBombName?: string | null;
   sourceBombCp?: string | null;
   callReviewStatus?: "Awaiting Review" | "Qualified" | "Unqualified" | null;
+  /** Latest Unqualified reason (Notion `Call Review Reason`). */
+  callReviewReason?: string | null;
+  /** Set only when Qualified; cleared on Unqualified (Notion `Call Qualified At`). */
+  callQualifiedAt?: string | null;
+  /** Raw Notion `Call Review History` column (JSON); preferred over Notes embedding. */
+  callReviewHistoryText?: string | null;
   callReviewHistory?: CallReviewRound[];
   contactPhone?: string | null;
   inboxStatus?: "Needs Reply" | null;

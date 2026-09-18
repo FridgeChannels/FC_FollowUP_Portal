@@ -56,6 +56,17 @@ function normalizeRound(value: unknown): CallReviewRound | null {
   };
 }
 
+function roundsFromJsonPayload(payload: string) {
+  try {
+    const parsed = JSON.parse(payload);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(normalizeRound).filter((item): item is CallReviewRound => !!item);
+  } catch {
+    return [];
+  }
+}
+
+/** Parse history embedded in Notes (legacy). Prefers the first valid block. */
 export function parseCallReviewHistory(notes?: string | null) {
   if (!notes) return [];
   // Prefer the first valid block — later duplicates may have wrongly inherited
@@ -63,16 +74,18 @@ export function parseCallReviewHistory(notes?: string | null) {
   HISTORY_BLOCK.lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = HISTORY_BLOCK.exec(notes)) !== null) {
-    try {
-      const parsed = JSON.parse(match[1] || "[]");
-      if (!Array.isArray(parsed)) continue;
-      const rounds = parsed.map(normalizeRound).filter((item): item is CallReviewRound => !!item);
-      if (rounds.length) return rounds;
-    } catch {
-      // try next block
-    }
+    const rounds = roundsFromJsonPayload(match[1] || "[]");
+    if (rounds.length) return rounds;
   }
   return [];
+}
+
+/** Parse the dedicated Call Review History column (JSON array, or legacy marker wrap). */
+export function parseCallReviewHistoryColumn(value?: string | null) {
+  if (!value?.trim()) return [];
+  const fromMarkers = parseCallReviewHistory(value);
+  if (fromMarkers.length) return fromMarkers;
+  return roundsFromJsonPayload(value.trim());
 }
 
 /** True when Notes contain more than one history marker (corrupt / raced writes). */
@@ -88,12 +101,46 @@ export function hasDuplicateCallReviewHistory(notes?: string | null) {
   return false;
 }
 
-export function writeCallReviewHistory(notes: string | null | undefined, history: CallReviewRound[]) {
+export function notesContainCallReviewHistory(notes?: string | null) {
+  return !!notes && notes.includes(HISTORY_START);
+}
+
+/** Strip legacy history markers from human Notes. */
+export function stripCallReviewHistoryFromNotes(notes: string | null | undefined) {
   HISTORY_BLOCK.lastIndex = 0;
-  const cleanNotes = (notes || "").replace(HISTORY_BLOCK, "").trim();
+  return (notes || "").replace(HISTORY_BLOCK, "").trim();
+}
+
+/** Encode rounds for the Call Review History Notion column. */
+export function encodeCallReviewHistory(history: CallReviewRound[]) {
+  if (!history.length) return "";
+  return JSON.stringify(history);
+}
+
+/**
+ * @deprecated Legacy Notes embedding. Prefer encodeCallReviewHistory + stripCallReviewHistoryFromNotes.
+ * Kept for tests that assert round-trip cleanup of duplicate Notes blocks.
+ */
+export function writeCallReviewHistory(notes: string | null | undefined, history: CallReviewRound[]) {
+  const cleanNotes = stripCallReviewHistoryFromNotes(notes);
   if (!history.length) return cleanNotes;
-  const payload = JSON.stringify(history);
-  return [cleanNotes, HISTORY_START, payload, HISTORY_END].filter(Boolean).join("\n");
+  return [cleanNotes, HISTORY_START, encodeCallReviewHistory(history), HISTORY_END].filter(Boolean).join("\n");
+}
+
+export function latestUnqualifiedReason(history: CallReviewRound[]) {
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const round = history[index];
+    if (round.status === "Unqualified" && round.reason?.trim()) return round.reason.trim();
+  }
+  return null;
+}
+
+export function latestQualifiedAt(history: CallReviewRound[]) {
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const round = history[index];
+    if (round.status === "Qualified" && round.reviewedAt) return round.reviewedAt;
+  }
+  return null;
 }
 
 function noteLine(notes: string | null | undefined, prefix: string) {
@@ -136,11 +183,15 @@ function legacyRoundFromNotes(input: {
 export function historyFromTask(input: {
   id: string;
   notes?: string | null;
+  /** Dedicated Notion column `Call Review History` (preferred). */
+  callReviewHistoryText?: string | null;
   endedAt?: string | null;
   callReviewStatus?: CallReviewStatus | null;
 }) {
-  const parsed = parseCallReviewHistory(input.notes);
-  if (parsed.length) return parsed;
+  const fromColumn = parseCallReviewHistoryColumn(input.callReviewHistoryText);
+  if (fromColumn.length) return fromColumn;
+  const fromNotes = parseCallReviewHistory(input.notes);
+  if (fromNotes.length) return fromNotes;
   if (input.callReviewStatus) return [legacyRoundFromNotes(input, input.callReviewStatus)];
   if (notesIndicateUnqualifiedRecall(input.notes)) {
     return [legacyRoundFromNotes(input, "Unqualified")];

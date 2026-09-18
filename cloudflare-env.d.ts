@@ -19,6 +19,14 @@ declare namespace Cloudflare {
     SKIP_UNAVAILABLE_CHANNELS?: string;
     SCHEDULE_TEST_MODE?: string;
     REPLY_INGEST_TOKEN?: string;
+    NOTIFY_ENABLED?: string;
+    NOTIFY_SLACK_ENABLED?: string;
+    SLACK_WEBHOOK_URL?: string;
+    NOTIFY_ON_REPLY?: string;
+    NOTIFY_ON_INBOUND?: string;
+    NOTIFY_ON_PHONE?: string;
+    NOTIFY_CONTENT_MAX_CHARS?: string;
+    PORTAL_BASE_URL?: string;
     QUO_API_KEY?: string;
     QUO_FROM_NUMBER?: string;
     DEV_CALL_PHONE?: string;

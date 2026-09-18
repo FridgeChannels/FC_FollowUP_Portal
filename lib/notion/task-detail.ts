@@ -9,10 +9,14 @@ import { annotateTasksWithReplyInbox } from "./reply-inbox";
 import { listFollowupTasks, retrieveFollowupTask, type TaskResolveHints } from "./tasks";
 import { updateFollowupTask } from "./followup-writes";
 import {
+  encodeCallReviewHistory,
   hasDuplicateCallReviewHistory,
   historyFromTask,
+  latestQualifiedAt,
+  latestUnqualifiedReason,
+  notesContainCallReviewHistory,
+  stripCallReviewHistoryFromNotes,
   withInheritedCallIds,
-  writeCallReviewHistory,
 } from "../call-review-history";
 
 function callIdsFromActivities(task: BrandTask, activities: BrandActivity[]) {
@@ -27,12 +31,58 @@ function callIdsFromActivities(task: BrandTask, activities: BrandActivity[]) {
 async function hydrateTaskReviewRounds(task: BrandTask, activities: BrandActivity[]): Promise<BrandTask> {
   const previous = historyFromTask(task);
   const history = withInheritedCallIds(previous, callIdsFromActivities(task, activities));
-  const changed = JSON.stringify(history) !== JSON.stringify(previous);
-  const needsCleanup = hasDuplicateCallReviewHistory(task.notes);
-  if (!changed && !needsCleanup) return { ...task, callReviewHistory: history };
-  const notes = writeCallReviewHistory(task.notes, history);
-  await updateFollowupTask(task.id, { notes }).catch(() => undefined);
-  return { ...task, notes, callReviewHistory: history };
+  const historyChanged = JSON.stringify(history) !== JSON.stringify(previous);
+  const notesDirty =
+    notesContainCallReviewHistory(task.notes) || hasDuplicateCallReviewHistory(task.notes);
+  const columnMissing = history.length > 0 && !task.callReviewHistoryText?.trim();
+  const expectedReason =
+    task.callReviewStatus === "Unqualified"
+      ? (task.callReviewReason?.trim() || latestUnqualifiedReason(history) || null)
+      : task.callReviewReason?.trim() || null;
+  const expectedQualifiedAt =
+    task.callReviewStatus === "Qualified"
+      ? (task.callQualifiedAt || latestQualifiedAt(history) || null)
+      : null;
+  const reasonNeedsSync =
+    task.callReviewStatus === "Unqualified"
+      && !!expectedReason
+      && expectedReason !== (task.callReviewReason || null);
+  const qualifiedAtNeedsSync =
+    (task.callReviewStatus === "Qualified" && !!expectedQualifiedAt && expectedQualifiedAt !== (task.callQualifiedAt || null))
+    || (task.callReviewStatus === "Unqualified" && !!task.callQualifiedAt);
+
+  if (!historyChanged && !notesDirty && !columnMissing && !reasonNeedsSync && !qualifiedAtNeedsSync) {
+    return { ...task, callReviewHistory: history };
+  }
+
+  const notes = stripCallReviewHistoryFromNotes(task.notes);
+  const callReviewHistoryText = encodeCallReviewHistory(history);
+  const patch: {
+    notes?: string | null;
+    callReviewHistory?: string | null;
+    callReviewReason?: string | null;
+    callQualifiedAt?: string | null;
+  } = {
+    callReviewHistory: callReviewHistoryText || null,
+  };
+  if (notes !== (task.notes || "").trim()) patch.notes = notes || null;
+  if (task.callReviewStatus === "Unqualified") {
+    if (expectedReason) patch.callReviewReason = expectedReason;
+    if (task.callQualifiedAt) patch.callQualifiedAt = null;
+  } else if (task.callReviewStatus === "Qualified") {
+    if (expectedQualifiedAt && !task.callQualifiedAt) patch.callQualifiedAt = expectedQualifiedAt;
+    if (task.callReviewReason) patch.callReviewReason = null;
+  }
+
+  await updateFollowupTask(task.id, patch).catch(() => undefined);
+  return {
+    ...task,
+    notes: patch.notes !== undefined ? patch.notes : task.notes,
+    callReviewHistoryText: callReviewHistoryText || null,
+    callReviewHistory: history,
+    callReviewReason: patch.callReviewReason !== undefined ? patch.callReviewReason : task.callReviewReason,
+    callQualifiedAt: patch.callQualifiedAt !== undefined ? patch.callQualifiedAt : task.callQualifiedAt,
+  };
 }
 
 export type TaskDetailPayload = {

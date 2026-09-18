@@ -589,9 +589,13 @@ async function mapTaskPage(
     sourceBombId: firstRelationId(properties["Source Bomb"]) || null,
     omniReachRunId: propertyText(properties["OmniReach Run Id"]) || null,
     callReviewStatus: asCallReviewStatus(propertyText(properties["Call Review Status"])),
+    callReviewReason: propertyText(properties["Call Review Reason"]) || null,
+    callQualifiedAt: propertyDate(properties["Call Qualified At"]),
+    callReviewHistoryText: propertyText(properties["Call Review History"]) || null,
     callReviewHistory: historyFromTask({
       id: page.id,
       notes: propertyText(properties.Notes) || null,
+      callReviewHistoryText: propertyText(properties["Call Review History"]) || null,
       endedAt: propertyDate(properties["Ended At"]),
       callReviewStatus: asCallReviewStatus(propertyText(properties["Call Review Status"])),
     }),

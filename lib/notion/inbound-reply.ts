@@ -56,6 +56,19 @@ export type InboundReplyInput = {
   "Extended Parameters"?: Record<string, unknown> | string | null;
 };
 
+export type InboundReplyNotifyContext = {
+  channel: string;
+  brandName: string;
+  ownerId: string | null;
+  ownerName: string | null;
+  contactName: string;
+  sender: string | null;
+  subject: string | null;
+  content: string;
+  replyDueAt: string | null;
+  occurredAt: string;
+};
+
 export type InboundReplyResult = {
   duplicate: boolean;
   conversationId: string;
@@ -65,12 +78,15 @@ export type InboundReplyResult = {
   taskId: string;
   brandId: string;
   inboxStatus: "Needs Reply";
+  /** Present on newly created replies — used by the notification engine. */
+  notify?: InboundReplyNotifyContext;
 };
 
 type ResolvedTarget = {
   brandId: string;
   brandName: string;
   brandOwnerId: string | null;
+  brandOwnerName: string | null;
   contactId: string;
   contactName: string;
   taskId?: string;
@@ -176,6 +192,7 @@ async function loadContactContext(contactId: string): Promise<ResolvedTarget> {
     brandId: brand.id,
     brandName: brand.name,
     brandOwnerId: brand.ownerId,
+    brandOwnerName: brand.ownerName,
     contactId,
     contactName: contact?.name || titleFromProperties(contactPage.properties) || "KeyPerson",
     currentCp: interactionCpCode(brand.currentCp),
@@ -212,6 +229,7 @@ async function resolveInboundReplyTarget(input: InboundReplyInput, channel: stri
       brandId: resolved.target.brand.id,
       brandName: resolved.target.brand.name,
       brandOwnerId: resolved.target.brand.ownerId,
+      brandOwnerName: resolved.target.brand.ownerName,
       contactId: resolved.target.contact.id,
       contactName: resolved.target.contact.name,
       taskId: resolved.target.task?.id || resolved.target.outbound?.taskId || undefined,
@@ -234,8 +252,9 @@ async function resolveInboundReplyTarget(input: InboundReplyInput, channel: stri
     const brand = await mapFollowupClientPage(await retrievePage(task.brandId));
     return {
       brandId: task.brandId,
-      brandName: task.brandName || "Untitled Client",
-      brandOwnerId: task.brandOwnerId || task.ownerId,
+      brandName: task.brandName || brand.name || "Untitled Client",
+      brandOwnerId: task.brandOwnerId || task.ownerId || brand.ownerId,
+      brandOwnerName: brand.ownerName,
       contactId: task.contactId,
       contactName: task.contactName || "KeyPerson",
       taskId: task.channel === channel ? task.id : undefined,
@@ -304,6 +323,7 @@ async function resolveInboundReplyTarget(input: InboundReplyInput, channel: stri
       brandId: resolved.target.brand.id,
       brandName: resolved.target.brand.name,
       brandOwnerId: resolved.target.brand.ownerId,
+      brandOwnerName: resolved.target.brand.ownerName,
       contactId: resolved.target.contact.id,
       contactName: resolved.target.contact.name,
       taskId: resolved.target.task?.id,
@@ -330,6 +350,7 @@ async function toResult(
   taskId: string,
   duplicate: boolean,
   activities?: BrandActivity[],
+  notify?: InboundReplyNotifyContext,
 ): Promise<InboundReplyResult> {
   const task = await retrieveFollowupTask(taskId);
   const listed =
@@ -345,6 +366,7 @@ async function toResult(
     taskId,
     brandId: target.brandId,
     inboxStatus: annotated?.inboxStatus || "Needs Reply",
+    ...(notify && !duplicate ? { notify } : {}),
   };
 }
 
@@ -458,12 +480,12 @@ export async function ingestInboundReply(
     outbound.cpId || outbound.cpAtInteraction || target.currentCpId || target.currentCp,
   );
   if (cp) properties.CP = cp;
+  let replyDueAt: string | null = null;
   if (channel !== "Phone") {
     properties["Reply Status"] = { select: { name: "Needs Reply" } };
     try {
-      properties[REPLY_DUE_PROPERTY] = replyDueAtProperty(
-        await allocateReplyDueAt({ occurredAt, channel }),
-      );
+      replyDueAt = await allocateReplyDueAt({ occurredAt, channel });
+      properties[REPLY_DUE_PROPERTY] = replyDueAtProperty(replyDueAt);
     } catch {
       // Capacity lookup failed — still ingest; brands list falls back to Interaction At.
     }
@@ -514,6 +536,18 @@ export async function ingestInboundReply(
         createdAt: occurredAt,
       },
     ],
+    {
+      channel,
+      brandName: target.brandName,
+      ownerId: target.brandOwnerId,
+      ownerName: target.brandOwnerName,
+      contactName: target.contactName,
+      sender: sender || null,
+      subject: subject || null,
+      content,
+      replyDueAt,
+      occurredAt,
+    },
   );
 }
 

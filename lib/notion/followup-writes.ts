@@ -496,6 +496,9 @@ export async function updateFollowupTask(
     endedAt?: string | null;
     priority?: string | null;
     callReviewStatus?: "Awaiting Review" | "Qualified" | "Unqualified" | null;
+    callReviewReason?: string | null;
+    callQualifiedAt?: string | null;
+    callReviewHistory?: string | null;
   },
 ) {
   const previous =
@@ -527,6 +530,17 @@ export async function updateFollowupTask(
     properties["Call Review Status"] = patch.callReviewStatus
       ? { select: { name: patch.callReviewStatus } }
       : { select: null };
+  }
+  if (patch.callReviewReason !== undefined) {
+    properties["Call Review Reason"] = { rich_text: richText(patch.callReviewReason || "") };
+  }
+  if (patch.callQualifiedAt !== undefined) {
+    properties["Call Qualified At"] = patch.callQualifiedAt
+      ? { date: { start: patch.callQualifiedAt } }
+      : { date: null };
+  }
+  if (patch.callReviewHistory !== undefined) {
+    properties["Call Review History"] = { rich_text: richText(patch.callReviewHistory || "") };
   }
   if (!Object.keys(properties).length) throw new Error("No task fields to update");
   const updated = await updatePage(pageId, properties);

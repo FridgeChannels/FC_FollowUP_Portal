@@ -23,6 +23,19 @@ import { interactionCpCode } from "../outreach-domain";
 export type { InboundColdInput };
 export { normalizeInboundColdInput } from "./inbound-cold-input";
 
+export type InboundColdNotifyContext = {
+  channel: string;
+  brandName: string;
+  ownerId: string | null;
+  ownerName: string | null;
+  contactName: string;
+  sender: string | null;
+  subject: string | null;
+  content: string;
+  replyDueAt: string | null;
+  occurredAt: string;
+};
+
 export type InboundColdResult = {
   duplicate: false;
   conversationId: string;
@@ -32,11 +45,14 @@ export type InboundColdResult = {
   taskId: null;
   brandId: string;
   inboxStatus: "Needs Reply" | null;
+  notify?: InboundColdNotifyContext;
 };
 
 type ResolvedTarget = {
   brandId: string;
   brandName: string;
+  brandOwnerId: string | null;
+  brandOwnerName: string | null;
   contactId: string;
   contactName: string;
   currentCp?: "CP1" | "CP2" | "CP3" | "CP4" | "CP5" | "CP6" | null;
@@ -57,6 +73,8 @@ async function loadContactContext(contactId: string, channel: string): Promise<R
   return {
     brandId: brand.id,
     brandName: brand.name,
+    brandOwnerId: brand.ownerId,
+    brandOwnerName: brand.ownerName,
     contactId,
     contactName: contact?.name || titleFromProperties(contactPage.properties) || "KeyPerson",
     currentCp: interactionCpCode(brand.currentCp),
@@ -140,12 +158,12 @@ export async function ingestInboundCold(
   };
   const cp = await conversationCpRelation(target.currentCpId || target.currentCp);
   if (cp) properties.CP = cp;
+  let replyDueAt: string | null = null;
   if (input.channel !== "Phone") {
     properties["Reply Status"] = { select: { name: "Needs Reply" } };
     try {
-      properties[REPLY_DUE_PROPERTY] = replyDueAtProperty(
-        await allocateReplyDueAt({ occurredAt, channel: input.channel }),
-      );
+      replyDueAt = await allocateReplyDueAt({ occurredAt, channel: input.channel });
+      properties[REPLY_DUE_PROPERTY] = replyDueAtProperty(replyDueAt);
     } catch {
       // Capacity lookup failed — still ingest; brands list falls back to Interaction At.
     }
@@ -166,5 +184,17 @@ export async function ingestInboundCold(
     taskId: null,
     brandId: target.brandId,
     inboxStatus: input.channel === "Phone" ? null : "Needs Reply",
+    notify: {
+      channel: input.channel,
+      brandName: target.brandName,
+      ownerId: target.brandOwnerId,
+      ownerName: target.brandOwnerName,
+      contactName: target.contactName,
+      sender: sender || null,
+      subject: subject || null,
+      content: input.content,
+      replyDueAt,
+      occurredAt,
+    },
   };
 }

@@ -29,6 +29,16 @@ export default defineConfig(async ({ mode }) => {
     process.env.SCHEDULE_TEST_MODE || loadedEnv.SCHEDULE_TEST_MODE;
   const replyIngestToken =
     process.env.REPLY_INGEST_TOKEN || loadedEnv.REPLY_INGEST_TOKEN || "local-reply-ingest";
+  const notifyEnabled = process.env.NOTIFY_ENABLED || loadedEnv.NOTIFY_ENABLED;
+  const notifySlackEnabled =
+    process.env.NOTIFY_SLACK_ENABLED || loadedEnv.NOTIFY_SLACK_ENABLED;
+  const slackWebhookUrl = process.env.SLACK_WEBHOOK_URL || loadedEnv.SLACK_WEBHOOK_URL;
+  const notifyOnReply = process.env.NOTIFY_ON_REPLY || loadedEnv.NOTIFY_ON_REPLY;
+  const notifyOnInbound = process.env.NOTIFY_ON_INBOUND || loadedEnv.NOTIFY_ON_INBOUND;
+  const notifyOnPhone = process.env.NOTIFY_ON_PHONE || loadedEnv.NOTIFY_ON_PHONE;
+  const notifyContentMaxChars =
+    process.env.NOTIFY_CONTENT_MAX_CHARS || loadedEnv.NOTIFY_CONTENT_MAX_CHARS;
+  const portalBaseUrl = process.env.PORTAL_BASE_URL || loadedEnv.PORTAL_BASE_URL;
   const quoApiKey = process.env.QUO_API_KEY || loadedEnv.QUO_API_KEY;
   const quoFromNumber = process.env.QUO_FROM_NUMBER || loadedEnv.QUO_FROM_NUMBER;
   const devCallPhone = process.env.DEV_CALL_PHONE || loadedEnv.DEV_CALL_PHONE;
@@ -74,6 +84,16 @@ export default defineConfig(async ({ mode }) => {
         : {}),
       ...(scheduleTestMode ? { SCHEDULE_TEST_MODE: scheduleTestMode } : {}),
       REPLY_INGEST_TOKEN: replyIngestToken,
+      ...(notifyEnabled ? { NOTIFY_ENABLED: notifyEnabled } : {}),
+      ...(notifySlackEnabled ? { NOTIFY_SLACK_ENABLED: notifySlackEnabled } : {}),
+      ...(slackWebhookUrl ? { SLACK_WEBHOOK_URL: slackWebhookUrl } : {}),
+      ...(notifyOnReply ? { NOTIFY_ON_REPLY: notifyOnReply } : {}),
+      ...(notifyOnInbound ? { NOTIFY_ON_INBOUND: notifyOnInbound } : {}),
+      ...(notifyOnPhone ? { NOTIFY_ON_PHONE: notifyOnPhone } : {}),
+      ...(notifyContentMaxChars
+        ? { NOTIFY_CONTENT_MAX_CHARS: notifyContentMaxChars }
+        : {}),
+      ...(portalBaseUrl ? { PORTAL_BASE_URL: portalBaseUrl } : {}),
       ...(quoApiKey ? { QUO_API_KEY: quoApiKey } : {}),
       ...(quoFromNumber ? { QUO_FROM_NUMBER: quoFromNumber } : {}),
       ...(devCallPhone ? { DEV_CALL_PHONE: devCallPhone } : {}),

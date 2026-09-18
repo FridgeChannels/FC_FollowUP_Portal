@@ -176,9 +176,12 @@ linkedin_account（额度账本，无 FK；Sender 写入 conversation.sender / t
 | Source Bomb | relation | N* | 否 | → OmniReachDB | Launch 来源 | `source_omni_reach_id` |
 | OmniReach Run Id | text | — | 否 | UUID | 同次 Launch 共享 | `omni_reach_run_id` |
 | Call Review Status | select | — | 否 | Awaiting Review / Qualified / Unqualified | 仅 Phone | `call_review_status` |
+| Call Review Reason | text | — | 否 | 最新一轮 Unqualified 原因；Qualified 时清空 | 仅 Phone | `call_review_reason` |
+| Call Qualified At | date+time | — | 否 | 最近一次 Qualified 时间；Unqualified 时清空 | 仅 Phone | `call_qualified_at` |
+| Call Review History | text | — | 否 | 多轮评审 JSON（勿写入 Notes） | 仅 Phone | `call_review_history` |
 | Conversations | relation | N | 否 | → ConversationDB | | junction |
 | Ended At | date | — | 否 | Completed/Failed/Cancelled 时写 | | `ended_at` |
-| Notes | text | — | 否 | 中文；LinkedIn 闸门机器行见 4.3 | | `notes` |
+| Notes | text | — | 否 | 中文人工备注；LinkedIn 闸门机器行见 4.3；**不含** Call Review History | | `notes` |
 | Created At / Last Edited At | 系统 | — | 自动 | | | |
 
 ### 4.1 Task Status
@@ -190,8 +193,10 @@ linkedin_account（额度账本，无 FK；Sender 写入 conversation.sender / t
 ### 4.2 Call Review Status（Phone）
 
 - `Awaiting Review`：Quo `Call Result=Connected` 后自动；Task→Completed  
-- `Qualified`：保持 Completed  
-- `Unqualified`：Task→Pending，改派 Beril，Priority→P0  
+- `Qualified`：保持 Completed；写入 `Call Qualified At`；清空 `Call Review Reason`  
+- `Unqualified`：Task→Pending，改派 Beril，Priority→P0；写入 `Call Review Reason`；清空 `Call Qualified At`  
+
+多轮评审轮次、callIds、评审人等结构化数据写入 `Call Review History`（JSON），**不得**再嵌入 Notes。
 
 ### 4.3 LinkedIn 闸门机器行（写入 Notes）
 
