@@ -807,6 +807,9 @@ function ThreadMessages({
       const callReview = phoneCall ? resolveReview(item.taskId) : undefined;
       const emailSubject = emailSubjectLabel(item);
       const occurredAt = interactionSortAt(item);
+      const messageBubbleClass = phoneCall
+        ? "w-full min-w-0 overflow-hidden rounded-xl bg-slate-50 p-4"
+        : `w-full min-w-0 max-w-[88%] overflow-hidden rounded-2xl p-4 ${inbound ? "rounded-tl-md bg-blue-50" : "rounded-tr-md bg-violet-50"}`;
       const initiallyExpanded = item.id === latestId;
       const expanded = !collapseOlder || expandAll || expandedMessageIds.has(item.id) || (initiallyExpanded && !collapsedLatestIds.has(item.id));
       const toggleExpanded = () => {
@@ -825,7 +828,8 @@ function ThreadMessages({
           return next;
         });
       };
-      return <article key={item.id} className={`min-w-0 overflow-hidden rounded-xl p-4 ${inbound ? "bg-rose-50/80" : "bg-slate-50"}`}>
+      return <article key={item.id} className={`flex min-w-0 ${phoneCall ? "" : inbound ? "justify-start" : "justify-end"}`}>
+        <div className={messageBubbleClass}>
         <button type="button" onClick={toggleExpanded} className={`flex w-full flex-wrap items-start justify-between gap-2 text-left ${collapseOlder && !expandAll ? "cursor-pointer" : "cursor-default"}`} aria-expanded={expanded}>
           <div className="min-w-0 flex flex-wrap items-center gap-2">
             <div className="break-words text-xs font-semibold text-slate-900">{who}</div>
@@ -880,6 +884,7 @@ function ThreadMessages({
           />
         )}
         </>}
+        </div>
       </article>;
     })}
   </div>;
