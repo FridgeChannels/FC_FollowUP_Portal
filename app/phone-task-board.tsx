@@ -103,7 +103,35 @@ function ReviewBadge({ status }: { status?: CallReviewStatus | null | "In Progre
     status === "Qualified" ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-100"
     : status === "Unqualified" ? "bg-rose-100 text-rose-800 hover:bg-rose-100"
     : "bg-amber-100 text-amber-900 hover:bg-amber-100";
-  return <Badge className={className}>{status === "Awaiting Review" ? "awaiting review" : status.toLowerCase()}</Badge>;
+  const label = status === "Unqualified"
+    ? "Unqualified · Recall needed"
+    : status === "Awaiting Review"
+      ? "Awaiting review"
+      : status;
+  return <Badge className={`rounded-full px-2 py-0.5 text-[10px] leading-none ${className}`}>{label}</Badge>;
+}
+
+function PhoneTaskStatusBadge({ status }: { status: string }) {
+  const normalized = status === "Canceled" ? "Cancelled" : status;
+  const className =
+    normalized === "Pending" ? "bg-amber-100 text-amber-800 hover:bg-amber-100"
+    : normalized === "In Progress" ? "bg-violet-100 text-violet-800 hover:bg-violet-100"
+    : normalized === "Completed" || normalized === "Resolved" ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-100"
+    : normalized === "Cancelled" ? "bg-slate-200 text-slate-700 hover:bg-slate-200"
+    : normalized === "Failed" ? "bg-rose-100 text-rose-800 hover:bg-rose-100"
+    : "bg-slate-100 text-slate-700 hover:bg-slate-100";
+  return <Badge className={`rounded-full px-2 py-0.5 text-[10px] leading-none ${className}`}>{normalized}</Badge>;
+}
+
+function phoneTaskPriority(task: PhoneBoardTask) {
+  // Cancelled tasks are retained for auditability, but never interrupt the
+  // active Phone work queue—even when they have a historical review label.
+  if (isCancelledTaskStatus(task.status)) return 5;
+  if (task.callReviewStatus === "Unqualified") return 0;
+  if (task.status === "Pending") return 1;
+  if (task.status === "In Progress") return 2;
+  if (task.callReviewStatus === "Awaiting Review") return 3;
+  return 4;
 }
 
 function formatReviewDay(iso?: string) {
@@ -201,7 +229,9 @@ export function PhoneTaskBoard({
   const tasks = useMemo(() => {
     const byId = new Map(phoneTasks.map((item) => [item.id, item]));
     return [...byId.values()].sort((left, right) =>
-      (left.dueAt || "").localeCompare(right.dueAt || "") || left.id.localeCompare(right.id),
+      phoneTaskPriority(left) - phoneTaskPriority(right)
+      || (left.dueAt || "").localeCompare(right.dueAt || "")
+      || left.id.localeCompare(right.id),
     );
   }, [phoneTasks]);
 
@@ -532,7 +562,7 @@ function PhoneTaskBlock({
         <div className="flex flex-wrap items-center gap-2">
           <div className={`text-[11px] font-semibold tracking-[.14em] ${active ? "text-blue-700" : "text-slate-500"}`}>Task Description</div>
           {active ? <Badge className="bg-violet-600 text-[10px] text-white hover:bg-violet-600">Current</Badge> : null}
-          <Badge variant="secondary" className="text-[10px]">{task.status}</Badge>
+          <PhoneTaskStatusBadge status={task.status}/>
           {task.dueAt ? <span className="text-[11px] text-slate-400">{formatEasternDateTime(task.dueAt)}</span> : null}
           <ReviewBadge status={reviewStatus}/>
         </div>
