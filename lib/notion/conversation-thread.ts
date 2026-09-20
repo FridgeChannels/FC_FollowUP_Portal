@@ -1,9 +1,11 @@
+import { parseTimelineMs } from "../scheduling-engine/calendar.ts";
+
 function activitySortAt(item: {
   createdAt?: string | null;
   recordedAt?: string | null;
   scheduledAt?: string | null;
 }) {
-  return item.recordedAt || item.createdAt || item.scheduledAt || "";
+  return parseTimelineMs(item.recordedAt || item.createdAt || item.scheduledAt || "") || 0;
 }
 
 /**
@@ -23,7 +25,7 @@ export function pickContactChannelThreadId(
   const sameChannel = items
     .filter((item) => item.channel === channel && item.threadId?.trim())
     .sort((left, right) => {
-      const byTime = activitySortAt(right).localeCompare(activitySortAt(left));
+      const byTime = activitySortAt(right) - activitySortAt(left);
       if (byTime) return byTime;
       const leftSystem = left.threadId?.startsWith("THR-") ? 0 : 1;
       const rightSystem = right.threadId?.startsWith("THR-") ? 0 : 1;

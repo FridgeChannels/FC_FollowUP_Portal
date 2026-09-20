@@ -12,7 +12,7 @@ import { toast } from "sonner";
 import type { BrandActivity, BrandContact, BrandDetail, BrandTask, CurrentCpOption } from "@/lib/brand-list";
 import { listApplicableCps } from "@/lib/brand-list";
 import { brandHasActiveOmniReach } from "@/lib/notion/reply-inbox";
-import { canSeeTask, dateOnly, isCancelledTaskStatus, isClosedTaskStatus, type Contact, type CPCode, type Customer, type Interaction } from "@/lib/outreach-domain";
+import { canSeeTask, compareInteractionSort, dateOnly, isCancelledTaskStatus, isClosedTaskStatus, type Contact, type CPCode, type Customer, type Interaction } from "@/lib/outreach-domain";
 import { buildInteractionCpFallbacks, resolveInteractionDisplayCp } from "@/lib/interaction-cp";
 import { useWorkspace } from "./workspace-store";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -719,11 +719,7 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
     applyTaskPayload(await fetch(taskPollUrl(task.id)).then(item => item.json()) as TaskPayload);
   };
   const baseTimeline = remote?.timeline || state.interactions.filter(item => item.customerId === task.customerId).map(item => ({ ...item, cp: item.cp || customer?.cp }));
-  const timeline = [...baseTimeline].sort((a, b) => {
-    const left = a.scheduledAt || a.recordedAt || a.createdAt;
-    const right = b.scheduledAt || b.recordedAt || b.createdAt;
-    return right.localeCompare(left);
-  });
+  const timeline = [...baseTimeline].sort((a, b) => compareInteractionSort(b, a));
   const callScript = callScriptFromConversations(timeline, liveTask.id);
   const callScriptLoading = task.remote && !detailHydrated;
   const refreshQuo = async (callId: string, options?: { silent?: boolean }) => {

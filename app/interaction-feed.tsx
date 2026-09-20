@@ -5,7 +5,7 @@ import { Bomb, CheckCircle2, RotateCcw, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import type { CallReviewRound } from "@/lib/call-review-history";
 import { callReviewsFromTasks, type CallReviewStatus } from "@/lib/call-review-metadata";
-import { BombInstance, Channel, Contact, CPCode, CP_CODES, Interaction, ScheduledAction, interactionPageAt, interactionSortAt } from "@/lib/outreach-domain";
+import { BombInstance, Channel, Contact, CPCode, CP_CODES, Interaction, ScheduledAction, compareInteractionSort, interactionPageAt, interactionSortMs } from "@/lib/outreach-domain";
 import { BombExecutionPlan, formatEasternDateTime } from "./bomb-plan";
 import { BrandReplyBox, inboundNeedsComposer } from "./brand-reply-box";
 import { ChannelIcon } from "./channel-icon";
@@ -484,9 +484,9 @@ function groupByContact(messages: Interaction[], contacts: Contact[]) {
   }));
   if (orphan.length) groups.push({ contact: undefined, messages: orphan });
   return groups.sort((left, right) => {
-    const leftTime = left.messages.map(item => interactionSortAt(item)).sort().at(-1) || "";
-    const rightTime = right.messages.map(item => interactionSortAt(item)).sort().at(-1) || "";
-    return rightTime.localeCompare(leftTime);
+    const leftTime = left.messages.reduce((latest, item) => Math.max(latest, interactionSortMs(item)), 0);
+    const rightTime = right.messages.reduce((latest, item) => Math.max(latest, interactionSortMs(item)), 0);
+    return rightTime - leftTime;
   });
 }
 
@@ -499,8 +499,8 @@ function groupByThread(messages: Interaction[]) {
     groups.set(key, list);
   }
   return [...groups.values()]
-    .map(list => [...list].sort((a, b) => interactionSortAt(a).localeCompare(interactionSortAt(b)) || a.id.localeCompare(b.id)))
-    .sort((left, right) => interactionSortAt(left[0]!).localeCompare(interactionSortAt(right[0]!)));
+    .map(list => [...list].sort(compareInteractionSort))
+    .sort((left, right) => compareInteractionSort(left[0]!, right[0]!));
 }
 
 function ContactThreads({

@@ -1,5 +1,5 @@
 import type { BrandActivity } from "../brand-list";
-import { interactionCpCode } from "../outreach-domain";
+import { compareInteractionSort, interactionCpCode } from "../outreach-domain";
 import {
   firstRelationId,
   notionFetch,
@@ -266,16 +266,25 @@ export async function listFollowupConversations(
   return attachConversationCp(pages.map((page) => mapConversation(page))).then(sortConversations);
 }
 
-function activitySortAt(item: BrandActivity) {
-  return item.scheduledAt || item.recordedAt || item.createdAt || "";
-}
-
 function sortConversations(items: BrandActivity[]) {
-  return items.sort((a, b) => {
-    const left = activitySortAt(a);
-    const right = activitySortAt(b);
-    return right.localeCompare(left) || a.id.localeCompare(b.id);
-  });
+  return items.sort((a, b) =>
+    compareInteractionSort(
+      {
+        id: a.id,
+        direction: a.direction || undefined,
+        scheduledAt: a.scheduledAt || undefined,
+        recordedAt: a.recordedAt || undefined,
+        createdAt: a.createdAt || undefined,
+      },
+      {
+        id: b.id,
+        direction: b.direction || undefined,
+        scheduledAt: b.scheduledAt || undefined,
+        recordedAt: b.recordedAt || undefined,
+        createdAt: b.createdAt || undefined,
+      },
+    ) * -1,
+  );
 }
 
 async function attachConversationCp(items: BrandActivity[]): Promise<BrandActivity[]> {

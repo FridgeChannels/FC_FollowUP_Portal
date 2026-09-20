@@ -445,6 +445,39 @@ Brand activity 按以下结构展示，OmniReach 执行计划不是对话的唯�
 
 每条消息展示发给谁 / 谁回复、时间、人工或 OmniReach。回复框挂在仍为 `Needs Reply` 的 Inbound 下。
 
+#### 7.7.1 各渠道对话内容排序
+
+Email / LinkedIn / SMS / WhatsApp / Phone 的 **Conversation 卡片共用同一套排序**（Portal `interactionSortAt`）。渠道之间不另写规则；切到某个渠道 tab 后，只过滤 `Channel`，不换算法。
+
+分层（均为 Portal Brand activity）：
+
+1. **联系人**：同一渠道下多人时，按该人该渠道 **最新一条** 的排序时刻倒序（最近活跃的联系人在上）。
+2. **Thread**：同一联系人内按 Thread ID 分组（无 Thread ID 则 `联系人 + 渠道 + Task`）。线程之间、线程内部，均按消息排序时刻 **从早到晚**。
+3. **时刻相同**：按 Conversation 页面 ID。
+
+每条消息的排序时刻：
+
+| Direction | 排序字段（前者有值则用前者） | 说明 |
+| --- | --- | --- |
+| **Inbound** | `Interaction At` → 页面 `Created At` → 才考虑 `Scheduled At` | 按实际收到时间。Inbound 挂在已发 Task 上时 **不得继承** 该 Task 的 `Scheduled At`，否则回复会排到发出时刻 |
+| **Outbound** | `Scheduled At` → `Interaction At` → 页面 `Created At` | Pending / In Progress / Cancelled 按计划发送时间插入对话；已发出若尚未写 `Interaction At`，目前仍落在 `Scheduled At` |
+
+比较方式：先换成 **UTC 绝对时刻** 再比，禁止对原始字符串做字典序。`Scheduled At` 的无时区墙钟按 **America/New_York**；`Interaction At` / `Created At` 的 `Z` 或 `±offset` 按绝对时间；仅日期的值按当日 **09:00 ET**。
+
+卡片上看到的时间可以和排序时刻不同：
+
+| 展示位置 | 用的时间 |
+| --- | --- |
+| 卡片右上角 | 仅 Notion 页面 `Created At` |
+| Outbound 状态旁（Pending / In Progress / Cancelled） | `Scheduled At` |
+| Outbound 状态旁（Completed / Failed 等） | 页面 `Created At` |
+
+因此「周一创建、周三 9:00 发出」的 LinkedIn / OmniReach 记录，位置按周三 9:00，右上角仍可能是周一。WhatsApp 预约 9:00 的 Pending 会排在当天已发生的回复之后。
+
+**Phone 例外**：该 CP 下已有 Phone Task 时，渠道 tab 走 Phone Task Board，任务列表按 Task `Scheduled At`（界面 `dueAt`）从早到晚，不是 Conversation 卡片时间轴。Board 内单次通话的 Conversation / Quo 记录仍用上表。无 Phone Task、仅有通话 Conversation 时，Phone tab 与其它渠道相同。
+
+本规则只约束 Portal 对话时间轴。排班引擎的 P0/P1/P2、以及「沿用哪条 Thread」时取最新交互（优先 `Interaction At` / `Created At`，不用 `Scheduled At`），见排班文档与 `Follow-up｜Thread ID 与 CP 挂靠规则.md`。
+
 ### 7.8 Call Result
 
 ```

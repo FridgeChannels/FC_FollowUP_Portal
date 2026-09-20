@@ -219,6 +219,42 @@ export function isDateOnlyScheduledAt(value: string): boolean {
   return DATE_PATTERN.test(value);
 }
 
+const HAS_EXPLICIT_ZONE = /(?:Z|[+-]\d{2}:\d{2})$/i;
+const NAIVE_LOCAL_DATETIME =
+  /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?$/;
+
+/**
+ * Parse a feed/Notion timestamp to epoch ms.
+ * Offset/`Z` values are absolute instants. Naive datetimes (Notion Scheduled At
+ * with America/New_York time_zone) are Eastern wall time, not the runtime zone.
+ */
+export function parseTimelineMs(value?: string | null): number {
+  const raw = value?.trim() || "";
+  if (!raw) return Number.NaN;
+  if (isDateOnlyScheduledAt(raw)) {
+    return Date.parse(easternDateTimeIso(raw, DATE_ONLY_PLACEHOLDER_MINUTES));
+  }
+  if (HAS_EXPLICIT_ZONE.test(raw)) {
+    const ms = Date.parse(raw);
+    return Number.isNaN(ms) ? Number.NaN : ms;
+  }
+  const naive = raw.match(NAIVE_LOCAL_DATETIME);
+  if (naive) {
+    const minuteOfDay = Number(naive[2]) * 60 + Number(naive[3]);
+    const seconds = Number(naive[4] || 0);
+    const fraction = naive[5] ? Number(`0.${naive[5]}`) * 1000 : 0;
+    return Date.parse(easternDateTimeIso(naive[1], minuteOfDay)) + seconds * 1000 + fraction;
+  }
+  const fallback = Date.parse(raw);
+  return Number.isNaN(fallback) ? Number.NaN : fallback;
+}
+
+/** UTC ISO sort key, or empty when the timestamp cannot be parsed. */
+export function timelineInstantIso(value?: string | null): string {
+  const ms = parseTimelineMs(value);
+  return Number.isNaN(ms) ? "" : new Date(ms).toISOString();
+}
+
 /** Normalize Task Scheduled At (date-only or datetime) to ET civil date + minute. */
 export function parseScheduledAt(value: string): { dateOnly: string; minuteOfDay: number } {
   if (isDateOnlyScheduledAt(value)) {

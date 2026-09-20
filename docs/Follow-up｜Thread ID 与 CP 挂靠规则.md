@@ -45,9 +45,43 @@ Activity Feed 每个 CP tab 严格按 Conversation 上的 CP 戳过滤。
 因此：在 CP3 launch / 人工发送并沿用旧 Thread 时，**新消息出现在 CP3**；同 Thread 上更早打在 CP2 的消息仍只在 CP2 可见。  
 在某条 CP2 Inbound 下点 Reply，人工回信也出现在 **CP2**。
 
-## 6. 修订记录
+## 6. 各渠道对话内容排序
+
+Email / LinkedIn / SMS / WhatsApp / Phone 的 Conversation 时间轴 **共用** Portal `interactionSortAt`，不按渠道分叉。切渠道 tab 只过滤 `Channel`。
+
+与第 3 节「最后一次交互」不同：沿用 Thread 时看最新 `Interaction At` / `Created At`；**排出对话卡片**时 Outbound 优先 `Scheduled At`。
+
+### 6.1 分组后再排
+
+1. 当前 CP tab 内、当前渠道下，按联系人分组。多人时按该人 **最新一条** 的排序时刻倒序。
+2. 联系人内按 Thread ID 分组（空则 `contactId:channel:taskId|id`）。
+3. 线程之间、线程内部：排序时刻从早到晚；相同时按 Conversation ID。
+
+### 6.2 排序时刻
+
+| Direction | 字段顺序 | 禁止 |
+| --- | --- | --- |
+| Inbound | `Interaction At` → 页面 `Created At` → `Scheduled At` | 不得用所挂 Outbound Task 的 `Scheduled At` 充当收到时间 |
+| Outbound | `Scheduled At` → `Interaction At` → 页面 `Created At` | — |
+
+比较前统一为 UTC 瞬间：无时区的 `Scheduled At` 视为 America/New_York；带 `Z` / offset 的按绝对时间；仅日期按当日 09:00 ET。不要用原始字符串 `localeCompare`。
+
+### 6.3 展示时间（不等于排序）
+
+- 卡片右上角：页面 `Created At`
+- Pending / In Progress / Cancelled：`Scheduled At`
+- Completed / Failed：页面 `Created At`
+
+### 6.4 Phone
+
+有 Phone Task 时走 Task Board，任务按 `Scheduled At` 从早到晚。Board 内通话 Conversation 仍用 6.2。无 Task 仅有记录时，Phone tab 与其它渠道相同。
+
+完整字段语义与 Pending / 已发出的 `Interaction At` 约定见 `Follow-up｜V1 数据架构规划.md` §7.7.1。
+
+## 7. 修订记录
 
 | 日期 | 说明 |
 | --- | --- |
 | 2026-09-17 | 初版：最后一次交互沿用 Thread；OmniReach/人工 Send 同规则；冷 Inbound 新建；CP 规则如上 |
 | 2026-09-17 | 门户 Inbound Reply 改为挂被回复 Inbound 的 CP（不再用 Brand Current） |
+| 2026-09-20 | 增补各渠道对话内容排序（与 Brand activity 时间轴一致） |

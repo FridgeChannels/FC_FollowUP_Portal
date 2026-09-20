@@ -1,4 +1,5 @@
 import type { QuoCallData } from "./quo/types";
+import { timelineInstantIso } from "./scheduling-engine/calendar.ts";
 
 export type Role = "Admin" | "AccountManager" | "Caller";
 export type Channel = "Email" | "SMS" | "WhatsApp" | "LinkedIn" | "Phone";
@@ -54,18 +55,37 @@ export type Interaction = {
 };
 
 /**
- * Feed sort key.
+ * Feed sort key as a UTC instant.
  * Inbound: prefer actual occurrence (Interaction At / created_time) — never the parent
  * task's Scheduled At, or replies sort as if they happened at send time.
  * Outbound / other: Scheduled At first (pending sends), then recorded/created.
+ * Naive Eastern Scheduled At and UTC Interaction At are compared as real instants,
+ * not lexicographic strings (otherwise WhatsApp replies jump below later outbounds).
  */
 export function interactionSortAt(
   item: Pick<Interaction, "scheduledAt" | "recordedAt" | "createdAt" | "id" | "direction">,
 ) {
-  if (item.direction === "Inbound") {
-    return item.recordedAt || item.createdAt || item.scheduledAt || "";
-  }
-  return item.scheduledAt || item.recordedAt || item.createdAt || "";
+  const raw =
+    item.direction === "Inbound"
+      ? item.recordedAt || item.createdAt || item.scheduledAt || ""
+      : item.scheduledAt || item.recordedAt || item.createdAt || "";
+  return timelineInstantIso(raw);
+}
+
+export function interactionSortMs(
+  item: Pick<Interaction, "scheduledAt" | "recordedAt" | "createdAt" | "id" | "direction">,
+) {
+  const iso = interactionSortAt(item);
+  return iso ? Date.parse(iso) : 0;
+}
+
+export function compareInteractionSort(
+  left: Pick<Interaction, "scheduledAt" | "recordedAt" | "createdAt" | "id" | "direction">,
+  right: Pick<Interaction, "scheduledAt" | "recordedAt" | "createdAt" | "id" | "direction">,
+) {
+  const delta = interactionSortMs(left) - interactionSortMs(right);
+  if (delta) return delta;
+  return (left.id || "").localeCompare(right.id || "");
 }
 
 /** Card timestamp: Notion page created_time only. */
