@@ -609,7 +609,7 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
       title: activity.subject || activity.channel || "Conversation",
       content: activity.content,
       createdAt: activity.createdAt || "",
-      recordedAt: activity.recordedAt || activity.createdAt || "",
+      recordedAt: activity.recordedAt || "",
       // Inbound shares the outbound Task — do not inherit Task Scheduled At for sorting.
       scheduledAt: activity.scheduledAt
         || (activity.direction === "Outbound" && activity.taskId

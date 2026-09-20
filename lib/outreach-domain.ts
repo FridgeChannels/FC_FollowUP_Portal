@@ -58,7 +58,8 @@ export type Interaction = {
  * Feed sort key as a UTC instant.
  * Inbound: prefer actual occurrence (Interaction At / created_time) — never the parent
  * task's Scheduled At, or replies sort as if they happened at send time.
- * Outbound / other: Scheduled At first (pending sends), then recorded/created.
+ * Outbound: prefer the actual Interaction At when it exists; otherwise Scheduled At is
+ * the source of truth. A Notion page's created_time is only a legacy fallback.
  * Naive Eastern Scheduled At and UTC Interaction At are compared as real instants,
  * not lexicographic strings (otherwise WhatsApp replies jump below later outbounds).
  */
@@ -68,7 +69,7 @@ export function interactionSortAt(
   const raw =
     item.direction === "Inbound"
       ? item.recordedAt || item.createdAt || item.scheduledAt || ""
-      : item.scheduledAt || item.recordedAt || item.createdAt || "";
+      : item.recordedAt || item.scheduledAt || item.createdAt || "";
   return timelineInstantIso(raw);
 }
 

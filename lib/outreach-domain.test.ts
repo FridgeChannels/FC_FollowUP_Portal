@@ -129,4 +129,25 @@ describe("interactionSortAt", () => {
     });
     assert.equal(compareInteractionSort(inbound, outbound) < 0, true);
   });
+
+  it("uses Scheduled At for an outbound row when no actual send time was recorded", () => {
+    const outbound = item({
+      id: "planned-send",
+      direction: "Outbound",
+      scheduledAt: "2026-09-18T09:00:00.000-04:00",
+      createdAt: "2026-09-20T10:00:00.000Z",
+    });
+    assert.match(interactionSortAt(outbound), /2026-09-18T13:00:00\.000Z$/);
+  });
+
+  it("uses an actual outbound Interaction At ahead of its Scheduled At", () => {
+    const outbound = item({
+      id: "sent",
+      direction: "Outbound",
+      recordedAt: "2026-09-18T15:20:00.000Z",
+      scheduledAt: "2026-09-18T09:00:00.000-04:00",
+      createdAt: "2026-09-18T12:00:00.000Z",
+    });
+    assert.match(interactionSortAt(outbound), /2026-09-18T15:20:00\.000Z$/);
+  });
 });
