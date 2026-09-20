@@ -406,7 +406,10 @@ export async function createOutboundConversation(input: {
   return createPage(getFollowupConversationDbId(), properties);
 }
 
-export async function cancelUnsentBombSiblingTasks(task: BrandTask) {
+export async function cancelUnsentBombSiblingTasks(
+  task: BrandTask,
+  options?: { note?: string },
+) {
   if (!task.sourceBombId || !task.contactId) return [];
   const siblings = (await listFollowupTasks([task.contactId])).filter((item) =>
     item.id !== task.id &&
@@ -416,12 +419,13 @@ export async function cancelUnsentBombSiblingTasks(task: BrandTask) {
     isOpenTaskStatus(item.status),
   );
   const endedAt = new Date().toISOString();
+  const note = options?.note || "客户已回复，后续未发出渠道已取消。";
   await Promise.all(
     siblings.map((item) =>
       updateFollowupTask(item.id, {
         status: "Cancelled",
         endedAt,
-        notes: [item.notes, "客户已回复，后续未发出渠道已取消。"].filter(Boolean).join("\n"),
+        notes: [item.notes, note].filter(Boolean).join("\n"),
       }),
     ),
   );

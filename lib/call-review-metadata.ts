@@ -18,6 +18,11 @@ export function taskStatusForCallReview(status: string, review?: Pick<CallReview
   return status;
 }
 
+/** Caller submit-for-review stops remaining OmniReach steps on that Phone task's run. */
+export function shouldStopOmniReachOnReviewSubmit(task: { sourceBombId?: string | null }) {
+  return Boolean(task.sourceBombId);
+}
+
 export function callReviewsFromTasks(
   tasks: Array<{ id: string; callReviewStatus?: CallReviewStatus | null }>,
 ) {

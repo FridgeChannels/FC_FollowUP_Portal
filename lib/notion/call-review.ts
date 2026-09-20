@@ -1,7 +1,12 @@
-import { CALL_REVIEW_CALLER_EMAIL, type CallReviewStatus } from "../call-review-metadata";
+import { CALL_REVIEW_CALLER_EMAIL, shouldStopOmniReachOnReviewSubmit, type CallReviewStatus } from "../call-review-metadata";
 import { findOwnerByAccount } from "./owners";
 import { retrieveFollowupTask } from "./tasks";
-import { markInboundsReplied, updateFollowupTask } from "./followup-writes";
+import {
+  cancelUnsentBombSiblingTasks,
+  markFollowupClientEngaged,
+  markInboundsReplied,
+  updateFollowupTask,
+} from "./followup-writes";
 import { listConversationsByIds } from "./conversations";
 import {
   encodeCallReviewHistory,
@@ -100,6 +105,24 @@ export async function submitCallReview(input: {
     notes: humanNotes(task.notes, submissionNote),
     callReviewHistory: encodeCallReviewHistory([...closedHistory, reviewRound]),
   });
+
+  if (shouldStopOmniReachOnReviewSubmit(task)) {
+    const cancelled = await cancelUnsentBombSiblingTasks(task, {
+      note: "Caller 已提交通话评审，后续未发出渠道已取消。",
+    });
+    if (task.brandId) {
+      await markFollowupClientEngaged(task.brandId, {
+        handlingMode: "Human",
+        note: "Caller 已提交通话评审，OmniReach 已停止，待人工处理。",
+      });
+    }
+    console.info("Call review submit stopped OmniReach", {
+      taskId: task.id,
+      brandId: task.brandId,
+      sourceBombId: task.sourceBombId,
+      cancelledTaskIds: cancelled.map((item) => item.id),
+    });
+  }
 
   return retrieveFollowupTask(task.id);
 }
