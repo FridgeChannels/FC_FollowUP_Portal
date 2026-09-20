@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { Bomb, CheckCircle2, RotateCcw, UserRound } from "lucide-react";
+import { Bomb, CheckCircle2, ChevronLeft, RotateCcw, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import type { CallReviewRound } from "@/lib/call-review-history";
 import { callReviewsFromTasks, type CallReviewStatus } from "@/lib/call-review-metadata";
-import { BombInstance, Channel, Contact, CPCode, CP_CODES, Interaction, ScheduledAction, compareInteractionSort, interactionPageAt, interactionSortMs } from "@/lib/outreach-domain";
+import { getDisplayTimeZone } from "@/lib/display-time";
+import { BombInstance, Channel, Contact, CPCode, CP_CODES, Interaction, ScheduledAction, compareInteractionSort, interactionSortAt, interactionSortMs } from "@/lib/outreach-domain";
 import { BombExecutionPlan, formatEasternDateTime } from "./bomb-plan";
 import { BrandReplyBox, inboundNeedsComposer } from "./brand-reply-box";
 import { ChannelIcon } from "./channel-icon";
@@ -83,22 +84,26 @@ function deliveryTiming(item: Interaction) {
   const taskStatus = outboundStatus(item);
   if (!taskStatus) return null;
   const label = taskStatus === "Canceled" ? "Cancelled" : taskStatus;
-  // Cancelled / Pending / In Progress: Conversation Scheduled At → Task Scheduled At; else empty.
-  // Completed / Failed etc.: Conversation created_time.
-  const usesScheduledAt =
-    label === "Cancelled" || label === "Pending" || label === "In Progress";
-  const at = usesScheduledAt ? item.scheduledAt || null : item.createdAt || null;
+  const at = interactionSortAt(item) || null;
   return { label, at };
+}
+
+function scheduledAtLabel(item: Interaction) {
+  return item.direction !== "Inbound" && item.scheduledAt
+    ? `Scheduled · ${formatEasternDateTime(item.scheduledAt)}`
+    : null;
 }
 
 function SendStatusBadge({ status }: { status: string }) {
   const tone =
     status === "Sent" || status === "Delivered" || status === "Connected" || status === "Completed" ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-100"
     : status === "Failed" || status === "Declined" || status === "Invalid Number" ? "bg-rose-100 text-rose-800 hover:bg-rose-100"
-    : status === "Cancelled" || status === "Canceled" ? "bg-slate-100 text-slate-700 hover:bg-slate-100"
-    : status === "Pending" || status === "In Progress" ? "bg-amber-100 text-amber-800 hover:bg-amber-100"
+    : status === "Cancelled" || status === "Canceled" ? "bg-slate-200 text-slate-700 hover:bg-slate-200"
+    : status === "Pending" ? "bg-amber-100 text-amber-800 hover:bg-amber-100"
+    : status === "In Progress" ? "bg-violet-100 text-violet-800 hover:bg-violet-100"
+    : status === "Received" ? "bg-blue-100 text-blue-800 hover:bg-blue-100"
     : "bg-slate-100 text-slate-700 hover:bg-slate-100";
-  return <Badge className={`text-[10px] ${tone}`}>{status === "Canceled" ? "Cancelled" : status}</Badge>;
+  return <Badge className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] leading-none ${tone}`}>{status === "Canceled" ? "Cancelled" : status}</Badge>;
 }
 
 function isChannelMessage(item: Interaction) {
@@ -301,7 +306,7 @@ export function InteractionFeed({
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt) || b.id.localeCompare(a.id));
   const usePhoneTaskBoard = activeChannel === "Phone" && (callerPhoneOnly || phoneTasks.length > 0);
 
-  return <div className={maxHeight ? `${maxHeight} overflow-y-auto` : undefined}>
+  return <div className={`w-full min-w-0 ${maxHeight ? `${maxHeight} overflow-y-auto` : ""}`}>
     <div className="px-5 py-4">
       <div className="grid grid-cols-3 gap-2">{visibleCps.map((cp, index) => {
         const current = cp === displayCurrentCp;
@@ -461,8 +466,41 @@ function ChannelTranscript({
   reviewingTaskId: string | null;
   onReviewCall: (interactionId: string, taskId: string | undefined, status: CallReviewStatus, reviewReason?: string, reviewNote?: string) => void | Promise<void>;
 }) {
+  const [selectedThread, setSelectedThread] = useState<{ channel: Channel; key: string } | null>(null);
   const contactGroups = groupByContact(messages, contacts);
-  return <div>
+  const threads = groupByThread(messages);
+  const activeThread = selectedThread?.channel === channel
+    ? threads.find((thread) => threadKey(thread[0]!) === selectedThread.key)
+    : undefined;
+
+  if (channel !== "Phone") {
+    if (!threads.length) {
+      return <div className="px-5 py-10 text-center text-sm text-slate-400">No {channel} conversation recorded for this CP.</div>;
+    }
+    if (activeThread) {
+      const contact = contacts.find((item) => item.id === activeThread[0]?.contactId);
+      return (
+        <ConversationDetail
+          thread={activeThread}
+          contact={contact}
+          channel={channel}
+          replyPool={messages}
+          bombInstances={bombInstances}
+          onBack={() => setSelectedThread(null)}
+          onSend={onSend}
+          onRefreshQuo={onRefreshQuo}
+          quoRefreshingCallId={quoRefreshingCallId}
+          resolveReview={resolveReview}
+          canReviewCalls={canReviewCalls}
+          reviewingTaskId={reviewingTaskId}
+          onReviewCall={onReviewCall}
+        />
+      );
+    }
+    return <ConversationInbox threads={threads} contacts={contacts} channel={channel} onOpen={(thread) => setSelectedThread({ channel, key: threadKey(thread[0]!) })} />;
+  }
+
+  return <div className="w-full min-w-0">
     {!contactGroups.length ? (
       <div className="px-5 py-10 text-center text-sm text-slate-400">No {channel} conversation recorded for this CP.</div>
     ) : (
@@ -490,7 +528,7 @@ function groupByContact(messages: Interaction[], contacts: Contact[]) {
   });
 }
 
-function groupByThread(messages: Interaction[]) {
+function groupByThread(messages: Interaction[], order: "latest" | "oldest" = "latest") {
   const groups = new Map<string, Interaction[]>();
   for (const item of messages) {
     const key = threadKey(item);
@@ -500,7 +538,169 @@ function groupByThread(messages: Interaction[]) {
   }
   return [...groups.values()]
     .map(list => [...list].sort(compareInteractionSort))
-    .sort((left, right) => compareInteractionSort(left[0]!, right[0]!));
+    .sort((left, right) => {
+      if (order === "oldest") return compareInteractionSort(left[0]!, right[0]!);
+
+      // The inbox is driven by the final interaction. A cancelled final action is
+      // retained for auditability but always stays below active conversations.
+      const leftLatest = latestThreadInteraction(left);
+      const rightLatest = latestThreadInteraction(right);
+      const cancellationDelta = Number(isCancelledInteraction(leftLatest)) - Number(isCancelledInteraction(rightLatest));
+      if (cancellationDelta) return cancellationDelta;
+      return compareInteractionSort(rightLatest, leftLatest);
+    });
+}
+
+function latestThreadInteraction(thread: Interaction[]) {
+  return thread.at(-1)!;
+}
+
+function isCancelledInteraction(item: Interaction) {
+  const status = outboundStatus(item);
+  return status === "Cancelled" || status === "Canceled";
+}
+
+function inboxSubject(thread: Interaction[], channel: Channel) {
+  const latest = latestThreadInteraction(thread);
+  return emailSubjectLabel(latest)
+    || (latest.title && latest.title !== channel && latest.title !== "Conversation" ? latest.title : null)
+    || `${channel} conversation`;
+}
+
+function inboxActivityTime(iso: string) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const timeZone = getDisplayTimeZone();
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    timeZoneName: "short",
+  }).format(date);
+}
+
+/** The inbox always summarizes the conversation's final interaction. */
+function inboxActivitySummary(item: Interaction) {
+  const actualAt = item.recordedAt || interactionSortAt(item);
+  if (item.direction === "Inbound") {
+    return { status: "Received", time: actualAt ? inboxActivityTime(actualAt) : null };
+  }
+
+  const rawStatus = outboundStatus(item);
+  const status = rawStatus === "Canceled" ? "Cancelled" : rawStatus;
+  const scheduledAt = item.scheduledAt;
+  const beforeSend = status === "Pending" || status === "In Progress" || (status === "Cancelled" && !item.recordedAt);
+  const displayAt = beforeSend ? scheduledAt || actualAt : actualAt;
+  const label = status === "Completed" ? "Sent" : status || "Updated";
+  return {
+    status: label,
+    time: displayAt ? `${beforeSend && scheduledAt ? "Scheduled for " : ""}${inboxActivityTime(displayAt)}` : null,
+  };
+}
+
+function ConversationInbox({
+  threads,
+  contacts,
+  channel,
+  onOpen,
+}: {
+  threads: Interaction[][];
+  contacts: Contact[];
+  channel: Channel;
+  onOpen: (thread: Interaction[]) => void;
+}) {
+  const visibleThreads = threads.slice(0, 50);
+  return (
+    <section aria-label={`${channel} conversations`} className="w-full min-w-0">
+      <div className="px-5 py-3 text-xs text-slate-500">
+        {visibleThreads.length} of {threads.length} conversations
+      </div>
+      <div>
+        {visibleThreads.map((thread) => {
+          const latest = latestThreadInteraction(thread);
+          const contact = contacts.find((item) => item.id === latest.contactId);
+          const needsReply = thread.some((item) => item.direction === "Inbound" && item.replyStatus === "Needs Reply");
+          const sender = contact?.name || "Contact not linked";
+          const preview = latest.content?.replace(/\s+/g, " ").trim() || (latest.attachments?.length ? "Attachment" : "No message content");
+          const latestSummary = inboxActivitySummary(latest);
+          return (
+            <button
+              key={threadKey(thread[0]!)}
+              type="button"
+              onClick={() => onOpen(thread)}
+              className={`flex min-h-20 w-full items-start gap-3 px-5 py-4 text-left transition hover:bg-slate-50 ${needsReply ? "bg-violet-50/40" : ""}`}
+            >
+              {contact ? <Avatar className="mt-0.5 size-9 shrink-0"><AvatarFallback className="bg-slate-100 text-[10px] font-bold text-slate-700">{initials(contact.name)}</AvatarFallback></Avatar> : <div className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full bg-amber-50 text-amber-700"><UserRound className="size-4" /></div>}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-baseline gap-2">
+                  <span className={`truncate text-sm ${needsReply ? "font-bold text-slate-950" : "font-medium text-slate-800"}`}>{sender}, me</span>
+                  {thread.length > 1 ? <span className="shrink-0 text-xs text-slate-500">{thread.length}</span> : null}
+                  <div className="ml-auto flex max-w-[58%] shrink items-center justify-end gap-1.5 text-right">
+                    <SendStatusBadge status={latestSummary.status} />
+                    {latestSummary.time ? <span className="min-w-0 text-[10px] leading-4 text-slate-500">{latestSummary.time}</span> : null}
+                  </div>
+                </div>
+                <div className={`mt-1 truncate text-sm ${needsReply ? "font-semibold text-slate-900" : "text-slate-700"}`}>{inboxSubject(thread, channel)}</div>
+                <p className="mt-1 truncate text-sm text-slate-500">{preview}</p>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function ConversationDetail({
+  thread,
+  contact,
+  channel,
+  replyPool,
+  bombInstances,
+  onBack,
+  onSend,
+  onRefreshQuo,
+  quoRefreshingCallId,
+  resolveReview,
+  canReviewCalls,
+  reviewingTaskId,
+  onReviewCall,
+}: {
+  thread: Interaction[];
+  contact?: Contact;
+  channel: Channel;
+  replyPool: Interaction[];
+  bombInstances: BombInstance[];
+  onBack: () => void;
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, attachments?: import("@/lib/media-attachments").MediaAttachment[]) => Promise<void>;
+  onRefreshQuo?: (callId: string) => void;
+  quoRefreshingCallId?: string | null;
+  resolveReview: (taskId?: string | null) => { status: CallReviewStatus; recallRequested?: boolean } | undefined;
+  canReviewCalls: boolean;
+  reviewingTaskId: string | null;
+  onReviewCall: (interactionId: string, taskId: string | undefined, status: CallReviewStatus, reviewReason?: string, reviewNote?: string) => void | Promise<void>;
+}) {
+  const [expandAll, setExpandAll] = useState(false);
+  const endpoint = contact ? contactPoint(contact, channel) : undefined;
+  return (
+    <section aria-label={`${channel} conversation detail`} className="w-full min-w-0">
+      <div className="flex items-center justify-between gap-2 px-5 py-3">
+        <Button variant="ghost" size="sm" className="-ml-2 text-slate-700" onClick={onBack}><ChevronLeft className="mr-1 size-4" />Back</Button>
+        <span className="text-xs text-slate-500">{thread.length} {thread.length === 1 ? "message" : "messages"}</span>
+        <Button variant="ghost" size="sm" className="-mr-2 text-slate-700" onClick={() => setExpandAll((value) => !value)}>{expandAll ? "Collapse all" : "Expand all"}</Button>
+      </div>
+      <div className="px-5 pb-5 pt-2">
+        <h3 className="break-words text-base font-semibold text-slate-950">{inboxSubject(thread, channel)}</h3>
+        {contact ? <p className="mt-1 truncate text-sm text-slate-500">{contact.name}{endpoint ? ` · ${endpoint}` : ""}</p> : null}
+      </div>
+      <div className="px-5 pb-5">
+        <ThreadMessages thread={thread} replyPool={replyPool} contact={contact} channel={channel} endpoint={endpoint} bombInstances={bombInstances} collapseOlder expandAll={expandAll} onSend={onSend} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId} resolveReview={resolveReview} canReviewCalls={canReviewCalls} reviewingTaskId={reviewingTaskId} onReviewCall={onReviewCall} />
+      </div>
+    </section>
+  );
 }
 
 function ContactThreads({
@@ -529,7 +729,7 @@ function ContactThreads({
   onReviewCall: (interactionId: string, taskId: string | undefined, status: CallReviewStatus, reviewReason?: string, reviewNote?: string) => void | Promise<void>;
 }) {
   const endpoint = group.contact ? contactPoint(group.contact, channel) : undefined;
-  const threads = groupByThread(group.messages);
+  const threads = groupByThread(group.messages, "oldest");
   return <section className="px-5 py-5">
     <div className="mb-4 flex items-center gap-3">
       {group.contact ? (
@@ -566,6 +766,8 @@ function ThreadMessages({
   canReviewCalls,
   reviewingTaskId,
   onReviewCall,
+  collapseOlder = false,
+  expandAll = false,
 }: {
   thread: Interaction[];
   replyPool: Interaction[];
@@ -580,9 +782,14 @@ function ThreadMessages({
   canReviewCalls: boolean;
   reviewingTaskId: string | null;
   onReviewCall: (interactionId: string, taskId: string | undefined, status: CallReviewStatus, reviewReason?: string, reviewNote?: string) => void | Promise<void>;
+  collapseOlder?: boolean;
+  expandAll?: boolean;
 }) {
   const [recallTaskId, setRecallTaskId] = useState<string | null>(null);
   const [recallReason, setRecallReason] = useState("");
+  const [expandedMessageIds, setExpandedMessageIds] = useState<Set<string>>(() => new Set());
+  const [collapsedLatestIds, setCollapsedLatestIds] = useState<Set<string>>(() => new Set());
+  const latestId = thread.at(-1)?.id;
   return <div className="space-y-3">
     {thread.map(item => {
       const inbound = item.direction === "Inbound";
@@ -596,55 +803,59 @@ function ThreadMessages({
       const callId = item.quo?.callId;
       const canRefresh = !!callId && !callId.startsWith("ACsim") && !!onRefreshQuo;
       const timing = !inbound && !phoneCall ? deliveryTiming(item) : null;
+      const scheduledAt = !phoneCall ? scheduledAtLabel(item) : null;
       const callReview = phoneCall ? resolveReview(item.taskId) : undefined;
       const emailSubject = emailSubjectLabel(item);
-      const pageAt = interactionPageAt(item);
-      return <article key={item.id} className={`rounded-xl p-4 ${inbound ? "bg-rose-50/80" : "bg-slate-50"}`}>
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="text-xs font-semibold text-slate-900">{who}</div>
+      const occurredAt = interactionSortAt(item);
+      const messageBubbleClass = phoneCall
+        ? "w-full min-w-0 overflow-hidden rounded-xl bg-slate-50 p-4"
+        : `w-full min-w-0 max-w-[88%] overflow-hidden rounded-2xl p-4 ${inbound ? "rounded-tl-md bg-blue-50" : "rounded-tr-md bg-violet-50"}`;
+      const initiallyExpanded = item.id === latestId;
+      const expanded = !collapseOlder || expandAll || expandedMessageIds.has(item.id) || (initiallyExpanded && !collapsedLatestIds.has(item.id));
+      const toggleExpanded = () => {
+        if (!collapseOlder || expandAll) return;
+        if (initiallyExpanded) {
+          setCollapsedLatestIds((previous) => {
+            const next = new Set(previous);
+            if (expanded) next.add(item.id); else next.delete(item.id);
+            return next;
+          });
+          return;
+        }
+        setExpandedMessageIds((previous) => {
+          const next = new Set(previous);
+          if (expanded) next.delete(item.id); else next.add(item.id);
+          return next;
+        });
+      };
+      return <article key={item.id} className={`flex min-w-0 ${phoneCall ? "" : inbound ? "justify-start" : "justify-end"}`}>
+        <div className={messageBubbleClass}>
+        <button type="button" onClick={toggleExpanded} className={`flex w-full flex-wrap items-start justify-between gap-2 text-left ${collapseOlder && !expandAll ? "cursor-pointer" : "cursor-default"}`} aria-expanded={expanded}>
+          <div className="min-w-0 flex flex-wrap items-center gap-2">
+            <div className="break-words text-xs font-semibold text-slate-900">{who}</div>
             {inbound && !phoneCall ? <Badge className="bg-rose-600 text-[10px] text-white hover:bg-rose-600">This is a reply</Badge> : <Badge variant="secondary" className="text-[10px]">{item.direction || "Outbound"}</Badge>}
-            {source && <SourceBadge source={source}/>}
+            {source ? <SourceBadge source={source} /> : null}
             {!inbound && !timing && (outboundStatus(item) ? <SendStatusBadge status={outboundStatus(item)!}/> : <Badge variant="outline" className="text-[10px] text-slate-500">No send status</Badge>)}
             {phoneCall && item.callResult ? <SendStatusBadge status={item.callResult}/> : null}
             {callReview ? <Badge className={callReview.status === "Qualified" ? "bg-emerald-100 text-[10px] text-emerald-800 hover:bg-emerald-100" : callReview.status === "Awaiting Review" ? "bg-amber-100 text-[10px] text-amber-900 hover:bg-amber-100" : "bg-rose-100 text-[10px] text-rose-800 hover:bg-rose-100"}>{callReview.status.toLowerCase()}</Badge> : null}
           </div>
-          {pageAt ? (
-            <time dateTime={pageAt} className="font-mono text-[11px] text-slate-500">
-              {formatEasternDateTime(pageAt)}
-            </time>
-          ) : null}
-        </div>
+          {occurredAt ? <time dateTime={occurredAt} className="font-mono text-[11px] text-slate-500">{formatEasternDateTime(occurredAt)}</time> : null}
+        </button>
+        {!expanded ? <><p className="mt-2 truncate text-sm text-slate-500">{item.content || (item.attachments?.length ? "Attachment" : "No message content")}</p>{timing ? <div className="mt-2 flex min-w-0 items-center gap-2 text-xs text-slate-500"><SendStatusBadge status={timing.label} />{scheduledAt ? <span className="truncate">{scheduledAt}</span> : null}</div> : null}</> : <>
         {timing && (
           <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-slate-500">
-            <span
-              className={
-                timing.label === "Completed"
-                  ? "font-semibold text-emerald-700"
-                  : timing.label === "Failed"
-                    ? "font-semibold text-rose-700"
-                    : timing.label === "Cancelled"
-                      ? "font-semibold text-slate-600"
-                      : "font-semibold text-amber-700"
-              }
-            >
-              {timing.label}
-            </span>
-            {timing.at ? (
-              <time dateTime={timing.at} className="font-mono text-[11px]">
-                {formatEasternDateTime(timing.at)}
-              </time>
-            ) : null}
+            <SendStatusBadge status={timing.label} />
+            {scheduledAt ? <time dateTime={item.scheduledAt} className="truncate font-mono text-[11px]">{scheduledAt}</time> : timing.at ? <time dateTime={timing.at} className="font-mono text-[11px]">{formatEasternDateTime(timing.at)}</time> : null}
           </div>
         )}
         {!item.quo && (
           <div className="mt-2 space-y-1">
             {emailSubject && (
-              <p className="text-sm text-slate-900">
+              <p className="break-words text-sm text-slate-900">
                 <span className="font-medium text-slate-500">Subject:</span> {emailSubject}
               </p>
             )}
-            {item.content ? <p className="whitespace-pre-wrap text-sm leading-6 text-slate-700">{item.content}</p> : null}
+            {item.content ? <p className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">{item.content}</p> : null}
             {item.attachments?.length ? (
               <div className="pt-1">
                 <ThreadMedia attachments={item.attachments} />
@@ -672,6 +883,8 @@ function ThreadMessages({
             onSend={onSend}
           />
         )}
+        </>}
+        </div>
       </article>;
     })}
   </div>;

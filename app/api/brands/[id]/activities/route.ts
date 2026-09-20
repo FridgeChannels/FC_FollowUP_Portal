@@ -16,7 +16,7 @@ export async function GET(request: Request, { params }: Params) {
     }
     const { id } = await params;
     const url = new URL(request.url);
-    const limit = Number.parseInt(url.searchParams.get("limit") || "40", 10);
+    const limit = Number.parseInt(url.searchParams.get("limit") || "50", 10);
     const cursor = url.searchParams.get("cursor");
 
     const page = await retrievePage(id);
@@ -37,7 +37,7 @@ export async function GET(request: Request, { params }: Params) {
     }
 
     const result = await listFollowupConversationsPage(contactIds, {
-      limit: Number.isFinite(limit) ? limit : 40,
+      limit: Number.isFinite(limit) ? limit : 50,
       cursor,
       trimPayload: true,
     });

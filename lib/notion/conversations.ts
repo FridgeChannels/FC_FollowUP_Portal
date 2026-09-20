@@ -60,9 +60,9 @@ function mapConversation(
     cpId: firstRelationId(properties.CP) || null,
     cpAtInteraction: null,
     createdAt: page.created_time || null,
-    // Prefer Interaction At (actual occurrence) over page created_time.
-    recordedAt:
-      propertyDate(properties["Interaction At"]) || page.created_time || null,
+    // Keep this strictly tied to Interaction At. page created_time is a legacy
+    // fallback, while outbound rows without an actual send time use Scheduled At.
+    recordedAt: propertyDate(properties["Interaction At"]) || null,
     scheduledAt: propertyDate(properties["Scheduled At"]) || null,
     replyDueAt: propertyDate(properties["Reply Due At"]) || null,
     // Prefer full Extended Parameters; fall back to Message ID so Call results still appear
