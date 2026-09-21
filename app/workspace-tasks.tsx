@@ -436,7 +436,7 @@ function toTaskContact(item: BrandContact): Contact {
     phone: item.phone || undefined,
     directPhone: item.directPhone || undefined,
     officePhone: item.officePhone || undefined,
-    whatsapp: item.phone || undefined,
+    whatsapp: item.whatsapp || undefined,
     linkedin: item.linkedin || undefined,
     preferredChannel: item.email ? "Email" : item.linkedin ? "LinkedIn" : "Phone",
     emailValid: item.emailValid,

@@ -207,7 +207,10 @@ export type BrandContact = {
   phone: string | null;
   directPhone: string | null;
   officePhone: string | null;
+  whatsapp?: string | null;
   linkedin: string | null;
+  /** KeyPersonDB page id, when this contact is linked to Notion. */
+  keyPersonId?: string | null;
   emailValid: boolean;
   phoneValid: boolean;
   followupStatus: string | null;
@@ -216,6 +219,11 @@ export type BrandContact = {
   notes: string | null;
   lastInteractionAt: string | null;
 };
+
+/** Open this person's page in FC3.0-KeyPersonDB (app.notion.com/p/…). */
+export function keyPersonNotionUrl(pageId: string) {
+  return `https://app.notion.com/p/${pageId.replace(/-/g, "")}`;
+}
 
 export type BrandTask = {
   id: string;

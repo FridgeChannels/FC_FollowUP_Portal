@@ -30,6 +30,7 @@ function mapKeyPerson(page: NotionPage | null, fallbackName: string) {
   const phone = propertyText(properties.Phone) || null;
   const directPhone = propertyText(properties["Direct Phone"]) || null;
   const officePhone = propertyText(properties["Office Phone"]) || null;
+  const whatsapp = propertyText(properties["WhatsApp Number"]) || null;
   const emailStatus = propertyText(properties["Email Verified Status"]);
   return {
     name,
@@ -40,7 +41,9 @@ function mapKeyPerson(page: NotionPage | null, fallbackName: string) {
     phone,
     directPhone,
     officePhone,
+    whatsapp,
     linkedin: propertyText(properties["LinkedIn URL"]) || null,
+    keyPersonId: page?.id || null,
     emailValid: !!email && VERIFIED_EMAIL_STATUSES.has(emailStatus),
     phoneValid: !!phone,
   };

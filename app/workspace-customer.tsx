@@ -3,11 +3,11 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Bomb, ChevronRight, CircleAlert, ExternalLink, MoreHorizontal, Plus, Send } from "lucide-react";
+import { ArrowLeft, Bomb, ChevronRight, CircleAlert, ExternalLink, MoreHorizontal, Plus, Search, Send } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "./workspace-store";
 import { cacheBrandItem, getCachedBrand } from "@/lib/brand-list-cache";
-import { currentCpOption, FOLLOW_UP_STATUSES, HANDLING_MODES, listCurrentCps, type BrandActivity, type BrandContact, type BrandDetail, type BrandMeetingNote, type BrandTask, type CurrentCpOption } from "@/lib/brand-list";
+import { currentCpOption, FOLLOW_UP_STATUSES, HANDLING_MODES, keyPersonNotionUrl, listCurrentCps, type BrandActivity, type BrandContact, type BrandDetail, type BrandMeetingNote, type BrandTask, type CurrentCpOption } from "@/lib/brand-list";
 import type { BombDetail, BombListItem } from "@/lib/bomb-list";
 import { ActionStatus, BombInstance, Channel, Contact, CPCode, Customer, dateOnly, Interaction, ScheduledAction, WorkspaceState, compareInteractionSort, interactionCpCode, uid } from "@/lib/outreach-domain";
 import { brandDetailMetadata } from "@/lib/page-metadata";
@@ -459,7 +459,7 @@ function toCustomerContacts(contacts: BrandContact[]): Contact[] {
     phone: item.phone || undefined,
     directPhone: item.directPhone || undefined,
     officePhone: item.officePhone || undefined,
-    whatsapp: item.phone || undefined,
+    whatsapp: item.whatsapp || undefined,
     linkedin: item.linkedin || undefined,
     preferredChannel: item.email ? "Email" : item.linkedin ? "LinkedIn" : "Phone",
     emailValid: item.emailValid,
@@ -729,7 +729,17 @@ export function BrandDetail({customerId}:{customerId:string}){
       <div className="min-w-0">
         <div className="flex items-start gap-4"><Avatar className="size-14"><AvatarFallback className="bg-violet-100 font-bold text-violet-700">{c.initials}</AvatarFallback></Avatar><div className="min-w-0"><h1 className="text-2xl font-bold tracking-tight">{c.name}</h1><div className="mt-2 flex flex-wrap gap-2"><CP value={notionBacked&&remote?remote.currentCp:c.cp}/>{notionBacked&&remote?.status?(can("editBrand")?<BadgeSelect value={remote.status} options={FOLLOW_UP_STATUSES} disabled={saving||!brandReady} onChange={value=>{void patchBrand({status:value}).then(()=>toast.success("Status updated")).catch(error=>toast.error(error instanceof Error?error.message:"Update failed"));}}/>:<Status value={remote.status}/>):(c.status?<Status value={c.status}/>:null)}{notionBacked&&can("editBrand")?<BadgeSelect value={remote?.handlingMode||""} options={HANDLING_MODES} disabled={saving||!brandReady} onChange={value=>{void patchBrand({handlingMode:value}).then(()=>toast.success("Handling Mode updated")).catch(error=>toast.error(error instanceof Error?error.message:"Update failed"));}}/>:notionBacked&&remote?.handlingMode?<Status value={remote.handlingMode}/>:null}{notionBacked&&!brandReady?<span className="inline-flex items-center gap-1 text-xs font-medium text-slate-400"><Spinner className="size-3"/>Loading details…</span>:null}</div>{brandReady?<><BrandMeetingNoteLink notes={notionBacked?remote?.meetingNotes||[]:null} fallback={summary}/>{notionBacked&&<p className="mt-1 text-xs text-slate-500">{currentCpOption(remote?.currentCp).name} · {currentCpOption(remote?.currentCp).fullName}</p>}{notionBacked&&displayNote(remote?.notes)&&<p className="mt-2 text-sm leading-6 text-slate-600">{displayNote(remote?.notes)}</p>}</>:<p className="mt-3 text-sm text-slate-400">Loading brand details…</p>}<div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500"><span>Latest: {remote?.lastInteractionAt?dateOnly(remote.lastInteractionAt):activityLoading?"Loading…":last?.title||"No activity"}</span>{!notionBacked&&<span>Source: {c.source}</span>}<span>AccountManager: {remote?.ownerName||state.users.find(u=>u.id===c.ownerId)?.name||"Unassigned"}</span>{notionBacked&&remote?.createdAt&&<span>Created: {formatEasternDateTime(remote.createdAt)}</span>}</div>{can("assignOwner")&&<div className="mt-3 flex flex-wrap items-center gap-2"><Select value={ownerDraft??c.ownerId??"unassigned"} onValueChange={setOwnerDraft} disabled={!brandReady}><SelectTrigger size="sm" className="w-44"><SelectValue placeholder="Select owner"/></SelectTrigger><SelectContent><SelectItem value="unassigned">Unassigned</SelectItem>{ownerChoices.map(u=><SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent></Select><Button size="sm" disabled={saving||!brandReady||(ownerDraft??c.ownerId??"unassigned")===(c.ownerId||"unassigned")} onClick={()=>void handleAssign()}>Assign</Button></div>}</div></div>
       </div>
-      <BrandContactList contacts={notionBacked&&remote?remote.contacts:c.contacts} loading={contactsLoading} canEdit={!notionBacked&&can("editBrand")} onAdd={()=>setContact(true)}/>
+      <BrandContactList
+        brandId={c.id}
+        contacts={notionBacked&&remote?remote.contacts:c.contacts}
+        loading={contactsLoading}
+        canEdit={can("editBrand")}
+        canEnrich={notionBacked&&can("editBrand")}
+        onAdd={()=>setContact(true)}
+        onContactsChange={notionBacked?(contacts)=>{
+          setRemote(prev=>prev?{...prev,contacts}:prev);
+        }:undefined}
+      />
       <div className="flex flex-wrap gap-2 xl:flex-col xl:items-stretch">{can("reply")&&<Button variant="outline" disabled={!brandReady||(notionBacked&&!c.contacts.length)} onClick={()=>setReply(true)}><Send className="mr-2 size-4"/>Send message</Button>}{can("launch")&&<LaunchOmniReachButton className="xl:w-full" disabled={!brandReady||hasActiveOmniReach} disabledReason={!brandReady?"Loading brand…":ACTIVE_OMNIREACH_BLOCK_REASON} onClick={()=>setLaunch(true)}/>}{can("changeCP")&&<Button disabled={!brandReady} onClick={()=>setCP(true)}>Change CP</Button>}{notionBacked&&can("editBrand")&&<DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" disabled={!brandReady} aria-label="More follow-up actions" title="More follow-up actions"><MoreHorizontal className="size-5"/></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem disabled={saving||remote?.status==="Paused"||remote?.status==="Completed"} onSelect={()=>void updateFollowUpStatus("Paused")}>Pause FollowUp</DropdownMenuItem><DropdownMenuItem disabled={saving||remote?.status==="Completed"} onSelect={()=>void updateFollowUpStatus("Completed")}>Complete FollowUp</DropdownMenuItem></DropdownMenuContent></DropdownMenu>}</div>
     </section>
     <div className={`grid min-w-0 gap-6 ${partnershipContext?"xl:grid-cols-[minmax(0,1fr)_340px]":""}`}><section className="min-w-0"><h2 className="mb-3 font-bold">Brand activity</h2><div className="w-full min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white">
@@ -752,7 +762,7 @@ export function BrandDetail({customerId}:{customerId:string}){
     const payload=await response.json() as {error?:string};
     if(!response.ok)throw new Error(payload.error||"Send failed");
     await Promise.all([refreshRemote(),fetchActivitiesPage(null,"replace")]);
-  }:undefined}/><ChangeCPDialog customerId={c.id} open={cp} onOpenChange={setCP} currentCp={notionBacked&&remote?remote.currentCp:undefined} cps={notionBacked?remoteCps:undefined} onSave={notionBacked?async (currentCpId,evidence,note)=>{await patchBrand({currentCpId,evidence,note});}:undefined}/><ContactDialog customerId={c.id} open={contact} onOpenChange={setContact}/></div>;
+  }:undefined}/><ChangeCPDialog customerId={c.id} open={cp} onOpenChange={setCP} currentCp={notionBacked&&remote?remote.currentCp:undefined} cps={notionBacked?remoteCps:undefined} onSave={notionBacked?async (currentCpId,evidence,note)=>{await patchBrand({currentCpId,evidence,note});}:undefined}/><ContactDialog customerId={c.id} open={contact} onOpenChange={setContact} notionBacked={notionBacked} onCreated={notionBacked?async ()=>{await refreshRemote();}:undefined}/></div>;
 }
 
 type DetailContact = {
@@ -761,8 +771,11 @@ type DetailContact = {
   role: string;
   email?: string | null;
   phone?: string | null;
+  directPhone?: string | null;
+  officePhone?: string | null;
   whatsapp?: string | null;
   linkedin?: string | null;
+  keyPersonId?: string | null;
   title?: string | null;
   contactOrder?: string | null;
   followupStatus?: string | null;
@@ -775,25 +788,447 @@ function linkedinLabel(value?: string | null) {
   return match ? `linkedin.com/in/${match[1]}` : value;
 }
 
-function BrandContactList({contacts,canEdit,onAdd,loading}:{contacts:DetailContact[];canEdit:boolean;onAdd:()=>void;loading?:boolean}){
-  const [open,setOpen]=useState<Set<string>>(new Set());
-  const toggle=(id:string)=>setOpen(prev=>{
-    const next=new Set(prev);
-    if(next.has(id)) next.delete(id); else next.add(id);
-    return next;
-  });
-  return <section className="min-w-0"><div className="flex items-center justify-between"><h2 className="text-sm font-bold">KeyPerson</h2>{canEdit&&!loading&&<Button variant="ghost" size="icon-sm" onClick={onAdd}><Plus className="size-4"/></Button>}</div>{loading?<div className="mt-3 flex items-center gap-2 text-sm text-slate-400"><Spinner className="size-3.5"/>Loading KeyPerson…</div>:contacts.length===0?<p className="mt-3 text-sm text-slate-400">No KeyPerson in this follow-up yet.</p>:<div className="mt-3 grid gap-y-4">{contacts.map(contact=>{
-    const expanded=open.has(contact.id);
-    const meta=[contact.contactOrder,contact.role,contact.followupStatus].filter(Boolean).join(" · ");
-    return <div key={contact.id} className="min-w-0">
-      <button type="button" onClick={()=>toggle(contact.id)} className="flex w-full min-w-0 items-center gap-x-1.5 text-left">
-        <ChevronRight className={`size-3.5 shrink-0 text-slate-400 transition-transform ${expanded?"rotate-90":""}`}/>
-        <span className="truncate text-sm font-semibold">{contact.name}</span>
-        <span className="shrink-0 text-xs text-slate-500">{meta||contact.role}</span>
-      </button>
-      {expanded&&<div className="mt-2 grid gap-1.5">{contact.title&&<div className="text-xs text-slate-500">{contact.title}</div>}{contact.followupMode&&<div className="text-xs text-slate-500">Mode: {contact.followupMode}</div>}{([["Email",contact.email],["Phone",contact.phone],["SMS",contact.phone],["WhatsApp",contact.whatsapp||contact.phone],["LinkedIn",linkedinLabel(contact.linkedin)]] as const).map(([channel,value])=><div key={channel} className="flex min-w-0 items-center gap-2 text-xs text-slate-600"><ChannelIcon channel={channel} className="size-4 shrink-0"/><span className={`truncate ${value?"":"text-slate-400"}`}>{value||"—"}</span></div>)}</div>}
-    </div>;
-  })}</div>}</section>;
+type EnrichField =
+  | "email"
+  | "phone"
+  | "directPhone"
+  | "officePhone"
+  | "whatsapp"
+  | "linkedin";
+type EnrichConflict = { field: EnrichField; current: string; proposed: string };
+type EnrichPreview = {
+  email?: string | null;
+  phone?: string | null;
+  directPhone?: string | null;
+  officePhone?: string | null;
+  whatsapp?: string | null;
+  linkedin?: string | null;
+  pending?: EnrichField[];
+  note?: string;
+};
+
+function BrandContactList({
+  brandId,
+  contacts,
+  canEdit,
+  canEnrich,
+  onAdd,
+  loading,
+  onContactsChange,
+}: {
+  brandId: string;
+  contacts: DetailContact[];
+  canEdit: boolean;
+  canEnrich?: boolean;
+  onAdd: () => void;
+  loading?: boolean;
+  onContactsChange?: (contacts: BrandContact[]) => void;
+}) {
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const [enrichingId, setEnrichingId] = useState<string | null>(null);
+  const [enrichStatus, setEnrichStatus] = useState<string | null>(null);
+  const [previews, setPreviews] = useState<Record<string, EnrichPreview>>({});
+  const [conflicts, setConflicts] = useState<EnrichConflict[] | null>(null);
+  const [conflictContactId, setConflictContactId] = useState<string | null>(null);
+  const [selectedFields, setSelectedFields] = useState<Record<string, boolean>>({});
+  const [applying, setApplying] = useState(false);
+
+  const toggle = (id: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const runEnrich = async (contactId: string) => {
+    setEnrichingId(contactId);
+    setEnrichStatus("Icypeas → FullEnrich（查手机号可能需要约 1 分钟）…");
+    setOpen((prev) => new Set(prev).add(contactId));
+    try {
+      const response = await fetch(`/api/brands/${brandId}/contacts/${contactId}/enrich`, {
+        method: "POST",
+      });
+      const payload = (await response.json()) as {
+        error?: string;
+        creditsExhausted?: boolean;
+        applied?: Partial<Record<EnrichField, string>>;
+        conflicts?: EnrichConflict[];
+        notFound?: string[];
+        found?: {
+          email?: string | null;
+          phone?: string | null;
+          directPhone?: string | null;
+          officePhone?: string | null;
+          whatsapp?: string | null;
+          linkedin?: string | null;
+        };
+        sources?: Partial<Record<EnrichField, string>>;
+        steps?: string[];
+        contacts?: BrandContact[];
+      };
+      if (!response.ok) throw new Error(payload.error || "Enrichment failed");
+      if (payload.contacts) onContactsChange?.(payload.contacts);
+
+      const found = payload.found || {};
+      const pending = (payload.conflicts || []).map((item) => item.field);
+      const foundAny = Boolean(
+        found.email ||
+          found.phone ||
+          found.directPhone ||
+          found.officePhone ||
+          found.whatsapp ||
+          found.linkedin,
+      );
+      if (foundAny) {
+        setPreviews((prev) => ({
+          ...prev,
+          [contactId]: {
+            email: found.email,
+            phone: found.phone,
+            directPhone: found.directPhone,
+            officePhone: found.officePhone,
+            whatsapp: found.whatsapp,
+            linkedin: found.linkedin,
+            pending,
+            note: [
+              found.email
+                ? `Email${payload.sources?.email ? ` (${payload.sources.email})` : ""}`
+                : null,
+              found.linkedin
+                ? `LinkedIn${payload.sources?.linkedin ? ` (${payload.sources.linkedin})` : ""}`
+                : null,
+              found.phone
+                ? `Phone${payload.sources?.phone ? ` (${payload.sources.phone})` : ""}`
+                : null,
+              found.directPhone
+                ? `Direct${payload.sources?.directPhone ? ` (${payload.sources.directPhone})` : ""}`
+                : null,
+              found.officePhone
+                ? `Office${payload.sources?.officePhone ? ` (${payload.sources.officePhone})` : ""}`
+                : null,
+              found.whatsapp
+                ? `WhatsApp${payload.sources?.whatsapp ? ` (${payload.sources.whatsapp})` : ""}`
+                : null,
+            ]
+              .filter(Boolean)
+              .join(" · "),
+          },
+        }));
+      }
+
+      const appliedCount = Object.keys(payload.applied || {}).length;
+      if (appliedCount) {
+        toast.success(`已写入 ${appliedCount} 个空字段`);
+      }
+      if (payload.conflicts?.length) {
+        setConflictContactId(contactId);
+        setConflicts(payload.conflicts);
+        setSelectedFields(
+          Object.fromEntries(payload.conflicts.map((item) => [item.field, true])),
+        );
+        toast.message("发现与库内不一致的字段，请确认是否采用");
+      } else if (!appliedCount && !foundAny) {
+        toast.message(
+          payload.notFound?.includes("phone")
+            ? "未找到新联系方式。Icypeas 不保证手机号；FullEnrich 也未返回 Phone。"
+            : "未找到新的联系方式",
+        );
+      } else if (foundAny && !appliedCount) {
+        toast.message("已回显找到的联系方式（与库内一致或待确认）");
+      }
+
+      if (payload.steps?.length) {
+        setEnrichStatus(payload.steps.slice(-2).join(" → "));
+      } else {
+        setEnrichStatus(null);
+      }
+    } catch (error) {
+      setEnrichStatus(null);
+      toast.error(error instanceof Error ? error.message : "Enrichment failed");
+    } finally {
+      setEnrichingId(null);
+    }
+  };
+
+  const applyConflicts = async () => {
+    if (!conflictContactId || !conflicts?.length) return;
+    const fields: Partial<Record<EnrichField, string>> = {};
+    for (const item of conflicts) {
+      if (selectedFields[item.field]) fields[item.field] = item.proposed;
+    }
+    if (!Object.keys(fields).length) {
+      setConflicts(null);
+      setConflictContactId(null);
+      return;
+    }
+    setApplying(true);
+    try {
+      const response = await fetch(
+        `/api/brands/${brandId}/contacts/${conflictContactId}/apply-enrichment`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fields }),
+        },
+      );
+      const payload = (await response.json()) as {
+        error?: string;
+        contacts?: BrandContact[];
+      };
+      if (!response.ok) throw new Error(payload.error || "Unable to apply");
+      if (payload.contacts) onContactsChange?.(payload.contacts);
+      setPreviews((prev) => {
+        const next = { ...prev };
+        delete next[conflictContactId];
+        return next;
+      });
+      toast.success("Confirmed contact updates applied");
+      setConflicts(null);
+      setConflictContactId(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to apply");
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  const displayValue = (
+    contact: DetailContact,
+    field: "email" | "phone" | "directPhone" | "officePhone" | "linkedin" | "whatsapp",
+  ) => {
+    const preview = previews[contact.id];
+    if (field === "email") return preview?.email || contact.email;
+    if (field === "phone") return preview?.phone || contact.phone;
+    if (field === "whatsapp") {
+      return preview?.whatsapp || contact.whatsapp || undefined;
+    }
+    if (field === "directPhone") return preview?.directPhone || contact.directPhone;
+    if (field === "officePhone") return preview?.officePhone || contact.officePhone;
+    return linkedinLabel(preview?.linkedin || contact.linkedin);
+  };
+
+  const isPending = (contactId: string, field: EnrichField) =>
+    Boolean(previews[contactId]?.pending?.includes(field));
+
+  return (
+    <section className="min-w-0">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-bold">KeyPerson</h2>
+        {canEdit && !loading && (
+          <Button variant="ghost" size="icon-sm" onClick={onAdd} aria-label="Add KeyPerson">
+            <Plus className="size-4" />
+          </Button>
+        )}
+      </div>
+      {canEnrich && (
+        <p className="mt-1 text-[11px] leading-4 text-slate-400">
+          find contact information takes about 3 minutes, please wait patiently.
+        </p>
+      )}
+      {(enrichingId || enrichStatus) && (
+        <p className="mt-2 flex items-center gap-1.5 text-xs text-slate-500">
+          {enrichingId ? <Spinner className="size-3" /> : null}
+          {enrichingId
+            ? enrichStatus || "Finding contact information..."
+            : enrichStatus}
+        </p>
+      )}
+      {loading ? (
+        <div className="mt-3 flex items-center gap-2 text-sm text-slate-400">
+          <Spinner className="size-3.5" />
+          Loading KeyPerson…
+        </div>
+      ) : contacts.length === 0 ? (
+        <p className="mt-3 text-sm text-slate-400">No KeyPerson in this follow-up yet.</p>
+      ) : (
+        <div className="mt-3 grid gap-y-4">
+          {contacts.map((contact) => {
+            const expanded = open.has(contact.id);
+            const meta = [contact.contactOrder, contact.role, contact.followupStatus]
+              .filter(Boolean)
+              .join(" · ");
+            const previewNote = previews[contact.id]?.note;
+            return (
+              <div key={contact.id} className="min-w-0">
+                <div className="flex min-w-0 items-center gap-1">
+                  <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => toggle(contact.id)}
+                      className="flex min-w-0 items-center gap-x-1.5 text-left"
+                    >
+                      <ChevronRight
+                        className={`size-3.5 shrink-0 text-slate-400 transition-transform ${expanded ? "rotate-90" : ""}`}
+                      />
+                      <span className="truncate text-sm font-semibold">{contact.name}</span>
+                    </button>
+                    {contact.keyPersonId ? (
+                      <a
+                        href={keyPersonNotionUrl(contact.keyPersonId)}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={`Open ${contact.name} in KeyPersonDB`}
+                        aria-label={`Open ${contact.name} in Notion`}
+                        className="inline-flex shrink-0 items-center gap-0.5 rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 hover:border-slate-300 hover:text-slate-800"
+                      >
+                        Notion
+                        <ExternalLink className="size-2.5" />
+                      </a>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => toggle(contact.id)}
+                      className="min-w-0 flex-1 truncate text-left text-xs text-slate-500"
+                    >
+                      {meta || contact.role}
+                    </button>
+                  </div>
+                  {canEnrich && (
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="shrink-0"
+                      disabled={!!enrichingId || loading}
+                      aria-label={`Enrich ${contact.name}`}
+                      title="Icypeas → FullEnrich：查找 Email / LinkedIn / Phone / Direct / Office"
+                      onClick={() => void runEnrich(contact.id)}
+                    >
+                      {enrichingId === contact.id ? (
+                        <Spinner className="size-3.5" />
+                      ) : (
+                        <Search className="size-3.5" />
+                      )}
+                    </Button>
+                  )}
+                </div>
+                {previewNote && (
+                  <p className="mt-1 pl-5 text-[11px] text-emerald-700">找到：{previewNote}</p>
+                )}
+                {expanded && (
+                  <div className="mt-2 grid gap-1.5">
+                    {contact.title && <div className="text-xs text-slate-500">{contact.title}</div>}
+                    {contact.followupMode && (
+                      <div className="text-xs text-slate-500">Mode: {contact.followupMode}</div>
+                    )}
+                    {(
+                      [
+                        ["Email", "email", "Email"],
+                        ["Phone", "phone", "Phone"],
+                        ["Phone", "directPhone", "Direct Phone"],
+                        ["Phone", "officePhone", "Office Phone"],
+                        ["SMS", "phone", "SMS"],
+                        ["WhatsApp", "whatsapp", "WhatsApp"],
+                        ["LinkedIn", "linkedin", "LinkedIn"],
+                      ] as const
+                    ).map(([channel, field, label]) => {
+                      const value = displayValue(contact, field);
+                      const pendingField =
+                        field === "email" ||
+                        field === "phone" ||
+                        field === "directPhone" ||
+                        field === "officePhone" ||
+                        field === "whatsapp" ||
+                        field === "linkedin"
+                          ? isPending(contact.id, field)
+                          : false;
+                      return (
+                        <div
+                          key={`${label}-${field}`}
+                          className="flex min-w-0 items-center gap-2 text-xs text-slate-600"
+                        >
+                          <ChannelIcon channel={channel} className="size-4 shrink-0" />
+                          <span className="w-[5.5rem] shrink-0 text-slate-400">{label}</span>
+                          <span
+                            className={`truncate ${value ? "" : "text-slate-400"} ${pendingField ? "text-amber-700" : ""}`}
+                          >
+                            {value || "—"}
+                          </span>
+                          {pendingField && value ? (
+                            <span className="shrink-0 text-[10px] font-medium text-amber-600">
+                              待确认
+                            </span>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <Dialog
+        open={!!conflicts?.length}
+        onOpenChange={(next) => {
+          if (!next) {
+            setConflicts(null);
+            setConflictContactId(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirm enrichment matches</DialogTitle>
+            <DialogDescription>
+              Found values differ from KeyPersonDB. Choose which ones to adopt. Empty fields were
+              already filled automatically. Phone / Direct / Office may come from FullEnrich;
+              WhatsApp Number is set only after WA probe confirms registration.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            {(conflicts || []).map((item) => (
+              <label
+                key={item.field}
+                className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 p-3 text-sm"
+              >
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={!!selectedFields[item.field]}
+                  onChange={(event) =>
+                    setSelectedFields((prev) => ({
+                      ...prev,
+                      [item.field]: event.target.checked,
+                    }))
+                  }
+                />
+                <div className="min-w-0 space-y-1">
+                  <div className="font-semibold">
+                    {item.field === "directPhone"
+                      ? "Direct Phone"
+                      : item.field === "officePhone"
+                        ? "Office Phone"
+                        : item.field === "whatsapp"
+                          ? "WhatsApp Number"
+                          : item.field.charAt(0).toUpperCase() + item.field.slice(1)}
+                  </div>
+                  <div className="text-xs text-slate-500">Current: {item.current}</div>
+                  <div className="text-xs text-emerald-700">Found: {item.proposed}</div>
+                </div>
+              </label>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setConflicts(null);
+                setConflictContactId(null);
+              }}
+            >
+              Keep current
+            </Button>
+            <Button disabled={applying} onClick={() => void applyConflicts()}>
+              {applying ? "Saving…" : "Apply selected"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </section>
+  );
 }
 
 type LaunchStepCopy = { subject?: string; content?: string; callGoal?: string; script?: string };
@@ -1237,4 +1672,158 @@ export function FollowUpDialog({customerId,open,onOpenChange}:{customerId:string
 
 export function CreateCallDialog({customerId,open,onOpenChange}:{customerId:string;open:boolean;onOpenChange:(v:boolean)=>void}){const {state,createCallTask}=useWorkspace();const c=state.customers.find(x=>x.id===customerId);const valid=c?.contacts.filter(x=>x.phone&&x.phoneValid)||[];const [contact,setContact]=useState(valid[0]?.id||"");const [days,setDays]=useState("1");const [note,setNote]=useState("");return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent><DialogHeader><DialogTitle>Create Call Task</DialogTitle><DialogDescription>The capacity scheduler chooses the Caller and may move the date.</DialogDescription></DialogHeader><Select value={contact||valid[0]?.id} onValueChange={setContact}><SelectTrigger className="w-full"><SelectValue placeholder="Valid phone contact"/></SelectTrigger><SelectContent>{valid.map(x=><SelectItem key={x.id} value={x.id}>{x.name} · {x.phone}</SelectItem>)}</SelectContent></Select><Select value={days} onValueChange={setDays}><SelectTrigger className="w-full"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="0">Today</SelectItem><SelectItem value="1">Tomorrow</SelectItem><SelectItem value="3">In 3 days</SelectItem></SelectContent></Select><Textarea value={note} onChange={e=>setNote(e.target.value)} placeholder="Goal and context"/><DialogFooter><Button variant="outline" onClick={()=>onOpenChange(false)}>Cancel</Button><Button disabled={!valid.length} onClick={()=>{const r=createCallTask(customerId,contact||valid[0].id,new Date(Date.parse(state.simulatedDate)+Number(days)*86400000).toISOString(),note);show(r);if(r.ok)onOpenChange(false)}}>Create Task</Button></DialogFooter></DialogContent></Dialog>}
 
-function ContactDialog({customerId,open,onOpenChange}:{customerId:string;open:boolean;onOpenChange:(v:boolean)=>void}){const {updateContact}=useWorkspace();const [name,setName]=useState("");const [role,setRole]=useState<Contact['role']>("Other");const [email,setEmail]=useState("");const [phone,setPhone]=useState("");return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent><DialogHeader><DialogTitle>Add Contact</DialogTitle><DialogDescription>Channel availability is derived from valid contact details.</DialogDescription></DialogHeader><Input value={name} onChange={e=>setName(e.target.value)} placeholder="Contact name"/><Select value={role} onValueChange={v=>setRole(v as Contact['role'])}><SelectTrigger className="w-full"><SelectValue/></SelectTrigger><SelectContent>{["Connector","Owner","Other"].map(x=><SelectItem key={x} value={x}>{x}</SelectItem>)}</SelectContent></Select><Input value={email} onChange={e=>setEmail(e.target.value)} placeholder="Email"/><Input value={phone} onChange={e=>setPhone(e.target.value)} placeholder="Phone"/><DialogFooter><Button variant="outline" onClick={()=>onOpenChange(false)}>Cancel</Button><Button disabled={!name} onClick={()=>{const r=updateContact(customerId,{id:uid('ct'),name,role,email:email||undefined,phone:phone||undefined,whatsapp:phone||undefined,preferredChannel:email?'Email':'Phone',emailValid:!!email,phoneValid:!!phone});show(r);if(r.ok)onOpenChange(false)}}>Save Contact</Button></DialogFooter></DialogContent></Dialog>}
+function ContactDialog({
+  customerId,
+  open,
+  onOpenChange,
+  notionBacked,
+  onCreated,
+}: {
+  customerId: string;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  notionBacked?: boolean;
+  onCreated?: () => Promise<void> | void;
+}) {
+  const { updateContact } = useWorkspace();
+  const [name, setName] = useState("");
+  const [title, setTitle] = useState("");
+  const [role, setRole] = useState<Contact["role"]>("Other");
+  const [contactOrder, setContactOrder] = useState<"Primary" | "Secondary" | "Backup" | "">("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [linkedin, setLinkedin] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const reset = () => {
+    setName("");
+    setTitle("");
+    setRole("Other");
+    setContactOrder("");
+    setEmail("");
+    setPhone("");
+    setLinkedin("");
+  };
+
+  const save = async () => {
+    if (!name.trim()) return;
+    if (!notionBacked) {
+      const r = updateContact(customerId, {
+        id: uid("ct"),
+        name: name.trim(),
+        role,
+        email: email || undefined,
+        phone: phone || undefined,
+        whatsapp: phone || undefined,
+        linkedin: linkedin || undefined,
+        preferredChannel: email ? "Email" : "Phone",
+        emailValid: !!email,
+        phoneValid: !!phone,
+      });
+      show(r);
+      if (r.ok) {
+        reset();
+        onOpenChange(false);
+      }
+      return;
+    }
+    setSaving(true);
+    try {
+      const response = await fetch(`/api/brands/${customerId}/contacts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name.trim(),
+          title: title.trim() || null,
+          ownerOrConnector: role === "Other" ? null : role,
+          email: email.trim() || null,
+          phone: phone.trim() || null,
+          linkedin: linkedin.trim() || null,
+          contactOrder: contactOrder || null,
+        }),
+      });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Unable to create KeyPerson");
+      toast.success("KeyPerson created");
+      await onCreated?.();
+      reset();
+      onOpenChange(false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to create KeyPerson");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) reset();
+        onOpenChange(next);
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Add KeyPerson</DialogTitle>
+          <DialogDescription>
+            {notionBacked
+              ? "Creates KeyPersonDB + Follow-up Contact linked to this brand’s ClientDB record."
+              : "Channel availability is derived from valid contact details."}
+          </DialogDescription>
+        </DialogHeader>
+        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" />
+        {notionBacked && (
+          <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title (optional)" />
+        )}
+        <Select value={role} onValueChange={(v) => setRole(v as Contact["role"])}>
+          <SelectTrigger className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {["Connector", "Owner", "Other"].map((x) => (
+              <SelectItem key={x} value={x}>
+                {x}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {notionBacked && (
+          <Select
+            value={contactOrder || "none"}
+            onValueChange={(v) =>
+              setContactOrder(v === "none" ? "" : (v as "Primary" | "Secondary" | "Backup"))
+            }
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Contact order" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">No contact order</SelectItem>
+              <SelectItem value="Primary">Primary</SelectItem>
+              <SelectItem value="Secondary">Secondary</SelectItem>
+              <SelectItem value="Backup">Backup</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
+        <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email (optional)" />
+        <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone (optional)" />
+        {notionBacked && (
+          <Input
+            value={linkedin}
+            onChange={(e) => setLinkedin(e.target.value)}
+            placeholder="LinkedIn URL (optional)"
+          />
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button disabled={!name.trim() || saving} onClick={() => void save()}>
+            {saving ? "Saving…" : "Save KeyPerson"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}

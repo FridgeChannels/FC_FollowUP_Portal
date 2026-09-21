@@ -14,6 +14,7 @@ declare namespace Cloudflare {
     NOTION_FOLLOWUP_CAPACITY_DB_ID?: string;
     NOTION_FOLLOWUP_CHECKPOINT_DB_ID?: string;
     NOTION_FOLLOWUP_LINKEDIN_ACCOUNT_DB_ID?: string;
+    NOTION_KEY_PERSON_DB_ID?: string;
     ADMIN_EMAILS?: string;
     NOTION_ADMIN_EMAILS?: string;
     SKIP_UNAVAILABLE_CHANNELS?: string;
@@ -33,5 +34,11 @@ declare namespace Cloudflare {
     QUO_WEBHOOK_KEY?: string;
     QUO_WEBHOOK_SIGNING_SECRET?: string;
     QUO_WEBHOOK_SIGNING_SECRETS?: string;
+    ICYPEAS_API_KEY?: string;
+    ICYPEAS_ACCOUNT_EMAIL?: string;
+    FULLENRICH_API_KEY?: string;
+    WA_PROBE_API_TOKEN?: string;
+    WA_API_TOKEN?: string;
+    WA_PROBE_BASE_URL?: string;
   }
 }

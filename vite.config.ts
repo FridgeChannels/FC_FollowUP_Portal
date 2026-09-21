@@ -22,6 +22,8 @@ export default defineConfig(async ({ mode }) => {
     process.env.NOTION_FOLLOWUP_OWNER_DB_ID || loadedEnv.NOTION_FOLLOWUP_OWNER_DB_ID;
   const followupContactDbId =
     process.env.NOTION_FOLLOWUP_CONTACT_DB_ID || loadedEnv.NOTION_FOLLOWUP_CONTACT_DB_ID;
+  const keyPersonDbId =
+    process.env.NOTION_KEY_PERSON_DB_ID || loadedEnv.NOTION_KEY_PERSON_DB_ID;
   const adminEmails = process.env.ADMIN_EMAILS || loadedEnv.ADMIN_EMAILS;
   const skipUnavailableChannels =
     process.env.SKIP_UNAVAILABLE_CHANNELS || loadedEnv.SKIP_UNAVAILABLE_CHANNELS;
@@ -52,6 +54,16 @@ export default defineConfig(async ({ mode }) => {
     loadedEnv.DISPLAY_TIME_ZONE ||
     "America/New_York";
   const senderName = process.env.SENDER_NAME || loadedEnv.SENDER_NAME || "";
+  const icypeasApiKey = process.env.ICYPEAS_API_KEY || loadedEnv.ICYPEAS_API_KEY;
+  const icypeasAccountEmail =
+    process.env.ICYPEAS_ACCOUNT_EMAIL || loadedEnv.ICYPEAS_ACCOUNT_EMAIL;
+  const fullenrichApiKey =
+    process.env.FULLENRICH_API_KEY || loadedEnv.FULLENRICH_API_KEY;
+  const waProbeApiToken =
+    process.env.WA_PROBE_API_TOKEN || loadedEnv.WA_PROBE_API_TOKEN;
+  const waApiToken = process.env.WA_API_TOKEN || loadedEnv.WA_API_TOKEN;
+  const waProbeBaseUrl =
+    process.env.WA_PROBE_BASE_URL || loadedEnv.WA_PROBE_BASE_URL;
   const awsAccessKeyId =
     process.env.AWS_ACCESS_KEY_ID || loadedEnv.AWS_ACCESS_KEY_ID;
   const awsSecretAccessKey =
@@ -89,6 +101,7 @@ export default defineConfig(async ({ mode }) => {
       ...(followupContactDbId
         ? { NOTION_FOLLOWUP_CONTACT_DB_ID: followupContactDbId }
         : {}),
+      ...(keyPersonDbId ? { NOTION_KEY_PERSON_DB_ID: keyPersonDbId } : {}),
       ...(adminEmails ? { ADMIN_EMAILS: adminEmails } : {}),
       ...(skipUnavailableChannels
         ? { SKIP_UNAVAILABLE_CHANNELS: skipUnavailableChannels }
@@ -117,6 +130,12 @@ export default defineConfig(async ({ mode }) => {
         : {}),
       DISPLAY_TIME_ZONE: displayTimeZone,
       ...(senderName ? { SENDER_NAME: senderName } : {}),
+      ...(icypeasApiKey ? { ICYPEAS_API_KEY: icypeasApiKey } : {}),
+      ...(icypeasAccountEmail ? { ICYPEAS_ACCOUNT_EMAIL: icypeasAccountEmail } : {}),
+      ...(fullenrichApiKey ? { FULLENRICH_API_KEY: fullenrichApiKey } : {}),
+      ...(waProbeApiToken ? { WA_PROBE_API_TOKEN: waProbeApiToken } : {}),
+      ...(waApiToken ? { WA_API_TOKEN: waApiToken } : {}),
+      ...(waProbeBaseUrl ? { WA_PROBE_BASE_URL: waProbeBaseUrl } : {}),
       ...(awsAccessKeyId ? { AWS_ACCESS_KEY_ID: awsAccessKeyId } : {}),
       ...(awsSecretAccessKey
         ? { AWS_SECRET_ACCESS_KEY: awsSecretAccessKey }
