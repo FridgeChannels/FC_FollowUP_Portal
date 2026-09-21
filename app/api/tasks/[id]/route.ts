@@ -89,6 +89,7 @@ export async function POST(request: Request, { params }: Params) {
     const { id } = await params;
     const body = (await request.json()) as {
       action?: string;
+      phone?: string;
     };
     const task = await retrieveFollowupTask(id);
     if (!canWriteTask(viewer, task)) {
@@ -102,7 +103,7 @@ export async function POST(request: Request, { params }: Params) {
     }
     await recordQuoDialAttempt({
       taskId: task.id,
-      phone: dialPhoneForTask(task.contactPhone),
+      phone: dialPhoneForTask(typeof body.phone === "string" && body.phone.trim() ? body.phone : task.contactPhone),
       contactId: task.contactId,
       brandId: task.brandId,
       brandName: task.brandName,

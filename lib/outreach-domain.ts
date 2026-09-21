@@ -19,7 +19,7 @@ export type CallOutcome = "Contact Responded" | "Connected — No Useful Respons
 
 export type Contact = {
   id: string; name: string; role: "Connector" | "Owner" | "Other"; title?: string; contactRole?: string;
-  email?: string; phone?: string; whatsapp?: string; linkedin?: string; preferredChannel: Channel; emailValid: boolean; phoneValid: boolean;
+  email?: string; phone?: string; directPhone?: string; officePhone?: string; whatsapp?: string; linkedin?: string; preferredChannel: Channel; emailValid: boolean; phoneValid: boolean;
 };
 export type Customer = {
   id: string; name: string; initials: string; cp: CPCode; status: CustomerStatus; source: string;

@@ -205,6 +205,8 @@ export type BrandContact = {
   contactRole: string | null;
   email: string | null;
   phone: string | null;
+  directPhone: string | null;
+  officePhone: string | null;
   linkedin: string | null;
   emailValid: boolean;
   phoneValid: boolean;

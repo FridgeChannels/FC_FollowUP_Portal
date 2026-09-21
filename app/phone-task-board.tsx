@@ -10,6 +10,13 @@ import {
   type CallReviewRound,
   type ReviewRoundDisplay,
 } from "@/lib/call-review-history";
+import {
+  dialPhoneOptions,
+  formatDialPhoneSummary,
+  quoDialHref,
+  type DialPhoneOption,
+} from "@/lib/dial-phones";
+import { parsePhoneCallContent } from "@/lib/phone-call-content";
 import { isCancelledTaskStatus, isClosedTaskStatus, type Contact, type Interaction } from "@/lib/outreach-domain";
 import { devCallPhoneOnClient } from "@/lib/quo/dev-call-phone";
 import { formatEasternDateTime } from "./bomb-plan";
@@ -17,8 +24,14 @@ import { ChannelIcon } from "./channel-icon";
 import { QuoCallPanel } from "./quo-call-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
+
+export type QuoDialOpening = {
+  taskId: string;
+  phone: string;
+};
 
 export type PhoneBoardTask = {
   id: string;
@@ -37,6 +50,8 @@ export type PhoneBoardScript = {
   id: string;
   name: string;
   content: string;
+  context: string;
+  script: string;
   status: string | null;
 };
 
@@ -54,12 +69,46 @@ export function callScriptFromConversations(
       && !!item.content?.trim())
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
   if (!outbound?.content) return null;
+  const parsed = parsePhoneCallContent(outbound.content);
   return {
     id: outbound.id,
     name: outbound.title || "Call script",
     content: outbound.content,
+    context: parsed.context,
+    script: parsed.script,
     status: outbound.taskStatus || null,
   };
+}
+
+export function PhoneCallCopy({
+  script,
+  bodyClassName,
+  labelClassName,
+}: {
+  script: Pick<PhoneBoardScript, "context" | "script">;
+  bodyClassName: string;
+  labelClassName: string;
+}) {
+  const context = script.context.trim();
+  const copy = script.script.trim();
+  if (!context && !copy) {
+    return <p className={bodyClassName}>No call content yet.</p>;
+  }
+  if (!context) {
+    return <p className={`whitespace-pre-wrap leading-6 ${bodyClassName}`}>{copy}</p>;
+  }
+  return (
+    <div className="space-y-3">
+      <div>
+        <div className={labelClassName}>Call scenario</div>
+        <p className={`whitespace-pre-wrap leading-6 ${bodyClassName}`}>{context}</p>
+      </div>
+      <div>
+        <div className={labelClassName}>Suggested script</div>
+        <p className={`whitespace-pre-wrap leading-6 ${bodyClassName}`}>{copy || "No call content yet."}</p>
+      </div>
+    </div>
+  );
 }
 
 function sameNotionId(left?: string | null, right?: string | null) {
@@ -80,8 +129,32 @@ function dialState(status: string, reviewStatus?: CallReviewStatus | null) {
   return "open" as const;
 }
 
-function CallActionButton({ phone, state, onCallOpening }: { phone: string; state: ReturnType<typeof dialState>; onCallOpening: () => void }) {
-  const quoDial = phone ? `openphone://dial?number=${encodeURIComponent(phone)}&action=call` : "";
+function DialNumberItem({ option, onCallOpening }: { option: DialPhoneOption; onCallOpening: (phone: string) => void }) {
+  return (
+    <DropdownMenuItem
+      onSelect={() => {
+        onCallOpening(option.number);
+        window.location.href = quoDialHref(option.number);
+      }}
+    >
+      <span className="flex min-w-0 flex-col">
+        <span className="text-sm font-medium">{option.label}</span>
+        <span className="font-mono text-[11px] text-slate-500">{option.number}</span>
+      </span>
+    </DropdownMenuItem>
+  );
+}
+
+export function CallWithQuoButton({
+  options,
+  state,
+  onCallOpening,
+}: {
+  options: DialPhoneOption[];
+  state: ReturnType<typeof dialState>;
+  onCallOpening: (phone: string) => void;
+}) {
+  const primary = options[0];
   if (state === "completed") {
     return <Button disabled className="bg-emerald-600 text-white hover:bg-emerald-600"><CheckCircle2 className="mr-2 size-4"/>Call completed</Button>;
   }
@@ -91,10 +164,33 @@ function CallActionButton({ phone, state, onCallOpening }: { phone: string; stat
   if (state === "failed") {
     return <Button disabled className="bg-rose-100 text-rose-800 hover:bg-rose-100"><Phone className="mr-2 size-4"/>Call failed</Button>;
   }
-  if (phone) {
-    return <Button asChild><a href={quoDial} onClick={onCallOpening}><Phone className="mr-2 size-4"/>Call with Quo</a></Button>;
+  if (!primary) {
+    return <Button disabled><Phone className="mr-2 size-4"/>Call with Quo</Button>;
   }
-  return <Button disabled><Phone className="mr-2 size-4"/>Call with Quo</Button>;
+  if (options.length === 1) {
+    return <Button asChild><a href={quoDialHref(primary.number)} onClick={() => onCallOpening(primary.number)}><Phone className="mr-2 size-4"/>Call with Quo</a></Button>;
+  }
+  return (
+    <div className="flex">
+      <Button asChild className="rounded-r-none">
+        <a href={quoDialHref(primary.number)} onClick={() => onCallOpening(primary.number)}>
+          <Phone className="mr-2 size-4"/>Call with Quo
+        </a>
+      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button className="rounded-l-none border-l border-l-white/25 px-2" aria-label="Choose phone number">
+            <ChevronDown className="size-4"/>
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-52">
+          {options.map((option) => (
+            <DialNumberItem key={option.key} option={option} onCallOpening={onCallOpening}/>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
 }
 
 function ReviewBadge({ status }: { status?: CallReviewStatus | null | "In Progress" | "Archived" }) {
@@ -215,7 +311,7 @@ export function PhoneTaskBoard({
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
   onSelectTask?: (taskId: string) => void;
-  onCallOpening?: () => void;
+  onCallOpening?: (info: QuoDialOpening) => void;
   callerReviewTaskId?: string | null;
   callerReviewHasConnectedCall?: boolean;
   callerReviewCanSubmit?: boolean;
@@ -292,15 +388,15 @@ export function PhoneTaskBoard({
         submittingCallerReview={submittingCallerReview}
         onFocusTask={active || !onSelectTask ? undefined : () => onSelectTask(item.id)}
         onReview={(status, reviewReason, reviewNote) => void handleReview(item.id, status, reviewReason, reviewNote)}
-        onCallOpening={() => {
+        onCallOpening={(phone) => {
           if (item.remote === false) return;
           if (onCallOpening) {
-            onCallOpening();
+            onCallOpening({ taskId: item.id, phone });
           } else {
             void fetch(`/api/tasks/${item.id}`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ action: "quo-attempt" }),
+              body: JSON.stringify({ action: "quo-attempt", phone }),
               keepalive: true,
             }).catch(() => undefined);
           }
@@ -513,7 +609,7 @@ function PhoneTaskBlock({
   showDial: boolean;
   canReviewCalls: boolean;
   reviewing: boolean;
-  onCallOpening: () => void;
+  onCallOpening: (phone: string) => void;
   onFocusTask?: () => void;
   onReview: (status: CallReviewStatus, reviewReason?: string, reviewNote?: string) => void;
   onRefreshQuo?: (callId: string) => void;
@@ -530,7 +626,12 @@ function PhoneTaskBlock({
   const [recallReason, setRecallReason] = useState("");
   const [selectingCall, setSelectingCall] = useState(false);
   const [selectedCallId, setSelectedCallId] = useState("");
-  const phone = (devCallPhoneOnClient() || contact?.phone || task.contactPhone || "").trim();
+  const dialOptions = dialPhoneOptions(
+    contact || {},
+    task.contactPhone,
+    devCallPhoneOnClient(),
+  );
+  const phoneSummary = formatDialPhoneSummary(dialOptions);
   const actionState = dialState(task.status, reviewStatus);
   const rounds = reviewRoundsForTask(task.callReviewHistory || []);
   const partitioned = partitionRoundCalls(quoResults, rounds, quoCallId, (item) => item.createdAt);
@@ -569,9 +670,9 @@ function PhoneTaskBlock({
         <h3 className={`mt-1 text-base font-bold ${active ? "text-blue-950" : "text-slate-900"}`}>
           {onFocusTask ? <button type="button" className="text-left hover:underline" onClick={onFocusTask}>{task.title || "Call this Contact"}</button> : (task.title || "Call this Contact")}
         </h3>
-        <p className={`mt-1 text-sm ${active ? "text-blue-900" : "text-slate-600"}`}>{contact?.name || "Contact"} · {phone || "No phone number"}</p>
+        <p className={`mt-1 text-sm ${active ? "text-blue-900" : "text-slate-600"}`}>{contact?.name || "Contact"} · {phoneSummary}</p>
       </div>
-      {showDial ? <div className="flex shrink-0"><CallActionButton phone={phone} state={actionState} onCallOpening={onCallOpening}/></div> : null}
+      {showDial ? <div className="flex shrink-0"><CallWithQuoButton options={dialOptions} state={actionState} onCallOpening={onCallOpening}/></div> : null}
     </div>
 
     <div className={`mt-5 rounded-xl border ${active ? "border-blue-100/80 bg-white/70" : "border-slate-200 bg-white"}`}>
@@ -586,7 +687,13 @@ function PhoneTaskBlock({
       </button>
       {scriptOpen && <div className="border-t border-slate-100 px-4 pb-4 pt-3 text-sm text-slate-800">
         {scriptLoading ? <p className="text-slate-500">Loading call script…</p>
-          : script ? <p className="whitespace-pre-wrap leading-6 text-slate-700">{script.content || "No call content yet."}</p>
+          : script ? (
+            <PhoneCallCopy
+              script={script}
+              bodyClassName="text-slate-700"
+              labelClassName="mb-1 text-[11px] font-semibold tracking-wide text-slate-500"
+            />
+          )
           : <p className="text-slate-500">No call content yet.</p>}
       </div>}
     </div>

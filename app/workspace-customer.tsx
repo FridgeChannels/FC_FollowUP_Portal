@@ -457,6 +457,8 @@ function toCustomerContacts(contacts: BrandContact[]): Contact[] {
     contactRole: item.contactRole || undefined,
     email: item.email || undefined,
     phone: item.phone || undefined,
+    directPhone: item.directPhone || undefined,
+    officePhone: item.officePhone || undefined,
     whatsapp: item.phone || undefined,
     linkedin: item.linkedin || undefined,
     preferredChannel: item.email ? "Email" : item.linkedin ? "LinkedIn" : "Phone",

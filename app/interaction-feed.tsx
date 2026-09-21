@@ -10,7 +10,7 @@ import { BombInstance, Channel, Contact, CPCode, CP_CODES, Interaction, Schedule
 import { BombExecutionPlan, formatEasternDateTime } from "./bomb-plan";
 import { BrandReplyBox, inboundNeedsComposer } from "./brand-reply-box";
 import { ChannelIcon } from "./channel-icon";
-import { PhoneTaskBoard, UnqualifiedRecallForm } from "./phone-task-board";
+import { PhoneTaskBoard, UnqualifiedRecallForm, type QuoDialOpening } from "./phone-task-board";
 import { QuoCallPanel } from "./quo-call-panel";
 import { useWorkspace } from "./workspace-store";
 import { MessageMediaPreview, MessageMediaThumbnails } from "./message-media";
@@ -213,7 +213,7 @@ export function InteractionFeed({
   activeTaskId?: string | null;
   headerContactName?: string;
   onSelectTask?: (taskId: string) => void;
-  onCallOpening?: () => void;
+  onCallOpening?: (info: QuoDialOpening) => void;
   callerReviewTaskId?: string | null;
   callerReviewHasConnectedCall?: boolean;
   callerReviewCanSubmit?: boolean;
@@ -872,6 +872,9 @@ function ThreadMessages({
           />
         </div> : null}
         {phoneCall && item.quo && canReviewCalls && callReview?.status === "Awaiting Review" ? recallTaskId === (item.taskId || item.id) ? <div className="mt-4"><UnqualifiedRecallForm reason={recallReason} onReason={setRecallReason} confirming={reviewingTaskId===item.taskId} onCancel={() => { setRecallTaskId(null); setRecallReason(""); }} onConfirm={() => { void Promise.resolve(onReviewCall(item.id, item.taskId, "Unqualified", recallReason.trim())).then(() => { setRecallTaskId(null); setRecallReason(""); }); }}/></div> : <div className="mt-4 flex flex-wrap gap-2"><Button size="sm" className="bg-emerald-600 text-white hover:bg-emerald-700" disabled={reviewingTaskId===item.taskId} onClick={() => void onReviewCall(item.id, item.taskId, "Qualified")}><CheckCircle2 className="mr-1.5 size-3.5"/>{reviewingTaskId===item.taskId?"Saving…":"Mark as Qualified"}</Button><Button size="sm" className="bg-rose-600 text-white hover:bg-rose-700" disabled={reviewingTaskId===item.taskId} onClick={() => { setRecallTaskId(item.taskId || item.id); setRecallReason(""); }}><RotateCcw className="mr-1.5 size-3.5"/>Unqualified & Recall</Button></div> : null}
+        </>}
+        {/* Keep Needs Reply composer visible even when older bubbles are collapsed
+            (e.g. a newer OmniReach Pending message became the thread "latest"). */}
         {inbound && !phoneCall && contact && (
           <BrandReplyBox
             customerId={item.customerId}
@@ -883,7 +886,6 @@ function ThreadMessages({
             onSend={onSend}
           />
         )}
-        </>}
         </div>
       </article>;
     })}

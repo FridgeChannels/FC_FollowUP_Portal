@@ -27,9 +27,10 @@ import { Spinner } from "@/components/ui/spinner";
 import { DEFAULT_TASK_PAGE_SIZE } from "@/lib/notion/owner-filter";
 import { ChangeCPDialog, LaunchBombDialog, LaunchOmniReachButton, ReplyDialog, ACTIVE_OMNIREACH_BLOCK_REASON } from "./workspace-customer";
 import { InteractionFeed } from "./interaction-feed";
-import { callScriptFromConversations } from "./phone-task-board";
+import { CallWithQuoButton, callScriptFromConversations, PhoneCallCopy, type QuoDialOpening } from "./phone-task-board";
 import { Status } from "./workspace-pages";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { dialPhoneOptions, formatDialPhoneSummary } from "@/lib/dial-phones";
 import { devCallPhoneOnClient } from "@/lib/quo/dev-call-phone";
 import { partitionRoundCalls, reviewRoundsForTask, type CallReviewRound } from "@/lib/call-review-history";
 import { taskStatusForCallReview, type CallReviewMetadata, type CallReviewStatus } from "@/lib/call-review-metadata";
@@ -433,6 +434,8 @@ function toTaskContact(item: BrandContact): Contact {
     contactRole: item.contactRole || undefined,
     email: item.email || undefined,
     phone: item.phone || undefined,
+    directPhone: item.directPhone || undefined,
+    officePhone: item.officePhone || undefined,
     whatsapp: item.phone || undefined,
     linkedin: item.linkedin || undefined,
     preferredChannel: item.email ? "Email" : item.linkedin ? "LinkedIn" : "Phone",
@@ -812,13 +815,14 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
       remote: true,
     }] : []),
   ];
-  const onCallOpening = () => {
+  const onCallOpening = (info?: Partial<QuoDialOpening>) => {
     if (!task.remote) return;
+    const taskId = info?.taskId || liveTask.id;
     setQuoPollUntil(Date.now() + QUO_POLL_WINDOW_MS);
-    void fetch(`/api/tasks/${task.id}`, {
+    void fetch(`/api/tasks/${taskId}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "quo-attempt" }),
+      body: JSON.stringify({ action: "quo-attempt", phone: info?.phone }),
       keepalive: true,
     }).then(async (response) => {
       if (response.ok) applyTaskPayload(await response.json() as TaskPayload);
@@ -976,30 +980,40 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
   </div>;
 }
 
-function CallBrief({ task, contact, completed, onCallOpening, script = null, scriptLoading = false, review }: { task: UnifiedTask; contact: Contact; completed: boolean; onCallOpening: () => void; script?: ReturnType<typeof callScriptFromConversations>; scriptLoading?: boolean; review?: CallReviewView }) {
-  const phone = (devCallPhoneOnClient() || contact.phone || task.contactPhone || "").trim();
+function CallBrief({ task, contact, completed, onCallOpening, script = null, scriptLoading = false, review }: { task: UnifiedTask; contact: Contact; completed: boolean; onCallOpening: (info?: Partial<QuoDialOpening>) => void; script?: ReturnType<typeof callScriptFromConversations>; scriptLoading?: boolean; review?: CallReviewView }) {
+  const dialOptions = dialPhoneOptions(contact, task.contactPhone, devCallPhoneOnClient());
   const cancelled = isCancelledTaskStatus(task.status);
   const failed = task.status === "Failed";
-  const callAction = completed && !cancelled && !failed
-    ? <Button disabled className="bg-emerald-600 text-white hover:bg-emerald-600"><CheckCircle2 className="mr-2 size-4"/>Call completed</Button>
+  const actionState = completed && !cancelled && !failed
+    ? "completed"
     : cancelled
-      ? <Button disabled variant="secondary"><Phone className="mr-2 size-4"/>Call cancelled</Button>
+      ? "cancelled"
       : failed
-        ? <Button disabled className="bg-rose-100 text-rose-800 hover:bg-rose-100"><Phone className="mr-2 size-4"/>Call failed</Button>
-        : phone
-          ? <Button asChild><a href={`openphone://dial?number=${encodeURIComponent(phone)}&action=call`} onClick={onCallOpening}><Phone className="mr-2 size-4"/>Call with Quo</a></Button>
-          : <Button disabled><Phone className="mr-2 size-4"/>Call with Quo</Button>;
+        ? "failed"
+        : "open";
   return <section className="mb-6 rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
     <div className="flex flex-wrap items-start justify-between gap-4">
       <div className="min-w-0">
         <div className="text-[11px] font-semibold tracking-[.14em] text-blue-700">Caller brief</div>
         <h3 className="mt-1 text-base font-bold text-blue-950">{task.summary || "Call this Contact"}</h3>
-        <p className="mt-1 text-sm text-blue-900">{contact.name} · {phone || "No phone number"}</p>
+        <p className="mt-1 text-sm text-blue-900">{contact.name} · {formatDialPhoneSummary(dialOptions)}</p>
       </div>
-      <div className="flex shrink-0 flex-wrap gap-2">{callAction}</div>
+      <div className="flex shrink-0 flex-wrap gap-2">
+        <CallWithQuoButton
+          options={dialOptions}
+          state={actionState}
+          onCallOpening={(phone) => onCallOpening({ phone })}
+        />
+      </div>
     </div>
     {(scriptLoading || script || review) && <div className="mt-4 text-sm text-blue-950">
-      {scriptLoading ? <p className="text-sm text-blue-800">Loading call script…</p> : script ? <p className="whitespace-pre-wrap leading-6 text-blue-950/85">{script.content || "No call content yet."}</p> : null}
+      {scriptLoading ? <p className="text-sm text-blue-800">Loading call script…</p> : script ? (
+        <PhoneCallCopy
+          script={script}
+          bodyClassName="text-sm text-blue-950/85"
+          labelClassName="mb-1 text-[11px] font-semibold tracking-wide text-blue-700"
+        />
+      ) : null}
       {review?.recallRequested ? <p className="mt-3 text-xs font-semibold text-rose-700">Recall requested · Reassigned to Beril</p>
         : review?.status === "Qualified" ? <p className="mt-3 text-xs font-semibold text-emerald-700">Call review completed · qualified</p>
         : review?.status === "Awaiting Review" ? <p className="mt-3 text-xs font-semibold text-amber-800">Connected · awaiting Account Manager review</p>

@@ -28,6 +28,8 @@ function mapKeyPerson(page: NotionPage | null, fallbackName: string) {
   const name = titleFromProperties(properties) || fallbackName;
   const email = propertyText(properties.Email) || null;
   const phone = propertyText(properties.Phone) || null;
+  const directPhone = propertyText(properties["Direct Phone"]) || null;
+  const officePhone = propertyText(properties["Office Phone"]) || null;
   const emailStatus = propertyText(properties["Email Verified Status"]);
   return {
     name,
@@ -36,6 +38,8 @@ function mapKeyPerson(page: NotionPage | null, fallbackName: string) {
     role: asRole(propertyText(properties.OwnerOrConnector)),
     email,
     phone,
+    directPhone,
+    officePhone,
     linkedin: propertyText(properties["LinkedIn URL"]) || null,
     emailValid: !!email && VERIFIED_EMAIL_STATUSES.has(emailStatus),
     phoneValid: !!phone,

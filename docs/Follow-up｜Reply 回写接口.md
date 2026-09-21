@@ -227,6 +227,9 @@ curl -sS -X POST "http://127.0.0.1:5173/api/replies" \
 
 ## Phone
 
+Phone 主路径是 Quo webhook（`/api/webhooks/quo`）+ Call Review，匹配规则见 [Quo 电话回写匹配](./Follow-up｜Quo%20电话回写匹配.md)。本节 `/api/replies` 仅作补充验证。
+
+
 ```json
 {
   "taskId": "<Follow-up Task 页面 ID 或标题>",
