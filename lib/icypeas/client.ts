@@ -193,19 +193,25 @@ export async function reverseEmailLookup(email: string) {
     method: "POST",
     body: JSON.stringify({ email: trimmed }),
   });
-  const status = payload.status || payload.item?.status || "";
+  let status = payload.status || payload.item?.status || "";
   const immediate =
     linkedinUrlFromUnknown(payload.results) || linkedinUrlFromUnknown(payload.result);
   if (immediate) return { linkedinUrl: immediate, status: status || "FOUND" };
 
   const id = payload.searchId || payload.item?._id || null;
-  if (id && (!status || PENDING_STATUSES.has(status))) {
-    const item = await pollSingleSearch(id);
-    const itemStatus = item.status || "";
+  // Always poll when we have an id and no URL yet (unless already a hard miss).
+  if (
+    id &&
+    status !== "NOT_FOUND" &&
+    status !== "INSUFFICIENT_FUNDS"
+  ) {
+    const item = await pollSingleSearch(id, { attempts: 20, delayMs: 1500 });
+    status = item.status || status;
     const url = linkedinUrlFromUnknown(item.results);
-    return { linkedinUrl: url, status: itemStatus };
+    if (url) return { linkedinUrl: url, status };
+    return { linkedinUrl: null as string | null, status };
   }
-  return { linkedinUrl: null as string | null, status };
+  return { linkedinUrl: null as string | null, status: status || "NOT_FOUND" };
 }
 
 export async function urlSearchProfile(input: {
