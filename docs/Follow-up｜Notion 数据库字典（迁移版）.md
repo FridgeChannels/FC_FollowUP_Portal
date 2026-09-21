@@ -392,7 +392,8 @@ Portal 业务短名：`NONE`（无关联）、`CP1`、`CP2`、`CP3`（及可能�
 | OwnerOrConnector | select | Owner / Connector |
 | Email | email | 渠道可用性 |
 | Email Verified Status | status | `Verified` / `Icypeas Verified` → emailValid |
-| Phone | phone_number | SMS/WhatsApp/Phone |
+| Phone | phone_number | SMS / Phone |
+| WhatsApp Number | phone_number | WhatsApp 渠道可用性（有值才可创建） |
 | LinkedIn URL | url | LinkedIn 渠道 |
 
 其余字段（社媒、ColdReach、研究状态等）属主数据运营，迁移建议整库保留，Follow-up 层不复制。

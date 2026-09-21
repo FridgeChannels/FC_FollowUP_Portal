@@ -1,4 +1,5 @@
 import type { BrandActivity, BrandContact, BrandListItem, BrandTask } from "../brand-list";
+import { endpointForChannel } from "../channel-availability";
 import { firstRelationId, queryFollowupClientPages, retrievePage } from "./client";
 import { listFollowupContacts } from "./contacts";
 import { findConversationsByThreadId } from "./conversations";
@@ -24,9 +25,7 @@ function normalizeName(value: string) {
 }
 
 export function senderForChannel(contact: BrandContact, channel: string) {
-  if (channel === "Email") return contact.email || "";
-  if (channel === "LinkedIn") return contact.linkedin || "";
-  return contact.phone || "";
+  return endpointForChannel(contact, channel);
 }
 
 export function pickReplyTaskForChannel(

@@ -1,4 +1,5 @@
 import type { BrandActivity, BrandContact } from "../brand-list";
+import { contactMatchesChannelSender } from "../channel-availability";
 import {
   createPage,
   firstRelationId,
@@ -98,32 +99,11 @@ type ResolvedTarget = {
 };
 
 export function contactMatchesReplySender(
-  contact: Pick<BrandContact, "email" | "phone" | "linkedin">,
+  contact: Pick<BrandContact, "email" | "phone" | "whatsapp" | "linkedin">,
   channel: string,
   sender: string,
 ) {
-  const value = sender.trim();
-  if (!value) return false;
-  if (channel === "Email") {
-    return (contact.email || "").trim().toLowerCase() === value.toLowerCase();
-  }
-  if (channel === "LinkedIn") {
-    return !!contact.linkedin && normalizeLinkedin(contact.linkedin) === normalizeLinkedin(value);
-  }
-  const left = normalizePhone(contact.phone || "");
-  const right = normalizePhone(value);
-  if (!left || !right) return false;
-  return left === right || left.endsWith(right) || right.endsWith(left);
-}
-
-function normalizePhone(value: string) {
-  return value.replace(/\D/g, "");
-}
-
-function normalizeLinkedin(value: string) {
-  const trimmed = value.trim().replace(/\/+$/, "");
-  const match = trimmed.match(/linkedin\.com\/in\/([^/?#]+)/i);
-  return (match?.[1] || trimmed).toLowerCase();
+  return contactMatchesChannelSender(contact, channel, sender);
 }
 
 function asChannel(value?: string) {

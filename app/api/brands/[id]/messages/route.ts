@@ -1,7 +1,8 @@
 import { canWriteBrand } from "@/lib/brand-access";
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
-import { firstRelationId, propertyText, relationIds, retrievePage, titleFromProperties } from "@/lib/notion/client";
-import { listFollowupContactIds } from "@/lib/notion/contacts";
+import { channelReachable, unavailableChannelMessage } from "@/lib/channel-availability";
+import { firstRelationId, propertyText, relationIds, retrievePage } from "@/lib/notion/client";
+import { listFollowupContactIds, mapFollowupContact } from "@/lib/notion/contacts";
 import { mapFollowupClientPage } from "@/lib/notion/followup-clients";
 import {
   createHumanOutbound,
@@ -63,14 +64,18 @@ export async function POST(request: Request, { params }: Params) {
     if (contactClientId && contactClientId !== id) {
       return Response.json({ error: "Contact not found on this brand" }, { status: 400 });
     }
-    const contactName = titleFromProperties(contactPage.properties) || "Contact";
-    const contactFollowupStatus = propertyText(contactPage.properties?.["Follow-up Status"]) || null;
-    const contactFollowupMode = propertyText(contactPage.properties?.["Follow-up Mode"]) || null;
+    const contact = await mapFollowupContact(contactPage);
+    const contactName = contact.name || "Contact";
+    const contactFollowupStatus = contact.followupStatus;
+    const contactFollowupMode = contact.followupMode;
 
     const channel = body.channel || "";
     const object = (body.object ?? body.subject)?.trim() || "";
     if (channel === "Email" && !object) {
       return Response.json({ error: "object (email subject) is required for Email" }, { status: 400 });
+    }
+    if (!channelReachable(contact, channel)) {
+      return Response.json({ error: unavailableChannelMessage(channel) }, { status: 400 });
     }
     const attachments = channelSupportsMedia(channel)
       ? sanitizeMediaAttachments(body.attachments).filter((item) => isAllowedS3MediaUrl(item.url))
@@ -123,7 +128,7 @@ export async function POST(request: Request, { params }: Params) {
     const status =
       message.includes("404")
         ? 404
-        : /LinkedIn|quota|capacity|reply|open LinkedIn|Daily Max|active sender|paused|No available send slot|needs review|Channel Daily Max|Unsupported channel/i.test(message)
+        : /LinkedIn|quota|capacity|reply|open LinkedIn|Daily Max|active sender|paused|No available send slot|needs review|Channel Daily Max|Unsupported channel|unavailable/i.test(message)
           ? 400
           : 500;
     return Response.json({ error: message }, { status });

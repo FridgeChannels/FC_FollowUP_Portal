@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   buildTemplateVariableContext,
+  ownerNameFromContacts,
   resolveOutboundFields,
   resolveTemplateVariables,
 } from "./template-variables.ts";
@@ -98,6 +99,47 @@ describe("template variable engine", () => {
     assert.equal(
       resolveTemplateVariables("Met at {{Follow-up Exhibition}}", withExhibition),
       "Met at Expo West 2026",
+    );
+  });
+
+  it("replaces owner_name from the brand Owner, not the selected contact", () => {
+    const connectorLaunch = buildTemplateVariableContext({
+      companyName: "Oxyfresh",
+      hasContact: true,
+      contactName: "John Smith",
+      ownerOrConnector: "Connector",
+      ownerName: "Melissa Gulbranson",
+    });
+    assert.equal(
+      resolveTemplateVariables("Hi {{contact_name}}, please intro {{owner_name}}", connectorLaunch),
+      "Hi John Smith, please intro Melissa Gulbranson",
+    );
+  });
+
+  it("fills owner_name from the selected contact when that person is the Owner", () => {
+    assert.equal(resolveTemplateVariables("{{owner_name}}", context), "Melissa Gulbranson");
+  });
+
+  it("keeps owner_name until an Owner is available", () => {
+    const connectorOnly = buildTemplateVariableContext({
+      companyName: "Oxyfresh",
+      hasContact: true,
+      contactName: "John Smith",
+      ownerOrConnector: "Connector",
+    });
+    assert.equal(
+      resolveTemplateVariables("Path to {{owner_name}}", connectorOnly),
+      "Path to {{owner_name}}",
+    );
+  });
+
+  it("picks the Owner contact from a brand roster", () => {
+    assert.equal(
+      ownerNameFromContacts([
+        { role: "Connector", name: "John Smith" },
+        { role: "Owner", name: "Melissa Gulbranson" },
+      ]),
+      "Melissa Gulbranson",
     );
   });
 

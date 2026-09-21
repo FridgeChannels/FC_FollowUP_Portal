@@ -49,7 +49,7 @@ function mapKeyPerson(page: NotionPage | null, fallbackName: string) {
   };
 }
 
-async function mapFollowupContact(page: NotionPage): Promise<BrandContact> {
+export async function mapFollowupContact(page: NotionPage): Promise<BrandContact> {
   const properties = page.properties || {};
   const fallbackName = titleFromProperties(properties) || "Untitled Contact";
   const keyPersonId = firstRelationId(properties["Key Person"]);

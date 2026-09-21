@@ -12,14 +12,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { SendTimingToggle, type DeliveryMode } from "./send-timing-toggle";
 import { MessageMediaInputFrame, useMessageMedia } from "./message-media";
 import type { MediaAttachment } from "@/lib/media-attachments";
+import { channelAvailable } from "@/lib/channel-availability";
 
 const show = (result: { ok: boolean; message: string }) => result.ok ? toast.success(result.message) : toast.error(result.message);
-const channelAvailable = (contact: Contact, channel: Channel) =>
-  channel === "Email" ? !!contact.email && contact.emailValid
-  : channel === "Phone" || channel === "SMS" ? !!contact.phone && contact.phoneValid
-  : channel === "WhatsApp" ? !!contact.whatsapp
-  : channel === "LinkedIn" ? !!contact.linkedin
-  : false;
 
 function activityTime(value?: string) {
   if (!value) return 0;

@@ -44,6 +44,7 @@ export async function GET(request: Request) {
       contactOrder: contact.contactOrder,
       email: contact.email,
       phone: contact.phone,
+      whatsapp: contact.whatsapp,
       linkedin: contact.linkedin,
       taskId: task?.id || outbound?.taskId || null,
       taskChannel: task?.channel || outbound?.channel || null,

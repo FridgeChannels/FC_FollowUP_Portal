@@ -26,6 +26,7 @@
     "test:icypeas": "node --experimental-strip-types --test lib/icypeas/enrich.test.ts",
     "test:fullenrich": "node --experimental-strip-types --test lib/fullenrich/helpers.test.ts lib/phone-format.test.ts",
     "test:wa-probe": "node --experimental-strip-types --test lib/wa-probe/helpers.test.ts",
+    "test:channel-availability": "node --experimental-strip-types --test lib/channel-availability.test.ts",
     "test:interaction-cp": "node --experimental-strip-types --test lib/interaction-cp.test.ts",
     "simulate:replies": "node scripts/simulate-channel-replies.mjs",
     "simulate:replies:email": "node scripts/simulate-channel-replies.mjs --channel Email",

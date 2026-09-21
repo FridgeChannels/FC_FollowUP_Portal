@@ -19,6 +19,7 @@ export const templateVariables: TemplateVariable[] = [
   { key: "contact_role", label: "Contact role", category: "Contact", description: "KeyPersonDB → Contact Role" },
   { key: "email", label: "Email", category: "Contact", description: "KeyPersonDB → Email" },
   { key: "phone", label: "Phone", category: "Contact", description: "KeyPersonDB → Phone" },
+  { key: "owner_name", label: "Owner name", category: "Contact", description: "KeyPersonDB → name of the Owner on this brand" },
   { key: "owner_or_connector", label: "Owner or Connector", category: "Contact", description: "KeyPersonDB → OwnerOrConnector" },
   { key: "LinkedIn URL", label: "LinkedIn URL", category: "Contact", description: "KeyPersonDB → LinkedIn URL" },
   { key: "Sender Name", label: "Sender name", category: "Sender", description: ".env → SENDER_NAME" },
@@ -34,11 +35,19 @@ export type TemplateVariableSource = {
   contactRole?: string | null;
   email?: string | null;
   phone?: string | null;
+  ownerName?: string | null;
   ownerOrConnector?: string | null;
   linkedinUrl?: string | null;
   senderName?: string | null;
   hasContact?: boolean;
 };
+
+export function ownerNameFromContacts(
+  contacts?: Array<{ role?: string | null; name?: string | null }> | null,
+) {
+  const owner = contacts?.find((item) => item.role === "Owner" && item.name?.trim());
+  return owner?.name?.trim() || null;
+}
 
 export type TemplateVariableContext = Record<string, string>;
 
@@ -92,6 +101,9 @@ function contextValue(context: TemplateVariableContext, key: string) {
 
 export function buildTemplateVariableContext(source: TemplateVariableSource): TemplateVariableContext {
   const senderName = (source.senderName ?? getSenderName()).trim();
+  const ownerName =
+    source.ownerName?.trim() ||
+    (source.ownerOrConnector?.trim() === "Owner" ? source.contactName?.trim() || "" : "");
   const context: TemplateVariableContext = {
     company_name: source.companyName?.trim() || "",
     product_description: source.productDescription?.trim() || "",
@@ -100,6 +112,7 @@ export function buildTemplateVariableContext(source: TemplateVariableSource): Te
     "Sender Name": senderName,
     sender_name: senderName,
   };
+  if (ownerName) context.owner_name = ownerName;
   const hasContact = source.hasContact === true || [
     source.contactName,
     source.contactTitle,

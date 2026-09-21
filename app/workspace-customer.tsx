@@ -28,9 +28,10 @@ import { ChannelIcon, ChannelOption } from "./channel-icon";
 import { SendTimingToggle, type DeliveryMode } from "./send-timing-toggle";
 import { MessageMediaInputFrame, useMessageMedia } from "./message-media";
 import type { MediaAttachment } from "@/lib/media-attachments";
-import { buildTemplateVariableContext, resolveLaunchStepCopy } from "@/lib/template-variables";
+import { buildTemplateVariableContext, ownerNameFromContacts, resolveLaunchStepCopy } from "@/lib/template-variables";
 import { brandHasActiveOmniReach } from "@/lib/notion/reply-inbox";
 import { buildInteractionCpFallbacks, resolveInteractionDisplayCp } from "@/lib/interaction-cp";
+import { channelAvailable } from "@/lib/channel-availability";
 import { cn } from "@/lib/utils";
 
 const show=(r:{ok:boolean;message:string})=>r.ok?toast.success(r.message):toast.error(r.message);
@@ -117,7 +118,6 @@ const Status=({value}:{value:string})=><Badge className={value.includes("Bomb")|
 function BadgeSelect({value,options,onChange,disabled}:{value:string;options:readonly string[];onChange:(value:string)=>void;disabled?:boolean}){
   return <Select value={value||undefined} onValueChange={onChange} disabled={disabled}><SelectTrigger className="h-auto w-auto gap-0 border-0 bg-transparent p-0 shadow-none focus-visible:ring-0 [&>svg]:hidden">{value?<Status value={value}/>:<span className="text-xs text-slate-400">—</span>}</SelectTrigger><SelectContent>{options.map(item=><SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent></Select>;
 }
-const channelAvailable=(c:Contact,ch:Channel)=>ch==="Email"?!!c.email&&c.emailValid:ch==="Phone"||ch==="SMS"?!!c.phone&&c.phoneValid:ch==="WhatsApp"?!!c.whatsapp:ch==="LinkedIn"?!!c.linkedin:false;
 const MESSAGE_CHANNELS:Channel[]=["Email","Phone","SMS","WhatsApp","LinkedIn"];
 const ACTIVITY_CHANNELS = new Set<Channel>(MESSAGE_CHANNELS);
 
@@ -1279,6 +1279,7 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
   const selected=previewOnly?remoteDetail:localBombs.find(b=>b.id===bombId);
   const targets=contacts||c?.contacts||[];
   const person=targets.find(t=>t.id===target);
+  const ownerName=ownerNameFromContacts(targets);
   const templateContext=buildTemplateVariableContext({
     companyName:companyName||c?.name,
     productDescription,
@@ -1290,6 +1291,7 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
     contactRole:person?.contactRole,
     email:person?.email,
     phone:person?.phone,
+    ownerName,
     ownerOrConnector:person?.role,
     linkedinUrl:person?.linkedin,
   });
@@ -1337,7 +1339,7 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
       next[s.id]=resolveLaunchStepCopy({subject:s.subject,content:s.content,callGoal:s.callGoal,script:s.script},templateContext);
     });
     setCopies(next);
-  },[selected,target,companyName,productDescription,matchedCategory,followupExhibition]);
+  },[selected,target,companyName,productDescription,matchedCategory,followupExhibition,ownerName]);
   const updateCopy=(id:string,patch:Partial<LaunchStepCopy>)=>setCopies(prev=>({...prev,[id]:{...prev[id],...patch}}));
   const unavailable=selected&&person
     ? selected.steps.filter((s)=>!channelAvailable(person,s.channel)).map((s)=>s.channel)

@@ -1,4 +1,5 @@
 import type { BrandContact } from "../brand-list";
+import { channelReachable } from "../channel-availability";
 import {
   mergeLinkedInNotes,
   prepareLinkedInOutbound,
@@ -18,6 +19,7 @@ import { CHANNELS } from "../scheduling-engine/types";
 import { interactionCpCode } from "../outreach-domain";
 import {
   buildTemplateVariableContext,
+  ownerNameFromContacts,
   resolveOutboundFields,
 } from "../template-variables";
 import { retrieveFollowupBomb } from "./bombs";
@@ -80,12 +82,6 @@ function asFollowUpMode(value?: string | null): FollowUpMode | undefined {
 
 function asPriority(value?: string | null): Priority | undefined {
   return value === "P0" || value === "P1" || value === "P2" ? value : undefined;
-}
-
-function channelReachable(contact: BrandContact, channel: Channel) {
-  if (channel === "Email") return contact.emailValid;
-  if (channel === "LinkedIn") return !!contact.linkedin;
-  return contact.phoneValid;
 }
 
 function outboundFromTemplate(
@@ -258,6 +254,7 @@ export async function launchFollowupBomb(input: {
     contactRole: contact.contactRole,
     email: contact.email,
     phone: contact.phone,
+    ownerName: ownerNameFromContacts(contacts),
     ownerOrConnector: contact.role,
     linkedinUrl: contact.linkedin,
   });
