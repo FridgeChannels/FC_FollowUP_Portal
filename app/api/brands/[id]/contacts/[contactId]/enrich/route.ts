@@ -54,6 +54,11 @@ export async function POST(request: Request, { params }: Params) {
       contactId,
     });
 
+    console.info(
+      `[enrich] brand=${id} contact=${contactId} applied=${Object.keys(result.applied).length} steps:`,
+      result.steps,
+    );
+
     return Response.json(result);
   } catch (error) {
     const mapped = mapEnrichError(error);

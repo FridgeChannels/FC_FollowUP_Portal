@@ -804,8 +804,32 @@ type EnrichPreview = {
   whatsapp?: string | null;
   linkedin?: string | null;
   pending?: EnrichField[];
+  /** Compact summary: found + misses, e.g. Email (existing) · LinkedIn not found */
   note?: string;
 };
+
+/** Short LinkedIn / WhatsApp verdicts for the green summary line. */
+function enrichMissLabels(steps: string[] | undefined, found: {
+  linkedin?: string | null;
+  whatsapp?: string | null;
+}) {
+  const labels: string[] = [];
+  const text = (steps || []).join("\n");
+
+  if (!found.linkedin) {
+    if (/LinkedIn not found/i.test(text)) labels.push("LinkedIn not found");
+    else if (/email→LinkedIn skipped|LinkedIn skipped/i.test(text)) labels.push("LinkedIn not found");
+  }
+  if (!found.whatsapp) {
+    if (/no WhatsApp on this Phone/i.test(text)) labels.push("no WhatsApp on this phone");
+    else if (/WA probe skipped|inconclusive|still pending/i.test(text)) {
+      labels.push("no WhatsApp on this phone");
+    } else if (/WA probe: checking/i.test(text) && !/WhatsApp registered/i.test(text)) {
+      labels.push("no WhatsApp on this phone");
+    }
+  }
+  return labels;
+}
 
 function BrandContactList({
   brandId,
@@ -872,50 +896,41 @@ function BrandContactList({
 
       const found = payload.found || {};
       const pending = (payload.conflicts || []).map((item) => item.field);
-      const foundAny = Boolean(
-        found.email ||
-          found.phone ||
-          found.directPhone ||
-          found.officePhone ||
-          found.whatsapp ||
-          found.linkedin,
-      );
-      if (foundAny) {
-        setPreviews((prev) => ({
-          ...prev,
-          [contactId]: {
-            email: found.email,
-            phone: found.phone,
-            directPhone: found.directPhone,
-            officePhone: found.officePhone,
-            whatsapp: found.whatsapp,
-            linkedin: found.linkedin,
-            pending,
-            note: [
-              found.email
-                ? `Email${payload.sources?.email ? ` (${payload.sources.email})` : ""}`
-                : null,
-              found.linkedin
-                ? `LinkedIn${payload.sources?.linkedin ? ` (${payload.sources.linkedin})` : ""}`
-                : null,
-              found.phone
-                ? `Phone${payload.sources?.phone ? ` (${payload.sources.phone})` : ""}`
-                : null,
-              found.directPhone
-                ? `Direct${payload.sources?.directPhone ? ` (${payload.sources.directPhone})` : ""}`
-                : null,
-              found.officePhone
-                ? `Office${payload.sources?.officePhone ? ` (${payload.sources.officePhone})` : ""}`
-                : null,
-              found.whatsapp
-                ? `WhatsApp${payload.sources?.whatsapp ? ` (${payload.sources.whatsapp})` : ""}`
-                : null,
-            ]
-              .filter(Boolean)
-              .join(" · "),
-          },
-        }));
-      }
+      const foundBits = [
+        found.email
+          ? `Email${payload.sources?.email ? ` (${payload.sources.email})` : ""}`
+          : null,
+        found.linkedin
+          ? `LinkedIn${payload.sources?.linkedin ? ` (${payload.sources.linkedin})` : ""}`
+          : null,
+        found.phone
+          ? `Phone${payload.sources?.phone ? ` (${payload.sources.phone})` : ""}`
+          : null,
+        found.directPhone
+          ? `Direct${payload.sources?.directPhone ? ` (${payload.sources.directPhone})` : ""}`
+          : null,
+        found.officePhone
+          ? `Office${payload.sources?.officePhone ? ` (${payload.sources.officePhone})` : ""}`
+          : null,
+        found.whatsapp
+          ? `WhatsApp${payload.sources?.whatsapp ? ` (${payload.sources.whatsapp})` : ""}`
+          : null,
+      ].filter(Boolean) as string[];
+      const missBits = enrichMissLabels(payload.steps, found);
+      const note = [...foundBits, ...missBits].join(" · ") || undefined;
+      setPreviews((prev) => ({
+        ...prev,
+        [contactId]: {
+          email: found.email,
+          phone: found.phone,
+          directPhone: found.directPhone,
+          officePhone: found.officePhone,
+          whatsapp: found.whatsapp,
+          linkedin: found.linkedin,
+          pending,
+          note,
+        },
+      }));
 
       const appliedCount = Object.keys(payload.applied || {}).length;
       if (appliedCount) {
@@ -928,21 +943,17 @@ function BrandContactList({
           Object.fromEntries(payload.conflicts.map((item) => [item.field, true])),
         );
         toast.message("发现与库内不一致的字段，请确认是否采用");
-      } else if (!appliedCount && !foundAny) {
+      } else if (!appliedCount && !found.linkedin && !found.whatsapp && !found.phone && !found.email) {
+        toast.message("未找到新的联系方式");
+      } else if (!appliedCount) {
         toast.message(
-          payload.notFound?.includes("phone")
-            ? "未找到新联系方式。Icypeas 不保证手机号；FullEnrich 也未返回 Phone。"
-            : "未找到新的联系方式",
+          missBits.length
+            ? `已处理 · ${missBits.join(" · ")}`
+            : "已回显找到的联系方式（与库内一致或待确认）",
         );
-      } else if (foundAny && !appliedCount) {
-        toast.message("已回显找到的联系方式（与库内一致或待确认）");
       }
 
-      if (payload.steps?.length) {
-        setEnrichStatus(payload.steps.slice(-2).join(" → "));
-      } else {
-        setEnrichStatus(null);
-      }
+      setEnrichStatus(null);
     } catch (error) {
       setEnrichStatus(null);
       toast.error(error instanceof Error ? error.message : "Enrichment failed");
@@ -1103,7 +1114,7 @@ function BrandContactList({
                   )}
                 </div>
                 {previewNote && (
-                  <p className="mt-1 pl-5 text-[11px] text-emerald-700">找到：{previewNote}</p>
+                  <p className="mt-1 pl-5 text-[11px] text-emerald-700">{previewNote}</p>
                 )}
                 {expanded && (
                   <div className="mt-2 grid gap-1.5">
