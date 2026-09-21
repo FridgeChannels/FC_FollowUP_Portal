@@ -285,7 +285,7 @@ test("OmniReach：同一客户每天只排 1 个渠道，5 个渠道至少跨 5 
   assert.equal(new Set(dates).size, 5);
 });
 
-test("人工 Send：忽略客户每日一渠，多渠道可同日落在渠道容量内", () => {
+test("人工 Send：忽略客户每日一渠，多渠道可同日落在渠道容量内（Phone 除外固定第 5 工作日）", () => {
   const channels: Channel[] = ["Email", "LinkedIn", "SMS", "WhatsApp", "Phone"];
   const plan = previewSchedule(input({
     start: "2026-09-14",
@@ -300,8 +300,12 @@ test("人工 Send：忽略客户每日一渠，多渠道可同日落在渠道容
     })],
   }));
   assert.equal(plan.scheduled.length, 5);
-  assert.equal(new Set(plan.scheduled.map(task => etDate(task.scheduledAt))).size, 1);
-  assert.equal(etDate(plan.scheduled[0]?.scheduledAt), "2026-09-14");
+  const byChannel = Object.fromEntries(plan.scheduled.map(task => [task.channel, etDate(task.scheduledAt)]));
+  assert.equal(byChannel.Email, "2026-09-14");
+  assert.equal(byChannel.LinkedIn, "2026-09-14");
+  assert.equal(byChannel.SMS, "2026-09-14");
+  assert.equal(byChannel.WhatsApp, "2026-09-14");
+  assert.equal(byChannel.Phone, "2026-09-18");
 });
 
 test("历史任务不挡客户每日一渠：同客户当天已有 Email，SMS 仍可排当天", () => {
@@ -336,7 +340,8 @@ test("OmniReach：客户每日 1 渠道按客户维度计算，不因联系人�
     })],
   }));
   assert.equal(etDate(plan.scheduled.find(task => task.contactId === "ct-1")?.scheduledAt), "2026-09-14");
-  assert.equal(etDate(plan.scheduled.find(task => task.contactId === "ct-2")?.scheduledAt), "2026-09-15");
+  // Phone targets the 5th US business day from start (Mon → Fri)
+  assert.equal(etDate(plan.scheduled.find(task => task.contactId === "ct-2")?.scheduledAt), "2026-09-18");
 });
 
 test("容量不足时更高 Task Priority 先占槽，P2 被顺延", () => {
@@ -423,7 +428,7 @@ test("多个客户共享同一渠道 Daily Max", () => {
   assert.equal(etDate(plan.scheduled.find(task => task.clientId === "c2")?.scheduledAt), "2026-09-15");
 });
 
-test("OmniReach：跨周末顺延——周五已占客户日，下一槽是下周一", () => {
+test("OmniReach：跨周末顺延——Email 周五、Phone 固定从第 5 工作日起", () => {
   const plan = previewSchedule(input({
     start: "2026-09-18",
     method: "Automated",
@@ -436,7 +441,70 @@ test("OmniReach：跨周末顺延——周五已占客户日，下一槽是下�
       }],
     })],
   }));
-  assert.deepEqual(plan.scheduled.map(task => etDate(task.scheduledAt)), ["2026-09-18", "2026-09-21"]);
+  // Fri=day1 … Thu=day5 → Phone on 2026-09-24
+  assert.deepEqual(plan.scheduled.map(task => etDate(task.scheduledAt)), ["2026-09-18", "2026-09-24"]);
+});
+
+test("Phone：从今天起（含）固定排到第 5 个美东工作日", () => {
+  const plan = previewSchedule(input({
+    start: "2026-09-14", // Monday
+    method: "Manual",
+    clients: [client({
+      clientId: "c1",
+      contacts: [{ contactId: "ct-1", followUpStatus: "Not Contacted", channels: [channel("Phone")] }],
+    })],
+  }));
+  assert.equal(etDate(plan.scheduled[0]?.scheduledAt), "2026-09-18"); // Friday
+  assert.equal(plan.scheduled[0]?.scheduledAt, easternDateTimeIso("2026-09-18", 9 * 60));
+});
+
+test("Phone：第 5 工作日满额后顺延到第 6 个工作日", () => {
+  const plan = previewSchedule(input({
+    start: "2026-09-14",
+    method: "Manual",
+    clients: [client({
+      clientId: "c1",
+      contacts: [{ contactId: "ct-1", followUpStatus: "Not Contacted", channels: [channel("Phone")] }],
+    })],
+    snapshot: {
+      dailyMax: { Email: 0, LinkedIn: 0, SMS: 0, WhatsApp: 0, Phone: 1 },
+      existingTasks: [{ clientId: "other", channel: "Phone", scheduledAt: "2026-09-18", status: "Pending" }],
+    },
+  }));
+  assert.equal(etDate(plan.scheduled[0]?.scheduledAt), "2026-09-21"); // next Monday = day 6
+});
+
+test("Phone：第 6 工作日也满时继续往后找", () => {
+  const plan = previewSchedule(input({
+    start: "2026-09-14",
+    method: "Manual",
+    clients: [client({
+      clientId: "c1",
+      contacts: [{ contactId: "ct-1", followUpStatus: "Not Contacted", channels: [channel("Phone")] }],
+    })],
+    snapshot: {
+      dailyMax: { Email: 0, LinkedIn: 0, SMS: 0, WhatsApp: 0, Phone: 1 },
+      existingTasks: [
+        { clientId: "other-1", channel: "Phone", scheduledAt: "2026-09-18", status: "Pending" },
+        { clientId: "other-2", channel: "Phone", scheduledAt: "2026-09-21", status: "Pending" },
+      ],
+    },
+  }));
+  assert.equal(etDate(plan.scheduled[0]?.scheduledAt), "2026-09-22"); // Tuesday = day 7
+});
+
+test("Phone：周末起算时从下一个工作日计为第 1 天", () => {
+  const plan = previewSchedule(input({
+    start: "2026-09-12", // Saturday
+    now: "2026-09-12T08:00:00-04:00",
+    method: "Manual",
+    clients: [client({
+      clientId: "c1",
+      contacts: [{ contactId: "ct-1", followUpStatus: "Not Contacted", channels: [channel("Phone")] }],
+    })],
+  }));
+  // Mon=1 … Fri=5
+  assert.equal(etDate(plan.scheduled[0]?.scheduledAt), "2026-09-18");
 });
 
 test("commit 只把 Scheduled 转成 TaskWrite，Needs Review 不写入", () => {

@@ -1,9 +1,12 @@
 import { dailyMaxFor, collectUsage, createCapacityBoard, findEarliestSlot, place } from "./capacity.ts";
 import {
   DEFAULT_TIME_INTERVAL_MINUTES,
+  PHONE_SCHEDULE_BUSINESS_DAY,
+  compareDateOnly,
   easternDateOnly,
   easternDateTimeIso,
   easternMinuteOfDayCeil,
+  nthUsBusinessDayOnOrAfter,
   parseScheduledAt,
   resolveWindow,
 } from "./calendar.ts";
@@ -11,6 +14,7 @@ import { evaluateEligibility } from "./eligibility.ts";
 import { sortCandidates } from "./priority.ts";
 import type {
   Candidate,
+  Channel,
   CommitResult,
   ScheduleInput,
   SchedulePlan,
@@ -51,11 +55,12 @@ export function previewSchedule(input: ScheduleInput): SchedulePlan {
       continue;
     }
 
+    const channelStart = channelWindowStart(candidate.channel, request.preferredStartDate, window.start);
     const scheduledAt = findEarliestSlot(
       board,
       candidate.channel,
       candidate.clientId,
-      window.start,
+      channelStart,
       window.end,
       now,
       placement,
@@ -121,6 +126,16 @@ export function commitSchedule(input: ScheduleInput): CommitResult {
     ...plan,
     writes: plan.scheduled.map(toTaskWrite),
   };
+}
+
+/**
+ * Phone always starts at the Nth US business day from preferredStartDate
+ * (inclusive). Other channels use the shared window start (earliest business day).
+ */
+function channelWindowStart(channel: Channel, preferredStartDate: string, windowStart: string): string {
+  if (channel !== "Phone") return windowStart;
+  const phoneStart = nthUsBusinessDayOnOrAfter(preferredStartDate, PHONE_SCHEDULE_BUSINESS_DAY);
+  return compareDateOnly(phoneStart, windowStart) >= 0 ? phoneStart : windowStart;
 }
 
 function toScheduled(candidate: Candidate, scheduledAt: string): ScheduledTask {

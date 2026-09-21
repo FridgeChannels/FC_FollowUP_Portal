@@ -1,6 +1,12 @@
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 export const DEFAULT_MAX_HORIZON_DAYS = 90;
+/**
+ * Phone tasks target this US business day counted from preferredStartDate
+ * (inclusive of the first business day on/after that date). Day 1 = start,
+ * so Monday → Friday when n = 5. Capacity overflow continues from day 6+.
+ */
+export const PHONE_SCHEDULE_BUSINESS_DAY = 5;
 export const SCHEDULE_TIME_ZONE = "America/New_York";
 export const WORK_WINDOW_START_MINUTES = 9 * 60;
 export const WORK_WINDOW_END_MINUTES = 17 * 60;
@@ -213,6 +219,21 @@ export function firstUsBusinessDayOnOrAfter(value: string): string {
 
 export function nextUsBusinessDay(value: string): string {
   return firstUsBusinessDayOnOrAfter(addCalendarDays(value, 1));
+}
+
+/**
+ * 1-indexed US business day on/after `value`.
+ * n=1 → firstUsBusinessDayOnOrAfter(value); n=5 → fifth business day (Mon→Fri).
+ */
+export function nthUsBusinessDayOnOrAfter(value: string, n: number): string {
+  if (!Number.isInteger(n) || n < 1) {
+    throw new Error(`n must be a positive integer, received: ${n}`);
+  }
+  let date = firstUsBusinessDayOnOrAfter(value);
+  for (let i = 1; i < n; i += 1) {
+    date = nextUsBusinessDay(date);
+  }
+  return date;
 }
 
 export function isDateOnlyScheduledAt(value: string): boolean {
