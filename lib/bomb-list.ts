@@ -90,6 +90,40 @@ export type BombDetail = BombListItem & {
   templates: BombTemplateItem[];
 };
 
+export function compactNotionId(id: string) {
+  return id.replace(/-/g, "").toLowerCase();
+}
+
+export function sameNotionId(left?: string | null, right?: string | null) {
+  return !!left && !!right && compactNotionId(left) === compactNotionId(right);
+}
+
+export function findByNotionId<T extends { id: string }>(items: T[], id?: string | null) {
+  if (!id) return undefined;
+  return items.find((item) => sameNotionId(item.id, id));
+}
+
+export function titleForNotionId(titles: Map<string, string>, id?: string | null) {
+  if (!id) return null;
+  return titles.get(id) || titles.get(compactNotionId(id)) || null;
+}
+
+export function setTitleForNotionId(titles: Map<string, string>, id: string, title: string) {
+  titles.set(id, title);
+  titles.set(compactNotionId(id), title);
+}
+
+export function attachBombScenario(bomb: BombDetail, scenarios: BombScenario[]): BombDetail {
+  const match = findByNotionId(scenarios, bomb.scenarioId);
+  if (!match) return bomb;
+  return {
+    ...bomb,
+    scenarioId: match.id,
+    scenarioName: bomb.scenarioName || match.name,
+    scenarioDescription: bomb.scenarioDescription || match.description || null,
+  };
+}
+
 export function isBombChannel(value: string | null | undefined): value is BombChannel {
   return !!value && (BOMB_CHANNELS as readonly string[]).includes(value);
 }

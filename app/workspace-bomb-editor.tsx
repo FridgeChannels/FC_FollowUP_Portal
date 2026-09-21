@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import {
   BOMB_CHANNELS,
   BOMB_TARGET_ROLES,
+  findByNotionId,
   isBombChannel,
   type BombDetail,
   type BombScenario,
@@ -48,6 +49,7 @@ type EditorDraft = {
   name: string;
   goal: string;
   cpId: string;
+  scenarioId: string;
   targetRole: string;
   priority: string;
   notes: string;
@@ -62,11 +64,32 @@ function draftCpId(bomb: BombDetail, cps: CurrentCpOption[]) {
   return cps.find((item) => item.id === name || item.name === name)?.id || selected?.id || "";
 }
 
-function draftFromBomb(bomb: BombDetail, cps: CurrentCpOption[] = []): EditorDraft {
+function draftScenarioId(bomb: BombDetail, scenarios: BombScenario[]) {
+  return findByNotionId(scenarios, bomb.scenarioId)?.id || bomb.scenarioId || "";
+}
+
+function scenarioChoices(bomb: BombDetail | null, scenarios: BombScenario[]) {
+  if (!bomb?.scenarioId || findByNotionId(scenarios, bomb.scenarioId)) return scenarios;
+  return [
+    {
+      id: bomb.scenarioId,
+      name: bomb.scenarioName || "Untitled Scenario",
+      description: bomb.scenarioDescription || "",
+    },
+    ...scenarios,
+  ];
+}
+
+function draftFromBomb(
+  bomb: BombDetail,
+  cps: CurrentCpOption[] = [],
+  scenarios: BombScenario[] = [],
+): EditorDraft {
   return {
     name: bomb.name,
     goal: bomb.goal,
     cpId: draftCpId(bomb, cps),
+    scenarioId: draftScenarioId(bomb, scenarios),
     targetRole: bomb.targetRole || "Connector",
     priority: bomb.priority || "P1",
     notes: bomb.notes || "",
@@ -241,7 +264,7 @@ export function BombEditor({ bombId }: { bombId: string }) {
         setBomb(payload.bomb);
         setScenarios(payload.scenarios || []);
         setCps(payload.cps || []);
-        setDraft(draftFromBomb(payload.bomb, payload.cps || []));
+        setDraft(draftFromBomb(payload.bomb, payload.cps || [], payload.scenarios || []));
         setError(undefined);
       })
       .catch((err: unknown) => {
@@ -281,6 +304,7 @@ export function BombEditor({ bombId }: { bombId: string }) {
           name: draft.name,
           goal: draft.goal,
           cpIds: draft.cpId ? [draft.cpId] : [],
+          scenarioId: draft.scenarioId || null,
           targetRole: draft.targetRole,
           status,
           templates: draft.steps.map((step) => ({
@@ -300,7 +324,7 @@ export function BombEditor({ bombId }: { bombId: string }) {
       if (!response.ok) throw new Error(payload.error || "Failed to save OmniReach");
       if (!payload.bomb) throw new Error("OmniReach was not saved");
       setBomb(payload.bomb);
-      setDraft(draftFromBomb(payload.bomb));
+      setDraft(draftFromBomb(payload.bomb, cps, scenarios));
       if (draft.status === "Active" && status !== "Active") {
         toast.success(
           payload.cancelledTasks
@@ -359,6 +383,10 @@ export function BombEditor({ bombId }: { bombId: string }) {
     draft.steps.some((step) => step.channel === "Phone" && (!step.callGoal || !step.script)) && "Phone goal/script",
     draft.steps.some((step) => !["Email", "Phone"].includes(step.channel) && !step.content) && "Message content",
   ].filter(Boolean);
+  const scenarioOptions = scenarioChoices(bomb, scenarios);
+  const selectedScenario =
+    findByNotionId(scenarioOptions, draft.scenarioId) || findByNotionId(scenarios, bomb?.scenarioId);
+  const scenarioDescription = selectedScenario?.description || bomb?.scenarioDescription;
 
   return (
     <div className="mx-auto max-w-[1480px]">
@@ -444,12 +472,32 @@ export function BombEditor({ bombId }: { bombId: string }) {
                   </SelectContent>
                 </Select>
               </label>
-              {scenarios.length ? (
-                <p className="md:col-span-2 text-xs text-slate-500">
-                  Scenario: {bomb?.scenarioName || "—"}
-                  {bomb?.scenarioDescription ? ` · ${bomb.scenarioDescription}` : ""}
-                </p>
-              ) : null}
+              <div className="text-sm font-medium">
+                Scenario
+                <Select
+                  value={draft.scenarioId || undefined}
+                  onValueChange={(value) => setDraft({ ...draft, scenarioId: value })}
+                >
+                  <SelectTrigger className="mt-2 w-full">
+                    <SelectValue placeholder="Select a scenario" />
+                  </SelectTrigger>
+                  <SelectContent position="popper">
+                    {scenarioOptions.map((item) => (
+                      <SelectItem key={item.id} value={item.id}>
+                        {item.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {scenarioDescription ? (
+                  <p className="mt-1 text-xs leading-5 text-slate-500">{scenarioDescription}</p>
+                ) : null}
+                {!scenarios.length && !bomb?.scenarioId ? (
+                  <p className="mt-1 text-xs text-amber-700">
+                    No Scenarios in Notion yet. Create one in Follow-up ScenarioDB first.
+                  </p>
+                ) : null}
+              </div>
             </div>
           </section>
           <section className="rounded-2xl bg-white p-5">

@@ -8,6 +8,8 @@ import {
   BOMB_TARGET_ROLES,
   isBombChannel,
   orderedBombChannels,
+  setTitleForNotionId,
+  titleForNotionId,
   type BombCpRef,
   type BombDetail,
   type BombListItem,
@@ -37,9 +39,11 @@ import {
 } from "./config";
 
 function titleMap(pages: NotionPage[]) {
-  return new Map(
-    pages.map((page) => [page.id, titleFromProperties(page.properties)]),
-  );
+  const titles = new Map<string, string>();
+  for (const page of pages) {
+    setTitleForNotionId(titles, page.id, titleFromProperties(page.properties));
+  }
+  return titles;
 }
 
 function mapTemplate(page: NotionPage): BombTemplateItem {
@@ -114,7 +118,7 @@ function mapBombPage(
     cp,
     cpIds: relationId ? [relationId] : cp ? [cp] : [],
     scenarioId: scenarioId || null,
-    scenarioName: (scenarioId && titles.get(scenarioId)) || null,
+    scenarioName: titleForNotionId(titles, scenarioId),
     channels: orderedBombChannels(
       templates.map((item) => item.channel).filter((item): item is string => !!item),
     ),
@@ -203,8 +207,10 @@ export async function retrieveFollowupBomb(id: string): Promise<BombDetail> {
 
   const titles = new Map<string, string>();
   const cps = [cp].filter((item): item is BombCpRef => !!item);
-  if (scenarioPage) {
-    titles.set(scenarioPage.id, titleFromProperties(scenarioPage.properties));
+  const scenarioTitle = scenarioPage ? titleFromProperties(scenarioPage.properties) : "";
+  if (scenarioPage && scenarioTitle) {
+    setTitleForNotionId(titles, scenarioPage.id, scenarioTitle);
+    if (scenarioId) setTitleForNotionId(titles, scenarioId, scenarioTitle);
   }
   const templates = new Map(templatePages.map((item) => [item.id, mapTemplate(item)]));
   const orderedTemplates = templateIds
@@ -218,6 +224,7 @@ export async function retrieveFollowupBomb(id: string): Promise<BombDetail> {
     cpIds: cps[0] ? [cps[0].id] : mapped.cpIds,
     notes: propertyText(properties.Notes) || null,
     createdAt: page.created_time || properties["Created At"]?.created_time || null,
+    scenarioName: scenarioTitle || mapped.scenarioName,
     scenarioDescription: scenarioPage
       ? propertyText(scenarioPage.properties?.["Scenario Description"]) || null
       : null,

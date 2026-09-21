@@ -1,4 +1,4 @@
-import type { UpdateBombInput } from "@/lib/bomb-list";
+import { attachBombScenario, type UpdateBombInput } from "@/lib/bomb-list";
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { retrieveFollowupBomb, updateFollowupBomb, listFollowupScenarios } from "@/lib/notion/bombs";
 import { listApplicableCheckpoints } from "@/lib/notion/cps";
@@ -25,7 +25,7 @@ export async function GET(request: Request, { params }: Params) {
     if (!viewer.email) {
       return Response.json({ error: "Sign in required" }, { status: 401 });
     }
-    return Response.json({ bomb, ...options });
+    return Response.json({ bomb: attachBombScenario(bomb, options.scenarios), ...options });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
     const status = message.includes("404") || message.includes("object_not_found") ? 404 : 500;
