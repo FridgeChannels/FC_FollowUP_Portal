@@ -13,10 +13,6 @@ import { markFollowupClientEngaged, resolveConversationThread } from "./followup
 import { contactMatchesReplySender } from "./inbound-reply";
 import { InboundReplyError } from "./inbound-errors";
 import {
-  resolveInboundContent,
-  resolveInboundEmailAttachments,
-} from "./inbound-attachments";
-import {
   normalizeInboundColdInput,
   type InboundColdInput,
 } from "./inbound-cold-input";
