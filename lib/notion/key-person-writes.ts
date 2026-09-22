@@ -109,7 +109,8 @@ export async function createKeyPerson(input: CreateKeyPersonInput) {
       officePhone: input.officePhone?.trim() ? input.officePhone : undefined,
       whatsapp: input.whatsapp?.trim() ? input.whatsapp : undefined,
       linkedin: input.linkedin?.trim() ? input.linkedin : undefined,
-      setIcypeasVerified: false,
+      // Portal Add Brand / Add KeyPerson: email present → set Email Verified Status.
+      setIcypeasVerified: true,
     }),
   );
   if (input.clientPageId) {

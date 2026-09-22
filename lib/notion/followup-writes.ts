@@ -7,7 +7,7 @@ import {
 } from "../linkedin";
 import { conversationCpRelation, resolveCheckpoint } from "./cps";
 import { createPage, propertyText, retrievePage, richText, updatePage } from "./client";
-import { getFollowupConversationDbId, getFollowupTaskDbId, isScheduleTestMode } from "./config";
+import { getFollowupClientDbId, getFollowupConversationDbId, getFollowupTaskDbId, isScheduleTestMode } from "./config";
 import {
   easternDateOnly,
   easternDateTimeIso,
@@ -238,6 +238,75 @@ export async function updateFollowupClient(
   }
 
   return updatePage(pageId, properties);
+}
+
+export type CreateFollowupClientInput = {
+  name: string;
+  clientPageId: string;
+  ownerId?: string | null;
+  status?: string | null;
+  handlingMode?: string | null;
+  priority?: string | null;
+  currentCpId?: string | null;
+  exhibitionId?: string | null;
+  isTest?: boolean;
+  notes?: string | null;
+};
+
+export async function createFollowupClient(input: CreateFollowupClientInput) {
+  const name = input.name.trim();
+  if (!name) throw new Error("Brand name is required");
+  if (!input.clientPageId) throw new Error("Client is required");
+
+  const ownerId = input.ownerId?.trim() || null;
+  if (ownerId) {
+    const owner = await retrieveOwner(ownerId);
+    if (!owner) throw new Error("Unknown Owner");
+  }
+
+  const statusName =
+    asStatus(input.status) || (ownerId ? "Ready" : "Unassigned");
+  const handlingMode = asHandlingMode(input.handlingMode) || "Human";
+  const priority = asPriority(input.priority) || null;
+
+  let currentCpRelation: Array<{ id: string }> | undefined;
+  if (input.currentCpId !== undefined && input.currentCpId !== null) {
+    const raw = input.currentCpId.trim();
+    if (raw && raw !== "NONE") {
+      const checkpoint = await resolveCheckpoint(raw);
+      if (!checkpoint) throw new Error("Unknown Current CP");
+      currentCpRelation = [{ id: checkpoint.id }];
+    } else {
+      currentCpRelation = [];
+    }
+  }
+
+  const exhibitionId = input.exhibitionId?.trim() || null;
+
+  const properties: Record<string, unknown> = {
+    "Follow-up Client": { title: richText(name) },
+    Client: { relation: [{ id: input.clientPageId }] },
+    "Follow-up Status": { status: { name: statusName } },
+    "Handling Mode": { select: { name: handlingMode } },
+    "Is Test": { checkbox: Boolean(input.isTest) },
+  };
+  if (ownerId) {
+    properties.Owner = { relation: [{ id: ownerId }] };
+  }
+  if (priority) {
+    properties.Priority = { select: { name: priority } };
+  }
+  if (currentCpRelation) {
+    properties["Current CP"] = { relation: currentCpRelation };
+  }
+  if (exhibitionId) {
+    properties["Follow-up Exhibition"] = { relation: [{ id: exhibitionId }] };
+  }
+  if (input.notes?.trim()) {
+    properties.Notes = { rich_text: richText(input.notes.trim()) };
+  }
+
+  return createPage(getFollowupClientDbId(), properties);
 }
 
 export async function markFollowupClientEngaged(

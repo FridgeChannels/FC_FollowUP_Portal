@@ -10,9 +10,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 export type ContactDraft = {
   id: string;
   name: string;
+  /** Maps to KeyPerson OwnerOrConnector (Other → omit). */
   role: Contact["role"];
+  title: string;
   email: string;
   phone: string;
+  directPhone: string;
+  officePhone: string;
   whatsapp: string;
   linkedin: string;
 };
@@ -20,7 +24,18 @@ export type ContactDraft = {
 const ROLES: Contact["role"][] = ["Connector", "Owner", "Other"];
 
 export function emptyContactDraft(role: Contact["role"] = "Connector"): ContactDraft {
-  return { id: uid("ct"), name: "", role, email: "", phone: "", whatsapp: "", linkedin: "" };
+  return {
+    id: uid("ct"),
+    name: "",
+    role,
+    title: "",
+    email: "",
+    phone: "",
+    directPhone: "",
+    officePhone: "",
+    whatsapp: "",
+    linkedin: "",
+  };
 }
 
 export function validContactDrafts(drafts: ContactDraft[]) {
@@ -52,14 +67,19 @@ export function contactFromDraft(draft: ContactDraft): Contact {
 
 function Field({
   label,
+  required,
   children,
 }: {
   label: string;
+  required?: boolean;
   children: ReactNode;
 }) {
   return (
     <label className="grid gap-1.5 text-xs font-medium text-slate-600">
-      {label}
+      <span>
+        {label}
+        {required ? <span className="ml-0.5 text-rose-600" aria-hidden>*</span> : null}
+      </span>
       {children}
     </label>
   );
@@ -76,14 +96,16 @@ export function ContactFields({
   return (
     <div className="grid gap-3">
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Contact name">
+        <Field label="Contact name" required>
           <Input
             value={value.name}
             onChange={(e) => patch({ name: e.target.value })}
             placeholder="KeyPerson"
+            required
+            aria-required
           />
         </Field>
-        <Field label="Role">
+        <Field label="OwnerOrConnector">
           <Select value={value.role} onValueChange={(role) => patch({ role: role as Contact["role"] })}>
             <SelectTrigger className="w-full">
               <SelectValue />
@@ -99,6 +121,13 @@ export function ContactFields({
         </Field>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Title">
+          <Input
+            value={value.title}
+            onChange={(e) => patch({ title: e.target.value })}
+            placeholder="VP Sales"
+          />
+        </Field>
         <Field label="Email">
           <Input
             value={value.email}
@@ -106,6 +135,8 @@ export function ContactFields({
             placeholder="name@brand.co"
           />
         </Field>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Phone">
           <Input
             value={value.phone}
@@ -113,7 +144,21 @@ export function ContactFields({
             placeholder="+1 415 555 0100"
           />
         </Field>
-        <Field label="WhatsApp">
+        <Field label="Direct Phone">
+          <Input
+            value={value.directPhone}
+            onChange={(e) => patch({ directPhone: e.target.value })}
+            placeholder="+1 415 555 0101"
+          />
+        </Field>
+        <Field label="Office Phone">
+          <Input
+            value={value.officePhone}
+            onChange={(e) => patch({ officePhone: e.target.value })}
+            placeholder="+1 415 555 0102"
+          />
+        </Field>
+        <Field label="WhatsApp Number">
           <Input
             value={value.whatsapp}
             onChange={(e) => patch({ whatsapp: e.target.value })}
@@ -152,8 +197,12 @@ export function BrandContactsEditor({
     <section className="grid gap-3">
       <div className="flex items-center justify-between">
         <div>
-          <div className="text-sm font-medium">KeyPerson</div>
-          <p className="text-xs text-slate-500">Add every contact that belongs to this brand.</p>
+          <div className="text-sm font-medium">
+            KeyPerson <span className="ml-0.5 text-rose-600" aria-hidden>*</span>
+          </div>
+          <p className="text-xs text-slate-500">
+            At least one contact with a name is required.
+          </p>
         </div>
         <Button
           type="button"

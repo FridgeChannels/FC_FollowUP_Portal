@@ -2,6 +2,10 @@ import { env } from "cloudflare:workers";
 import { parseSkipUnavailableChannels } from "../channel-availability";
 
 const DEFAULT_FOLLOWUP_CLIENT_DB_ID = "8b04a997-c66f-40dd-8f23-7234450f3c58";
+/** FC2.0-ClientDB (master company). Data-source collection id differs; this is the database_id. */
+const DEFAULT_CLIENT_DB_ID = "6c192adb-e3e6-42f0-9333-9800b544bea7";
+/** FC3.0-ExhibitionDB */
+const DEFAULT_EXHIBITION_DB_ID = "3989166f-d9fd-8033-ad3d-d6f80378ccef";
 const DEFAULT_FOLLOWUP_OWNER_DB_ID = "3460eaca-0fb1-42da-813a-64a1dc5a39d6";
 const DEFAULT_FOLLOWUP_CONTACT_DB_ID = "d67e70b2-230f-4a4e-b8a2-ce79337ee959";
 const DEFAULT_KEY_PERSON_DB_ID = "0189166f-d9fd-8373-9626-01cc3dddd878";
@@ -21,6 +25,22 @@ export function getFollowupClientDbId() {
     env.NOTION_FOLLOWUP_CLIENT_DB_ID ||
     (typeof process !== "undefined" ? process.env.NOTION_FOLLOWUP_CLIENT_DB_ID : undefined) ||
     DEFAULT_FOLLOWUP_CLIENT_DB_ID
+  );
+}
+
+export function getClientDbId() {
+  return (
+    env.NOTION_CLIENT_DB_ID ||
+    (typeof process !== "undefined" ? process.env.NOTION_CLIENT_DB_ID : undefined) ||
+    DEFAULT_CLIENT_DB_ID
+  );
+}
+
+export function getExhibitionDbId() {
+  return (
+    env.NOTION_EXHIBITION_DB_ID ||
+    (typeof process !== "undefined" ? process.env.NOTION_EXHIBITION_DB_ID : undefined) ||
+    DEFAULT_EXHIBITION_DB_ID
   );
 }
 

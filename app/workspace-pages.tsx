@@ -15,6 +15,7 @@ import {
   CircleAlert,
   MessageCircle,
   PhoneCall,
+  Plus,
   Search,
   Upload,
 } from "lucide-react";
@@ -54,6 +55,7 @@ import {
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Popover,
   PopoverContent,
@@ -596,6 +598,8 @@ export function BrandsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string>();
   const [debouncedQuery, setDebouncedQuery] = useState(query);
+  const [addBrandOpen, setAddBrandOpen] = useState(false);
+  const [listEpoch, setListEpoch] = useState(0);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedQuery(query), 300);
@@ -724,7 +728,7 @@ export function BrandsPage() {
     return () => {
       cancelled = true;
     };
-  }, [brandsFilterKey, cursor, state.currentRole]);
+  }, [brandsFilterKey, cursor, state.currentRole, listEpoch]);
 
   const goNextPage = () => {
     if (!nextCursor || !hasMore || loading) return;
@@ -821,6 +825,23 @@ export function BrandsPage() {
       <PageHeader
         eyebrow={`${loading ? "Loading" : refreshing ? "Updating" : `${brands.length} on this page`}`}
         title="Brands"
+      >
+        {can("importBrands") && (
+          <Button className="bg-slate-950 text-white hover:bg-slate-800" onClick={() => setAddBrandOpen(true)}>
+            <Plus className="mr-2 size-4" />
+            Add Brand
+          </Button>
+        )}
+      </PageHeader>
+      <AddBrandDialog
+        open={addBrandOpen}
+        onOpenChange={setAddBrandOpen}
+        owners={owners}
+        cps={cps}
+        onCreated={(brandId) => {
+          setListEpoch((n) => n + 1);
+          router.push(`/customers/${brandId}`);
+        }}
       />
       {isAdmin && selected.length > 0 && (
         <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl bg-violet-50 px-4 py-3">
@@ -1279,41 +1300,150 @@ function applyMapping(
   });
 }
 
+type ExhibitionSearchHit = {
+  id: string;
+  name: string;
+  startDate: string | null;
+};
+
 function AddBrandDialog({
   open,
   onOpenChange,
+  owners,
+  cps,
+  onCreated,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
+  owners: Array<{ id: string; name: string }>;
+  cps: Array<{ id?: string; name: string }>;
+  onCreated?: (brandId: string) => void;
 }) {
-  const { state, createBrand } = useWorkspace();
-  const humans = state.users.filter(
-    (u) => u.role === "AccountManager" || u.role === "Admin",
-  );
   const [name, setName] = useState("");
-  const [source, setSource] = useState("Manual");
+  const [website, setWebsite] = useState("");
+  const [productDescription, setProductDescription] = useState("");
+  const [exhibitionQuery, setExhibitionQuery] = useState("");
+  const [exhibitionHits, setExhibitionHits] = useState<ExhibitionSearchHit[]>([]);
+  const [exhibitionSearching, setExhibitionSearching] = useState(false);
+  const [selectedExhibition, setSelectedExhibition] = useState<ExhibitionSearchHit | null>(null);
   const [ownerId, setOwnerId] = useState("unassigned");
+  const [currentCp, setCurrentCp] = useState("none");
   const [contacts, setContacts] = useState([emptyContactDraft()]);
+  const [saving, setSaving] = useState(false);
+
   const reset = () => {
     setName("");
-    setSource("Manual");
+    setWebsite("");
+    setProductDescription("");
+    setExhibitionQuery("");
+    setExhibitionHits([]);
+    setSelectedExhibition(null);
     setOwnerId("unassigned");
+    setCurrentCp("none");
     setContacts([emptyContactDraft()]);
+    setSaving(false);
   };
-  const ready = name.trim() && validContactDrafts(contacts).length > 0;
-  const submit = () => {
-    const result = createBrand({
-      name,
-      source,
-      ownerId,
-      contacts: validContactDrafts(contacts),
-    });
-    show(result);
-    if (result.ok) {
+
+  useEffect(() => {
+    if (!open || selectedExhibition) return;
+    const q = exhibitionQuery.trim();
+    if (q.length < 2) {
+      setExhibitionHits([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setExhibitionSearching(true);
+      fetch(`/api/exhibitions?q=${encodeURIComponent(q)}`)
+        .then(async (response) => {
+          const payload = (await response.json()) as {
+            exhibitions?: ExhibitionSearchHit[];
+            error?: string;
+          };
+          if (!response.ok) throw new Error(payload.error || "Search failed");
+          return payload.exhibitions || [];
+        })
+        .then((items) => {
+          if (!cancelled) setExhibitionHits(items);
+        })
+        .catch(() => {
+          if (!cancelled) setExhibitionHits([]);
+        })
+        .finally(() => {
+          if (!cancelled) setExhibitionSearching(false);
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [exhibitionQuery, open, selectedExhibition]);
+
+  const companyName = name.trim();
+  const ready =
+    Boolean(companyName) &&
+    Boolean(website.trim()) &&
+    validContactDrafts(contacts).length > 0 &&
+    !saving;
+
+  const submit = async () => {
+    if (!ready) return;
+    setSaving(true);
+    try {
+      const response = await fetch("/api/brands", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          company: {
+            name: companyName,
+            website: website.trim() || null,
+            productDescription: productDescription.trim() || null,
+          },
+          ownerId: ownerId === "unassigned" ? null : ownerId,
+          handlingMode: "Human",
+          priority: null,
+          currentCpId: currentCp === "none" ? null : currentCp,
+          exhibitionId: selectedExhibition?.id || null,
+          contacts: validContactDrafts(contacts).map((item) => ({
+            name: item.name.trim(),
+            title: item.title.trim() || null,
+            role: item.role,
+            email: item.email.trim() || null,
+            phone: item.phone.trim() || null,
+            directPhone: item.directPhone.trim() || null,
+            officePhone: item.officePhone.trim() || null,
+            whatsapp: item.whatsapp.trim() || null,
+            linkedin: item.linkedin.trim() || null,
+          })),
+        }),
+      });
+      const payload = (await response.json()) as {
+        brandId?: string;
+        companyName?: string;
+        contactErrors?: Array<{ name: string; error?: string }>;
+        error?: string;
+      };
+      if (!response.ok) throw new Error(payload.error || "Unable to create brand");
+
+      const failed = payload.contactErrors?.length || 0;
+      if (failed) {
+        toast.warning(
+          `Brand created; ${failed} contact${failed === 1 ? "" : "s"} failed`,
+        );
+      } else {
+        toast.success(`Brand created: ${payload.companyName || companyName}`);
+      }
+      const brandId = payload.brandId;
       reset();
       onOpenChange(false);
+      if (brandId) onCreated?.(brandId);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to create brand");
+    } finally {
+      setSaving(false);
     }
   };
+
   return (
     <Dialog
       open={open}
@@ -1322,32 +1452,54 @@ function AddBrandDialog({
         onOpenChange(value);
       }}
     >
-      <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-xl">
+      <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Add a Brand</DialogTitle>
           <DialogDescription>
-            Enter the brand, then add one or more contacts. The brand starts at
-            CP1 · Ready.
+            Creates ClientDB, Follow-up Client, and KeyPersons. Handling mode defaults to Human.
+            Fields marked with <span className="font-semibold text-rose-600">*</span> are required.
           </DialogDescription>
         </DialogHeader>
         <div className="min-h-0 space-y-5 overflow-y-auto pr-1">
-          <label className="grid gap-2 text-sm font-medium">
-            Brand
-            <Input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Brand name"
-            />
-          </label>
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-3">
             <label className="grid gap-2 text-sm font-medium">
-              Source
+              <span>
+                Company name
+                <span className="ml-0.5 text-rose-600" aria-hidden>*</span>
+              </span>
               <Input
-                value={source}
-                onChange={(e) => setSource(e.target.value)}
-                placeholder="Manual"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Brand / company name"
+                required
+                aria-required
               />
             </label>
+            <label className="grid gap-2 text-sm font-medium">
+              <span>
+                Website
+                <span className="ml-0.5 text-rose-600" aria-hidden>*</span>
+              </span>
+              <Input
+                value={website}
+                onChange={(e) => setWebsite(e.target.value)}
+                placeholder="https://example.com"
+                required
+                aria-required
+              />
+            </label>
+            <label className="grid gap-2 text-sm font-medium">
+              Product description
+              <Textarea
+                value={productDescription}
+                onChange={(e) => setProductDescription(e.target.value)}
+                placeholder="Short product / category intro"
+                rows={3}
+              />
+            </label>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
             <label className="grid gap-2 text-sm font-medium">
               AccountManager
               <Select value={ownerId} onValueChange={setOwnerId}>
@@ -1356,7 +1508,7 @@ function AddBrandDialog({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="unassigned">Unassigned</SelectItem>
-                  {humans.map((u) => (
+                  {owners.map((u) => (
                     <SelectItem key={u.id} value={u.id}>
                       {u.name}
                     </SelectItem>
@@ -1364,12 +1516,89 @@ function AddBrandDialog({
                 </SelectContent>
               </Select>
             </label>
+            <label className="grid gap-2 text-sm font-medium">
+              Current CP
+              <Select value={currentCp} onValueChange={setCurrentCp}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Empty" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Empty (NONE)</SelectItem>
+                  {cps
+                    .filter((item) => item.name && item.name !== "NONE")
+                    .map((item) => (
+                      <SelectItem key={item.id || item.name} value={item.name}>
+                        {item.name}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </label>
+            <div className="grid gap-2 text-sm font-medium sm:col-span-2">
+              <span>Follow-up Exhibition</span>
+              {selectedExhibition ? (
+                <div className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2">
+                  <div>
+                    <div className="font-medium text-slate-900">{selectedExhibition.name}</div>
+                    {selectedExhibition.startDate && (
+                      <div className="text-xs text-slate-500">{selectedExhibition.startDate}</div>
+                    )}
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setSelectedExhibition(null);
+                      setExhibitionQuery("");
+                      setExhibitionHits([]);
+                    }}
+                  >
+                    Clear
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <Input
+                    value={exhibitionQuery}
+                    onChange={(e) => setExhibitionQuery(e.target.value)}
+                    placeholder="Search exhibition (optional)…"
+                  />
+                  {(exhibitionSearching || exhibitionHits.length > 0 || exhibitionQuery.trim().length >= 2) && (
+                    <div className="max-h-36 overflow-y-auto rounded-xl border border-slate-200">
+                      {exhibitionSearching ? (
+                        <div className="flex items-center gap-2 px-3 py-3 text-sm text-slate-500">
+                          <Spinner className="size-4" /> Searching…
+                        </div>
+                      ) : exhibitionHits.length === 0 ? (
+                        <div className="px-3 py-3 text-sm text-slate-500">No matching exhibitions.</div>
+                      ) : (
+                        exhibitionHits.map((hit) => (
+                          <button
+                            key={hit.id}
+                            type="button"
+                            className="flex w-full flex-col items-start gap-0.5 border-b border-slate-100 px-3 py-2 text-left last:border-0 hover:bg-slate-50"
+                            onClick={() => setSelectedExhibition(hit)}
+                          >
+                            <span className="text-sm font-medium text-slate-900">{hit.name}</span>
+                            {hit.startDate && (
+                              <span className="text-xs text-slate-500">{hit.startDate}</span>
+                            )}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
           </div>
           <BrandContactsEditor contacts={contacts} onChange={setContacts} />
         </div>
         <DialogFooter>
           <Button
             variant="outline"
+            disabled={saving}
             onClick={() => {
               reset();
               onOpenChange(false);
@@ -1377,8 +1606,8 @@ function AddBrandDialog({
           >
             Cancel
           </Button>
-          <Button disabled={!ready} onClick={submit}>
-            Add Brand
+          <Button disabled={!ready} onClick={() => void submit()}>
+            {saving ? "Creating…" : "Add Brand"}
           </Button>
         </DialogFooter>
       </DialogContent>

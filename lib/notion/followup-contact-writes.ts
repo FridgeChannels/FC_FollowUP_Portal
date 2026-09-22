@@ -12,6 +12,9 @@ export type CreateFollowupContactInput = {
   ownerOrConnector?: "Owner" | "Connector" | null;
   email?: string | null;
   phone?: string | null;
+  directPhone?: string | null;
+  officePhone?: string | null;
+  whatsapp?: string | null;
   linkedin?: string | null;
   contactOrder?: "Primary" | "Secondary" | "Backup" | null;
   followupMode?: "Automated" | "Manual";
@@ -33,6 +36,9 @@ export async function createFollowupContactWithKeyPerson(input: CreateFollowupCo
     ownerOrConnector: input.ownerOrConnector,
     email: input.email,
     phone: input.phone,
+    directPhone: input.directPhone,
+    officePhone: input.officePhone,
+    whatsapp: input.whatsapp,
     linkedin: input.linkedin,
     clientPageId: input.clientPageId,
   };

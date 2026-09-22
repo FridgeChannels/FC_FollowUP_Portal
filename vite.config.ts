@@ -18,6 +18,9 @@ export default defineConfig(async ({ mode }) => {
   const notionApiKey = process.env.NOTION_API_KEY || loadedEnv.NOTION_API_KEY;
   const followupClientDbId =
     process.env.NOTION_FOLLOWUP_CLIENT_DB_ID || loadedEnv.NOTION_FOLLOWUP_CLIENT_DB_ID;
+  const clientDbId = process.env.NOTION_CLIENT_DB_ID || loadedEnv.NOTION_CLIENT_DB_ID;
+  const exhibitionDbId =
+    process.env.NOTION_EXHIBITION_DB_ID || loadedEnv.NOTION_EXHIBITION_DB_ID;
   const followupOwnerDbId =
     process.env.NOTION_FOLLOWUP_OWNER_DB_ID || loadedEnv.NOTION_FOLLOWUP_OWNER_DB_ID;
   const followupContactDbId =
@@ -95,6 +98,8 @@ export default defineConfig(async ({ mode }) => {
       ...(followupClientDbId
         ? { NOTION_FOLLOWUP_CLIENT_DB_ID: followupClientDbId }
         : {}),
+      ...(clientDbId ? { NOTION_CLIENT_DB_ID: clientDbId } : {}),
+      ...(exhibitionDbId ? { NOTION_EXHIBITION_DB_ID: exhibitionDbId } : {}),
       ...(followupOwnerDbId
         ? { NOTION_FOLLOWUP_OWNER_DB_ID: followupOwnerDbId }
         : {}),
