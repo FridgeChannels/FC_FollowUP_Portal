@@ -3,6 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      secrets:
+        - portal_env
     image: fc-followup-portal:latest
     ports:
       - "${PORT:-8787}:8787"
@@ -29,3 +31,7 @@ services:
       timeout: 5s
       retries: 5
       start_period: 40s
+
+secrets:
+  portal_env:
+    file: .env
