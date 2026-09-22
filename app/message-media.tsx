@@ -607,7 +607,7 @@ export function MessageMediaInputFrame({
   if (!media.enabled) return children;
   return (
     <div className="space-y-1.5">
-      <div className="relative [&_textarea]:pb-8">
+      <div className="relative [&_textarea]:pb-8 [&_[data-slot=email-editor]]:pb-0">
         {children}
         <div className="absolute bottom-0.5 left-0.5">
           <MessageMediaAddButton

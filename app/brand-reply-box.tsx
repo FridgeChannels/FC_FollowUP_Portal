@@ -11,6 +11,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { SendTimingToggle, type DeliveryMode } from "./send-timing-toggle";
 import { MessageMediaInputFrame, useMessageMedia } from "./message-media";
+import { EmailBodyEditor } from "./email-body-editor";
+import { emailBodyIsEmpty } from "@/lib/email-html";
 import type { MediaAttachment } from "@/lib/media-attachments";
 import { channelAvailable } from "@/lib/channel-availability";
 
@@ -107,7 +109,8 @@ export function BrandReplyBox({
   if (!inboundNeedsComposer(state, interaction, interactions)) return null;
   if (!contact || !channel) return null;
   const replyTaskId = interaction.taskId || actions?.find(item => item.bombInstanceId === bombInstanceId && item.channel === channel)?.id || taskId;
-  const canSend = (!!content.trim() || media.readyAttachments.length > 0) && !(channel === "Email" && !subject.trim()) && !saving && !media.uploading;
+  const hasBody = (channel === "Email" ? !emailBodyIsEmpty(content) : !!content.trim()) || media.readyAttachments.length > 0;
+  const canSend = hasBody && !(channel === "Email" && !subject.trim()) && !saving && !media.uploading;
   return (
     <div className="mt-3 rounded-xl bg-slate-50 p-3">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
@@ -118,7 +121,11 @@ export function BrandReplyBox({
         {channel === "Email" && <Input value={subject} onChange={event => setSubject(event.target.value)} placeholder="Email subject" />}
         {channel === "Email" && <Input value={cc} onChange={event => setCc(event.target.value)} placeholder="CC (comma-separated)" />}
         <MessageMediaInputFrame channel={channel} media={media} disabled={saving}>
-          <Textarea value={content} onChange={event => setContent(event.target.value)} className="min-h-20 resize-none" placeholder="Write a reply…"/>
+          {channel === "Email" ? (
+            <EmailBodyEditor value={content} onChange={setContent} disabled={saving} placeholder="Write a reply…" />
+          ) : (
+            <Textarea value={content} onChange={event => setContent(event.target.value)} className="min-h-20 resize-none" placeholder="Write a reply…"/>
+          )}
         </MessageMediaInputFrame>
         <div className="flex items-center justify-end gap-2">
           <div className="flex items-center gap-2">
