@@ -32,7 +32,17 @@ Authorization: Bearer <REPLY_INGEST_TOKEN>
   "extendedParameters": {
     "gmailThreadId": "18c4abcd",
     "gmailMessageId": "18c4ef01"
-  }
+  },
+  "attachments": [
+    {
+      "id": "abc123def456",
+      "kind": "file",
+      "name": "quote.pdf",
+      "mimeType": "application/pdf",
+      "size": 12345,
+      "url": "https://<bucket>.s3.<region>.amazonaws.com/files/abc123def456.pdf"
+    }
+  ]
 }
 ```
 
@@ -40,14 +50,29 @@ Authorization: Bearer <REPLY_INGEST_TOKEN>
 | --- | --- | --- |
 | `taskId` | 是 | 已发出任务的页面 ID 或标题 |
 | `threadId` | 是 | 系统线程 ID，与 Outbound 相同。Inbound 复用，对话才能拼在一起 |
-| `content` | 是 | 回复原文 |
+| `content` | 条件 | 回复原文。可空，但此时必须有 `attachments`（Content 会写成附件 caption） |
 | `channel` | 建议 | 固定 `Email` |
 | `sender` | 否 | 空则补联系人邮箱 |
 | `subject` | 否 | 空则补 `Re:` + Outbound 主题 |
 | `messageId` | 否 | **回写留空**。服务端生成 `IN-Email-{timestamp}`，不影响对话展示 |
 | `occurredAt` | 否 | 真实收到时间。空则用服务器时间 |
 | `extendedParameters` | 否 | JSON 对象，写入 ConversationDB `Extended Parameters`。Gmail thread / message id 放这里 |
+| `attachments` | 否 | Email 附件元数据数组，写入 ConversationDB `Attachments`。二进制须先落到本系统 S3；非法项整单 **400** |
 
+`attachments[]` 每项：
+
+| 字段 | 说明 |
+| --- | --- |
+| `id` | 上传 id（与 S3 key 主体一致，去横线 UUID） |
+| `kind` | `image` / `video` / `file`。也可省略，由 `mimeType` 推断：`image/*` → `image`，`video/*` → `video`，其余（如 `application/pdf`）→ `file`。Email **默认**允许的 MIME 只有 pdf / jpeg / png / webp，因此默认场景实际只会落到 `image` 或 `file`；`video` 仅在 `EMAIL_ATTACHMENT_MIME_TYPES` 包含视频类型时才会出现 |
+| `name` | 文件名 |
+| `mimeType` | 默认允许 `application/pdf,image/jpeg,image/png,image/webp`（可用 `EMAIL_ATTACHMENT_MIME_TYPES` 覆盖） |
+| `size` | 字节数，须 > 0 且不超过 `EMAIL_ATTACHMENT_MAX_BYTES`（默认 10MB） |
+| `url` | 本桶 S3 公网 HTTPS URL（须通过 `isAllowedS3MediaUrl`） |
+
+数量上限默认 5（`EMAIL_ATTACHMENT_MAX_COUNT`）。S3 对象前缀默认 `files`（`S3_FILE_PREFIX`）。
+
+非 Email 渠道携带 `attachments` → **400**。
 `taskId` + `threadId` 必须指向同一条 Outbound Email，且对应 `Task Status = Completed`。发送状态以 Task Status 为准。
 
 写入后：

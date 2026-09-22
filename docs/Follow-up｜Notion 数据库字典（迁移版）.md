@@ -113,7 +113,8 @@ linkedin_account（额度账本，无 FK；Sender 写入 conversation.sender / t
 | Last Interaction At | rollup | — | 自动 | Contacts→… | 最近互动 | **派生** |
 | Last Reply At | rollup | — | 自动 | Contacts formula | 最近回复 | **派生** |
 | Notes | text | — | 否 | 中文 | 备注 | `notes` |
-| FC3.0-FollowUp-NotionAIMeetings | relation | N | 否 | Meetings DB | AI 会议关联 | 可选迁移 |
+| AI Meeting Links | text | — | 否 | JSON 数组 | Portal 创建的 Notion AI Meeting 查看链接（多条） | `ai_meeting_links` |
+| FC3.0-FollowUp-NotionAIMeetings | relation | N | 否 | Meetings DB | 展会 AI 会议关联（与 Portal Meeting 按钮无关） | 可选迁移 |
 | Created At | created_time | — | 自动 | — | | `created_at` |
 | Last Edited At | last_edited_time | — | 自动 | — | | `updated_at` |
 

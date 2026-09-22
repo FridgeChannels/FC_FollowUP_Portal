@@ -1,8 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ImagePlus, Paperclip, Play, Video, X } from "lucide-react";
+import { FileText, ImagePlus, Paperclip, Play, Video, X } from "lucide-react";
 import { toast } from "sonner";
+import {
+  DEFAULT_EMAIL_ATTACHMENT_MAX_COUNT,
+  DEFAULT_EMAIL_ATTACHMENT_MIME_TYPES,
+  channelSupportsEmailAttachments,
+} from "@/lib/email-attachments";
 import {
   MAX_MEDIA_ATTACHMENTS,
   channelSupportsMedia,
@@ -23,8 +28,52 @@ export type DraftMedia = MediaAttachment & {
   error?: string;
 };
 
+type EmailUploadConfig = {
+  mimeTypes: string[];
+  maxBytes: number;
+  maxCount: number;
+  accept: string;
+};
+
+const DEFAULT_EMAIL_CONFIG: EmailUploadConfig = {
+  mimeTypes: [...DEFAULT_EMAIL_ATTACHMENT_MIME_TYPES],
+  maxBytes: 10 * 1024 * 1024,
+  maxCount: DEFAULT_EMAIL_ATTACHMENT_MAX_COUNT,
+  accept: DEFAULT_EMAIL_ATTACHMENT_MIME_TYPES.join(","),
+};
+
 function acceptFor(kind: MediaKind) {
   return kind === "image" ? "image/jpeg,image/png,image/webp,image/gif" : "video/mp4,video/quicktime,video/3gpp";
+}
+
+function formatBytes(size: number) {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
+  return `${Math.round((size / (1024 * 1024)) * 10) / 10} MB`;
+}
+
+function emailKindFromMime(mimeType: string, allowed: string[]): MediaKind | null {
+  const mime = mimeType.trim().toLowerCase();
+  if (!mime || !allowed.includes(mime)) return null;
+  if (mime.startsWith("image/")) return "image";
+  if (mime.startsWith("video/")) return "video";
+  return "file";
+}
+
+function validateEmailFileClient(
+  file: File,
+  config: EmailUploadConfig,
+): { kind: MediaKind; error?: string } | { kind?: undefined; error: string } {
+  const kind = emailKindFromMime(file.type, config.mimeTypes);
+  if (!kind) {
+    return { error: `Unsupported file type. Allowed: ${config.mimeTypes.join(", ")}.` };
+  }
+  if (file.size <= 0) return { error: "This file is empty." };
+  if (file.size > config.maxBytes) {
+    const mb = Math.round((config.maxBytes / (1024 * 1024)) * 10) / 10;
+    return { error: `Files must be ${mb} MB or smaller.` };
+  }
+  return { kind };
 }
 
 async function readResponsePayload(response: Response) {
@@ -40,7 +89,11 @@ async function readResponsePayload(response: Response) {
   }
 }
 
-export async function uploadMediaFile(file: File, kind: MediaKind): Promise<MediaAttachment> {
+export async function uploadMediaFile(
+  file: File,
+  kind: MediaKind,
+  options?: { purpose?: "email" | "whatsapp" },
+): Promise<MediaAttachment> {
   const initResponse = await fetch("/api/media", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -49,6 +102,7 @@ export async function uploadMediaFile(file: File, kind: MediaKind): Promise<Medi
       mimeType: file.type,
       fileName: file.name,
       size: file.size,
+      purpose: options?.purpose,
     }),
   });
   const init = await readResponsePayload(initResponse);
@@ -95,9 +149,13 @@ export async function uploadMediaFile(file: File, kind: MediaKind): Promise<Medi
   if (!completed?.done || !mediaUrl) {
     throw new Error("Upload did not complete");
   }
+  const uploadedKind =
+    completed.kind === "image" || completed.kind === "video" || completed.kind === "file"
+      ? completed.kind
+      : kind;
   return {
     id: typeof completed.id === "string" ? completed.id : uploadId,
-    kind,
+    kind: uploadedKind,
     name: typeof completed.name === "string" ? completed.name : file.name,
     mimeType: typeof completed.mimeType === "string" ? completed.mimeType : file.type,
     size: typeof completed.size === "number" ? completed.size : file.size,
@@ -119,34 +177,53 @@ export function MessageMediaThumbnails({
     <div className="flex flex-wrap gap-2">
       {attachments.map((item) => (
         <div key={item.id} className="relative">
-          <button
-            type="button"
-            className="group relative size-16 overflow-hidden rounded-xl border border-slate-200 bg-slate-100"
-            onClick={() => onPreview(item)}
-            aria-label={`Preview ${item.name}`}
-          >
-            {item.kind === "image" ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={item.previewUrl || item.url} alt="" className="size-full object-cover" />
-            ) : (
-              <video src={item.previewUrl || item.url} className="size-full object-cover" muted playsInline />
-            )}
-            {item.kind === "video" && !item.uploading ? (
-              <span className="absolute inset-0 grid place-items-center bg-black/25 text-white">
-                <Play className="size-4 fill-current" />
+          {item.kind === "file" ? (
+            <button
+              type="button"
+              className="group flex max-w-[14rem] items-center gap-2 rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-left"
+              onClick={() => onPreview(item)}
+              aria-label={`Open ${item.name}`}
+            >
+              <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-600">
+                {item.uploading ? <Spinner className="size-4" /> : <FileText className="size-4" />}
               </span>
-            ) : null}
-            {item.uploading ? (
-              <span className="absolute inset-0 grid place-items-center bg-white/70">
-                <Spinner className="size-4" />
+              <span className="min-w-0">
+                <span className="block truncate text-xs font-medium text-slate-800">{item.name}</span>
+                <span className="block text-[10px] text-slate-500">
+                  {item.error ? "Failed" : formatBytes(item.size)}
+                </span>
               </span>
-            ) : null}
-            {item.error ? (
-              <span className="absolute inset-0 grid place-items-center bg-rose-50/90 px-1 text-[10px] font-medium text-rose-700">
-                Failed
-              </span>
-            ) : null}
-          </button>
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="group relative size-16 overflow-hidden rounded-xl border border-slate-200 bg-slate-100"
+              onClick={() => onPreview(item)}
+              aria-label={`Preview ${item.name}`}
+            >
+              {item.kind === "image" ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={item.previewUrl || item.url} alt="" className="size-full object-cover" />
+              ) : (
+                <video src={item.previewUrl || item.url} className="size-full object-cover" muted playsInline />
+              )}
+              {item.kind === "video" && !item.uploading ? (
+                <span className="absolute inset-0 grid place-items-center bg-black/25 text-white">
+                  <Play className="size-4 fill-current" />
+                </span>
+              ) : null}
+              {item.uploading ? (
+                <span className="absolute inset-0 grid place-items-center bg-white/70">
+                  <Spinner className="size-4" />
+                </span>
+              ) : null}
+              {item.error ? (
+                <span className="absolute inset-0 grid place-items-center bg-rose-50/90 px-1 text-[10px] font-medium text-rose-700">
+                  Failed
+                </span>
+              ) : null}
+            </button>
+          )}
           {onRemove ? (
           <button
             type="button"
@@ -167,16 +244,54 @@ export function MessageMediaAddButton({
   channel,
   disabled,
   remaining,
+  emailConfig,
   onPick,
+  onPickEmail,
 }: {
   channel?: Channel | string | null;
   disabled?: boolean;
   remaining: number;
+  emailConfig?: EmailUploadConfig;
   onPick: (files: FileList, kind: MediaKind) => void;
+  onPickEmail: (files: FileList) => void;
 }) {
   const imageInput = useRef<HTMLInputElement>(null);
   const videoInput = useRef<HTMLInputElement>(null);
-  if (!channelSupportsMedia(channel)) return null;
+  const emailInput = useRef<HTMLInputElement>(null);
+  const whatsapp = channelSupportsMedia(channel);
+  const email = channelSupportsEmailAttachments(channel);
+  if (!whatsapp && !email) return null;
+
+  if (email) {
+    return (
+      <>
+        <input
+          ref={emailInput}
+          type="file"
+          accept={emailConfig?.accept || DEFAULT_EMAIL_CONFIG.accept}
+          multiple
+          className="hidden"
+          onChange={(event) => {
+            if (event.target.files?.length) onPickEmail(event.target.files);
+            event.target.value = "";
+          }}
+        />
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="text-slate-500 hover:text-slate-900"
+          disabled={disabled || remaining <= 0}
+          aria-label="Add attachment"
+          title="Add attachment"
+          onClick={() => emailInput.current?.click()}
+        >
+          <Paperclip className="size-4" />
+        </Button>
+      </>
+    );
+  }
+
   return (
     <>
       <input
@@ -236,6 +351,27 @@ export function MessageMediaPreview({
   onOpenChange: (open: boolean) => void;
 }) {
   if (!item) return null;
+  if (item.kind === "file") {
+    return (
+      <Dialog open onOpenChange={onOpenChange}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="truncate text-base">{item.name}</DialogTitle>
+            <DialogDescription>
+              {item.mimeType} · {formatBytes(item.size)}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end">
+            <Button asChild>
+              <a href={item.url} target="_blank" rel="noreferrer">
+                Open file
+              </a>
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
   return (
     <Dialog open onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl overflow-hidden p-0 sm:max-w-3xl">
@@ -244,7 +380,7 @@ export function MessageMediaPreview({
           <DialogDescription className="sr-only">Media preview</DialogDescription>
         </DialogHeader>
         <div className="bg-slate-950 px-5 pb-5">
-          {"kind" in item && item.kind === "video" ? (
+          {item.kind === "video" ? (
             <video
               src={"previewUrl" in item ? item.previewUrl || item.url : item.url}
               className="mx-auto max-h-[70vh] w-full rounded-lg"
@@ -267,10 +403,43 @@ export function MessageMediaPreview({
 
 export function useMessageMedia(channel?: Channel | string | null) {
   const [attachments, setAttachments] = useState<DraftMedia[]>([]);
-  const [preview, setPreview] = useState<DraftMedia | null>(null);
+  const [preview, setPreviewState] = useState<DraftMedia | null>(null);
+  const [emailConfig, setEmailConfig] = useState<EmailUploadConfig>(DEFAULT_EMAIL_CONFIG);
   const attachmentsRef = useRef(attachments);
   attachmentsRef.current = attachments;
-  const enabled = channelSupportsMedia(channel);
+  const whatsapp = channelSupportsMedia(channel);
+  const email = channelSupportsEmailAttachments(channel);
+  const enabled = whatsapp || email;
+  const maxCount = email ? emailConfig.maxCount : MAX_MEDIA_ATTACHMENTS;
+
+  useEffect(() => {
+    if (!email) return;
+    let cancelled = false;
+    void fetch("/api/media/config")
+      .then(async (response) => {
+        if (!response.ok) return;
+        const payload = (await response.json()) as { email?: Partial<EmailUploadConfig> };
+        if (cancelled || !payload.email) return;
+        setEmailConfig({
+          mimeTypes: Array.isArray(payload.email.mimeTypes) && payload.email.mimeTypes.length
+            ? payload.email.mimeTypes
+            : DEFAULT_EMAIL_CONFIG.mimeTypes,
+          maxBytes: typeof payload.email.maxBytes === "number" && payload.email.maxBytes > 0
+            ? payload.email.maxBytes
+            : DEFAULT_EMAIL_CONFIG.maxBytes,
+          maxCount: typeof payload.email.maxCount === "number" && payload.email.maxCount > 0
+            ? payload.email.maxCount
+            : DEFAULT_EMAIL_CONFIG.maxCount,
+          accept: typeof payload.email.accept === "string" && payload.email.accept
+            ? payload.email.accept
+            : DEFAULT_EMAIL_CONFIG.accept,
+        });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [email]);
 
   useEffect(() => {
     if (enabled) return;
@@ -280,7 +449,7 @@ export function useMessageMedia(channel?: Channel | string | null) {
       }
       return [];
     });
-    setPreview(null);
+    setPreviewState(null);
   }, [enabled]);
 
   useEffect(() => () => {
@@ -289,12 +458,41 @@ export function useMessageMedia(channel?: Channel | string | null) {
     }
   }, []);
 
-  const remaining = MAX_MEDIA_ATTACHMENTS - attachments.length;
+  const remaining = maxCount - attachments.length;
   const uploading = attachments.some((item) => item.uploading);
   const readyAttachments = attachments.filter((item) => !item.uploading && !item.error && item.url);
 
+  const enqueueUpload = (file: File, kind: MediaKind, purpose: "email" | "whatsapp") => {
+    const localId = `local-${crypto.randomUUID()}`;
+    const previewUrl = URL.createObjectURL(file);
+    const draft: DraftMedia = {
+      id: localId,
+      kind,
+      name: file.name,
+      mimeType: file.type,
+      size: file.size,
+      url: "",
+      previewUrl,
+      uploading: true,
+    };
+    setAttachments((current) => [...current, draft]);
+    void uploadMediaFile(file, kind, { purpose })
+      .then((uploaded) => {
+        setAttachments((current) =>
+          current.map((item) => item.id === localId ? { ...item, ...uploaded, previewUrl, uploading: false } : item),
+        );
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : "Upload failed";
+        toast.error(message);
+        setAttachments((current) =>
+          current.map((item) => item.id === localId ? { ...item, uploading: false, error: message } : item),
+        );
+      });
+  };
+
   const addFiles = (list: FileList, kind: MediaKind) => {
-    const room = MAX_MEDIA_ATTACHMENTS - attachments.length;
+    const room = maxCount - attachments.length;
     const files = [...list].slice(0, room);
     if (!files.length) {
       toast.error("WhatsApp allows one image or video per message.");
@@ -306,32 +504,24 @@ export function useMessageMedia(channel?: Channel | string | null) {
         toast.error(`${file.name}: ${invalid}`);
         continue;
       }
-      const localId = `local-${crypto.randomUUID()}`;
-      const previewUrl = URL.createObjectURL(file);
-      const draft: DraftMedia = {
-        id: localId,
-        kind,
-        name: file.name,
-        mimeType: file.type,
-        size: file.size,
-        url: "",
-        previewUrl,
-        uploading: true,
-      };
-      setAttachments((current) => [...current, draft]);
-      void uploadMediaFile(file, kind)
-        .then((uploaded) => {
-          setAttachments((current) =>
-            current.map((item) => item.id === localId ? { ...item, ...uploaded, previewUrl, uploading: false } : item),
-          );
-        })
-        .catch((error) => {
-          const message = error instanceof Error ? error.message : "Upload failed";
-          toast.error(message);
-          setAttachments((current) =>
-            current.map((item) => item.id === localId ? { ...item, uploading: false, error: message } : item),
-          );
-        });
+      enqueueUpload(file, kind, "whatsapp");
+    }
+  };
+
+  const addEmailFiles = (list: FileList) => {
+    const room = maxCount - attachments.length;
+    const files = [...list].slice(0, room);
+    if (!files.length) {
+      toast.error(`Email allows up to ${maxCount} attachments per message.`);
+      return;
+    }
+    for (const file of files) {
+      const result = validateEmailFileClient(file, emailConfig);
+      if (result.error || !result.kind) {
+        toast.error(`${file.name}: ${result.error || "Unsupported file"}`);
+        continue;
+      }
+      enqueueUpload(file, result.kind, "email");
     }
   };
 
@@ -342,7 +532,7 @@ export function useMessageMedia(channel?: Channel | string | null) {
       if (removed?.previewUrl.startsWith("blob:")) URL.revokeObjectURL(removed.previewUrl);
       return next;
     });
-    setPreview((current) => current?.id === id ? null : current);
+    setPreviewState((current) => current?.id === id ? null : current);
   };
 
   const reset = () => {
@@ -353,7 +543,7 @@ export function useMessageMedia(channel?: Channel | string | null) {
       }
       return [];
     });
-    setPreview(null);
+    setPreviewState(null);
   };
 
   return {
@@ -363,8 +553,19 @@ export function useMessageMedia(channel?: Channel | string | null) {
     remaining,
     uploading,
     preview,
-    setPreview,
+    emailConfig,
+    setPreview: (item: DraftMedia | MediaAttachment | null) => {
+      if (!item) {
+        setPreviewState(null);
+        return;
+      }
+      setPreviewState({
+        ...item,
+        previewUrl: "previewUrl" in item && item.previewUrl ? item.previewUrl : item.url,
+      });
+    },
     addFiles,
+    addEmailFiles,
     remove,
     reset,
   };
@@ -413,7 +614,9 @@ export function MessageMediaInputFrame({
             channel={channel}
             disabled={disabled}
             remaining={media.remaining}
+            emailConfig={media.emailConfig}
             onPick={media.addFiles}
+            onPickEmail={media.addEmailFiles}
           />
         </div>
       </div>

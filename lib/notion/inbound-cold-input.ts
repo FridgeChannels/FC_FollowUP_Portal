@@ -1,4 +1,9 @@
+import type { MediaAttachment } from "../media-attachments.ts";
 import { InboundReplyError } from "./inbound-errors.ts";
+import {
+  resolveInboundContent,
+  resolveInboundEmailAttachments,
+} from "./inbound-attachments.ts";
 
 const CHANNELS = new Set(["Email", "LinkedIn", "SMS", "WhatsApp", "Phone"]);
 
@@ -15,10 +20,23 @@ export type InboundColdInput = {
   taskId?: string | null;
   /** @deprecated Removed — cold inbound resolves via FollowUpClientId + sender. */
   contactId?: string | null;
+  attachments?: unknown;
+  extendedParameters?: Record<string, unknown> | string | null;
+  "Extended Parameters"?: Record<string, unknown> | string | null;
+};
+
+export type NormalizedInboundColdInput = {
+  channel: string;
+  content: string;
+  object: string;
+  brandId: string;
+  sender: string;
+  attachments: MediaAttachment[];
+  extendedParameters: Record<string, unknown> | string | null;
 };
 
 /** Pure validation for /api/inbound. */
-export function normalizeInboundColdInput(input: InboundColdInput) {
+export function normalizeInboundColdInput(input: InboundColdInput): NormalizedInboundColdInput {
   if (input.taskId != null && String(input.taskId).trim()) {
     throw new InboundReplyError(
       "taskId is not allowed on /api/inbound. Use POST /api/replies for replies to a sent Follow-up Task.",
@@ -45,10 +63,8 @@ export function normalizeInboundColdInput(input: InboundColdInput) {
     throw new InboundReplyError("object is only valid for Email", 400);
   }
 
-  const content = input.content?.trim() || "";
-  if (channel !== "Phone" && !content) {
-    throw new InboundReplyError("Message content is required", 400);
-  }
+  const attachments = resolveInboundEmailAttachments(channel, input.attachments);
+  const content = resolveInboundContent(channel, input.content, attachments);
 
   const brandId = input.FollowUpClientId?.trim() || input.brandId?.trim() || "";
   const sender = input.sender?.trim() || "";
@@ -56,6 +72,9 @@ export function normalizeInboundColdInput(input: InboundColdInput) {
   if (!sender) {
     throw new InboundReplyError("sender is required", 422);
   }
+
+  const extendedParameters =
+    input.extendedParameters ?? input["Extended Parameters"] ?? null;
 
   if (channel === "Email") {
     // FollowUpClientId optional: empty → resolve contact globally by email.
@@ -65,6 +84,8 @@ export function normalizeInboundColdInput(input: InboundColdInput) {
       object,
       brandId,
       sender,
+      attachments,
+      extendedParameters,
     };
   }
 
@@ -77,9 +98,11 @@ export function normalizeInboundColdInput(input: InboundColdInput) {
 
   return {
     channel,
-    content: content || "Inbound call",
+    content,
     object: "",
     brandId,
     sender,
+    attachments,
+    extendedParameters,
   };
 }

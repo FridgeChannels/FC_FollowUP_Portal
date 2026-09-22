@@ -1,4 +1,4 @@
-export type MediaKind = "image" | "video";
+export type MediaKind = "image" | "video" | "file";
 
 export type MediaAttachment = {
   id: string;
@@ -52,12 +52,19 @@ export function validateMediaFile(
 
 export function captionForAttachments(attachments: MediaAttachment[]) {
   if (!attachments.length) return "";
-  if (attachments.length === 1) return attachments[0].kind === "video" ? "Video" : "Image";
+  if (attachments.length === 1) {
+    const kind = attachments[0].kind;
+    if (kind === "video") return "Video";
+    if (kind === "image") return "Image";
+    return attachments[0].name || "Attachment";
+  }
   const images = attachments.filter((item) => item.kind === "image").length;
-  const videos = attachments.length - images;
-  if (images && !videos) return `${images} images`;
-  if (videos && !images) return `${videos} videos`;
-  return `${attachments.length} media files`;
+  const videos = attachments.filter((item) => item.kind === "video").length;
+  const files = attachments.length - images - videos;
+  if (images && !videos && !files) return `${images} images`;
+  if (videos && !images && !files) return `${videos} videos`;
+  if (files && !images && !videos) return `${files} attachments`;
+  return `${attachments.length} attachments`;
 }
 
 function parseJsonObject(value?: string | null): Record<string, unknown> | null {
@@ -75,7 +82,10 @@ function parseJsonObject(value?: string | null): Record<string, unknown> | null 
 function asAttachment(value: unknown): MediaAttachment | null {
   if (!value || typeof value !== "object") return null;
   const row = value as Partial<MediaAttachment>;
-  const kind = row.kind === "video" ? "video" : row.kind === "image" ? "image" : null;
+  const kind =
+    row.kind === "video" ? "video" : row.kind === "image" ? "image" : row.kind === "file" ? "file" : null;
+  // WhatsApp outbound only accepts image/video.
+  if (kind !== "image" && kind !== "video") return null;
   const id = typeof row.id === "string" ? row.id.trim() : "";
   const name = typeof row.name === "string" ? row.name.trim() : "";
   const mimeType = typeof row.mimeType === "string" ? row.mimeType.trim() : "";
@@ -116,7 +126,7 @@ export function sanitizeMediaAttachments(value: unknown): MediaAttachment[] {
 }
 
 export function mediaFieldsFromAttachments(attachments: MediaAttachment[]) {
-  const first = attachments[0];
+  const first = attachments.find((item) => item.kind === "image" || item.kind === "video");
   if (!first) return null;
   return {
     mediaUrl: first.url,

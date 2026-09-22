@@ -311,6 +311,14 @@ export type BrandMeetingNote = {
   url: string;
 };
 
+/** Portal-created Notion AI Meeting Notes links (Follow-up Client `AI Meeting Links` JSON). */
+export type BrandAiMeetingLink = {
+  id: string;
+  title: string;
+  url: string;
+  createdAt: string;
+};
+
 export type BrandDetail = BrandListItem & {
   priority: string | null;
   notes: string | null;
@@ -322,6 +330,7 @@ export type BrandDetail = BrandListItem & {
   matchedCategory: string | null;
   followupExhibition: string | null;
   meetingNotes: BrandMeetingNote[];
+  aiMeetingLinks: BrandAiMeetingLink[];
   contacts: BrandContact[];
   tasks: BrandTask[];
   activities: BrandActivity[];

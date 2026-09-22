@@ -3,11 +3,11 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Bomb, ChevronRight, CircleAlert, ExternalLink, MoreHorizontal, Plus, Search, Send } from "lucide-react";
+import { ArrowLeft, Bomb, ChevronRight, CircleAlert, ExternalLink, History, MoreHorizontal, Plus, Search, Send } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "./workspace-store";
 import { cacheBrandItem, getCachedBrand } from "@/lib/brand-list-cache";
-import { currentCpOption, FOLLOW_UP_STATUSES, HANDLING_MODES, keyPersonNotionUrl, listCurrentCps, type BrandActivity, type BrandContact, type BrandDetail, type BrandMeetingNote, type BrandTask, type CurrentCpOption } from "@/lib/brand-list";
+import { currentCpOption, FOLLOW_UP_STATUSES, HANDLING_MODES, keyPersonNotionUrl, listCurrentCps, type BrandActivity, type BrandAiMeetingLink, type BrandContact, type BrandDetail, type BrandMeetingNote, type BrandTask, type CurrentCpOption } from "@/lib/brand-list";
 import type { BombDetail, BombListItem } from "@/lib/bomb-list";
 import { ActionStatus, BombInstance, Channel, Contact, CPCode, Customer, dateOnly, Interaction, ScheduledAction, WorkspaceState, compareInteractionSort, interactionCpCode, uid } from "@/lib/outreach-domain";
 import { brandDetailMetadata } from "@/lib/page-metadata";
@@ -49,10 +49,10 @@ function BrandMeetingNoteLink({
 }) {
   const note = notes?.[0];
   if (!notes) {
-    return <p className="mt-3 text-sm font-medium text-slate-700">{fallback}</p>;
+    return <p className="text-sm font-medium text-slate-700">{fallback}</p>;
   }
   if (!note) {
-    return <p className="mt-3 text-sm font-medium text-slate-400">Notion meeting note</p>;
+    return <p className="text-sm font-medium text-slate-400">Exhibition Meeting</p>;
   }
   return (
     <a
@@ -60,11 +60,65 @@ function BrandMeetingNoteLink({
       target="_blank"
       rel="noreferrer"
       title={note.title}
-      className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-violet-700 hover:text-violet-900"
+      className="inline-flex items-center gap-1.5 text-sm font-medium text-violet-700 hover:text-violet-900"
     >
-      Notion meeting note
+      Exhibition Meeting
       <ExternalLink className="size-3.5 shrink-0" />
     </a>
+  );
+}
+
+function MeetingHistoryDialog({
+  open,
+  onOpenChange,
+  links,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  links: BrandAiMeetingLink[];
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Follow up Meeting</DialogTitle>
+          <DialogDescription>
+            Portal-created Notion AI Meeting Notes for this brand.
+          </DialogDescription>
+        </DialogHeader>
+        {links.length ? (
+          <ul className="max-h-[50vh] space-y-1 overflow-y-auto">
+            {links.map((item) => (
+              <li key={item.id}>
+                <a
+                  href={item.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={item.title}
+                  className="flex items-start justify-between gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-slate-50"
+                  onClick={() => onOpenChange(false)}
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-medium text-slate-900">{item.title}</span>
+                    {item.createdAt ? (
+                      <span className="mt-0.5 block text-[11px] text-slate-400">
+                        {formatEasternDateTime(item.createdAt)}
+                      </span>
+                    ) : null}
+                  </span>
+                  <ExternalLink className="mt-0.5 size-3.5 shrink-0 text-slate-400" />
+                </a>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="py-6 text-center text-sm text-slate-500">No meetings yet. Use Meeting to create one.</p>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -291,6 +345,7 @@ function toBombPlan(customerId: string, tasks: BrandTask[], activities: BrandAct
         status: asActionStatus(task.status),
         content: subject && body ? `Subject: ${subject}\n\n${body}` : subject || body,
         note: displayNote(task.notes),
+        attachments: conversation?.attachments?.length ? conversation.attachments : undefined,
       });
     }
   }
@@ -310,6 +365,7 @@ function launchPlanFromApiSteps(input: {
     scheduledAt: string;
     templateId?: string;
     content: string;
+    attachments?: MediaAttachment[];
   }>;
 }) {
   const instanceId = `run:${input.omniReachRunId}`;
@@ -335,6 +391,7 @@ function launchPlanFromApiSteps(input: {
     actualDate: step.scheduledAt,
     status: "Scheduled",
     content: step.content,
+    attachments: step.attachments?.length ? step.attachments : undefined,
   }));
   return { instanceId, state: planWorkspaceFromBombPlan({ bombInstances, actions }) };
 }
@@ -472,6 +529,8 @@ const ACTIVITY_PAGE_SIZE = 50;
 export function BrandDetail({customerId}:{customerId:string}){
   const {state,can,assignBrand,cancelBomb}=useWorkspace();
   const router=useRouter(); const [launch,setLaunch]=useState(false); const [reply,setReply]=useState(false); const [cp,setCP]=useState(false); const [contact,setContact]=useState(false); const [ownerDraft,setOwnerDraft]=useState<string>();
+  const [creatingMeeting,setCreatingMeeting]=useState(false);
+  const [meetingHistory,setMeetingHistory]=useState(false);
   const cached=getCachedBrand(customerId);
   const [remote,setRemote]=useState<BrandDetail|null>(cached?{
     ...cached,
@@ -485,6 +544,7 @@ export function BrandDetail({customerId}:{customerId:string}){
     matchedCategory:null,
     followupExhibition:null,
     meetingNotes:[],
+    aiMeetingLinks:[],
     contacts:[],
     tasks:[],
     activities:[],
@@ -515,6 +575,7 @@ export function BrandDetail({customerId}:{customerId:string}){
       matchedCategory:null,
       followupExhibition:null,
       meetingNotes:[],
+      aiMeetingLinks:[],
       contacts:[],
       tasks:[],
       activities:[],
@@ -707,6 +768,22 @@ export function BrandDetail({customerId}:{customerId:string}){
     catch(error){toast.error(error instanceof Error?error.message:"Status update failed");}
     finally{setSaving(false);}
   };
+  const createMeeting=async ()=>{
+    if(!notionBacked||creatingMeeting)return;
+    setCreatingMeeting(true);
+    try{
+      const response=await fetch(`/api/brands/${c.id}/meetings`,{method:"POST"});
+      const payload=await response.json() as {meeting?:BrandAiMeetingLink;meetings?:BrandAiMeetingLink[];error?:string};
+      if(!response.ok||!payload.meeting)throw new Error(payload.error||"Unable to create meeting");
+      setRemote(prev=>prev?{...prev,aiMeetingLinks:payload.meetings||[payload.meeting,...(prev.aiMeetingLinks||[])]}:prev);
+      if(payload.meeting.url)window.open(payload.meeting.url,"_blank","noopener,noreferrer");
+      toast.success("Meeting created");
+    }catch(error){
+      toast.error(error instanceof Error?error.message:"Unable to create meeting");
+    }finally{
+      setCreatingMeeting(false);
+    }
+  };
   const loadMoreActivities=()=>{
     if(!activitiesHasMore||activitiesLoadingMore||activitiesLoading||!activitiesCursor)return;
     setActivitiesLoadingMore(true);
@@ -727,7 +804,7 @@ export function BrandDetail({customerId}:{customerId:string}){
     <button onClick={()=>router.push(can("customers")?"/customers":"/tasks")} className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900"><ArrowLeft className="size-4"/>{can("customers")?"Brands":"ReplyTask"}</button>
     <section className="mb-8 grid gap-6 rounded-2xl border border-slate-200 bg-white p-5 xl:grid-cols-[minmax(0,1fr)_minmax(260px,.8fr)_176px] xl:items-start">
       <div className="min-w-0">
-        <div className="flex items-start gap-4"><Avatar className="size-14"><AvatarFallback className="bg-violet-100 font-bold text-violet-700">{c.initials}</AvatarFallback></Avatar><div className="min-w-0"><h1 className="text-2xl font-bold tracking-tight">{c.name}</h1><div className="mt-2 flex flex-wrap gap-2"><CP value={notionBacked&&remote?remote.currentCp:c.cp}/>{notionBacked&&remote?.status?(can("editBrand")?<BadgeSelect value={remote.status} options={FOLLOW_UP_STATUSES} disabled={saving||!brandReady} onChange={value=>{void patchBrand({status:value}).then(()=>toast.success("Status updated")).catch(error=>toast.error(error instanceof Error?error.message:"Update failed"));}}/>:<Status value={remote.status}/>):(c.status?<Status value={c.status}/>:null)}{notionBacked&&can("editBrand")?<BadgeSelect value={remote?.handlingMode||""} options={HANDLING_MODES} disabled={saving||!brandReady} onChange={value=>{void patchBrand({handlingMode:value}).then(()=>toast.success("Handling Mode updated")).catch(error=>toast.error(error instanceof Error?error.message:"Update failed"));}}/>:notionBacked&&remote?.handlingMode?<Status value={remote.handlingMode}/>:null}{notionBacked&&!brandReady?<span className="inline-flex items-center gap-1 text-xs font-medium text-slate-400"><Spinner className="size-3"/>Loading details…</span>:null}</div>{brandReady?<><BrandMeetingNoteLink notes={notionBacked?remote?.meetingNotes||[]:null} fallback={summary}/>{notionBacked&&<p className="mt-1 text-xs text-slate-500">{currentCpOption(remote?.currentCp).name} · {currentCpOption(remote?.currentCp).fullName}</p>}{notionBacked&&displayNote(remote?.notes)&&<p className="mt-2 text-sm leading-6 text-slate-600">{displayNote(remote?.notes)}</p>}</>:<p className="mt-3 text-sm text-slate-400">Loading brand details…</p>}<div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500"><span>Latest: {remote?.lastInteractionAt?dateOnly(remote.lastInteractionAt):activityLoading?"Loading…":last?.title||"No activity"}</span>{!notionBacked&&<span>Source: {c.source}</span>}<span>AccountManager: {remote?.ownerName||state.users.find(u=>u.id===c.ownerId)?.name||"Unassigned"}</span>{notionBacked&&remote?.createdAt&&<span>Created: {formatEasternDateTime(remote.createdAt)}</span>}</div>{can("assignOwner")&&<div className="mt-3 flex flex-wrap items-center gap-2"><Select value={ownerDraft??c.ownerId??"unassigned"} onValueChange={setOwnerDraft} disabled={!brandReady}><SelectTrigger size="sm" className="w-44"><SelectValue placeholder="Select owner"/></SelectTrigger><SelectContent><SelectItem value="unassigned">Unassigned</SelectItem>{ownerChoices.map(u=><SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent></Select><Button size="sm" disabled={saving||!brandReady||(ownerDraft??c.ownerId??"unassigned")===(c.ownerId||"unassigned")} onClick={()=>void handleAssign()}>Assign</Button></div>}</div></div>
+        <div className="flex items-start gap-4"><Avatar className="size-14"><AvatarFallback className="bg-violet-100 font-bold text-violet-700">{c.initials}</AvatarFallback></Avatar><div className="min-w-0"><h1 className="text-2xl font-bold tracking-tight">{c.name}</h1><div className="mt-2 flex flex-wrap gap-2"><CP value={notionBacked&&remote?remote.currentCp:c.cp}/>{notionBacked&&remote?.status?(can("editBrand")?<BadgeSelect value={remote.status} options={FOLLOW_UP_STATUSES} disabled={saving||!brandReady} onChange={value=>{void patchBrand({status:value}).then(()=>toast.success("Status updated")).catch(error=>toast.error(error instanceof Error?error.message:"Update failed"));}}/>:<Status value={remote.status}/>):(c.status?<Status value={c.status}/>:null)}{notionBacked&&can("editBrand")?<BadgeSelect value={remote?.handlingMode||""} options={HANDLING_MODES} disabled={saving||!brandReady} onChange={value=>{void patchBrand({handlingMode:value}).then(()=>toast.success("Handling Mode updated")).catch(error=>toast.error(error instanceof Error?error.message:"Update failed"));}}/>:notionBacked&&remote?.handlingMode?<Status value={remote.handlingMode}/>:null}{notionBacked&&!brandReady?<span className="inline-flex items-center gap-1 text-xs font-medium text-slate-400"><Spinner className="size-3"/>Loading details…</span>:null}</div>{brandReady?<><div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1"><BrandMeetingNoteLink notes={notionBacked?remote?.meetingNotes||[]:null} fallback={summary}/>{notionBacked&&<Button type="button" variant="ghost" size="sm" className="h-auto px-1.5 py-0.5 text-sm font-medium text-slate-600 hover:text-slate-900" disabled={!brandReady} onClick={()=>setMeetingHistory(true)}><History className="mr-1 size-3.5"/>Follow up Meeting</Button>}{notionBacked&&can("editBrand")&&<Button type="button" variant="ghost" size="icon" className="size-7 text-slate-600 hover:text-slate-900" disabled={!brandReady||creatingMeeting} aria-label="Create Follow up Meeting" title="Create Follow up Meeting" onClick={()=>void createMeeting()}>{creatingMeeting?<Spinner className="size-3.5"/>:<Plus className="size-4"/>}</Button>}</div>{notionBacked&&<p className="mt-1 text-xs text-slate-500">{currentCpOption(remote?.currentCp).name} · {currentCpOption(remote?.currentCp).fullName}</p>}{notionBacked&&displayNote(remote?.notes)&&<p className="mt-2 text-sm leading-6 text-slate-600">{displayNote(remote?.notes)}</p>}</>:<p className="mt-3 text-sm text-slate-400">Loading brand details…</p>}<div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500"><span>Latest: {remote?.lastInteractionAt?dateOnly(remote.lastInteractionAt):activityLoading?"Loading…":last?.title||"No activity"}</span>{!notionBacked&&<span>Source: {c.source}</span>}<span>AccountManager: {remote?.ownerName||state.users.find(u=>u.id===c.ownerId)?.name||"Unassigned"}</span>{notionBacked&&remote?.createdAt&&<span>Created: {formatEasternDateTime(remote.createdAt)}</span>}</div>{can("assignOwner")&&<div className="mt-3 flex flex-wrap items-center gap-2"><Select value={ownerDraft??c.ownerId??"unassigned"} onValueChange={setOwnerDraft} disabled={!brandReady}><SelectTrigger size="sm" className="w-44"><SelectValue placeholder="Select owner"/></SelectTrigger><SelectContent><SelectItem value="unassigned">Unassigned</SelectItem>{ownerChoices.map(u=><SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent></Select><Button size="sm" disabled={saving||!brandReady||(ownerDraft??c.ownerId??"unassigned")===(c.ownerId||"unassigned")} onClick={()=>void handleAssign()}>Assign</Button></div>}</div></div>
       </div>
       <BrandContactList
         brandId={c.id}
@@ -762,7 +839,7 @@ export function BrandDetail({customerId}:{customerId:string}){
     const payload=await response.json() as {error?:string};
     if(!response.ok)throw new Error(payload.error||"Send failed");
     await Promise.all([refreshRemote(),fetchActivitiesPage(null,"replace")]);
-  }:undefined}/><ChangeCPDialog customerId={c.id} open={cp} onOpenChange={setCP} currentCp={notionBacked&&remote?remote.currentCp:undefined} cps={notionBacked?remoteCps:undefined} onSave={notionBacked?async (currentCpId,evidence,note)=>{await patchBrand({currentCpId,evidence,note});}:undefined}/><ContactDialog customerId={c.id} open={contact} onOpenChange={setContact} notionBacked={notionBacked} onCreated={notionBacked?async ()=>{await refreshRemote();}:undefined}/></div>;
+  }:undefined}/><ChangeCPDialog customerId={c.id} open={cp} onOpenChange={setCP} currentCp={notionBacked&&remote?remote.currentCp:undefined} cps={notionBacked?remoteCps:undefined} onSave={notionBacked?async (currentCpId,evidence,note)=>{await patchBrand({currentCpId,evidence,note});}:undefined}/><ContactDialog customerId={c.id} open={contact} onOpenChange={setContact} notionBacked={notionBacked} onCreated={notionBacked?async ()=>{await refreshRemote();}:undefined}/>{notionBacked?<MeetingHistoryDialog open={meetingHistory} onOpenChange={setMeetingHistory} links={remote?.aiMeetingLinks||[]}/>:null}</div>;
 }
 
 type DetailContact = {
@@ -1242,9 +1319,63 @@ function BrandContactList({
   );
 }
 
-type LaunchStepCopy = { subject?: string; content?: string; callGoal?: string; script?: string };
+type LaunchStepCopy = {
+  subject?: string;
+  content?: string;
+  callGoal?: string;
+  script?: string;
+  attachments?: MediaAttachment[];
+};
 
 type LaunchBombOption = {id:string;name:string;version?:number;goal:string;cp?:string;status?:string;priority?:string|null;steps:Array<{id:string;channel:Channel;subject?:string;content:string;callGoal?:string;script?:string}>};
+
+function LaunchEmailStepEditor({
+  subject,
+  content,
+  disabled,
+  onChange,
+  onUploadingChange,
+}: {
+  subject: string;
+  content: string;
+  disabled?: boolean;
+  onChange: (patch: Pick<LaunchStepCopy, "subject" | "content" | "attachments">) => void;
+  onUploadingChange?: (uploading: boolean) => void;
+}) {
+  const media = useMessageMedia("Email");
+  const readyKey = media.readyAttachments.map((item) => item.id).join("|");
+
+  useEffect(() => {
+    onChange({ attachments: media.readyAttachments });
+    // Sync ready uploads into launch copies; intentionally keyed by attachment ids.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readyKey]);
+
+  useEffect(() => {
+    onUploadingChange?.(media.uploading);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [media.uploading]);
+
+  return (
+    <div className="grid gap-2">
+      <Input
+        value={subject}
+        onChange={(e) => onChange({ subject: e.target.value })}
+        placeholder="Email subject"
+        disabled={disabled}
+      />
+      <MessageMediaInputFrame channel="Email" media={media} disabled={disabled}>
+        <Textarea
+          className="min-h-24"
+          value={content}
+          onChange={(e) => onChange({ content: e.target.value })}
+          placeholder="Email body"
+          disabled={disabled}
+        />
+      </MessageMediaInputFrame>
+    </div>
+  );
+}
 
 function asLaunchChannel(value?: string | null): Channel | null {
   return value && MESSAGE_CHANNELS.includes(value as Channel) ? value as Channel : null;
@@ -1281,6 +1412,7 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
   const [bombId,setBombId]=useState("");
   const [target,setTarget]=useState("");
   const [copies,setCopies]=useState<Record<string,LaunchStepCopy>>({});
+  const [emailUploading,setEmailUploading]=useState<Record<string,boolean>>({});
   const [launchedInstanceId,setLaunchedInstanceId]=useState("");
   const [previewReady,setPreviewReady]=useState(false);
   const [launchPlan,setLaunchPlan]=useState<{instanceId:string;state:WorkspaceState}|null>(null);
@@ -1337,6 +1469,7 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
     setBombId("");
     setTarget("");
     setCopies({});
+    setEmailUploading({});
     setRemoteDetail(undefined);
     setRemoteBombs([]);
     setLaunchPlan(null);
@@ -1359,10 +1492,14 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
     if(person&&!channelAvailable(person,s.channel))return false;
     const copy=copies[s.id];
     if(!copy)return true;
-    if(s.channel==="Email")return !copy.subject?.trim()||!copy.content?.trim();
+    if(s.channel==="Email"){
+      const hasBody=!!copy.content?.trim()||(copy.attachments?.length||0)>0;
+      return !copy.subject?.trim()||!hasBody;
+    }
     if(s.channel==="Phone")return !copy.callGoal?.trim()||!copy.script?.trim();
     return !copy.content?.trim();
   });
+  const anyEmailUploading=Object.values(emailUploading).some(Boolean);
   const hasReachableStep=!!selected&&!!person&&selected.steps.some((s)=>channelAvailable(person,s.channel));
   const launched=!!launchedInstanceId||previewReady||!!launchPlan;
   const launchedInstance=launchedInstanceId?state.bombInstances.find(item=>item.id===launchedInstanceId):undefined;
@@ -1383,7 +1520,18 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
           const disabled=!!person&&!channelAvailable(person,s.channel);
           return <div key={s.id} className={`rounded-xl bg-slate-50 p-4 ${disabled?"pointer-events-none opacity-50":""}`} aria-disabled={disabled||undefined}>
             <div className="mb-3 flex items-center justify-between gap-2"><div className="flex items-center gap-2"><span className={`grid size-7 place-items-center rounded-md bg-slate-50 text-xs font-bold ${disabled?"text-slate-400":"text-violet-600"}`}>{index+1}</span><ChannelOption channel={s.channel}/></div><span className={`text-xs ${disabled?"font-medium text-slate-400":"text-slate-500"}`}>{disabled?"Unavailable · no contact info":"System will schedule this step"}</span></div>
-            {s.channel==="Email"&&<div className="grid gap-2"><Input value={copy.subject||""} onChange={e=>updateCopy(s.id,{subject:e.target.value})} placeholder="Email subject" disabled={disabled}/><Textarea className="min-h-24" value={copy.content||""} onChange={e=>updateCopy(s.id,{content:e.target.value})} placeholder="Email body" disabled={disabled}/></div>}
+            {s.channel==="Email"&&(
+              <LaunchEmailStepEditor
+                key={`${s.id}:${target}:${bombId}`}
+                subject={copy.subject||""}
+                content={copy.content||""}
+                disabled={disabled}
+                onChange={(patch)=>updateCopy(s.id,patch)}
+                onUploadingChange={(uploading)=>setEmailUploading((prev)=>(
+                  prev[s.id]===uploading?prev:{...prev,[s.id]:uploading}
+                ))}
+              />
+            )}
             {s.channel==="Phone"&&<div className="grid gap-2"><Input value={copy.callGoal||""} onChange={e=>updateCopy(s.id,{callGoal:e.target.value})} placeholder="Call goal" disabled={disabled}/><Textarea className="min-h-24" value={copy.script||""} onChange={e=>updateCopy(s.id,{script:e.target.value})} placeholder="Suggested script" disabled={disabled}/></div>}
             {s.channel!=="Email"&&s.channel!=="Phone"&&<Textarea className="min-h-24" value={copy.content||""} onChange={e=>updateCopy(s.id,{content:e.target.value})} placeholder={`${s.channel} content`} disabled={disabled}/>}
           </div>;
@@ -1392,7 +1540,7 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
       </>}
       </>}
     </div>
-    <DialogFooter>{launched?<Button onClick={()=>onOpenChange(false)}>Done</Button>:<><Button variant="outline" onClick={()=>onOpenChange(false)}>Cancel</Button><Button disabled={launching||!selected||!person||!hasReachableStep||incomplete||!!hasActiveOmniReach||(!previewOnly&&(!!c?.activeBombId||c?.status==="Bomb Running"))} onClick={()=>{if(!selected||!person)return;if(previewOnly){if(!customerId)return;void (async ()=>{setLaunching(true);try{const response=await fetch(`/api/brands/${customerId}/launch`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({bombId:selected.id,contactId:person.id,copies})});const payload=await response.json() as {message?:string;error?:string;omniReachRunId?:string;bombId?:string;bombName?:string;contactId?:string;steps?:Array<{taskId:string;channel:string;scheduledAt:string;templateId?:string;content:string}>};if(!response.ok)throw new Error(payload.error||"Launch failed");if(!payload.omniReachRunId||!payload.steps?.length)throw new Error("Launch succeeded but no execution plan steps were returned");const plan=launchPlanFromApiSteps({customerId,bombId:payload.bombId||selected.id,bombName:payload.bombName||selected.name,contactId:payload.contactId||person.id,omniReachRunId:payload.omniReachRunId,steps:payload.steps});setLaunchPlan(plan);setPreviewReady(true);toast.success(payload.message||"OmniReach launched");onLaunched?.();}catch(error){toast.error(error instanceof Error?error.message:"Launch failed");}finally{setLaunching(false);}})();return;}if(!c)return;const r=launchBomb(c.id,selected.id,person.id,copies);show(r);if(r.ok&&r.id)setLaunchedInstanceId(r.id);}}>Launch OmniReach</Button></>}</DialogFooter>
+    <DialogFooter>{launched?<Button onClick={()=>onOpenChange(false)}>Done</Button>:<><Button variant="outline" onClick={()=>onOpenChange(false)}>Cancel</Button><Button disabled={launching||anyEmailUploading||!selected||!person||!hasReachableStep||incomplete||!!hasActiveOmniReach||(!previewOnly&&(!!c?.activeBombId||c?.status==="Bomb Running"))} onClick={()=>{if(!selected||!person)return;if(previewOnly){if(!customerId)return;void (async ()=>{setLaunching(true);try{const response=await fetch(`/api/brands/${customerId}/launch`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({bombId:selected.id,contactId:person.id,copies})});const payload=await response.json() as {message?:string;error?:string;omniReachRunId?:string;bombId?:string;bombName?:string;contactId?:string;steps?:Array<{taskId:string;channel:string;scheduledAt:string;templateId?:string;content:string;attachments?:MediaAttachment[]}>};if(!response.ok)throw new Error(payload.error||"Launch failed");if(!payload.omniReachRunId||!payload.steps?.length)throw new Error("Launch succeeded but no execution plan steps were returned");const plan=launchPlanFromApiSteps({customerId,bombId:payload.bombId||selected.id,bombName:payload.bombName||selected.name,contactId:payload.contactId||person.id,omniReachRunId:payload.omniReachRunId,steps:payload.steps});setLaunchPlan(plan);setPreviewReady(true);toast.success(payload.message||"OmniReach launched");onLaunched?.();}catch(error){toast.error(error instanceof Error?error.message:"Launch failed");}finally{setLaunching(false);}})();return;}if(!c)return;const r=launchBomb(c.id,selected.id,person.id,copies);show(r);if(r.ok&&r.id)setLaunchedInstanceId(r.id);}}>Launch OmniReach</Button></>}</DialogFooter>
   </DialogContent></Dialog>;
 }
 

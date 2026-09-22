@@ -34,6 +34,11 @@ import {
   sanitizeMediaAttachments,
   type MediaAttachment,
 } from "../media-attachments";
+import {
+  channelSupportsEmailAttachments,
+  encodeAttachmentsProperty,
+  sanitizeEmailAttachments,
+} from "../email-attachments";
 import { retrieveOwner } from "./owners";
 import {
   annotateTasksWithReplyInbox,
@@ -419,9 +424,13 @@ export async function createOutboundConversation(input: {
   attachments?: MediaAttachment[];
 }) {
   if (!CHANNELS.has(input.channel)) throw new Error("Invalid channel");
-  const attachments = channelSupportsMedia(input.channel)
+  const whatsappAttachments = channelSupportsMedia(input.channel)
     ? sanitizeMediaAttachments(input.attachments)
     : [];
+  const emailAttachments = channelSupportsEmailAttachments(input.channel)
+    ? sanitizeEmailAttachments(input.attachments)
+    : [];
+  const attachments = whatsappAttachments.length ? whatsappAttachments : emailAttachments;
   const content = input.content.trim() || captionForAttachments(attachments);
   if (!content) throw new Error("Message content is required");
 
@@ -467,9 +476,18 @@ export async function createOutboundConversation(input: {
   }
   const cp = await conversationCpRelation(input.cpId || input.cpAtInteraction);
   if (cp) properties.CP = cp;
-  const encodedExtended = encodeOutboundExtendedParameters(input.extendedParameters, attachments);
+  // WhatsApp media stays in Extended Parameters for the existing sender contract.
+  // Email attachments use the dedicated Attachments property (JSON array).
+  const encodedExtended = encodeOutboundExtendedParameters(
+    input.extendedParameters,
+    whatsappAttachments,
+  );
   if (encodedExtended) {
     properties["Extended Parameters"] = { rich_text: richText(encodedExtended) };
+  }
+  const encodedAttachments = encodeAttachmentsProperty(emailAttachments);
+  if (encodedAttachments) {
+    properties.Attachments = { rich_text: richText(encodedAttachments) };
   }
 
   return createPage(getFollowupConversationDbId(), properties);

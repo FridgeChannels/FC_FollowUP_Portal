@@ -17,8 +17,12 @@ const DEFAULT_FOLLOWUP_TEMPLATE_DB_ID = "6b8cab86-324d-4d1d-9a8b-8acc48ebc1c5";
 const DEFAULT_FOLLOWUP_CAPACITY_DB_ID = "0c422a9a-a10b-4f6f-b87d-b97fbb263dee";
 const DEFAULT_FOLLOWUP_CHECKPOINT_DB_ID = "1e1f297c-2925-4903-a0f1-2b6ad113c364";
 const DEFAULT_FOLLOWUP_LINKEDIN_ACCOUNT_DB_ID = "2ea248ed-37c4-42ec-8591-699f336a3ee7";
+/** Parent page for Portal-created Notion AI Meeting Notes. */
+const DEFAULT_FOLLOWUP_MEETING_LIST_PAGE_ID = "3e39166f-d9fd-80b5-a298-d0a7b351bb68";
 
 export const NOTION_VERSION = "2022-06-28";
+/** Required for `markdown` body when creating AI Meeting Notes pages. */
+export const NOTION_VERSION_MARKDOWN = "2026-03-11";
 
 export function getFollowupClientDbId() {
   return (
@@ -137,6 +141,16 @@ export function getFollowupLinkedInAccountDbId() {
       ? process.env.NOTION_FOLLOWUP_LINKEDIN_ACCOUNT_DB_ID
       : undefined) ||
     DEFAULT_FOLLOWUP_LINKEDIN_ACCOUNT_DB_ID
+  );
+}
+
+export function getFollowupMeetingListPageId() {
+  return (
+    env.NOTION_FOLLOWUP_MEETING_LIST_PAGE_ID ||
+    (typeof process !== "undefined"
+      ? process.env.NOTION_FOLLOWUP_MEETING_LIST_PAGE_ID
+      : undefined) ||
+    DEFAULT_FOLLOWUP_MEETING_LIST_PAGE_ID
   );
 }
 

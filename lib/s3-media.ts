@@ -1,5 +1,5 @@
 import { createHmac, createHash } from "node:crypto";
-import type { MediaKind } from "./media-attachments";
+import type { MediaKind } from "./media-attachments.ts";
 
 /** Keep each proxied chunk under vinext's ~1MB request body limit. */
 export const MEDIA_UPLOAD_CHUNK_BYTES = 512 * 1024;
@@ -22,7 +22,8 @@ export function s3Config() {
   const bucket = envValue("S3_BUCKET");
   const imagePrefix = (envValue("S3_KEY_PREFIX") || "images").replace(/^\/+|\/+$/g, "");
   const videoPrefix = (envValue("S3_VIDEO_PREFIX") || "videos").replace(/^\/+|\/+$/g, "");
-  return { accessKeyId, secretAccessKey, region, bucket, imagePrefix, videoPrefix };
+  const filePrefix = (envValue("S3_FILE_PREFIX") || "files").replace(/^\/+|\/+$/g, "");
+  return { accessKeyId, secretAccessKey, region, bucket, imagePrefix, videoPrefix, filePrefix };
 }
 
 export function assertS3Configured() {
@@ -44,7 +45,10 @@ function extensionFor(kind: MediaKind, mimeType: string, fileName?: string) {
   if (mime === "video/mp4") return "mp4";
   if (mime === "video/quicktime") return "mov";
   if (mime === "video/3gpp") return "3gp";
-  return kind === "video" ? "mp4" : "jpg";
+  if (mime === "application/pdf") return "pdf";
+  if (kind === "video") return "mp4";
+  if (kind === "file") return "bin";
+  return "jpg";
 }
 
 export function publicS3ObjectUrl(bucket: string, region: string, key: string) {
@@ -96,7 +100,12 @@ export function createMediaObjectPlan(input: {
   fileName?: string;
 }): MediaObjectPlan {
   const cfg = assertS3Configured();
-  const prefix = input.kind === "video" ? cfg.videoPrefix : cfg.imagePrefix;
+  const prefix =
+    input.kind === "video"
+      ? cfg.videoPrefix
+      : input.kind === "file"
+        ? cfg.filePrefix
+        : cfg.imagePrefix;
   const id = crypto.randomUUID().replace(/-/g, "");
   const ext = extensionFor(input.kind, input.mimeType, input.fileName);
   const key = `${prefix}/${id}.${ext}`;

@@ -1,4 +1,9 @@
-import { getFollowupClientDbId, getNotionApiKey, NOTION_VERSION } from "./config";
+import {
+  getFollowupClientDbId,
+  getNotionApiKey,
+  NOTION_VERSION,
+  NOTION_VERSION_MARKDOWN,
+} from "./config";
 import { followupClientListFilter, testClientFilter } from "./owner-filter";
 import { notionRetry, runWithNotionLimit } from "./rate-limit";
 
@@ -263,6 +268,32 @@ export async function createPage(
       parent: { database_id: databaseId },
       properties,
     }),
+  });
+}
+
+/** Create a child page under a parent page (not a database). */
+export async function createChildPage(
+  parentPageId: string,
+  input: { title: string; markdown?: string },
+) {
+  const title = input.title.trim();
+  if (!title) throw new Error("Page title is required");
+  const body: Record<string, unknown> = {
+    parent: { page_id: parentPageId },
+    properties: {
+      title: { title: richText(title) },
+    },
+  };
+  if (input.markdown?.trim()) {
+    body.markdown = input.markdown;
+    body.allow_async = false;
+  }
+  return notionFetch<NotionPage>("/pages", {
+    method: "POST",
+    headers: input.markdown?.trim()
+      ? { "Notion-Version": NOTION_VERSION_MARKDOWN }
+      : undefined,
+    body: JSON.stringify(body),
   });
 }
 

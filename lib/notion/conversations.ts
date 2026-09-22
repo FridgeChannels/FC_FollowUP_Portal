@@ -15,6 +15,7 @@ import { getFollowupConversationDbId } from "./config";
 import { listCheckpoints } from "./cps";
 import { isRetryableNotionError } from "./rate-limit";
 import { parseQuoCallData, quoFromMessageId } from "../quo/call-payload";
+import { attachmentsFromProperty } from "../email-attachments";
 import { attachmentsFromExtendedParameters } from "../media-attachments";
 
 const CONTACT_CONVERSATION_KEYS = ["Interactions", "Conversations", "Conversation Records"];
@@ -37,7 +38,12 @@ function mapConversation(
   const subject = propertyText(properties.Subject) || null;
   const notes = propertyText(properties.Notes) || null;
   const extendedParameters = propertyText(properties["Extended Parameters"]) || null;
+  const attachmentsProperty = propertyText(properties.Attachments) || null;
   const messageId = propertyText(properties["Message ID"]) || null;
+  const fromAttachmentsField = attachmentsFromProperty(attachmentsProperty);
+  const attachments = fromAttachmentsField.length
+    ? fromAttachmentsField
+    : attachmentsFromExtendedParameters(extendedParameters);
   return {
     id: page.id,
     contactId: firstRelationId(properties["Follow-up Contact"]) || null,
@@ -55,7 +61,7 @@ function mapConversation(
     threadId: propertyText(properties["Thread ID"]) || null,
     messageId,
     extendedParameters: options.trimPayload ? null : extendedParameters,
-    attachments: attachmentsFromExtendedParameters(extendedParameters),
+    attachments,
     replyStatus: asReplyStatus(propertyText(properties["Reply Status"])),
     cpId: firstRelationId(properties.CP) || null,
     cpAtInteraction: null,

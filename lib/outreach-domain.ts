@@ -42,6 +42,7 @@ export type BombInstance = {
 export type ScheduledAction = {
   id: string; bombInstanceId: string; customerId: string; stepId: string; channel: Channel; plannedDate: string;
   actualDate: string; status: ActionStatus; content: string; note?: string; callTaskId?: string;
+  attachments?: import("./media-attachments").MediaAttachment[];
 };
 export type Interaction = {
   id: string; customerId: string; contactId?: string; bombInstanceId?: string; cp?: CPCode; type: "Message" | "Phone" | "Bomb" | "CP" | "Follow-up" | "Human" | "System";

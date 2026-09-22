@@ -16,6 +16,7 @@ declare namespace Cloudflare {
     NOTION_FOLLOWUP_CAPACITY_DB_ID?: string;
     NOTION_FOLLOWUP_CHECKPOINT_DB_ID?: string;
     NOTION_FOLLOWUP_LINKEDIN_ACCOUNT_DB_ID?: string;
+    NOTION_FOLLOWUP_MEETING_LIST_PAGE_ID?: string;
     NOTION_KEY_PERSON_DB_ID?: string;
     ADMIN_EMAILS?: string;
     NOTION_ADMIN_EMAILS?: string;
@@ -42,5 +43,16 @@ declare namespace Cloudflare {
     WA_PROBE_API_TOKEN?: string;
     WA_API_TOKEN?: string;
     WA_PROBE_BASE_URL?: string;
+    AWS_ACCESS_KEY_ID?: string;
+    AWS_SECRET_ACCESS_KEY?: string;
+    AWS_DEFAULT_REGION?: string;
+    S3_BUCKET?: string;
+    S3_KEY_PREFIX?: string;
+    S3_VIDEO_PREFIX?: string;
+    S3_CREATOR_PREFIX?: string;
+    S3_FILE_PREFIX?: string;
+    EMAIL_ATTACHMENT_MIME_TYPES?: string;
+    EMAIL_ATTACHMENT_MAX_BYTES?: string;
+    EMAIL_ATTACHMENT_MAX_COUNT?: string;
   }
 }

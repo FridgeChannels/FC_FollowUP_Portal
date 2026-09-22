@@ -7,6 +7,11 @@ import {
   type BrandMeetingNote,
   type HandlingMode,
 } from "../brand-list";
+import {
+  aiMeetingLinksPropertyName,
+  parseAiMeetingLinks,
+  sortAiMeetingLinks,
+} from "../ai-meeting-links";
 import { checkpointShortName, listCheckpoints, resolveCheckpoint } from "./cps";
 import {
   firstRelationId,
@@ -401,6 +406,9 @@ export async function mapFollowupClientDetail(
     matchedCategory: company.matchedCategory,
     followupExhibition,
     meetingNotes,
+    aiMeetingLinks: sortAiMeetingLinks(
+      parseAiMeetingLinks(propertyText(properties[aiMeetingLinksPropertyName()])),
+    ),
     priority: propertyText(properties.Priority) || null,
     notes: propertyText(properties.Notes) || null,
     createdAt: page.created_time || properties["Created At"]?.created_time || null,

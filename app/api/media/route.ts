@@ -1,5 +1,9 @@
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import {
+  emailAttachmentKindFromMime,
+  validateEmailAttachmentFile,
+} from "@/lib/email-attachments";
+import {
   mediaKindFromMime,
   validateMediaFile,
   type MediaKind,
@@ -8,7 +12,8 @@ import { createMediaUploadSession } from "@/lib/media-upload-sessions";
 import { MEDIA_UPLOAD_CHUNK_BYTES, createMediaObjectPlan } from "@/lib/s3-media";
 
 function mediaKindFromQuery(value?: string | null): MediaKind | null {
-  return value === "video" ? "video" : value === "image" ? "image" : null;
+  if (value === "video" || value === "image" || value === "file") return value;
+  return null;
 }
 
 /**
@@ -26,19 +31,43 @@ export async function POST(request: Request) {
       mimeType?: string;
       fileName?: string;
       size?: number;
+      purpose?: string;
     };
     const mimeType = String(body.mimeType || "").trim();
     const fileName = String(body.fileName || "").trim() || undefined;
     const size = typeof body.size === "number" ? body.size : 0;
-    const kind = mediaKindFromQuery(body.kind) || mediaKindFromMime(mimeType);
-    if (!kind) {
-      return Response.json({ error: "Unsupported media type" }, { status: 400 });
+    const purpose = String(body.purpose || "").trim().toLowerCase();
+    const requestedKind = mediaKindFromQuery(body.kind);
+
+    let kind: MediaKind | null = null;
+    let invalid: string | null = null;
+
+    if (purpose === "email" || requestedKind === "file") {
+      kind = emailAttachmentKindFromMime(mimeType) || requestedKind;
+      if (!kind || (kind !== "image" && kind !== "file" && kind !== "video")) {
+        return Response.json({ error: "Unsupported email attachment type" }, { status: 400 });
+      }
+      // Prefer mime-derived kind for email (pdf → file, jpeg → image).
+      kind = emailAttachmentKindFromMime(mimeType) || kind;
+      invalid = validateEmailAttachmentFile({ type: mimeType, size, name: fileName });
+    } else {
+      kind = requestedKind || mediaKindFromMime(mimeType);
+      if (!kind || kind === "file") {
+        return Response.json({ error: "Unsupported media type" }, { status: 400 });
+      }
+      invalid = validateMediaFile({ type: mimeType, size, name: fileName }, kind);
     }
-    const invalid = validateMediaFile({ type: mimeType, size, name: fileName }, kind);
+
     if (invalid) {
       return Response.json({ error: invalid }, { status: 400 });
     }
-    const name = fileName || (kind === "video" ? "video.mp4" : "image.jpg");
+    if (!kind) {
+      return Response.json({ error: "Unsupported media type" }, { status: 400 });
+    }
+
+    const name =
+      fileName ||
+      (kind === "video" ? "video.mp4" : kind === "file" ? "attachment.bin" : "image.jpg");
     const plan = createMediaObjectPlan({ kind, mimeType, fileName: name });
     const session = createMediaUploadSession({
       plan,

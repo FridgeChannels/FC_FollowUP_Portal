@@ -9,6 +9,10 @@ import {
   markFollowupClientEngaged,
   type DeliveryMode,
 } from "@/lib/notion/followup-writes";
+import {
+  channelSupportsEmailAttachments,
+  sanitizeEmailAttachments,
+} from "@/lib/email-attachments";
 import { channelSupportsMedia, sanitizeMediaAttachments } from "@/lib/media-attachments";
 import { interactionCpCode } from "@/lib/outreach-domain";
 import { isAllowedS3MediaUrl } from "@/lib/s3-media";
@@ -79,9 +83,16 @@ export async function POST(request: Request, { params }: Params) {
     }
     const attachments = channelSupportsMedia(channel)
       ? sanitizeMediaAttachments(body.attachments).filter((item) => isAllowedS3MediaUrl(item.url))
-      : [];
-    if (attachments.length && !channelSupportsMedia(channel)) {
-      return Response.json({ error: "Media is only supported on WhatsApp" }, { status: 400 });
+      : channelSupportsEmailAttachments(channel)
+        ? sanitizeEmailAttachments(body.attachments).filter((item) => isAllowedS3MediaUrl(item.url))
+        : [];
+    if (
+      Array.isArray(body.attachments) &&
+      body.attachments.length &&
+      !channelSupportsMedia(channel) &&
+      !channelSupportsEmailAttachments(channel)
+    ) {
+      return Response.json({ error: "Attachments are only supported on Email and WhatsApp" }, { status: 400 });
     }
     if (!String(body.content || "").trim() && !attachments.length) {
       return Response.json({ error: "Message content is required" }, { status: 400 });

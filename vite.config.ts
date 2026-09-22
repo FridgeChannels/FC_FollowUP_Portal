@@ -27,6 +27,9 @@ export default defineConfig(async ({ mode }) => {
     process.env.NOTION_FOLLOWUP_CONTACT_DB_ID || loadedEnv.NOTION_FOLLOWUP_CONTACT_DB_ID;
   const keyPersonDbId =
     process.env.NOTION_KEY_PERSON_DB_ID || loadedEnv.NOTION_KEY_PERSON_DB_ID;
+  const followupMeetingListPageId =
+    process.env.NOTION_FOLLOWUP_MEETING_LIST_PAGE_ID ||
+    loadedEnv.NOTION_FOLLOWUP_MEETING_LIST_PAGE_ID;
   const adminEmails = process.env.ADMIN_EMAILS || loadedEnv.ADMIN_EMAILS;
   const skipUnavailableChannels =
     process.env.SKIP_UNAVAILABLE_CHANNELS || loadedEnv.SKIP_UNAVAILABLE_CHANNELS;
@@ -78,6 +81,13 @@ export default defineConfig(async ({ mode }) => {
   const s3VideoPrefix = process.env.S3_VIDEO_PREFIX || loadedEnv.S3_VIDEO_PREFIX;
   const s3CreatorPrefix =
     process.env.S3_CREATOR_PREFIX || loadedEnv.S3_CREATOR_PREFIX;
+  const s3FilePrefix = process.env.S3_FILE_PREFIX || loadedEnv.S3_FILE_PREFIX;
+  const emailAttachmentMimeTypes =
+    process.env.EMAIL_ATTACHMENT_MIME_TYPES || loadedEnv.EMAIL_ATTACHMENT_MIME_TYPES;
+  const emailAttachmentMaxBytes =
+    process.env.EMAIL_ATTACHMENT_MAX_BYTES || loadedEnv.EMAIL_ATTACHMENT_MAX_BYTES;
+  const emailAttachmentMaxCount =
+    process.env.EMAIL_ATTACHMENT_MAX_COUNT || loadedEnv.EMAIL_ATTACHMENT_MAX_COUNT;
   const rawDevAllowedHosts =
     process.env.DEV_ALLOWED_HOSTS || loadedEnv.DEV_ALLOWED_HOSTS || "";
   // `true` / `*` / `all` disables Vite host checks (needed for reverse-proxy domains).
@@ -107,6 +117,9 @@ export default defineConfig(async ({ mode }) => {
         ? { NOTION_FOLLOWUP_CONTACT_DB_ID: followupContactDbId }
         : {}),
       ...(keyPersonDbId ? { NOTION_KEY_PERSON_DB_ID: keyPersonDbId } : {}),
+      ...(followupMeetingListPageId
+        ? { NOTION_FOLLOWUP_MEETING_LIST_PAGE_ID: followupMeetingListPageId }
+        : {}),
       ...(adminEmails ? { ADMIN_EMAILS: adminEmails } : {}),
       ...(skipUnavailableChannels
         ? { SKIP_UNAVAILABLE_CHANNELS: skipUnavailableChannels }
@@ -150,6 +163,16 @@ export default defineConfig(async ({ mode }) => {
       ...(s3KeyPrefix ? { S3_KEY_PREFIX: s3KeyPrefix } : {}),
       ...(s3VideoPrefix ? { S3_VIDEO_PREFIX: s3VideoPrefix } : {}),
       ...(s3CreatorPrefix ? { S3_CREATOR_PREFIX: s3CreatorPrefix } : {}),
+      ...(s3FilePrefix ? { S3_FILE_PREFIX: s3FilePrefix } : {}),
+      ...(emailAttachmentMimeTypes
+        ? { EMAIL_ATTACHMENT_MIME_TYPES: emailAttachmentMimeTypes }
+        : {}),
+      ...(emailAttachmentMaxBytes
+        ? { EMAIL_ATTACHMENT_MAX_BYTES: emailAttachmentMaxBytes }
+        : {}),
+      ...(emailAttachmentMaxCount
+        ? { EMAIL_ATTACHMENT_MAX_COUNT: emailAttachmentMaxCount }
+        : {}),
     },
     d1_databases: d1
       ? [

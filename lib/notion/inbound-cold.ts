@@ -13,12 +13,18 @@ import { markFollowupClientEngaged, resolveConversationThread } from "./followup
 import { contactMatchesReplySender } from "./inbound-reply";
 import { InboundReplyError } from "./inbound-errors";
 import {
+  resolveInboundContent,
+  resolveInboundEmailAttachments,
+} from "./inbound-attachments";
+import {
   normalizeInboundColdInput,
   type InboundColdInput,
 } from "./inbound-cold-input";
+import { ExtendedParametersError, asExtendedParameters } from "./extended-parameters";
 import { allocateReplyDueAt, replyDueAtProperty, REPLY_DUE_PROPERTY } from "./reply-due";
 import { senderForChannel } from "./reply-target";
 import { interactionCpCode } from "../outreach-domain";
+import { encodeAttachmentsProperty } from "../email-attachments";
 
 export type { InboundColdInput };
 export { normalizeInboundColdInput } from "./inbound-cold-input";
@@ -127,6 +133,16 @@ export async function ingestInboundCold(
   const target = await resolveInboundColdTarget(input);
   if (assertAccess) await assertAccess({ brandId: target.brandId });
 
+  let extendedParameters: string | null = null;
+  try {
+    extendedParameters = asExtendedParameters(input.extendedParameters);
+  } catch (error) {
+    if (error instanceof ExtendedParametersError) {
+      throw new InboundReplyError(error.message, 400);
+    }
+    throw error;
+  }
+
   // Cold inbound is a new topic (no matching outbound task) → always open a new thread.
   const { threadId } = await resolveConversationThread(
     target.contactId,
@@ -167,6 +183,13 @@ export async function ingestInboundCold(
     } catch {
       // Capacity lookup failed — still ingest; brands list falls back to Interaction At.
     }
+  }
+  if (extendedParameters) {
+    properties["Extended Parameters"] = { rich_text: richText(extendedParameters) };
+  }
+  const encodedAttachments = encodeAttachmentsProperty(input.attachments);
+  if (encodedAttachments) {
+    properties.Attachments = { rich_text: richText(encodedAttachments) };
   }
 
   const page = await createPage(getFollowupConversationDbId(), properties);

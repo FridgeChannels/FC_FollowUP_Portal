@@ -30,7 +30,12 @@ import { retrieveFollowupTask } from "./tasks";
 import { interactionCpCode } from "../outreach-domain";
 import { ExtendedParametersError, asExtendedParameters } from "./extended-parameters";
 import { InboundReplyError } from "./inbound-errors";
+import {
+  resolveInboundContent,
+  resolveInboundEmailAttachments,
+} from "./inbound-attachments";
 import { allocateReplyDueAt, replyDueAtProperty, REPLY_DUE_PROPERTY } from "./reply-due";
+import { encodeAttachmentsProperty } from "../email-attachments";
 
 export { InboundReplyError };
 
@@ -53,6 +58,7 @@ export type InboundReplyInput = {
   brandName?: string | null;
   callResult?: string | null;
   notes?: string | null;
+  attachments?: unknown;
   extendedParameters?: Record<string, unknown> | string | null;
   "Extended Parameters"?: Record<string, unknown> | string | null;
 };
@@ -129,13 +135,6 @@ function asOccurredAt(value?: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) throw new InboundReplyError("Invalid occurredAt", 400);
   return date.toISOString();
-}
-
-function asContent(channel: string, content?: string, callResult?: string | null) {
-  const text = content?.trim() || "";
-  if (channel === "Phone") return text || callResult?.trim() || "Inbound call";
-  if (!text) throw new InboundReplyError("Message content is required", 400);
-  return text;
 }
 
 function asCallResult(channel: string, value?: string | null) {
@@ -355,7 +354,8 @@ export async function ingestInboundReply(
   assertAccess?: (target: ResolvedTarget) => Promise<void>,
 ): Promise<InboundReplyResult> {
   const channel = await inferChannel(input);
-  const content = asContent(channel, input.content, input.callResult);
+  const attachments = resolveInboundEmailAttachments(channel, input.attachments);
+  const content = resolveInboundContent(channel, input.content, attachments, input.callResult);
   const occurredAt = asOccurredAt(input.occurredAt);
   const callResult = asCallResult(channel, input.callResult);
   const sourceUrl = asSourceUrl(input.sourceUrl);
@@ -478,6 +478,10 @@ export async function ingestInboundReply(
   }
   if (extendedParameters) {
     properties["Extended Parameters"] = { rich_text: richText(extendedParameters) };
+  }
+  const encodedAttachments = encodeAttachmentsProperty(attachments);
+  if (encodedAttachments) {
+    properties.Attachments = { rich_text: richText(encodedAttachments) };
   }
 
   const page = await createPage(getFollowupConversationDbId(), properties);

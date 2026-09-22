@@ -50,7 +50,21 @@ Authorization: Bearer <REPLY_INGEST_TOKEN>
   "object": "Magnet inquiry",
   "content": "We saw your Magnet offer…",
   "sender": "buyer@acme.com",
-  "FollowUpClientId": "<Follow-up Client 页面 ID，可空>"
+  "FollowUpClientId": "<Follow-up Client 页面 ID，可空>",
+  "extendedParameters": {
+    "gmailThreadId": "18c4abcd",
+    "gmailMessageId": "18c4ef01"
+  },
+  "attachments": [
+    {
+      "id": "abc123def456",
+      "kind": "file",
+      "name": "brochure.pdf",
+      "mimeType": "application/pdf",
+      "size": 12345,
+      "url": "https://<bucket>.s3.<region>.amazonaws.com/files/abc123def456.pdf"
+    }
+  ]
 }
 ```
 
@@ -58,9 +72,24 @@ Authorization: Bearer <REPLY_INGEST_TOKEN>
 | --- | --- | --- |
 | `channel` | 是 | `Email` |
 | `object` | 是 | 邮件主题 → Conversation `Subject` |
-| `content` | 是 | 正文 |
+| `content` | 条件 | 正文。可空，但此时必须有 `attachments` |
 | `sender` | 是 | **对方发信人邮箱**（KeyPerson `Email`） |
 | `FollowUpClientId` | 否 | Follow-up Client 页面 ID。也接受别名 `brandId` |
+| `extendedParameters` | 否 | 写入 ConversationDB `Extended Parameters`（如 Gmail ids） |
+| `attachments` | 否 | Email 附件元数据数组，写入 ConversationDB `Attachments`。二进制须先落到本系统 S3；非法项整单 **400**。非 Email 携带 `attachments` → **400** |
+
+`attachments[]` 每项（与 [Reply 回写](./Follow-up｜Reply%20回写接口.md) Email 约定相同）：
+
+| 字段 | 说明 |
+| --- | --- |
+| `id` | 上传 id（与 S3 key 主体一致，去横线 UUID） |
+| `kind` | `image` / `video` / `file`。也可省略，由 `mimeType` 推断：`image/*` → `image`，`video/*` → `video`，其余（如 `application/pdf`）→ `file`。Email **默认**允许的 MIME 只有 pdf / jpeg / png / webp，因此默认场景实际只会落到 `image` 或 `file`；`video` 仅在 `EMAIL_ATTACHMENT_MIME_TYPES` 包含视频类型时才会出现 |
+| `name` | 文件名 |
+| `mimeType` | 默认允许 `application/pdf,image/jpeg,image/png,image/webp`（可用 `EMAIL_ATTACHMENT_MIME_TYPES` 覆盖） |
+| `size` | 字节数，须 > 0 且不超过 `EMAIL_ATTACHMENT_MAX_BYTES`（默认 10MB） |
+| `url` | 本桶 S3 公网 HTTPS URL（须通过 `isAllowedS3MediaUrl`） |
+
+数量上限默认 5（`EMAIL_ATTACHMENT_MAX_COUNT`）。S3 对象前缀默认 `files`（`S3_FILE_PREFIX`）。
 
 解析：
 

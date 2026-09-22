@@ -136,4 +136,58 @@ describe("normalizeInboundColdInput", () => {
         error instanceof InboundReplyError && error.status === 422 && /sender/.test(error.message),
     );
   });
+
+  it("allows Email with attachments and empty content", () => {
+    const previous = {
+      bucket: process.env.S3_BUCKET,
+      region: process.env.AWS_DEFAULT_REGION,
+    };
+    process.env.S3_BUCKET = "amzn-s3-fc-bucket";
+    process.env.AWS_DEFAULT_REGION = "sa-east-1";
+    try {
+      const normalized = normalizeInboundColdInput({
+        channel: "Email",
+        object: "Magnet inquiry",
+        content: "",
+        sender: "buyer@acme.com",
+        attachments: [{
+          id: "abc123",
+          kind: "file",
+          name: "quote.pdf",
+          mimeType: "application/pdf",
+          size: 1200,
+          url: "https://amzn-s3-fc-bucket.s3.sa-east-1.amazonaws.com/files/abc123.pdf",
+        }],
+      });
+      assert.equal(normalized.attachments.length, 1);
+      assert.equal(normalized.content, "quote.pdf");
+    } finally {
+      if (previous.bucket == null) delete process.env.S3_BUCKET;
+      else process.env.S3_BUCKET = previous.bucket;
+      if (previous.region == null) delete process.env.AWS_DEFAULT_REGION;
+      else process.env.AWS_DEFAULT_REGION = previous.region;
+    }
+  });
+
+  it("rejects attachments on non-Email cold inbound", () => {
+    assert.throws(
+      () =>
+        normalizeInboundColdInput({
+          channel: "SMS",
+          content: "Hi",
+          brandId: "brand-1",
+          sender: "+14155550182",
+          attachments: [{
+            id: "abc123",
+            kind: "file",
+            name: "quote.pdf",
+            mimeType: "application/pdf",
+            size: 1200,
+            url: "https://amzn-s3-fc-bucket.s3.sa-east-1.amazonaws.com/files/abc123.pdf",
+          }],
+        }),
+      (error: unknown) =>
+        error instanceof InboundReplyError && /only supported on Email/.test(error.message),
+    );
+  });
 });

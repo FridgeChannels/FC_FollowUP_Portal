@@ -40,13 +40,19 @@ import { mapFollowupClientPage } from "./followup-clients";
 import { createFollowupTask, createOutboundConversation, markFollowupClientEngaged, newConversationThreadId } from "./followup-writes";
 import { chooseConversationThreadId } from "./conversation-thread";
 import { hasOpenOmniReachTasks, listExistingTasksForSchedule, listFollowupTasks } from "./tasks";
-
+import {
+  channelSupportsEmailAttachments,
+  sanitizeEmailAttachments,
+} from "../email-attachments";
+import { captionForAttachments } from "../media-attachments";
+import { isAllowedS3MediaUrl } from "../s3-media";
 
 export type LaunchStepCopy = {
   subject?: string;
   content?: string;
   callGoal?: string;
   script?: string;
+  attachments?: import("../media-attachments").MediaAttachment[];
 };
 
 export type LaunchPlanStep = {
@@ -57,6 +63,7 @@ export type LaunchPlanStep = {
   templateId?: string;
   content: string;
   status: "Pending";
+  attachments?: import("../media-attachments").MediaAttachment[];
 };
 
 function asChannel(value?: string | null): Channel | null {
@@ -289,7 +296,18 @@ export async function launchFollowupBomb(input: {
       callGoal: incoming?.callGoal ?? (write.channel === "Phone" ? template?.name || undefined : undefined),
       script: incoming?.script ?? (write.channel === "Phone" ? template?.content || undefined : undefined),
     }, context);
-    const content = resolved.content.trim() || resolved.subject.trim();
+    const body = resolved.content.trim();
+    const emailAttachments =
+      channelSupportsEmailAttachments(write.channel)
+        ? sanitizeEmailAttachments(incoming?.attachments).filter((item) =>
+            isAllowedS3MediaUrl(item.url),
+          )
+        : [];
+    const conversationContent =
+      body ||
+      (emailAttachments.length ? "" : resolved.subject.trim());
+    const content =
+      conversationContent || captionForAttachments(emailAttachments);
 
     let linkedIn: LinkedInCreateDecision | null = null;
     if (write.channel === "LinkedIn") {
@@ -321,14 +339,14 @@ export async function launchFollowupBomb(input: {
 
       let conversationId: string | undefined;
       let displayContent = content;
-      if (content) {
+      if (conversationContent || emailAttachments.length) {
         const page = await createOutboundConversation({
           brandName,
           contactId: contact.id,
           contactName: contact.name,
           channel: write.channel,
           subject: resolved.subject || null,
-          content,
+          content: conversationContent,
           sender: linkedIn?.senderAccount || input.sender,
           taskId: task.id,
           threadId: runChannelThreads.get(write.channel),
@@ -337,13 +355,14 @@ export async function launchFollowupBomb(input: {
           existingConversations,
           scheduledAt: write.scheduledAt,
           notes: "OmniReach 方案已排班，尚未实际发送。",
+          attachments: emailAttachments,
         });
         conversationId = page.id;
         await updatePage(task.id, {
           Conversations: { relation: [{ id: page.id }] },
         });
         displayContent = resolved.subject?.trim()
-          ? `Subject: ${resolved.subject.trim()}\n\n${resolved.content.trim() || content}`
+          ? `Subject: ${resolved.subject.trim()}\n\n${body || captionForAttachments(emailAttachments) || content}`
           : content;
       }
 
@@ -380,6 +399,7 @@ export async function launchFollowupBomb(input: {
         templateId: write.templateId,
         content: displayContent,
         status: "Pending" as const,
+        attachments: emailAttachments.length ? emailAttachments : undefined,
       } satisfies LaunchPlanStep;
     } catch (error) {
       if (linkedIn?.countsAgainstQuota) {
