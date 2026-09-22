@@ -100,6 +100,30 @@ export function ownerPageIdFromQueryParam(
   return value;
 }
 
+export type NeedsReplyBrandScope = {
+  ownerPageId?: string | null;
+  includeTest?: boolean;
+  onlyTest?: boolean;
+  excludeStatuses?: string[];
+};
+
+/** Shared visibility rules for Needs Reply brand badge / reply-due list. */
+export function matchesNeedsReplyBrandScope(
+  brand: {
+    ownerId?: string | null;
+    isTest?: boolean;
+    status: string;
+  },
+  input: NeedsReplyBrandScope = {},
+) {
+  if (input.onlyTest && !brand.isTest) return false;
+  if (!input.onlyTest && input.includeTest === false && brand.isTest) return false;
+  if (input.ownerPageId === null && brand.ownerId) return false;
+  if (input.ownerPageId && brand.ownerId !== input.ownerPageId) return false;
+  if (input.excludeStatuses?.includes(brand.status)) return false;
+  return true;
+}
+
 /** Default list page size for `/api/tasks` and ReplyTask UI. */
 export const DEFAULT_TASK_PAGE_SIZE = 25;
 

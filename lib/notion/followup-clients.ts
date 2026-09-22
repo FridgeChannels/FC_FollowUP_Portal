@@ -34,7 +34,12 @@ import {
   listBrandInteractionSignals,
   listBrandReplySignals,
 } from "./brand-reply-signals";
-import { DEFAULT_BRAND_PAGE_SIZE, followupClientListFilter } from "./owner-filter";
+import {
+  encodeBrandListCursor,
+  parseBrandListCursor,
+  sortBrandListItems,
+} from "./brand-list-order";
+import { DEFAULT_BRAND_PAGE_SIZE, followupClientListFilter, matchesNeedsReplyBrandScope, type NeedsReplyBrandScope } from "./owner-filter";
 import { listFollowupTasks, type TaskResolveHints } from "./tasks";
 import { retrieveOwner, type FollowupOwner } from "./owners";
 const HANDLING_MODES = new Set(["Automated", "Human"]);
@@ -170,33 +175,8 @@ function replyDueInRange(dueAt: string | null | undefined, from?: string | null,
   return true;
 }
 
-function sortBrandListItems(brands: BrandListItem[]) {
-  return [...brands].sort((a, b) => {
-    const qualificationRank = (item: BrandListItem) => (item.needsQualification ? 1 : 0);
-    const replyRank = (item: BrandListItem) => (item.needsReply ? 1 : 0);
-    const aTime = a.replyDueAt || a.replyUpdatedAt || a.lastInteractionAt || "";
-    const bTime = b.replyDueAt || b.replyUpdatedAt || b.lastInteractionAt || "";
-    return (
-      qualificationRank(b) - qualificationRank(a) ||
-      replyRank(b) - replyRank(a) ||
-      (a.needsReply && b.needsReply ? aTime.localeCompare(bTime) : 0) ||
-      bTime.localeCompare(aTime) ||
-      a.name.localeCompare(b.name)
-    );
-  });
-}
-
-async function enrichBrandPage(pages: NotionPage[]) {
-  if (!pages.length) return [] as BrandListItem[];
-  const [mapped, replySignals, interactionSignals] = await Promise.all([
-    mapFollowupClientPages(pages),
-    listBrandReplySignals(pages).catch(() => new Map()),
-    listBrandInteractionSignals(pages).catch(() => new Map()),
-  ]);
-  return attachBrandInteractionSignals(
-    attachBrandReplySignals(mapped, replySignals),
-    interactionSignals,
-  );
+function pageKey(id: string) {
+  return id.replace(/-/g, "").toLowerCase();
 }
 
 export type ListFollowupClientsPageInput = {
@@ -220,9 +200,123 @@ export type ListFollowupClientsPageResult = {
   hasMore: boolean;
 };
 
+type FilteredReplyBrand = {
+  id: string;
+  page: NotionPage;
+  dueAt: string | null;
+};
+
+async function listFilteredReplyBrands(
+  input: ListFollowupClientsPageInput,
+): Promise<FilteredReplyBrand[]> {
+  const signals = await listBrandReplySignals([]).catch(() => new Map());
+  const hasDueFilter = Boolean(input.replyFrom?.trim() || input.replyTo?.trim());
+  const entries = [...signals.entries()]
+    .filter(([, signal]) =>
+      hasDueFilter ? replyDueInRange(signal.dueAt, input.replyFrom, input.replyTo) : true,
+    )
+    .sort((a, b) => (a[1].dueAt || "").localeCompare(b[1].dueAt || ""));
+  if (!entries.length) return [];
+
+  const pages = await Promise.all(
+    entries.map(([id]) => retrievePage(id).catch(() => null)),
+  );
+  const validPages: NotionPage[] = [];
+  const dueByKey = new Map<string, string | null>();
+  for (let index = 0; index < entries.length; index += 1) {
+    const page = pages[index];
+    if (!page) continue;
+    validPages.push(page);
+    dueByKey.set(pageKey(page.id), entries[index][1].dueAt);
+  }
+  if (!validPages.length) return [];
+
+  const mapped = await mapFollowupClientPages(validPages);
+  const byKey = new Map(mapped.map((brand) => [pageKey(brand.id), brand]));
+  const q = input.q?.trim().toLowerCase() || "";
+  const cp = input.cp?.trim() || "all";
+
+  const filtered: FilteredReplyBrand[] = [];
+  for (const page of validPages) {
+    const brand = byKey.get(pageKey(page.id));
+    if (!brand) continue;
+    if (!matchesNeedsReplyBrandScope(brand, input)) continue;
+    if (input.status && input.status !== "all" && brand.status !== input.status) continue;
+    if (q && !brand.name.toLowerCase().includes(q)) continue;
+    if (cp !== "all" && brand.currentCp !== cp) continue;
+    filtered.push({
+      id: page.id,
+      page,
+      dueAt: dueByKey.get(pageKey(page.id)) || null,
+    });
+  }
+  return filtered.sort((a, b) => (a.dueAt || "").localeCompare(b.dueAt || ""));
+}
+
+async function takeNonReplyClientPages(options: {
+  filter?: Record<string, unknown>;
+  excludeKeys: Set<string>;
+  need: number;
+  notionCursor: string | null;
+  buffer: string[];
+}) {
+  const bufferIds = [...options.buffer];
+  const collected: NotionPage[] = [];
+  let notionCursor = options.notionCursor;
+
+  while (collected.length < options.need && bufferIds.length) {
+    const id = bufferIds.shift()!;
+    if (options.excludeKeys.has(pageKey(id))) continue;
+    const page = await retrievePage(id).catch(() => null);
+    if (page) collected.push(page);
+  }
+
+  while (collected.length < options.need) {
+    const batch = await queryFollowupClientPagesPage({
+      filter: options.filter,
+      startCursor: notionCursor,
+      pageSize: Math.min(Math.max(options.need * 2, DEFAULT_BRAND_PAGE_SIZE), 100),
+      sorts: [{ property: "Follow-up Client", direction: "ascending" }],
+    });
+    notionCursor = batch.nextCursor;
+
+    for (const page of batch.pages) {
+      if (options.excludeKeys.has(pageKey(page.id))) continue;
+      if (collected.length < options.need) collected.push(page);
+      else bufferIds.push(page.id);
+    }
+
+    if (!batch.hasMore) {
+      notionCursor = null;
+      break;
+    }
+    if (collected.length >= options.need) break;
+  }
+
+  return {
+    pages: collected,
+    notionCursor,
+    buffer: bufferIds,
+    hasMore: bufferIds.length > 0 || !!notionCursor,
+  };
+}
+
+async function enrichBrandPage(pages: NotionPage[]) {
+  if (!pages.length) return [] as BrandListItem[];
+  const [mapped, replySignals, interactionSignals] = await Promise.all([
+    mapFollowupClientPages(pages),
+    listBrandReplySignals(pages).catch(() => new Map()),
+    listBrandInteractionSignals(pages).catch(() => new Map()),
+  ]);
+  return attachBrandInteractionSignals(
+    attachBrandReplySignals(mapped, replySignals),
+    interactionSignals,
+  );
+}
+
 /**
- * True Notion pagination (`page_size` + cursor).
- * Reply-due filter uses Needs Reply hits only (usually small), not full ClientDB scan.
+ * Brands list pagination with global Needs Reply prefix, then remaining clients.
+ * Reply-due date filter stays on the Needs Reply-only path.
  */
 export async function listFollowupClientsForViewerPage(
   input: ListFollowupClientsPageInput = {},
@@ -257,20 +351,130 @@ export async function listFollowupClientsForViewerPage(
     currentCpPageId,
   });
 
-  const batch = await queryFollowupClientPagesPage({
-    filter,
-    startCursor: input.cursor,
-    pageSize,
-    sorts: [{ property: "Follow-up Client", direction: "ascending" }],
-  });
+  const replyBrands = await listFilteredReplyBrands(input);
+  const replyKeys = new Set(replyBrands.map((item) => pageKey(item.id)));
+  const cursor = parseBrandListCursor(input.cursor);
+  const outPages: NotionPage[] = [];
 
-  const brands = sortBrandListItems(await enrichBrandPage(batch.pages));
+  if (cursor.phase === "reply") {
+    const slice = replyBrands.slice(cursor.offset, cursor.offset + pageSize);
+    outPages.push(...slice.map((item) => item.page));
+    const nextReplyOffset = cursor.offset + slice.length;
+    const replyHasMore = nextReplyOffset < replyBrands.length;
+
+    if (outPages.length < pageSize) {
+      const rest = await takeNonReplyClientPages({
+        filter,
+        excludeKeys: replyKeys,
+        need: pageSize - outPages.length,
+        notionCursor: null,
+        buffer: [],
+      });
+      outPages.push(...rest.pages);
+      const brands = sortBrandListItems(await enrichBrandPage(outPages));
+      return {
+        brands,
+        pageSize,
+        nextCursor: rest.hasMore
+          ? encodeBrandListCursor({
+              phase: "rest",
+              notionCursor: rest.notionCursor,
+              buffer: rest.buffer,
+            })
+          : null,
+        hasMore: rest.hasMore,
+      };
+    }
+
+    if (replyHasMore) {
+      return {
+        brands: sortBrandListItems(await enrichBrandPage(outPages)),
+        pageSize,
+        nextCursor: encodeBrandListCursor({ phase: "reply", offset: nextReplyOffset }),
+        hasMore: true,
+      };
+    }
+
+    const restPeek = await takeNonReplyClientPages({
+      filter,
+      excludeKeys: replyKeys,
+      need: 1,
+      notionCursor: null,
+      buffer: [],
+    });
+    return {
+      brands: sortBrandListItems(await enrichBrandPage(outPages)),
+      pageSize,
+      nextCursor: restPeek.hasMore || restPeek.pages.length
+        ? encodeBrandListCursor({
+            phase: "rest",
+            notionCursor: restPeek.notionCursor,
+            buffer: [
+              ...restPeek.pages.map((page) => page.id),
+              ...restPeek.buffer,
+            ],
+          })
+        : null,
+      hasMore: restPeek.hasMore || restPeek.pages.length > 0,
+    };
+  }
+
+  const rest = await takeNonReplyClientPages({
+    filter,
+    excludeKeys: replyKeys,
+    need: pageSize,
+    notionCursor: cursor.notionCursor,
+    buffer: cursor.buffer,
+  });
   return {
-    brands,
+    brands: sortBrandListItems(await enrichBrandPage(rest.pages)),
     pageSize,
-    nextCursor: batch.nextCursor,
-    hasMore: batch.hasMore,
+    nextCursor: rest.hasMore
+      ? encodeBrandListCursor({
+          phase: "rest",
+          notionCursor: rest.notionCursor,
+          buffer: rest.buffer,
+        })
+      : null,
+    hasMore: rest.hasMore,
   };
+}
+
+export type { NeedsReplyBrandScope } from "./owner-filter";
+
+/**
+ * Full Needs Reply brand count for the Brands menu badge.
+ * Dedupes by Follow-up Client (Brand) via listBrandReplySignals Map keys.
+ */
+export async function countNeedsReplyBrandsForViewer(
+  input: NeedsReplyBrandScope = {},
+): Promise<number> {
+  const replySignals = await listBrandReplySignals([]).catch(() => new Map());
+  const brandIds = [...replySignals.keys()];
+  if (!brandIds.length) return 0;
+
+  const pages = (
+    await Promise.all(brandIds.map((id) => retrievePage(id).catch(() => null)))
+  ).filter((page): page is NotionPage => !!page);
+
+  let count = 0;
+  for (const page of pages) {
+    const ownerId = firstRelationId(page.properties?.Owner) || null;
+    const status = propertyText(page.properties?.["Follow-up Status"]);
+    if (
+      matchesNeedsReplyBrandScope(
+        {
+          ownerId,
+          isTest: isTestFollowupClientPage(page),
+          status,
+        },
+        input,
+      )
+    ) {
+      count += 1;
+    }
+  }
+  return count;
 }
 
 /** Reply-due path: paginate matching Needs Reply brand IDs (no full ClientDB scan). */
@@ -278,40 +482,16 @@ async function listFollowupClientsByReplyDuePage(
   input: ListFollowupClientsPageInput,
   pageSize: number,
 ): Promise<ListFollowupClientsPageResult> {
-  const replySignals = await listBrandReplySignals([]).catch(() => new Map());
-  const matchingIds = [...replySignals.entries()]
-    .filter(([, signal]) =>
-      replyDueInRange(signal.dueAt, input.replyFrom, input.replyTo),
-    )
-    .sort((a, b) => (a[1].dueAt || "").localeCompare(b[1].dueAt || ""))
-    .map(([brandId]) => brandId);
-
+  const matching = await listFilteredReplyBrands(input);
   const offset = Math.max(0, Number(input.cursor || 0) || 0);
-  const sliceIds = matchingIds.slice(offset, offset + pageSize);
-  const pages = (
-    await Promise.all(sliceIds.map((id) => retrievePage(id).catch(() => null)))
-  ).filter((page): page is NotionPage => !!page);
-
-  let brands = await enrichBrandPage(pages);
-
-  const q = input.q?.trim().toLowerCase() || "";
-  const cp = input.cp?.trim() || "all";
-  brands = brands.filter((brand) => {
-    if (input.onlyTest && !brand.isTest) return false;
-    if (!input.onlyTest && input.includeTest === false && brand.isTest) return false;
-    if (input.ownerPageId === null && brand.ownerId) return false;
-    if (input.ownerPageId && brand.ownerId !== input.ownerPageId) return false;
-    if (input.status && input.status !== "all" && brand.status !== input.status) return false;
-    if (input.excludeStatuses?.includes(brand.status)) return false;
-    if (q && !brand.name.toLowerCase().includes(q)) return false;
-    if (cp !== "all" && brand.currentCp !== cp) return false;
-    return true;
-  });
-
+  const slice = matching.slice(offset, offset + pageSize);
+  const brands = sortBrandListItems(
+    await enrichBrandPage(slice.map((item) => item.page)),
+  );
   const nextOffset = offset + pageSize;
-  const hasMore = nextOffset < matchingIds.length;
+  const hasMore = nextOffset < matching.length;
   return {
-    brands: sortBrandListItems(brands),
+    brands,
     pageSize,
     nextCursor: hasMore ? String(nextOffset) : null,
     hasMore,

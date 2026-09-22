@@ -6,8 +6,6 @@ import {
   Bomb, ChevronDown, ClipboardCheck, LogOut,
   Users, Zap,
 } from "lucide-react";
-import type { BrandListItem } from "@/lib/brand-list";
-import { getCachedBrandList } from "@/lib/brand-list-cache";
 import { Role } from "@/lib/outreach-domain";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -45,10 +43,6 @@ const accountInitials = (name?: string | null, email?: string | null) => {
   return source.slice(0, 2).toUpperCase();
 };
 
-function brandsNeedingReplyCount(brands: BrandListItem[]) {
-  return brands.filter((brand) => brand.needsReply).length;
-}
-
 export default function OutreachWorkspace({ children }: { children?: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -56,9 +50,7 @@ export default function OutreachWorkspace({ children }: { children?: ReactNode }
   const { user, loading: sessionLoading, signOut } = useSession();
   const screen = routeScreen(pathname);
   const [taskCount, setTaskCount] = useState(0);
-  const [brandReplyCount, setBrandReplyCount] = useState(() =>
-    brandsNeedingReplyCount(getCachedBrandList()),
-  );
+  const [brandReplyCount, setBrandReplyCount] = useState(0);
 
   useEffect(() => {
     if (sessionLoading) return;
@@ -93,30 +85,23 @@ export default function OutreachWorkspace({ children }: { children?: ReactNode }
   useEffect(() => {
     if (sessionLoading || !user || !can("customers")) return;
     let cancelled = false;
-    const cached = brandsNeedingReplyCount(getCachedBrandList());
-    if (cached) setBrandReplyCount(cached);
-
-    const syncFromCache = () => {
-      setBrandReplyCount(brandsNeedingReplyCount(getCachedBrandList()));
-    };
-    window.addEventListener("fc-brands-cache-updated", syncFromCache);
-
-    fetch("/api/brands")
+    fetch("/api/brands/summary")
       .then(async (response) => {
-        const payload = await response.json() as { brands?: BrandListItem[]; error?: string };
-        if (!response.ok) throw new Error(payload.error || "Failed to load brands");
-        return payload.brands || [];
+        const payload = await response.json() as {
+          needsReplyBrandCount?: number;
+          error?: string;
+        };
+        if (!response.ok) throw new Error(payload.error || "Failed to load brand summary");
+        return payload.needsReplyBrandCount || 0;
       })
-      .then((brands) => {
-        if (cancelled) return;
-        setBrandReplyCount(brandsNeedingReplyCount(brands));
+      .then((count) => {
+        if (!cancelled) setBrandReplyCount(count);
       })
       .catch(() => {
-        /* keep cached badge if refresh fails */
+        if (!cancelled) setBrandReplyCount(0);
       });
     return () => {
       cancelled = true;
-      window.removeEventListener("fc-brands-cache-updated", syncFromCache);
     };
   }, [sessionLoading, user?.email, user?.role, can]);
 
@@ -211,7 +196,7 @@ export default function OutreachWorkspace({ children }: { children?: ReactNode }
             <SidebarGroupContent>
               <SidebarMenu>
                 {nav.filter((item) => can(item.cap)).map((item) => {
-                  // Brands badge: brands with needsReply (same signal as Brands list).
+                  // Brands badge: full Needs Reply brand count (role-scoped).
                   // ReplyTask badge: open reply/phone tasks.
                   const count =
                     item.label === "Brands"
