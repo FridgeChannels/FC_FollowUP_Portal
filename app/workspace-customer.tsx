@@ -491,6 +491,7 @@ function toInteractions(
     direction: item.direction || undefined,
     title: item.subject || item.channel || "Conversation",
     content: item.content,
+    cc: item.cc || undefined,
     createdAt: item.createdAt || "",
     recordedAt: item.recordedAt || "",
     creationMethod: isManualActivity(item, manualTaskIds)
@@ -822,6 +823,36 @@ export function BrandDetail({customerId}:{customerId:string}){
   const summary=notionBacked
     ? currentCpOption(remote?.currentCp).definition
     : state.cps.find(x=>x.code===c.cp)?.goal||"—";
+  const sendBrandMessage = async (
+    contactId: string,
+    channel: Channel,
+    content: string,
+    taskId?: string,
+    threadId?: string,
+    subject?: string,
+    deliveryMode?: DeliveryMode,
+    attachments?: MediaAttachment[],
+    cc?: string,
+  ) => {
+    const response = await fetch(`/api/brands/${c.id}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contactId,
+        channel,
+        content,
+        taskId,
+        threadId,
+        object: channel === "Email" ? subject : undefined,
+        cc: channel === "Email" ? cc : undefined,
+        deliveryMode,
+        attachments,
+      }),
+    });
+    const payload = (await response.json()) as { error?: string };
+    if (!response.ok) throw new Error(payload.error || "Send failed");
+    await Promise.all([refreshRemote(), fetchActivitiesPage(null, "replace")]);
+  };
   return <div className="mx-auto w-full min-w-0 max-w-[1480px]">
     <button onClick={()=>router.push(can("customers")?"/customers":"/tasks")} className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900"><ArrowLeft className="size-4"/>{can("customers")?"Brands":"ReplyTask"}</button>
     <section className="mb-8 grid gap-6 rounded-2xl border border-slate-200 bg-white p-5 xl:grid-cols-[minmax(0,1fr)_minmax(260px,.8fr)_176px] xl:items-start">
@@ -847,20 +878,12 @@ export function BrandDetail({customerId}:{customerId:string}){
     const payload=await response.json() as {error?:string};
     if(!response.ok)throw new Error(payload.error||"Unable to save call review");
     await refreshBrandAndActivities();
-  }:undefined} onCancelBomb={async instance=>{if(!notionBacked){const result=cancelBomb(c.id,instance.id);if(!result.ok)throw new Error(result.message);toast.success(result.message);return;}const response=await fetch(`/api/brands/${c.id}/bombs/${instance.templateId}/cancel`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId:instance.targetContactId,omniReachRunId:instance.id.startsWith("run:")?instance.id.slice(4):undefined})});const payload=await response.json() as {cancelledTaskIds?:string[];error?:string};if(!response.ok)throw new Error(payload.error||"Unable to stop OmniReach");const cancelled=new Set(payload.cancelledTaskIds||[]);if(cancelled.size){setRemote(prev=>prev?{...prev,tasks:prev.tasks.map(task=>cancelled.has(task.id)?{...task,status:"Cancelled"}:task),handlingMode:prev.handlingMode==="Human"?prev.handlingMode:"Human"}:prev);}toast.success(`${payload.cancelledTaskIds?.length||0} remaining task${payload.cancelledTaskIds?.length===1?"":"s"} cancelled`);void Promise.all([refreshRemote(),fetchActivitiesPage(null,"replace")]);}}   onSend={notionBacked?async (contactId,channel,content,taskId,threadId,subject,deliveryMode,attachments)=>{
-    const response=await fetch(`/api/brands/${c.id}/messages`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId,channel,content,taskId,threadId,object:channel==="Email"?subject:undefined,deliveryMode,attachments})});
-    const payload=await response.json() as {error?:string};
-    if(!response.ok)throw new Error(payload.error||"Send failed");
-    await Promise.all([refreshRemote(),fetchActivitiesPage(null,"replace")]);
-  }:undefined}/>
+  }:undefined} onCancelBomb={async instance=>{if(!notionBacked){const result=cancelBomb(c.id,instance.id);if(!result.ok)throw new Error(result.message);toast.success(result.message);return;}const response=await fetch(`/api/brands/${c.id}/bombs/${instance.templateId}/cancel`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId:instance.targetContactId,omniReachRunId:instance.id.startsWith("run:")?instance.id.slice(4):undefined})});const payload=await response.json() as {cancelledTaskIds?:string[];error?:string};if(!response.ok)throw new Error(payload.error||"Unable to stop OmniReach");const cancelled=new Set(payload.cancelledTaskIds||[]);if(cancelled.size){setRemote(prev=>prev?{...prev,tasks:prev.tasks.map(task=>cancelled.has(task.id)?{...task,status:"Cancelled"}:task),handlingMode:prev.handlingMode==="Human"?prev.handlingMode:"Human"}:prev);}toast.success(`${payload.cancelledTaskIds?.length||0} remaining task${payload.cancelledTaskIds?.length===1?"":"s"} cancelled`);void Promise.all([refreshRemote(),fetchActivitiesPage(null,"replace")]);}}   onSend={notionBacked?sendBrandMessage:undefined}/>
   {notionBacked&&activitiesHasMore&&activitiesCursor&&(remote?.activities.length||0)>=ACTIVITY_PAGE_SIZE?<div className="border-t border-slate-100 p-3"><Button variant="outline" size="sm" className="w-full" disabled={activitiesLoadingMore||activitiesLoading} onClick={loadMoreActivities}>{activitiesLoadingMore?<span className="inline-flex items-center gap-2"><Spinner className="size-3.5"/>Loading…</span>:"Load more activity"}</Button></div>:null}
   </div></section>
     {(c.cp==="CP3"||partnershipContext)&&partnershipContext&&<aside><section className="rounded-2xl bg-emerald-50 p-5"><div className="text-xs font-semibold tracking-wide text-emerald-700">CP3 · Partnership context</div><h2 className="mt-2 font-bold text-emerald-950">{partnershipContext.headline}</h2><p className="mt-2 text-sm leading-6 text-emerald-900">{partnershipContext.summary}</p><div className="mt-4 space-y-2">{partnershipContext.signals.map(signal=><div key={signal} className="rounded-lg bg-white/70 px-3 py-2 text-xs leading-5 text-slate-700">{signal}</div>)}</div><div className="mt-3 text-[11px] text-emerald-700">Updated {dateOnly(partnershipContext.updatedAt)}</div></section></aside>}</div>
-  <LaunchBombDialog customerId={c.id} open={launch} onOpenChange={setLaunch} contacts={notionBacked?c.contacts:undefined} currentCp={notionBacked&&remote?remote.currentCp:undefined} companyName={c.name} productDescription={notionBacked?remote?.productDescription:undefined} matchedCategory={notionBacked?remote?.matchedCategory:undefined} followupExhibition={notionBacked?remote?.followupExhibition:undefined} previewOnly={notionBacked} hasActiveOmniReach={hasActiveOmniReach} onLaunched={notionBacked?()=>{void refreshBrandAndActivities()}:undefined}/><ReplyDialog customerId={c.id} open={reply} onOpenChange={setReply} contacts={notionBacked?c.contacts:undefined} onSend={notionBacked?async (contactId,channel,content,object,deliveryMode,attachments)=>{
-    const response=await fetch(`/api/brands/${c.id}/messages`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId,channel,content,object,deliveryMode,attachments})});
-    const payload=await response.json() as {error?:string};
-    if(!response.ok)throw new Error(payload.error||"Send failed");
-    await Promise.all([refreshRemote(),fetchActivitiesPage(null,"replace")]);
+  <LaunchBombDialog customerId={c.id} open={launch} onOpenChange={setLaunch} contacts={notionBacked?c.contacts:undefined} currentCp={notionBacked&&remote?remote.currentCp:undefined} companyName={c.name} productDescription={notionBacked?remote?.productDescription:undefined} matchedCategory={notionBacked?remote?.matchedCategory:undefined} followupExhibition={notionBacked?remote?.followupExhibition:undefined} previewOnly={notionBacked} hasActiveOmniReach={hasActiveOmniReach} onLaunched={notionBacked?()=>{void refreshBrandAndActivities()}:undefined}/><ReplyDialog customerId={c.id} open={reply} onOpenChange={setReply} contacts={notionBacked?c.contacts:undefined} onSend={notionBacked?async (contactId,channel,content,object,deliveryMode,attachments,cc)=>{
+    await sendBrandMessage(contactId, channel, content, undefined, undefined, object, deliveryMode, attachments, cc);
   }:undefined}/><ChangeCPDialog customerId={c.id} open={cp} onOpenChange={setCP} currentCp={notionBacked&&remote?remote.currentCp:undefined} cps={notionBacked?remoteCps:undefined} onSave={notionBacked?async (currentCpId,evidence,note)=>{await patchBrand({currentCpId,evidence,note});}:undefined}/><ContactDialog customerId={c.id} open={contact} onOpenChange={setContact} notionBacked={notionBacked} onCreated={notionBacked?async ()=>{await refreshRemote();}:undefined}/>{notionBacked?<MeetingHistoryDialog open={meetingHistory} onOpenChange={setMeetingHistory} links={remote?.aiMeetingLinks||[]}/>:null}</div>;
 }
 
@@ -1343,6 +1366,7 @@ function BrandContactList({
 
 type LaunchStepCopy = {
   subject?: string;
+  cc?: string;
   content?: string;
   callGoal?: string;
   script?: string;
@@ -1353,15 +1377,17 @@ type LaunchBombOption = {id:string;name:string;version?:number;goal:string;cp?:s
 
 function LaunchEmailStepEditor({
   subject,
+  cc,
   content,
   disabled,
   onChange,
   onUploadingChange,
 }: {
   subject: string;
+  cc: string;
   content: string;
   disabled?: boolean;
-  onChange: (patch: Pick<LaunchStepCopy, "subject" | "content" | "attachments">) => void;
+  onChange: (patch: Pick<LaunchStepCopy, "subject" | "cc" | "content" | "attachments">) => void;
   onUploadingChange?: (uploading: boolean) => void;
 }) {
   const media = useMessageMedia("Email");
@@ -1384,6 +1410,12 @@ function LaunchEmailStepEditor({
         value={subject}
         onChange={(e) => onChange({ subject: e.target.value })}
         placeholder="Email subject"
+        disabled={disabled}
+      />
+      <Input
+        value={cc}
+        onChange={(e) => onChange({ cc: e.target.value })}
+        placeholder="CC (comma-separated)"
         disabled={disabled}
       />
       <MessageMediaInputFrame channel="Email" media={media} disabled={disabled}>
@@ -1546,6 +1578,7 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
               <LaunchEmailStepEditor
                 key={`${s.id}:${target}:${bombId}`}
                 subject={copy.subject||""}
+                cc={copy.cc||""}
                 content={copy.content||""}
                 disabled={disabled}
                 onChange={(patch)=>updateCopy(s.id,patch)}
@@ -1584,6 +1617,7 @@ export function ReplyDialog({
     object?: string,
     deliveryMode?: DeliveryMode,
     attachments?: MediaAttachment[],
+    cc?: string,
   ) => Promise<void>;
 }) {
   const { state, sendHumanReply } = useWorkspace();
@@ -1592,6 +1626,7 @@ export function ReplyDialog({
   const [contactId, setContact] = useState(people[0]?.id || "");
   const [channel, setChannel] = useState<Channel>(people[0]?.preferredChannel || "Email");
   const [object, setObject] = useState("");
+  const [cc, setCc] = useState("");
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
   const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("scheduled");
@@ -1607,6 +1642,7 @@ export function ReplyDialog({
     setContact(people[0]?.id || "");
     setChannel(people[0]?.preferredChannel || "Email");
     setObject("");
+    setCc("");
     setContent("");
     setDeliveryMode("scheduled");
     setLinkedinGate(null);
@@ -1757,6 +1793,9 @@ export function ReplyDialog({
         {emailNeedsObject ? (
           <Input value={object} onChange={(e) => setObject(e.target.value)} placeholder="Email subject" />
         ) : null}
+        {emailNeedsObject ? (
+          <Input value={cc} onChange={(e) => setCc(e.target.value)} placeholder="CC (comma-separated)" />
+        ) : null}
         <MessageMediaInputFrame channel={effective} media={media} disabled={saving}>
           <Textarea
             className="min-h-32"
@@ -1791,9 +1830,11 @@ export function ReplyDialog({
                       emailNeedsObject ? object.trim() : undefined,
                       deliveryMode,
                       media.readyAttachments,
+                      emailNeedsObject ? cc : undefined,
                     );
                     toast.success("Message saved as pending");
                     setObject("");
+                    setCc("");
                     setContent("");
                     media.reset();
                     onOpenChange(false);
@@ -1815,6 +1856,7 @@ export function ReplyDialog({
                 show(r);
                 if (r.ok) {
                   setObject("");
+                  setCc("");
                   setContent("");
                   onOpenChange(false);
                 }

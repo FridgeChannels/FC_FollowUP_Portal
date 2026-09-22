@@ -86,7 +86,7 @@ export function BrandReplyBox({
   interactions?: Interaction[];
   actions?: ScheduledAction[];
   taskId?: string;
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: DeliveryMode, attachments?: MediaAttachment[]) => Promise<void>;
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: DeliveryMode, attachments?: MediaAttachment[], cc?: string) => Promise<void>;
 }) {
   const { state, can, sendHumanReply } = useWorkspace();
   const customer = state.customers.find(item => item.id === customerId);
@@ -95,6 +95,7 @@ export function BrandReplyBox({
   const [subject, setSubject] = useState(() =>
     interaction.channel === "Email" && interaction.title !== "Email" ? interaction.title : "",
   );
+  const [cc, setCc] = useState("");
   const [saving, setSaving] = useState(false);
   const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("scheduled");
   const contact = people.find(item => item.id === interaction.contactId) || people[0];
@@ -115,6 +116,7 @@ export function BrandReplyBox({
       </div>
       <div className="min-w-0 space-y-2">
         {channel === "Email" && <Input value={subject} onChange={event => setSubject(event.target.value)} placeholder="Email subject" />}
+        {channel === "Email" && <Input value={cc} onChange={event => setCc(event.target.value)} placeholder="CC (comma-separated)" />}
         <MessageMediaInputFrame channel={channel} media={media} disabled={saving}>
           <Textarea value={content} onChange={event => setContent(event.target.value)} className="min-h-20 resize-none" placeholder="Write a reply…"/>
         </MessageMediaInputFrame>
@@ -124,8 +126,8 @@ export function BrandReplyBox({
           <Button className="h-9 px-3" disabled={!canSend} onClick={() => {
           if (onSend) {
             setSaving(true);
-            void onSend(contact.id, channel, content, replyTaskId, interaction.threadId, subject, deliveryMode, media.readyAttachments)
-              .then(() => { toast.success("Message saved as pending"); setContent(""); setSubject(""); media.reset(); })
+            void onSend(contact.id, channel, content, replyTaskId, interaction.threadId, subject, deliveryMode, media.readyAttachments, channel === "Email" ? cc : undefined)
+              .then(() => { toast.success("Message saved as pending"); setContent(""); setSubject(""); setCc(""); media.reset(); })
               .catch(error => toast.error(error instanceof Error ? error.message : "Send failed"))
               .finally(() => setSaving(false));
             return;
@@ -153,7 +155,7 @@ export function ChannelSendBox({
   channel: Channel;
   contacts: Contact[];
   interactions: Interaction[];
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: DeliveryMode, attachments?: MediaAttachment[]) => Promise<void>;
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: DeliveryMode, attachments?: MediaAttachment[], cc?: string) => Promise<void>;
 }) {
   const { state, can, sendHumanReply } = useWorkspace();
   const people = contacts.filter(item => channelAvailable(item, channel));

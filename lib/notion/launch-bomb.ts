@@ -44,11 +44,14 @@ import {
   channelSupportsEmailAttachments,
   sanitizeEmailAttachments,
 } from "../email-attachments";
+import { EmailCcError, normalizeEmailCc } from "../email-cc";
 import { captionForAttachments } from "../media-attachments";
 import { isAllowedS3MediaUrl } from "../s3-media";
 
 export type LaunchStepCopy = {
   subject?: string;
+  /** Email CC: comma-separated addresses (normalized before write). */
+  cc?: string;
   content?: string;
   callGoal?: string;
   script?: string;
@@ -303,6 +306,15 @@ export async function launchFollowupBomb(input: {
             isAllowedS3MediaUrl(item.url),
           )
         : [];
+    let emailCc: string | null = null;
+    if (write.channel === "Email") {
+      try {
+        emailCc = normalizeEmailCc(incoming?.cc);
+      } catch (error) {
+        const message = error instanceof EmailCcError ? error.message : "Invalid cc";
+        throw new Error(message);
+      }
+    }
     const conversationContent =
       body ||
       (emailAttachments.length ? "" : resolved.subject.trim());
@@ -346,6 +358,7 @@ export async function launchFollowupBomb(input: {
           contactName: contact.name,
           channel: write.channel,
           subject: resolved.subject || null,
+          cc: emailCc,
           content: conversationContent,
           sender: linkedIn?.senderAccount || input.sender,
           taskId: task.id,

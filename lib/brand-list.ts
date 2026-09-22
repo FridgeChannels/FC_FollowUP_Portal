@@ -274,6 +274,8 @@ export type BrandActivity = {
   direction: "Inbound" | "Outbound" | null;
   status: string | null;
   subject: string | null;
+  /** Email CC: comma-separated addresses from ConversationDB `CC`. */
+  cc?: string | null;
   content: string;
   sender: string | null;
   notes: string | null;

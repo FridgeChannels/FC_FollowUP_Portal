@@ -58,6 +58,12 @@ function emailSubjectLabel(item: Interaction) {
   return subject;
 }
 
+function emailCcLabel(item: Interaction) {
+  if (item.channel !== "Email") return null;
+  const cc = item.cc?.trim();
+  return cc || null;
+}
+
 function SourceBadge({ source }: { source: string }) {
   return (
     <Badge className={source === "Human" ? "bg-violet-100 text-[10px] text-violet-800 hover:bg-violet-100" : "bg-blue-100 text-[10px] text-blue-800 hover:bg-blue-100"}>
@@ -185,7 +191,7 @@ export function InteractionFeed({
   maxHeight?: string;
   bombInstances?: BombInstance[];
   actions?: ScheduledAction[];
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, attachments?: import("@/lib/media-attachments").MediaAttachment[]) => Promise<void>;
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string) => Promise<void>;
   onCancelBomb?: (instance: BombInstance) => Promise<void>;
   initialChannel?: Channel;
   initialCp?: CPCode;
@@ -458,7 +464,7 @@ function ChannelTranscript({
   contacts: Contact[];
   channel: Channel;
   bombInstances: BombInstance[];
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, attachments?: import("@/lib/media-attachments").MediaAttachment[]) => Promise<void>;
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
   resolveReview: (taskId?: string | null) => { status: CallReviewStatus; recallRequested?: boolean } | undefined;
@@ -675,7 +681,7 @@ function ConversationDetail({
   replyPool: Interaction[];
   bombInstances: BombInstance[];
   onBack: () => void;
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, attachments?: import("@/lib/media-attachments").MediaAttachment[]) => Promise<void>;
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
   resolveReview: (taskId?: string | null) => { status: CallReviewStatus; recallRequested?: boolean } | undefined;
@@ -720,7 +726,7 @@ function ContactThreads({
   replyPool: Interaction[];
   channel: Channel;
   bombInstances: BombInstance[];
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, attachments?: import("@/lib/media-attachments").MediaAttachment[]) => Promise<void>;
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
   resolveReview: (taskId?: string | null) => { status: CallReviewStatus; recallRequested?: boolean } | undefined;
@@ -775,7 +781,7 @@ function ThreadMessages({
   channel: Channel;
   endpoint?: string;
   bombInstances: BombInstance[];
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, attachments?: import("@/lib/media-attachments").MediaAttachment[]) => Promise<void>;
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
   resolveReview: (taskId?: string | null) => { status: CallReviewStatus; recallRequested?: boolean } | undefined;
@@ -806,6 +812,7 @@ function ThreadMessages({
       const scheduledAt = !phoneCall ? scheduledAtLabel(item) : null;
       const callReview = phoneCall ? resolveReview(item.taskId) : undefined;
       const emailSubject = emailSubjectLabel(item);
+      const emailCc = emailCcLabel(item);
       const occurredAt = interactionSortAt(item);
       const messageBubbleClass = phoneCall
         ? "w-full min-w-0 overflow-hidden rounded-xl bg-slate-50 p-4"
@@ -853,6 +860,11 @@ function ThreadMessages({
             {emailSubject && (
               <p className="break-words text-sm text-slate-900">
                 <span className="font-medium text-slate-500">Subject:</span> {emailSubject}
+              </p>
+            )}
+            {emailCc && (
+              <p className="break-words text-sm text-slate-900">
+                <span className="font-medium text-slate-500">CC:</span> {emailCc}
               </p>
             )}
             {item.content ? <p className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">{item.content}</p> : null}

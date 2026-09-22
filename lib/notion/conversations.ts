@@ -36,6 +36,7 @@ function mapConversation(
 ): BrandActivity {
   const properties = page.properties || {};
   const subject = propertyText(properties.Subject) || null;
+  const cc = propertyText(properties.CC) || null;
   const notes = propertyText(properties.Notes) || null;
   const extendedParameters = propertyText(properties["Extended Parameters"]) || null;
   const attachmentsProperty = propertyText(properties.Attachments) || null;
@@ -53,6 +54,7 @@ function mapConversation(
     // Send state lives on Follow-up Task Status; ConversationDB no longer has Message Status.
     status: null,
     subject,
+    cc,
     content: propertyText(properties.Content) || titleFromProperties(properties),
     sender: propertyText(properties.Sender) || null,
     notes,

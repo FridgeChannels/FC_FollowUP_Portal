@@ -1,6 +1,7 @@
 import { canWriteBrand } from "@/lib/brand-access";
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { channelReachable, unavailableChannelMessage } from "@/lib/channel-availability";
+import { EmailCcError, normalizeEmailCc } from "@/lib/email-cc";
 import { firstRelationId, propertyText, relationIds, retrievePage } from "@/lib/notion/client";
 import { listFollowupContactIds, mapFollowupContact } from "@/lib/notion/contacts";
 import { mapFollowupClientPage } from "@/lib/notion/followup-clients";
@@ -36,6 +37,7 @@ export async function POST(request: Request, { params }: Params) {
       content?: string;
       object?: string;
       subject?: string;
+      cc?: string;
       taskId?: string;
       threadId?: string;
       deliveryMode?: string;
@@ -78,6 +80,19 @@ export async function POST(request: Request, { params }: Params) {
     if (channel === "Email" && !object) {
       return Response.json({ error: "object (email subject) is required for Email" }, { status: 400 });
     }
+    const hasCcInput = body.cc != null && String(body.cc).trim() !== "";
+    if (hasCcInput && channel !== "Email") {
+      return Response.json({ error: "cc is only valid for Email" }, { status: 400 });
+    }
+    let cc: string | null = null;
+    if (channel === "Email") {
+      try {
+        cc = normalizeEmailCc(body.cc);
+      } catch (error) {
+        const message = error instanceof EmailCcError ? error.message : "Invalid cc";
+        return Response.json({ error: message }, { status: 400 });
+      }
+    }
     if (!channelReachable(contact, channel)) {
       return Response.json({ error: unavailableChannelMessage(channel) }, { status: 400 });
     }
@@ -112,6 +127,7 @@ export async function POST(request: Request, { params }: Params) {
       channel,
       content: body.content || "",
       subject: channel === "Email" ? object : undefined,
+      cc: channel === "Email" ? cc : undefined,
       sender: channel === "LinkedIn" ? undefined : viewer.email,
       existingTaskId: body.taskId,
       threadId: body.threadId,

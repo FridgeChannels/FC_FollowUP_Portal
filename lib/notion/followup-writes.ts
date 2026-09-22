@@ -405,6 +405,8 @@ export async function createOutboundConversation(input: {
   content: string;
   subject?: string | null;
   sender?: string | null;
+  /** Email CC: normalized comma-separated addresses for ConversationDB `CC`. */
+  cc?: string | null;
   taskId?: string;
   threadId?: string | null;
   messageId?: string | null;
@@ -462,6 +464,10 @@ export async function createOutboundConversation(input: {
     "Thread ID": { rich_text: richText(thread.threadId) },
     "Message ID": { rich_text: richText(thread.messageId) },
   };
+  const cc = input.cc?.trim();
+  if (cc) {
+    properties.CC = { rich_text: richText(cc) };
+  }
   if (input.taskId) {
     properties["Follow-up Task"] = { relation: [{ id: input.taskId }] };
   }
@@ -751,6 +757,8 @@ export async function createHumanOutbound(input: {
   content: string;
   subject?: string | null;
   sender?: string | null;
+  /** Email CC: normalized comma-separated addresses. */
+  cc?: string | null;
   existingTaskId?: string;
   threadId?: string | null;
   cpId?: string | null;
@@ -828,6 +836,7 @@ export async function createHumanOutbound(input: {
       content: input.content,
       subject: input.subject,
       sender,
+      cc: channel === "Email" ? input.cc : undefined,
       taskId,
       threadId: input.threadId,
       cpId: isReply ? repliedInbound?.cpId || input.cpId : input.cpId,

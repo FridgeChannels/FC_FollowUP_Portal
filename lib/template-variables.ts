@@ -175,12 +175,13 @@ export function resolveOutboundFields(
 }
 
 export function resolveLaunchStepCopy(
-  copy: { subject?: string; content?: string; callGoal?: string; script?: string },
+  copy: { subject?: string; cc?: string; content?: string; callGoal?: string; script?: string },
   context: TemplateVariableContext,
 ) {
   const resolve = (value?: string) => resolveTemplateVariables(value || "", context);
   return {
     subject: resolve(copy.subject),
+    cc: copy.cc?.trim() || "",
     content: resolve(copy.content),
     callGoal: resolve(copy.callGoal),
     script: resolve(copy.script),

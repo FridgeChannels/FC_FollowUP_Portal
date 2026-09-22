@@ -228,6 +228,7 @@ linkedin_account（额度账本，无 FK；Sender 写入 conversation.sender / t
 | Content | text | — | 否 | 完整正文 | | `content` |
 | Scheduled At | date+time | — | Outbound 待发建议必填 | ET | | `scheduled_at` |
 | Interaction At | date | — | 否 | 实际发生时间；Pending 留空 | | `interaction_at` |
+| CC | text | — | 否 | Email 抄送；逗号分隔多地址 | | `cc` |
 | Sender | text | — | 否 | 发件账号 / LinkedIn 展示名等 | | `sender` |
 | Reply Status | select | — | 否 | Needs Reply / Replied | 仅 Inbound | `reply_status` |
 | Reply Due At | date | — | 否 | Needs Reply 时写入 | | `reply_due_at` |
