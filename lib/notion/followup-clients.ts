@@ -348,10 +348,11 @@ async function resolveMeetingNotes(pageIds: string[]): Promise<BrandMeetingNote[
       id: page.id,
       title: titleFromProperties(page.properties) || "Meeting note",
       url: notionPageUrl(page),
+      nfcCardUrl: propertyText(page.properties?.["NFC Card URL"]) || null,
       sortAt: notionDate(page.properties?.["Meeting Time"]) || page.last_edited_time || "",
     }))
     .sort((a, b) => b.sortAt.localeCompare(a.sortAt) || a.title.localeCompare(b.title))
-    .map(({ id, title, url }) => ({ id, title, url }));
+    .map(({ id, title, url, nfcCardUrl }) => ({ id, title, url, nfcCardUrl }));
 }
 
 export type MapFollowupClientDetailOptions = {

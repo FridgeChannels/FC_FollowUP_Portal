@@ -309,6 +309,7 @@ export type BrandMeetingNote = {
   id: string;
   title: string;
   url: string;
+  nfcCardUrl: string | null;
 };
 
 /** Portal-created Notion AI Meeting Notes links (Follow-up Client `AI Meeting Links` JSON). */

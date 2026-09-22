@@ -51,20 +51,38 @@ function BrandMeetingNoteLink({
   if (!notes) {
     return <p className="text-sm font-medium text-slate-700">{fallback}</p>;
   }
-  if (!note) {
-    return <p className="text-sm font-medium text-slate-400">Exhibition Meeting</p>;
-  }
+  const sampleUrl = note?.nfcCardUrl?.trim() || "";
   return (
-    <a
-      href={note.url}
-      target="_blank"
-      rel="noreferrer"
-      title={note.title}
-      className="inline-flex items-center gap-1.5 text-sm font-medium text-violet-700 hover:text-violet-900"
-    >
-      Exhibition Meeting
-      <ExternalLink className="size-3.5 shrink-0" />
-    </a>
+    <>
+      {note ? (
+        <a
+          href={note.url}
+          target="_blank"
+          rel="noreferrer"
+          title={note.title}
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-violet-700 hover:text-violet-900"
+        >
+          Exhibition Meeting
+          <ExternalLink className="size-3.5 shrink-0" />
+        </a>
+      ) : (
+        <p className="text-sm font-medium text-slate-400">Exhibition Meeting</p>
+      )}
+      {sampleUrl ? (
+        <a
+          href={sampleUrl}
+          target="_blank"
+          rel="noreferrer"
+          title={sampleUrl}
+          className="inline-flex items-center gap-1 rounded-md border border-violet-200 bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-700 hover:bg-violet-100 hover:text-violet-900"
+        >
+          Sample URL
+          <ExternalLink className="size-3 shrink-0" />
+        </a>
+      ) : (
+        <span className="text-sm font-medium text-slate-400">no sample</span>
+      )}
+    </>
   );
 }
 
@@ -775,8 +793,9 @@ export function BrandDetail({customerId}:{customerId:string}){
       const response=await fetch(`/api/brands/${c.id}/meetings`,{method:"POST"});
       const payload=await response.json() as {meeting?:BrandAiMeetingLink;meetings?:BrandAiMeetingLink[];error?:string};
       if(!response.ok||!payload.meeting)throw new Error(payload.error||"Unable to create meeting");
-      setRemote(prev=>prev?{...prev,aiMeetingLinks:payload.meetings||[payload.meeting,...(prev.aiMeetingLinks||[])]}:prev);
-      if(payload.meeting.url)window.open(payload.meeting.url,"_blank","noopener,noreferrer");
+      const meeting=payload.meeting;
+      setRemote(prev=>prev?{...prev,aiMeetingLinks:payload.meetings||[meeting,...(prev.aiMeetingLinks||[])]}:prev);
+      if(meeting.url)window.open(meeting.url,"_blank","noopener,noreferrer");
       toast.success("Meeting created");
     }catch(error){
       toast.error(error instanceof Error?error.message:"Unable to create meeting");
