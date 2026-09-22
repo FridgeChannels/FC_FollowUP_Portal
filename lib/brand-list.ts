@@ -309,6 +309,7 @@ export type BrandMeetingNote = {
   id: string;
   title: string;
   url: string;
+  nfcCardUrl: string | null;
 };
 
 export type BrandDetail = BrandListItem & {

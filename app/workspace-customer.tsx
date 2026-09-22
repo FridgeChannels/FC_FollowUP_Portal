@@ -51,20 +51,38 @@ function BrandMeetingNoteLink({
   if (!notes) {
     return <p className="mt-3 text-sm font-medium text-slate-700">{fallback}</p>;
   }
-  if (!note) {
-    return <p className="mt-3 text-sm font-medium text-slate-400">Notion meeting note</p>;
-  }
+  const sampleUrl = note?.nfcCardUrl?.trim() || "";
   return (
-    <a
-      href={note.url}
-      target="_blank"
-      rel="noreferrer"
-      title={note.title}
-      className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-violet-700 hover:text-violet-900"
-    >
-      Notion meeting note
-      <ExternalLink className="size-3.5 shrink-0" />
-    </a>
+    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+      {note ? (
+        <a
+          href={note.url}
+          target="_blank"
+          rel="noreferrer"
+          title={note.title}
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-violet-700 hover:text-violet-900"
+        >
+          Notion meeting note
+          <ExternalLink className="size-3.5 shrink-0" />
+        </a>
+      ) : (
+        <p className="text-sm font-medium text-slate-400">Notion meeting note</p>
+      )}
+      {sampleUrl ? (
+        <a
+          href={sampleUrl}
+          target="_blank"
+          rel="noreferrer"
+          title={sampleUrl}
+          className="inline-flex items-center gap-1 rounded-md border border-violet-200 bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-700 hover:bg-violet-100 hover:text-violet-900"
+        >
+          Sample URL
+          <ExternalLink className="size-3 shrink-0" />
+        </a>
+      ) : (
+        <span className="text-sm font-medium text-slate-400">no sample</span>
+      )}
+    </div>
   );
 }
 
