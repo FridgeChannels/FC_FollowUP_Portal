@@ -91,6 +91,7 @@ type CreateBrandBody = {
   notes?: string | null;
   contacts?: Array<{
     name?: string;
+    keyPersonId?: string | null;
     title?: string | null;
     ownerOrConnector?: "Owner" | "Connector" | null;
     role?: "Owner" | "Connector" | "Other" | null;
@@ -121,6 +122,7 @@ export async function POST(request: Request) {
         const role = item.ownerOrConnector || item.role || null;
         return {
           name,
+          keyPersonId: item.keyPersonId?.trim() || null,
           title: item.title?.trim() || null,
           ownerOrConnector:
             role === "Owner" || role === "Connector" ? role : null,

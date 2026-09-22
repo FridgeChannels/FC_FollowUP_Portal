@@ -17,7 +17,7 @@ export async function GET(request: Request) {
       return Response.json({ clients: [] });
     }
 
-    const clients = await searchClientCompanies(q, 12);
+    const clients = await searchClientCompanies(q, 12, { excludeFollowupLinked: true });
     return Response.json({ clients });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";

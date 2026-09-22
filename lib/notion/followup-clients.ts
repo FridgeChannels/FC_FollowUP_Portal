@@ -45,7 +45,7 @@ function asHandlingMode(value: string): HandlingMode | null {
 
 async function resolveClientCompany(pageId?: string | null) {
   if (!pageId) {
-    return { companyName: null, productDescription: null, matchedCategory: null };
+    return { companyName: null, productDescription: null, matchedCategory: null, icpGroup: null };
   }
   try {
     const page = await retrievePage(pageId);
@@ -64,9 +64,10 @@ async function resolveClientCompany(pageId?: string | null) {
       companyName: propertyText(properties["Company Name"]) || titleFromProperties(properties) || null,
       productDescription: propertyText(properties["Product Description"]) || null,
       matchedCategory: categories.filter(Boolean).join(", ") || null,
+      icpGroup: propertyText(properties["ICP Group"]) || null,
     };
   } catch {
-    return { companyName: null, productDescription: null, matchedCategory: null };
+    return { companyName: null, productDescription: null, matchedCategory: null, icpGroup: null };
   }
 }
 
@@ -405,6 +406,7 @@ export async function mapFollowupClientDetail(
     name: brandName,
     productDescription: company.productDescription,
     matchedCategory: company.matchedCategory,
+    icpGroup: company.icpGroup,
     followupExhibition,
     meetingNotes,
     aiMeetingLinks: sortAiMeetingLinks(

@@ -7,6 +7,8 @@ export type CreateFollowupContactInput = {
   followupClientId: string;
   clientPageId?: string | null;
   companyName?: string | null;
+  /** Reuse an existing KeyPerson instead of creating a new one. */
+  keyPersonId?: string | null;
   name: string;
   title?: string | null;
   ownerOrConnector?: "Owner" | "Connector" | null;
@@ -30,24 +32,31 @@ export async function createFollowupContactWithKeyPerson(input: CreateFollowupCo
   if (!name) throw new Error("KeyPerson name is required");
   if (!input.followupClientId) throw new Error("Follow-up Client is required");
 
-  const keyPersonInput: CreateKeyPersonInput = {
-    name,
-    title: input.title,
-    ownerOrConnector: input.ownerOrConnector,
-    email: input.email,
-    phone: input.phone,
-    directPhone: input.directPhone,
-    officePhone: input.officePhone,
-    whatsapp: input.whatsapp,
-    linkedin: input.linkedin,
-    clientPageId: input.clientPageId,
-  };
-  const keyPerson = await createKeyPerson(keyPersonInput);
+  let keyPersonId = input.keyPersonId?.trim() || "";
+  if (keyPersonId) {
+    // Ensure the page exists; do not rewrite master KeyPerson on link.
+    await retrievePage(keyPersonId);
+  } else {
+    const keyPersonInput: CreateKeyPersonInput = {
+      name,
+      title: input.title,
+      ownerOrConnector: input.ownerOrConnector,
+      email: input.email,
+      phone: input.phone,
+      directPhone: input.directPhone,
+      officePhone: input.officePhone,
+      whatsapp: input.whatsapp,
+      linkedin: input.linkedin,
+      clientPageId: input.clientPageId,
+    };
+    const keyPerson = await createKeyPerson(keyPersonInput);
+    keyPersonId = keyPerson.id;
+  }
 
   const properties: Record<string, unknown> = {
     "Follow-up Contact": { title: richText(contactTitle(input.companyName, name)) },
     "Follow-up Client": { relation: [{ id: input.followupClientId }] },
-    "Key Person": { relation: [{ id: keyPerson.id }] },
+    "Key Person": { relation: [{ id: keyPersonId }] },
     "Follow-up Status": { status: { name: "Not Contacted" } },
     "Follow-up Mode": { select: { name: input.followupMode || "Automated" } },
   };
@@ -76,7 +85,7 @@ export async function createFollowupContactWithKeyPerson(input: CreateFollowupCo
   const created = contacts.find((item) => item.id === contact.id) || null;
   return {
     contactId: contact.id,
-    keyPersonId: keyPerson.id,
+    keyPersonId,
     contact: created,
     contacts,
   };

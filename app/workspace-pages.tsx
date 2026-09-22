@@ -76,7 +76,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { BrandContactsEditor, emptyContactDraft, validContactDrafts } from "./brand-contacts-editor";
+import { BrandContactsEditor, emptyContactDraft, validContactDrafts, type ContactDraft } from "./brand-contacts-editor";
 
 const cx = (...v: (string | false | undefined | null)[]) =>
   v.filter(Boolean).join(" ");
@@ -1300,6 +1300,13 @@ function applyMapping(
   });
 }
 
+type ClientSearchHit = {
+  id: string;
+  name: string;
+  website: string | null;
+  productDescription: string | null;
+};
+
 type ExhibitionSearchHit = {
   id: string;
   name: string;
@@ -1319,9 +1326,16 @@ function AddBrandDialog({
   cps: Array<{ id?: string; name: string }>;
   onCreated?: (brandId: string) => void;
 }) {
+  /** Prefer linking an existing ClientDB over creating a new company. */
+  const [mode, setMode] = useState<"link" | "create">("link");
   const [name, setName] = useState("");
   const [website, setWebsite] = useState("");
   const [productDescription, setProductDescription] = useState("");
+  const [clientQuery, setClientQuery] = useState("");
+  const [clientHits, setClientHits] = useState<ClientSearchHit[]>([]);
+  const [clientSearching, setClientSearching] = useState(false);
+  const [linkedClient, setLinkedClient] = useState<ClientSearchHit | null>(null);
+  const [loadingKeyPersons, setLoadingKeyPersons] = useState(false);
   const [exhibitionQuery, setExhibitionQuery] = useState("");
   const [exhibitionHits, setExhibitionHits] = useState<ExhibitionSearchHit[]>([]);
   const [exhibitionSearching, setExhibitionSearching] = useState(false);
@@ -1332,9 +1346,14 @@ function AddBrandDialog({
   const [saving, setSaving] = useState(false);
 
   const reset = () => {
+    setMode("link");
     setName("");
     setWebsite("");
     setProductDescription("");
+    setClientQuery("");
+    setClientHits([]);
+    setLinkedClient(null);
+    setLoadingKeyPersons(false);
     setExhibitionQuery("");
     setExhibitionHits([]);
     setSelectedExhibition(null);
@@ -1343,6 +1362,41 @@ function AddBrandDialog({
     setContacts([emptyContactDraft()]);
     setSaving(false);
   };
+
+  useEffect(() => {
+    if (!open || mode !== "link" || linkedClient) return;
+    const q = clientQuery.trim();
+    if (q.length < 2) {
+      setClientHits([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setClientSearching(true);
+      fetch(`/api/clients?q=${encodeURIComponent(q)}`)
+        .then(async (response) => {
+          const payload = (await response.json()) as {
+            clients?: ClientSearchHit[];
+            error?: string;
+          };
+          if (!response.ok) throw new Error(payload.error || "Search failed");
+          return payload.clients || [];
+        })
+        .then((items) => {
+          if (!cancelled) setClientHits(items);
+        })
+        .catch(() => {
+          if (!cancelled) setClientHits([]);
+        })
+        .finally(() => {
+          if (!cancelled) setClientSearching(false);
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [clientQuery, linkedClient, mode, open]);
 
   useEffect(() => {
     if (!open || selectedExhibition) return;
@@ -1379,12 +1433,68 @@ function AddBrandDialog({
     };
   }, [exhibitionQuery, open, selectedExhibition]);
 
-  const companyName = name.trim();
+  const loadKeyPersonsForClient = async (clientId: string) => {
+    setLoadingKeyPersons(true);
+    try {
+      const response = await fetch(`/api/clients/${encodeURIComponent(clientId)}/key-persons`);
+      const payload = (await response.json()) as {
+        keyPersons?: Array<{
+          id: string;
+          name: string;
+          title: string | null;
+          ownerOrConnector: "Owner" | "Connector" | null;
+          email: string | null;
+          phone: string | null;
+          directPhone: string | null;
+          officePhone: string | null;
+          whatsapp: string | null;
+          linkedin: string | null;
+        }>;
+        error?: string;
+      };
+      if (!response.ok) throw new Error(payload.error || "Failed to load KeyPersons");
+      const people = payload.keyPersons || [];
+      if (!people.length) {
+        setContacts([emptyContactDraft()]);
+        toast.message("No KeyPersons on this Client — add contacts below");
+        return;
+      }
+      const drafts: ContactDraft[] = people.map((person) => {
+        const base = emptyContactDraft(
+          person.ownerOrConnector === "Owner" || person.ownerOrConnector === "Connector"
+            ? person.ownerOrConnector
+            : "Other",
+        );
+        return {
+          ...base,
+          keyPersonId: person.id,
+          name: person.name,
+          title: person.title || "",
+          email: person.email || "",
+          phone: person.phone || "",
+          directPhone: person.directPhone || "",
+          officePhone: person.officePhone || "",
+          whatsapp: person.whatsapp || "",
+          linkedin: person.linkedin || "",
+        };
+      });
+      setContacts(drafts);
+      toast.success(`Loaded ${drafts.length} KeyPerson${drafts.length === 1 ? "" : "s"}`);
+    } catch (error) {
+      setContacts([emptyContactDraft()]);
+      toast.error(error instanceof Error ? error.message : "Failed to load KeyPersons");
+    } finally {
+      setLoadingKeyPersons(false);
+    }
+  };
+
+  const companyName = mode === "link" ? linkedClient?.name || "" : name.trim();
   const ready =
     Boolean(companyName) &&
-    Boolean(website.trim()) &&
+    (mode === "link" ? Boolean(linkedClient?.id) : Boolean(website.trim())) &&
     validContactDrafts(contacts).length > 0 &&
-    !saving;
+    !saving &&
+    !loadingKeyPersons;
 
   const submit = async () => {
     if (!ready) return;
@@ -1394,10 +1504,14 @@ function AddBrandDialog({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          clientPageId: mode === "link" ? linkedClient?.id : null,
           company: {
             name: companyName,
-            website: website.trim() || null,
-            productDescription: productDescription.trim() || null,
+            website: mode === "create" ? website.trim() || null : linkedClient?.website || null,
+            productDescription:
+              mode === "create"
+                ? productDescription.trim() || null
+                : linkedClient?.productDescription || null,
           },
           ownerId: ownerId === "unassigned" ? null : ownerId,
           handlingMode: "Human",
@@ -1406,6 +1520,7 @@ function AddBrandDialog({
           exhibitionId: selectedExhibition?.id || null,
           contacts: validContactDrafts(contacts).map((item) => ({
             name: item.name.trim(),
+            keyPersonId: item.keyPersonId || null,
             title: item.title.trim() || null,
             role: item.role,
             email: item.email.trim() || null,
@@ -1456,48 +1571,161 @@ function AddBrandDialog({
         <DialogHeader>
           <DialogTitle>Add a Brand</DialogTitle>
           <DialogDescription>
-            Creates ClientDB, Follow-up Client, and KeyPersons. Handling mode defaults to Human.
-            Fields marked with <span className="font-semibold text-rose-600">*</span> are required.
+            Prefer linking an existing ClientDB company, then create Follow-up Client and KeyPersons.
+            Handling mode defaults to Human. Fields marked with{" "}
+            <span className="font-semibold text-rose-600">*</span> are required.
           </DialogDescription>
         </DialogHeader>
         <div className="min-h-0 space-y-5 overflow-y-auto pr-1">
-          <div className="space-y-3">
-            <label className="grid gap-2 text-sm font-medium">
-              <span>
-                Company name
-                <span className="ml-0.5 text-rose-600" aria-hidden>*</span>
-              </span>
-              <Input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Brand / company name"
-                required
-                aria-required
-              />
-            </label>
-            <label className="grid gap-2 text-sm font-medium">
-              <span>
-                Website
-                <span className="ml-0.5 text-rose-600" aria-hidden>*</span>
-              </span>
-              <Input
-                value={website}
-                onChange={(e) => setWebsite(e.target.value)}
-                placeholder="https://example.com"
-                required
-                aria-required
-              />
-            </label>
-            <label className="grid gap-2 text-sm font-medium">
-              Product description
-              <Textarea
-                value={productDescription}
-                onChange={(e) => setProductDescription(e.target.value)}
-                placeholder="Short product / category intro"
-                rows={3}
-              />
-            </label>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant={mode === "link" ? "default" : "outline"}
+              onClick={() => {
+                setMode("link");
+                setName("");
+                setWebsite("");
+                setProductDescription("");
+              }}
+            >
+              Link existing ClientDB
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={mode === "create" ? "default" : "outline"}
+              onClick={() => {
+                setMode("create");
+                setLinkedClient(null);
+                setClientQuery("");
+                setClientHits([]);
+                setContacts([emptyContactDraft()]);
+              }}
+            >
+              Create company
+            </Button>
           </div>
+
+          {mode === "link" ? (
+            <div className="space-y-3">
+              <label className="grid gap-2 text-sm font-medium">
+                <span>
+                  Search ClientDB
+                  <span className="ml-0.5 text-rose-600" aria-hidden>*</span>
+                </span>
+                <Input
+                  value={clientQuery}
+                  onChange={(e) => setClientQuery(e.target.value)}
+                  placeholder="Type at least 2 characters…"
+                  aria-required
+                />
+              </label>
+              {!linkedClient && (
+                <p className="text-xs text-slate-500">Select an existing company to continue.</p>
+              )}
+              {linkedClient ? (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between rounded-xl bg-emerald-50 px-3 py-2 text-sm">
+                    <div>
+                      <div className="font-medium text-emerald-900">{linkedClient.name}</div>
+                      {linkedClient.website && (
+                        <div className="text-xs text-emerald-700">{linkedClient.website}</div>
+                      )}
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setLinkedClient(null);
+                        setContacts([emptyContactDraft()]);
+                      }}
+                    >
+                      Clear
+                    </Button>
+                  </div>
+                  {loadingKeyPersons && (
+                    <div className="flex items-center gap-2 text-sm text-slate-500">
+                      <Spinner className="size-4" /> Loading KeyPersons…
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="max-h-40 overflow-y-auto rounded-xl border border-slate-200">
+                  {clientSearching ? (
+                    <div className="flex items-center gap-2 px-3 py-3 text-sm text-slate-500">
+                      <Spinner className="size-4" /> Searching…
+                    </div>
+                  ) : clientHits.length === 0 ? (
+                    <div className="px-3 py-3 text-sm text-slate-500">
+                      {clientQuery.trim().length < 2
+                        ? "Enter a company name to search."
+                        : "No available companies (already in Follow-up are hidden)."}
+                    </div>
+                  ) : (
+                    clientHits.map((hit) => (
+                      <button
+                        key={hit.id}
+                        type="button"
+                        className="flex w-full flex-col items-start gap-0.5 border-b border-slate-100 px-3 py-2 text-left last:border-0 hover:bg-slate-50"
+                        onClick={() => {
+                          setLinkedClient(hit);
+                          setName(hit.name);
+                          setWebsite(hit.website || "");
+                          setProductDescription(hit.productDescription || "");
+                          void loadKeyPersonsForClient(hit.id);
+                        }}
+                      >
+                        <span className="text-sm font-medium text-slate-900">{hit.name}</span>
+                        {hit.website && (
+                          <span className="text-xs text-slate-500">{hit.website}</span>
+                        )}
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <label className="grid gap-2 text-sm font-medium">
+                <span>
+                  Company name
+                  <span className="ml-0.5 text-rose-600" aria-hidden>*</span>
+                </span>
+                <Input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Brand / company name"
+                  required
+                  aria-required
+                />
+              </label>
+              <label className="grid gap-2 text-sm font-medium">
+                <span>
+                  Website
+                  <span className="ml-0.5 text-rose-600" aria-hidden>*</span>
+                </span>
+                <Input
+                  value={website}
+                  onChange={(e) => setWebsite(e.target.value)}
+                  placeholder="https://example.com"
+                  required
+                  aria-required
+                />
+              </label>
+              <label className="grid gap-2 text-sm font-medium">
+                Product description
+                <Textarea
+                  value={productDescription}
+                  onChange={(e) => setProductDescription(e.target.value)}
+                  placeholder="Short product / category intro"
+                  rows={3}
+                />
+              </label>
+            </div>
+          )}
 
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="grid gap-2 text-sm font-medium">

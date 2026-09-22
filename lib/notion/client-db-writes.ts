@@ -1,12 +1,17 @@
 import {
   createPage,
+  firstRelationId,
   notionFetch,
   propertyText,
+  retrievePage,
   richText,
   titleFromProperties,
   type NotionPage,
 } from "./client";
 import { getClientDbId } from "./config";
+
+/** Dual relation on ClientDB → Follow-up ClientDB (synced with Follow-up Client.Client). */
+export const CLIENT_FOLLOWUP_RELATION = "Follow up Client";
 
 export type ClientCompanySummary = {
   id: string;
@@ -36,9 +41,42 @@ function mapClientCompany(page: NotionPage): ClientCompanySummary {
   };
 }
 
-export async function searchClientCompanies(query: string, limit = 10) {
+/** True when ClientDB.`Follow up Client` already points at a Follow-up Client row. */
+export async function isClientInFollowupClientDb(clientPageId: string) {
+  const id = clientPageId.trim();
+  if (!id) return false;
+  try {
+    const page = await retrievePage(id);
+    return Boolean(firstRelationId(page.properties?.[CLIENT_FOLLOWUP_RELATION]));
+  } catch {
+    return false;
+  }
+}
+
+export async function searchClientCompanies(
+  query: string,
+  limit = 10,
+  options?: { excludeFollowupLinked?: boolean },
+) {
   const q = query.trim();
   if (!q) return [] as ClientCompanySummary[];
+
+  const excludeFollowupLinked = Boolean(options?.excludeFollowupLinked);
+  const nameFilter = {
+    property: "Company Name",
+    title: { contains: q },
+  };
+  const filter = excludeFollowupLinked
+    ? {
+        and: [
+          nameFilter,
+          {
+            property: CLIENT_FOLLOWUP_RELATION,
+            relation: { is_empty: true },
+          },
+        ],
+      }
+    : nameFilter;
 
   const data = await notionFetch<{ results: NotionPage[] }>(
     `/databases/${getClientDbId()}/query`,
@@ -46,10 +84,7 @@ export async function searchClientCompanies(query: string, limit = 10) {
       method: "POST",
       body: JSON.stringify({
         page_size: Math.min(Math.max(limit, 1), 25),
-        filter: {
-          property: "Company Name",
-          title: { contains: q },
-        },
+        filter,
         sorts: [{ property: "Company Name", direction: "ascending" }],
       }),
     },
@@ -89,4 +124,3 @@ export function normalizeWebsiteUrl(value?: string | null) {
   if (/^https?:\/\//i.test(raw)) return raw;
   return `https://${raw}`;
 }
-

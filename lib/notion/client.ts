@@ -20,6 +20,9 @@ type NotionRollup = {
 
 type NotionFormula = {
   type?: string;
+  string?: string | null;
+  number?: number | null;
+  boolean?: boolean | null;
   date?: NotionDate;
 };
 
@@ -119,6 +122,14 @@ export function propertyText(property?: NotionProperty) {
   if (property.type === "email") return property.email || "";
   if (property.type === "url") return property.url || "";
   if (property.type === "phone_number") return property.phone_number || "";
+  if (property.type === "formula") {
+    const formula = property.formula;
+    if (!formula) return "";
+    if (formula.type === "string") return formula.string || "";
+    if (formula.type === "number") return formula.number != null ? String(formula.number) : "";
+    if (formula.type === "boolean") return formula.boolean != null ? String(formula.boolean) : "";
+    return "";
+  }
   return "";
 }
 

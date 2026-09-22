@@ -1,5 +1,6 @@
 import {
   createClientCompany,
+  isClientInFollowupClientDb,
   type ClientCompanySummary,
 } from "./client-db-writes";
 import { createFollowupContactWithKeyPerson } from "./followup-contact-writes";
@@ -8,6 +9,8 @@ import { propertyText, retrievePage, titleFromProperties } from "./client";
 
 export type CreateBrandContactInput = {
   name: string;
+  /** When set, Follow-up Contact links this existing KeyPerson (no duplicate create). */
+  keyPersonId?: string | null;
   title?: string | null;
   ownerOrConnector?: "Owner" | "Connector" | null;
   email?: string | null;
@@ -71,6 +74,9 @@ export async function createBrandWithContacts(input: CreateBrandWithContactsInpu
   let client: ClientCompanySummary;
   if (input.clientPageId?.trim()) {
     const clientPageId = input.clientPageId.trim();
+    if (await isClientInFollowupClientDb(clientPageId)) {
+      throw new Error("This company is already in Follow-up ClientDB");
+    }
     const name = await resolveCompanyName(clientPageId, input.company?.name);
     client = {
       id: clientPageId,
@@ -109,6 +115,7 @@ export async function createBrandWithContacts(input: CreateBrandWithContactsInpu
         followupClientId: followup.id,
         clientPageId: client.id,
         companyName: client.name,
+        keyPersonId: draft.keyPersonId,
         name,
         title: draft.title,
         ownerOrConnector: draft.ownerOrConnector || null,

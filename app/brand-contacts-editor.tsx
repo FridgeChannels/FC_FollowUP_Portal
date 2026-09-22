@@ -9,6 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 
 export type ContactDraft = {
   id: string;
+  /** Existing KeyPerson page id when prefilled from ClientDB. */
+  keyPersonId?: string;
   name: string;
   /** Maps to KeyPerson OwnerOrConnector (Other → omit). */
   role: Contact["role"];
@@ -26,6 +28,7 @@ const ROLES: Contact["role"][] = ["Connector", "Owner", "Other"];
 export function emptyContactDraft(role: Contact["role"] = "Connector"): ContactDraft {
   return {
     id: uid("ct"),
+    keyPersonId: undefined,
     name: "",
     role,
     title: "",
@@ -202,6 +205,7 @@ export function BrandContactsEditor({
           </div>
           <p className="text-xs text-slate-500">
             At least one contact with a name is required.
+            {contacts.some((c) => c.keyPersonId) ? " Linked Client KeyPersons are prefilled." : ""}
           </p>
         </div>
         <Button
@@ -219,7 +223,12 @@ export function BrandContactsEditor({
         {contacts.map((contact, index) => (
           <div key={contact.id} className="rounded-xl bg-slate-50 p-3">
             <div className="mb-3 flex items-center justify-between gap-2">
-              <div className="text-xs font-semibold text-slate-500">Contact {index + 1}</div>
+              <div className="text-xs font-semibold text-slate-500">
+                Contact {index + 1}
+                {contact.keyPersonId ? (
+                  <span className="ml-2 font-medium text-emerald-700">from ClientDB</span>
+                ) : null}
+              </div>
               <Button
                 type="button"
                 variant="ghost"

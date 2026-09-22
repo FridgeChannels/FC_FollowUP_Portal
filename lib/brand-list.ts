@@ -329,6 +329,8 @@ export type BrandDetail = BrandListItem & {
   currentCpDefinition: string | null;
   productDescription: string | null;
   matchedCategory: string | null;
+  /** ClientDB → ICP Group (formula, e.g. A / B / A&B). */
+  icpGroup: string | null;
   followupExhibition: string | null;
   meetingNotes: BrandMeetingNote[];
   aiMeetingLinks: BrandAiMeetingLink[];

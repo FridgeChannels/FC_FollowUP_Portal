@@ -1,6 +1,7 @@
 import {
   createPage,
   firstRelationId,
+  notionFetch,
   propertyText,
   richText,
   retrievePage,
@@ -137,6 +138,10 @@ export function readKeyPersonContacts(page: NotionPage) {
     id: page.id,
     name: titleFromProperties(properties) || propertyText(properties.name) || "",
     title: propertyText(properties.Title) || null,
+    ownerOrConnector: (() => {
+      const role = propertyText(properties.OwnerOrConnector);
+      return role === "Owner" || role === "Connector" ? role : null;
+    })(),
     email: propertyText(properties.Email) || null,
     phone: propertyText(properties.Phone) || null,
     directPhone: propertyText(properties["Direct Phone"]) || null,
@@ -150,4 +155,29 @@ export function readKeyPersonContacts(page: NotionPage) {
 export async function retrieveKeyPerson(keyPersonId: string) {
   const page = await retrievePage(keyPersonId);
   return { page, ...readKeyPersonContacts(page) };
+}
+
+/** KeyPersons linked to an FC2.0 ClientDB company page. */
+export async function listKeyPersonsByClient(clientPageId: string) {
+  const id = clientPageId.trim();
+  if (!id) return [];
+  // Single page query is enough — one company rarely has >100 KeyPersons.
+  // Avoid queryDatabasePages auto-pagination under rate-limit pressure.
+  const data = await notionFetch<{ results: NotionPage[] }>(
+    `/databases/${getKeyPersonDbId()}/query`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        page_size: 100,
+        filter: {
+          property: "Client",
+          relation: { contains: id },
+        },
+      }),
+    },
+  );
+  return (data.results || [])
+    .map(readKeyPersonContacts)
+    .filter((item) => item.name.trim())
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
