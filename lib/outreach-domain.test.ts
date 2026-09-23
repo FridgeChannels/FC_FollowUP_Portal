@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  canManuallyCancelTaskStatus,
   compareInteractionSort,
   interactionSortAt,
   type Interaction,
@@ -19,6 +20,16 @@ function item(
     direction: partial.direction,
   };
 }
+
+describe("canManuallyCancelTaskStatus", () => {
+  it("allows only Pending", () => {
+    assert.equal(canManuallyCancelTaskStatus("Pending"), true);
+    assert.equal(canManuallyCancelTaskStatus("In Progress"), false);
+    assert.equal(canManuallyCancelTaskStatus("Completed"), false);
+    assert.equal(canManuallyCancelTaskStatus("Cancelled"), false);
+    assert.equal(canManuallyCancelTaskStatus(null), false);
+  });
+});
 
 describe("parseTimelineMs", () => {
   it("treats naive Notion Scheduled At as Eastern wall time", () => {

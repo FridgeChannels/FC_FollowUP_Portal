@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { enUS } from "date-fns/locale";
 import {
-  ArrowLeft, CalendarClock, Check, CheckCircle2, MessageCircle, Phone, Search, Send, UserRound,
+  ArrowLeft, CalendarClock, Check, CheckCircle2, MessageCircle, Phone, Search, Send, UserRound, XCircle,
 } from "lucide-react";
 import { type DateRange } from "react-day-picker";
 import { toast } from "sonner";
@@ -937,6 +937,21 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
                 onPersistCallReview={task.remote ? persistCallReview : undefined}
                 onRefreshQuo={task.remote ? refreshQuo : undefined}
                 quoRefreshingCallId={quoRefreshingCallId}
+                onCancelPending={task.remote && can("reply") ? async (pendingTaskId) => {
+                  const response = await fetch(`/api/tasks/${pendingTaskId}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ status: "Cancelled" }),
+                  });
+                  const payload = await response.json() as TaskPayload & { error?: string };
+                  if (!response.ok) throw new Error(payload.error || "Unable to cancel");
+                  if (pendingTaskId === task.id) applyTaskPayload(payload);
+                  else {
+                    const nextResponse = await fetch(`/api/tasks/${task.id}`);
+                    applyTaskPayload(await nextResponse.json() as TaskPayload);
+                  }
+                  toast.success("Pending message cancelled");
+                } : undefined}
               />
               </div>
             </section>
@@ -958,6 +973,7 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
           {can("launch") && <LaunchOmniReachButton className="justify-start w-full" disabled={task.remote ? brandHasActiveOmniReach(remote?.brand?.tasks || []) : (!!customer.activeBombId || customer.status === "Bomb Running")} disabledReason={ACTIVE_OMNIREACH_BLOCK_REASON} onClick={() => setLaunch(true)} />}
           {can("changeCP") && <Button variant="outline" className="justify-start" onClick={() => setChangeCP(true)}><Check className="mr-2 size-4"/>Change CP</Button>}
           {can("reply") && !isDone(liveTask) && <Button variant="outline" className="justify-start" disabled={saving} onClick={() => { if (!task.remote) { show(resolveInbox(task.id)); return; } void (async () => { setSaving(true); try { const response = await fetch(`/api/tasks/${task.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "Completed" }) }); const payload = await response.json() as TaskPayload; if (!response.ok) throw new Error(payload.error || "Update failed"); applyTaskPayload(payload); toast.success("Task completed"); } catch (error) { toast.error(error instanceof Error ? error.message : "Update failed"); } finally { setSaving(false); } })(); }}><CheckCircle2 className="mr-2 size-4"/>End task</Button>}
+          {can("reply") && task.remote && liveTask.status === "Pending" && <Button variant="outline" className="justify-start border-rose-200 text-rose-700 hover:bg-rose-50 hover:text-rose-800" disabled={saving} onClick={() => { void (async () => { setSaving(true); try { const response = await fetch(`/api/tasks/${task.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "Cancelled" }) }); const payload = await response.json() as TaskPayload; if (!response.ok) throw new Error(payload.error || "Cancel failed"); applyTaskPayload(payload); toast.success("Pending task cancelled"); } catch (error) { toast.error(error instanceof Error ? error.message : "Cancel failed"); } finally { setSaving(false); } })(); }}><XCircle className="mr-2 size-4"/>Cancel task</Button>}
         </div>}
       </aside>}
     </div>

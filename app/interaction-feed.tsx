@@ -171,6 +171,7 @@ export function InteractionFeed({
   maxHeight,
   onSend,
   onCancelBomb,
+  onCancelPending,
   initialChannel,
   initialCp,
   callerPhoneOnly,
@@ -203,6 +204,7 @@ export function InteractionFeed({
   actions?: ScheduledAction[];
   onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string) => Promise<void>;
   onCancelBomb?: (instance: BombInstance) => Promise<void>;
+  onCancelPending?: (taskId: string) => Promise<void>;
   initialChannel?: Channel;
   initialCp?: CPCode;
   callerPhoneOnly?: boolean;
@@ -409,6 +411,7 @@ export function InteractionFeed({
       channel={activeChannel}
       bombInstances={planState.bombInstances}
       onSend={onSend}
+      onCancelPending={onCancelPending}
       onRefreshQuo={onRefreshQuo}
       quoRefreshingCallId={quoRefreshingCallId}
       resolveReview={resolveReview}
@@ -463,6 +466,7 @@ function ChannelTranscript({
   channel,
   bombInstances,
   onSend,
+  onCancelPending,
   onRefreshQuo,
   quoRefreshingCallId,
   resolveReview,
@@ -475,6 +479,7 @@ function ChannelTranscript({
   channel: Channel;
   bombInstances: BombInstance[];
   onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string) => Promise<void>;
+  onCancelPending?: (taskId: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
   resolveReview: (taskId?: string | null) => { status: CallReviewStatus; recallRequested?: boolean } | undefined;
@@ -504,6 +509,7 @@ function ChannelTranscript({
           bombInstances={bombInstances}
           onBack={() => setSelectedThread(null)}
           onSend={onSend}
+          onCancelPending={onCancelPending}
           onRefreshQuo={onRefreshQuo}
           quoRefreshingCallId={quoRefreshingCallId}
           resolveReview={resolveReview}
@@ -522,7 +528,7 @@ function ChannelTranscript({
     ) : (
       <div className="divide-y">
         {contactGroups.map(group => (
-          <ContactThreads key={group.contact?.id || "unknown"} group={group} replyPool={messages} channel={channel} bombInstances={bombInstances} onSend={onSend} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId} resolveReview={resolveReview} canReviewCalls={canReviewCalls} reviewingTaskId={reviewingTaskId} onReviewCall={onReviewCall}/>
+          <ContactThreads key={group.contact?.id || "unknown"} group={group} replyPool={messages} channel={channel} bombInstances={bombInstances} onSend={onSend} onCancelPending={onCancelPending} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId} resolveReview={resolveReview} canReviewCalls={canReviewCalls} reviewingTaskId={reviewingTaskId} onReviewCall={onReviewCall}/>
         ))}
       </div>
     )}
@@ -678,6 +684,7 @@ function ConversationDetail({
   bombInstances,
   onBack,
   onSend,
+  onCancelPending,
   onRefreshQuo,
   quoRefreshingCallId,
   resolveReview,
@@ -692,6 +699,7 @@ function ConversationDetail({
   bombInstances: BombInstance[];
   onBack: () => void;
   onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string) => Promise<void>;
+  onCancelPending?: (taskId: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
   resolveReview: (taskId?: string | null) => { status: CallReviewStatus; recallRequested?: boolean } | undefined;
@@ -713,7 +721,7 @@ function ConversationDetail({
         {contact ? <p className="mt-1 truncate text-sm text-slate-500">{contact.name}{endpoint ? ` · ${endpoint}` : ""}</p> : null}
       </div>
       <div className="px-5 pb-5">
-        <ThreadMessages thread={thread} replyPool={replyPool} contact={contact} channel={channel} endpoint={endpoint} bombInstances={bombInstances} collapseOlder expandAll={expandAll} onSend={onSend} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId} resolveReview={resolveReview} canReviewCalls={canReviewCalls} reviewingTaskId={reviewingTaskId} onReviewCall={onReviewCall} />
+        <ThreadMessages thread={thread} replyPool={replyPool} contact={contact} channel={channel} endpoint={endpoint} bombInstances={bombInstances} collapseOlder expandAll={expandAll} onSend={onSend} onCancelPending={onCancelPending} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId} resolveReview={resolveReview} canReviewCalls={canReviewCalls} reviewingTaskId={reviewingTaskId} onReviewCall={onReviewCall} />
       </div>
     </section>
   );
@@ -725,6 +733,7 @@ function ContactThreads({
   channel,
   bombInstances,
   onSend,
+  onCancelPending,
   onRefreshQuo,
   quoRefreshingCallId,
   resolveReview,
@@ -737,6 +746,7 @@ function ContactThreads({
   channel: Channel;
   bombInstances: BombInstance[];
   onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string) => Promise<void>;
+  onCancelPending?: (taskId: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
   resolveReview: (taskId?: string | null) => { status: CallReviewStatus; recallRequested?: boolean } | undefined;
@@ -762,7 +772,7 @@ function ContactThreads({
     </div>
     <div className="space-y-6">
       {threads.map(thread => (
-        <ThreadMessages key={threadKey(thread[0])} thread={thread} replyPool={replyPool} contact={group.contact} channel={channel} endpoint={endpoint} bombInstances={bombInstances} onSend={onSend} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId} resolveReview={resolveReview} canReviewCalls={canReviewCalls} reviewingTaskId={reviewingTaskId} onReviewCall={onReviewCall}/>
+        <ThreadMessages key={threadKey(thread[0])} thread={thread} replyPool={replyPool} contact={group.contact} channel={channel} endpoint={endpoint} bombInstances={bombInstances} onSend={onSend} onCancelPending={onCancelPending} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId} resolveReview={resolveReview} canReviewCalls={canReviewCalls} reviewingTaskId={reviewingTaskId} onReviewCall={onReviewCall}/>
       ))}
     </div>
   </section>;
@@ -776,6 +786,7 @@ function ThreadMessages({
   endpoint,
   bombInstances,
   onSend,
+  onCancelPending,
   onRefreshQuo,
   quoRefreshingCallId,
   resolveReview,
@@ -792,6 +803,7 @@ function ThreadMessages({
   endpoint?: string;
   bombInstances: BombInstance[];
   onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string) => Promise<void>;
+  onCancelPending?: (taskId: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
   resolveReview: (taskId?: string | null) => { status: CallReviewStatus; recallRequested?: boolean } | undefined;
@@ -805,6 +817,7 @@ function ThreadMessages({
   const [recallReason, setRecallReason] = useState("");
   const [expandedMessageIds, setExpandedMessageIds] = useState<Set<string>>(() => new Set());
   const [collapsedLatestIds, setCollapsedLatestIds] = useState<Set<string>>(() => new Set());
+  const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null);
   const latestId = thread.at(-1)?.id;
   return <div className="space-y-3">
     {thread.map(item => {
@@ -824,6 +837,29 @@ function ThreadMessages({
       const emailSubject = emailSubjectLabel(item);
       const emailCc = emailCcLabel(item);
       const occurredAt = interactionSortAt(item);
+      const sendStatus = outboundStatus(item);
+      const canCancelPending = !inbound && !!item.taskId && sendStatus === "Pending" && !!onCancelPending;
+      const cancelPendingButton = canCancelPending ? (
+        <div className="mt-3">
+          <Button
+            size="sm"
+            variant="outline"
+            className="border-rose-200 text-rose-700 hover:bg-rose-50 hover:text-rose-800"
+            disabled={cancellingTaskId === item.taskId}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (!item.taskId || !onCancelPending) return;
+              if (!window.confirm("Cancel this pending message? It will not be sent.")) return;
+              setCancellingTaskId(item.taskId);
+              void onCancelPending(item.taskId)
+                .catch((error) => toast.error(error instanceof Error ? error.message : "Unable to cancel"))
+                .finally(() => setCancellingTaskId(null));
+            }}
+          >
+            {cancellingTaskId === item.taskId ? "Cancelling…" : "Cancel"}
+          </Button>
+        </div>
+      ) : null;
       const messageBubbleClass = phoneCall
         ? "w-full min-w-0 overflow-hidden rounded-xl bg-slate-50 p-4"
         : `w-full min-w-0 max-w-[88%] overflow-hidden rounded-2xl p-4 ${inbound ? "rounded-tl-md bg-blue-50" : "rounded-tr-md bg-violet-50"}`;
@@ -852,13 +888,13 @@ function ThreadMessages({
             <div className="break-words text-xs font-semibold text-slate-900">{who}</div>
             {inbound && !phoneCall ? <Badge className="bg-rose-600 text-[10px] text-white hover:bg-rose-600">This is a reply</Badge> : <Badge variant="secondary" className="text-[10px]">{item.direction || "Outbound"}</Badge>}
             {source ? <SourceBadge source={source} /> : null}
-            {!inbound && !timing && (outboundStatus(item) ? <SendStatusBadge status={outboundStatus(item)!}/> : <Badge variant="outline" className="text-[10px] text-slate-500">No send status</Badge>)}
+            {!inbound && !timing && (sendStatus ? <SendStatusBadge status={sendStatus}/> : <Badge variant="outline" className="text-[10px] text-slate-500">No send status</Badge>)}
             {phoneCall && item.callResult ? <SendStatusBadge status={item.callResult}/> : null}
             {callReview ? <Badge className={callReview.status === "Qualified" ? "bg-emerald-100 text-[10px] text-emerald-800 hover:bg-emerald-100" : callReview.status === "Awaiting Review" ? "bg-amber-100 text-[10px] text-amber-900 hover:bg-amber-100" : "bg-rose-100 text-[10px] text-rose-800 hover:bg-rose-100"}>{callReview.status.toLowerCase()}</Badge> : null}
           </div>
           {occurredAt ? <time dateTime={occurredAt} className="font-mono text-[11px] text-slate-500">{formatEasternDateTime(occurredAt)}</time> : null}
         </button>
-        {!expanded ? <><p className="mt-2 truncate text-sm text-slate-500">{messagePreviewText(item)}</p>{timing ? <div className="mt-2 flex min-w-0 items-center gap-2 text-xs text-slate-500"><SendStatusBadge status={timing.label} />{scheduledAt ? <span className="truncate">{scheduledAt}</span> : null}</div> : null}</> : <>
+        {!expanded ? <><p className="mt-2 truncate text-sm text-slate-500">{messagePreviewText(item)}</p>{timing ? <div className="mt-2 flex min-w-0 items-center gap-2 text-xs text-slate-500"><SendStatusBadge status={timing.label} />{scheduledAt ? <span className="truncate">{scheduledAt}</span> : null}</div> : null}{cancelPendingButton}</> : <>
         {timing && (
           <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-slate-500">
             <SendStatusBadge status={timing.label} />
@@ -899,6 +935,7 @@ function ThreadMessages({
             onRefresh={canRefresh ? () => onRefreshQuo?.(callId!) : undefined}
           />
         </div> : null}
+        {cancelPendingButton}
         {phoneCall && item.quo && canReviewCalls && callReview?.status === "Awaiting Review" ? recallTaskId === (item.taskId || item.id) ? <div className="mt-4"><UnqualifiedRecallForm reason={recallReason} onReason={setRecallReason} confirming={reviewingTaskId===item.taskId} onCancel={() => { setRecallTaskId(null); setRecallReason(""); }} onConfirm={() => { void Promise.resolve(onReviewCall(item.id, item.taskId, "Unqualified", recallReason.trim())).then(() => { setRecallTaskId(null); setRecallReason(""); }); }}/></div> : <div className="mt-4 flex flex-wrap gap-2"><Button size="sm" className="bg-emerald-600 text-white hover:bg-emerald-700" disabled={reviewingTaskId===item.taskId} onClick={() => void onReviewCall(item.id, item.taskId, "Qualified")}><CheckCircle2 className="mr-1.5 size-3.5"/>{reviewingTaskId===item.taskId?"Saving…":"Mark as Qualified"}</Button><Button size="sm" className="bg-rose-600 text-white hover:bg-rose-700" disabled={reviewingTaskId===item.taskId} onClick={() => { setRecallTaskId(item.taskId || item.id); setRecallReason(""); }}><RotateCcw className="mr-1.5 size-3.5"/>Unqualified & Recall</Button></div> : null}
         </>}
         {/* Keep Needs Reply composer visible even when older bubbles are collapsed

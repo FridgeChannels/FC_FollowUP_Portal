@@ -124,6 +124,8 @@ export const isCancelledTaskStatus = (status?: string | null) =>
   status === "Cancelled" || status === "Canceled";
 export const isClosedTaskStatus = (status: string) =>
   ["Completed", "Resolved", "Failed"].includes(status) || isCancelledTaskStatus(status);
+/** Manual cancel is allowed only while the task is still Pending (not In Progress / sent). */
+export const canManuallyCancelTaskStatus = (status?: string | null) => status === "Pending";
 export const canSeeTask = (state: WorkspaceState, customerId: string, assigneeId?: string) => {
   if (state.currentRole === "Admin") return true;
   const customer = state.customers.find(item => item.id === customerId);

@@ -6,6 +6,7 @@ import {
   buildTaskDetailPayload,
 } from "@/lib/notion/task-detail";
 import { retrieveFollowupTask } from "@/lib/notion/tasks";
+import { canManuallyCancelTaskStatus } from "@/lib/outreach-domain";
 import { dialPhoneForTask } from "@/lib/quo/config";
 import { recordQuoDialAttempt } from "@/lib/quo/dial-attempts";
 
@@ -60,8 +61,12 @@ export async function PATCH(request: Request, { params }: Params) {
     if (body.ownerId !== undefined && !canAssignBrandOwner(viewer)) {
       return Response.json({ error: "Only Admin can assign Owner" }, { status: 403 });
     }
+    if (body.status === "Cancelled" && !canManuallyCancelTaskStatus(task.status)) {
+      return Response.json({ error: "Only Pending tasks can be cancelled" }, { status: 400 });
+    }
     const extras: string[] = [];
     if (body.status === "Completed") extras.push("人工结束任务。");
+    if (body.status === "Cancelled") extras.push("人工取消未发送任务。");
     if (body.notes?.trim()) extras.push(body.notes.trim());
     const notes = extras.length ? extras.join("") : undefined;
     await updateFollowupTask(id, {

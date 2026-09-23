@@ -140,6 +140,12 @@ BRAND=3dc9166f-d9fd-80cb-b68d-ea31f82e4f87
 | 6.4 | Cancel 未发 OmniReach | 未发 Task → `Cancelled`；已发不受影响 | ☐ | |
 | 6.5 | （可选）LI 闸门刻意失败再 Launch | 预览跳过或整单失败，行为符合产品 | ☐ | |
 | 6.6 | （可选）不可达渠道 | 该步不建 Task（`SKIP_UNAVAILABLE_CHANNELS`） | ☐ | |
+| 6.7 | 单条 Pending Cancel · Email | Brand activity 气泡 Cancel（或 Tasks → Cancel task）→ Task `Cancelled`；同 run 其它 Pending **不**变；Notes 含「人工取消未发送任务。」 | ☐ | |
+| 6.8 | 单条 Pending Cancel · LinkedIn | 同上；若 cold 预扣则额度释放 | ☐ | |
+| 6.9 | 单条 Pending Cancel · SMS | 同上 → Cancelled | ☐ | |
+| 6.10 | 单条 Pending Cancel · WhatsApp | 同上 → Cancelled | ☐ | |
+| 6.11 | 单条 Pending Cancel · Phone | Tasks 详情 Cancel task（Phone Board 本轮无按钮）→ Cancelled；Open 列表消失 | ☐ | |
+| 6.12 | 负例 · In Progress / Sent | 对非 Pending 调 Cancel → API 400；UI 无 Cancel | ☐ | |
 
 ---
 
@@ -439,7 +445,7 @@ curl -sS -X POST "$BASE/api/replies" \
 | §3 时间线 | 每渠道 1 次 | +CP 切换 | ☐ |
 | §4 可用性 | 4.1–4.4 | +4.5 | ☐ |
 | §5 人工 Send | 五渠道各 1；WA+附件 | +Human 停 OmniReach | ☐ |
-| §6 Launch/Cancel | Launch + Cancel | +闸门/不可达 | ☐ |
+| §6 Launch/Cancel | Launch + Cancel | +闸门/不可达 + 单条 Pending Cancel 五渠道 | ☐ |
 | §7 Inbound | 五渠道各 1 | +负例 + Email 仅 sender | ☐ |
 | §8 Reply | Email+WA 各 1 | 四渠道 + duplicate + 负例 | ☐ |
 | §9 门户 Reply | 任 1 渠道 | 四渠道 | ☐ |
