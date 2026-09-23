@@ -23,6 +23,18 @@ describe("email attachments", () => {
       validateEmailAttachmentFile({ type: "image/png", size: 1200, name: "a.png" }),
       null,
     );
+    assert.equal(
+      validateEmailAttachmentFile({ type: "video/mp4", size: 1200, name: "a.mp4" }),
+      null,
+    );
+    assert.equal(
+      validateEmailAttachmentFile({ type: "video/quicktime", size: 1200, name: "a.mov" }),
+      null,
+    );
+    assert.equal(
+      validateEmailAttachmentFile({ type: "video/3gpp", size: 1200, name: "a.3gp" }),
+      null,
+    );
     assert.match(
       validateEmailAttachmentFile({ type: "application/zip", size: 1200, name: "a.zip" }) || "",
       /Unsupported/,
@@ -55,6 +67,14 @@ describe("email attachments", () => {
         size: 9,
         url: "https://bucket.s3.us-east-1.amazonaws.com/images/img.png",
       },
+      {
+        id: "clip",
+        kind: "video",
+        name: "clip.mp4",
+        mimeType: "video/mp4",
+        size: 20,
+        url: "https://bucket.s3.us-east-1.amazonaws.com/videos/clip.mp4",
+      },
       { kind: "file" },
       {
         id: "bad",
@@ -65,13 +85,14 @@ describe("email attachments", () => {
         url: "https://bucket.s3.us-east-1.amazonaws.com/files/bad.zip",
       },
     ]);
-    assert.equal(kept.length, 2);
+    assert.equal(kept.length, 3);
     const encoded = encodeAttachmentsProperty(kept);
     assert.ok(encoded);
     const roundTrip = attachmentsFromProperty(encoded);
-    assert.equal(roundTrip.length, 2);
+    assert.equal(roundTrip.length, 3);
     assert.equal(roundTrip[0]?.id, "abc");
     assert.equal(roundTrip[1]?.kind, "image");
+    assert.equal(roundTrip[2]?.kind, "video");
   });
 
   it("reads historical attachments even if mime is no longer allowed", () => {

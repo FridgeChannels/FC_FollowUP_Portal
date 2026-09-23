@@ -5,6 +5,9 @@ export const DEFAULT_EMAIL_ATTACHMENT_MIME_TYPES = [
   "image/jpeg",
   "image/png",
   "image/webp",
+  "video/mp4",
+  "video/quicktime",
+  "video/3gpp",
 ] as const;
 
 export const DEFAULT_EMAIL_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;

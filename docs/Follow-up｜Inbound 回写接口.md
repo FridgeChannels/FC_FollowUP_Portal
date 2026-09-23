@@ -83,9 +83,9 @@ Authorization: Bearer <REPLY_INGEST_TOKEN>
 | 字段 | 说明 |
 | --- | --- |
 | `id` | 上传 id（与 S3 key 主体一致，去横线 UUID） |
-| `kind` | `image` / `video` / `file`。也可省略，由 `mimeType` 推断：`image/*` → `image`，`video/*` → `video`，其余（如 `application/pdf`）→ `file`。Email **默认**允许的 MIME 只有 pdf / jpeg / png / webp，因此默认场景实际只会落到 `image` 或 `file`；`video` 仅在 `EMAIL_ATTACHMENT_MIME_TYPES` 包含视频类型时才会出现 |
+| `kind` | `image` / `video` / `file`。也可省略，由 `mimeType` 推断：`image/*` → `image`，`video/*` → `video`，其余（如 `application/pdf`）→ `file`。默认允许的视频 MIME 为 mp4 / quicktime(mov) / 3gpp，对应 `kind = video` |
 | `name` | 文件名 |
-| `mimeType` | 默认允许 `application/pdf,image/jpeg,image/png,image/webp`（可用 `EMAIL_ATTACHMENT_MIME_TYPES` 覆盖） |
+| `mimeType` | 默认允许 `application/pdf,image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/3gpp`（可用 `EMAIL_ATTACHMENT_MIME_TYPES` 覆盖） |
 | `size` | 字节数，须 > 0 且不超过 `EMAIL_ATTACHMENT_MAX_BYTES`（默认 10MB） |
 | `url` | 本桶 S3 公网 HTTPS URL（须通过 `isAllowedS3MediaUrl`） |
 
