@@ -37,6 +37,7 @@ import {
 import { getCachedBrandReplyMetadata } from "./brand-reply-signal-cache";
 import { cacheBrandPages } from "./brand-page-cache";
 import {
+  brandListSourceIsExhausted,
   encodeBrandListCursor,
   parseBrandListCursor,
   sortBrandListItems,
@@ -369,6 +370,10 @@ async function takeNonReplyClientPages(options: {
   const bufferIds = [...options.buffer];
   const collected: NotionPage[] = [];
   let notionCursor = options.notionCursor;
+  // A rest cursor with buffered IDs and no Notion cursor means the upstream
+  // query already reached EOF. Once the buffer is consumed, do not query again
+  // with a null cursor because that would restart from the first Notion page.
+  let sourceExhausted = brandListSourceIsExhausted(notionCursor, bufferIds);
 
   while (collected.length < options.need && bufferIds.length) {
     const id = bufferIds.shift()!;
@@ -377,7 +382,7 @@ async function takeNonReplyClientPages(options: {
     if (page) collected.push(page);
   }
 
-  while (collected.length < options.need) {
+  while (collected.length < options.need && !sourceExhausted) {
     const batch = await queryFollowupClientPagesPage({
       filter: options.filter,
       startCursor: notionCursor,
@@ -394,6 +399,7 @@ async function takeNonReplyClientPages(options: {
 
     if (!batch.hasMore) {
       notionCursor = null;
+      sourceExhausted = true;
       break;
     }
     if (collected.length >= options.need) break;
@@ -403,7 +409,7 @@ async function takeNonReplyClientPages(options: {
     pages: collected,
     notionCursor,
     buffer: bufferIds,
-    hasMore: bufferIds.length > 0 || !!notionCursor,
+    hasMore: bufferIds.length > 0 || (!sourceExhausted && !!notionCursor),
   };
   logBrandListPhase(options.traceId, "client-page", startedAt, {
     pageCount: collected.length,

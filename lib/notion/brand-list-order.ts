@@ -21,6 +21,14 @@ export type BrandListCursor =
   | { phase: "reply"; offset: number }
   | { phase: "rest"; notionCursor: string | null; buffer: string[] };
 
+/** Buffered IDs with no upstream cursor are the final unread rows, not a fresh query. */
+export function brandListSourceIsExhausted(
+  notionCursor: string | null,
+  buffer: string[],
+) {
+  return notionCursor === null && buffer.length > 0;
+}
+
 export function encodeBrandListCursor(cursor: BrandListCursor): string {
   if (cursor.phase === "reply") return `reply:${cursor.offset}`;
   const payload = JSON.stringify({

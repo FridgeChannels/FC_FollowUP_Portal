@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { BrandListItem } from "../brand-list.ts";
 import {
+  brandListSourceIsExhausted,
   encodeBrandListCursor,
   parseBrandListCursor,
   sortBrandListItems,
@@ -52,6 +53,12 @@ describe("sortBrandListItems", () => {
 });
 
 describe("brand list cursor", () => {
+  it("treats a buffered null cursor as an exhausted Notion source", () => {
+    assert.equal(brandListSourceIsExhausted(null, ["b1", "b2"]), true);
+    assert.equal(brandListSourceIsExhausted(null, []), false);
+    assert.equal(brandListSourceIsExhausted("next", ["b1"]), false);
+  });
+
   it("defaults to reply phase offset 0", () => {
     assert.deepEqual(parseBrandListCursor(null), { phase: "reply", offset: 0 });
     assert.deepEqual(parseBrandListCursor(""), { phase: "reply", offset: 0 });
