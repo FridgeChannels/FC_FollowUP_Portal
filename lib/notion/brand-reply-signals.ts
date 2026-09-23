@@ -11,8 +11,9 @@ import {
 } from "./client";
 import { getFollowupConversationDbId } from "./config";
 import { listFollowupConversations } from "./conversations";
+import { getCachedBrandReplySignals } from "./brand-reply-signal-cache";
 import { REPLY_DUE_PROPERTY } from "./reply-due";
-import { listFollowupTasks } from "./tasks";
+import { listFollowupTaskSignals } from "./tasks";
 
 export type BrandReplySignal = {
   preview: string;
@@ -73,7 +74,24 @@ async function resolveBrandId(
   }
 }
 
-export async function listBrandReplySignals(clientPages: NotionPage[] = []) {
+async function resolveBrandIds(
+  contactIds: string[],
+  cache: Map<string, string | null>,
+) {
+  let nextIndex = 0;
+  const worker = async () => {
+    while (nextIndex < contactIds.length) {
+      const contactId = contactIds[nextIndex];
+      nextIndex += 1;
+      await resolveBrandId(contactId, cache);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(3, contactIds.length) }, () => worker()),
+  );
+}
+
+async function loadBrandReplySignals(clientPages: NotionPage[]) {
   const contactToBrand = new Map<string, string>();
   for (const page of clientPages) {
     for (const contactId of relationIds(page.properties?.["Follow-up Contacts"])) {
@@ -89,6 +107,18 @@ export async function listBrandReplySignals(clientPages: NotionPage[] = []) {
   });
 
   const contactCache = new Map<string, string | null>();
+  const unresolvedContactIds = [
+    ...new Set(
+      pages.flatMap((page) => {
+        const contactId = firstRelationId(
+          page.properties?.["Follow-up Contact"],
+        );
+        return contactId && !contactToBrand.has(contactId) ? [contactId] : [];
+      }),
+    ),
+  ];
+  await resolveBrandIds(unresolvedContactIds, contactCache);
+
   const signals = new Map<string, BrandReplySignal>();
 
   for (const page of pages) {
@@ -96,7 +126,8 @@ export async function listBrandReplySignals(clientPages: NotionPage[] = []) {
     if (!contactId) continue;
     const brandId =
       contactToBrand.get(contactId) ||
-      (await resolveBrandId(contactId, contactCache));
+      contactCache.get(contactId) ||
+      null;
     if (!brandId) continue;
 
     const dueAt = conversationDueAt(page);
@@ -112,6 +143,10 @@ export async function listBrandReplySignals(clientPages: NotionPage[] = []) {
   }
 
   return signals;
+}
+
+export async function listBrandReplySignals(clientPages: NotionPage[] = []) {
+  return getCachedBrandReplySignals(() => loadBrandReplySignals(clientPages));
 }
 
 function pageKey(id: string) {
@@ -169,48 +204,70 @@ function interactionStatusLabel(
 
 export async function listBrandInteractionSignals(pages: NotionPage[]) {
   const signals = new Map<string, BrandInteractionSignal>();
-  await Promise.all(
-    pages.map(async (page) => {
-      const contactIds = relationIds(page.properties?.["Follow-up Contacts"]);
-      if (!contactIds.length) {
-        signals.set(page.id, {
-          lastInteractionAt: null,
-          lastInteractionChannel: null,
-          lastInteractionDirection: null,
-          lastInteractionStatus: null,
-          lastInteractionCallResult: null,
-          lastReplyAt: null,
-          needsQualification: false,
-          qualificationTaskCount: 0,
-        });
-        return;
-      }
-      try {
-        const [conversations, tasks] = await Promise.all([
-          listFollowupConversations(contactIds),
-          listFollowupTasks(contactIds),
-        ]);
-        const taskStatusById = new Map(tasks.map((task) => [task.id, task.status]));
-        const qualificationTaskCount = tasks.filter(
-          (task) => task.channel === "Phone" && task.callReviewStatus === "Awaiting Review",
-        ).length;
-        const latest = conversations.find((item) => isCompletedInteraction(item, taskStatusById));
-        const lastReplyAt = lastReplyAtFromActivities(conversations);
-        signals.set(page.id, {
-          lastInteractionAt: latest ? interactionOccurredAt(latest) : null,
-          lastInteractionChannel: latest?.channel ?? null,
-          lastInteractionDirection: latest?.direction ?? null,
-          lastInteractionStatus: latest ? interactionStatusLabel(latest, taskStatusById) : null,
-          lastInteractionCallResult: latest?.callResult ?? null,
-          lastReplyAt,
-          needsQualification: qualificationTaskCount > 0,
-          qualificationTaskCount,
-        });
-      } catch {
-        // Leave unset so attach keeps any Notion rollup fallback.
-      }
-    }),
+  const contactIdsByPage = new Map(
+    pages.map((page) => [
+      page.id,
+      relationIds(page.properties?.["Follow-up Contacts"]),
+    ]),
   );
+  const allContactIds = [
+    ...new Set([...contactIdsByPage.values()].flat()),
+  ];
+  if (!allContactIds.length) {
+    for (const page of pages) {
+      signals.set(page.id, {
+        lastInteractionAt: null,
+        lastInteractionChannel: null,
+        lastInteractionDirection: null,
+        lastInteractionStatus: null,
+        lastInteractionCallResult: null,
+        lastReplyAt: null,
+        needsQualification: false,
+        qualificationTaskCount: 0,
+      });
+    }
+    return signals;
+  }
+
+  try {
+    const [allConversations, allTasks] = await Promise.all([
+      listFollowupConversations(allContactIds),
+      listFollowupTaskSignals(allContactIds),
+    ]);
+    for (const page of pages) {
+      const contactIds = new Set(contactIdsByPage.get(page.id) || []);
+      const conversations = allConversations.filter(
+        (item) => item.contactId && contactIds.has(item.contactId),
+      );
+      const tasks = allTasks.filter(
+        (task) => task.contactId && contactIds.has(task.contactId),
+      );
+      const taskStatusById = new Map(tasks.map((task) => [task.id, task.status]));
+      const qualificationTaskCount = tasks.filter(
+        (task) =>
+          task.channel === "Phone" &&
+          task.callReviewStatus === "Awaiting Review",
+      ).length;
+      const latest = conversations.find((item) =>
+        isCompletedInteraction(item, taskStatusById),
+      );
+      const lastReplyAt = lastReplyAtFromActivities(conversations);
+      signals.set(page.id, {
+        lastInteractionAt: latest ? interactionOccurredAt(latest) : null,
+        lastInteractionChannel: latest?.channel ?? null,
+        lastInteractionDirection: latest?.direction ?? null,
+        lastInteractionStatus: latest
+          ? interactionStatusLabel(latest, taskStatusById)
+          : null,
+        lastInteractionCallResult: latest?.callResult ?? null,
+        lastReplyAt,
+        needsQualification: qualificationTaskCount > 0,
+        qualificationTaskCount,
+      });
+    }
+  } catch {
+    // Leave unset so the Brands list keeps its Notion rollup fallback.
+  }
   return signals;
 }
 

@@ -6,6 +6,7 @@ import {
   titleFromProperties,
 } from "./client";
 import { getFollowupConversationDbId } from "./config";
+import { invalidateBrandReplySignalCache } from "./brand-reply-signal-cache";
 import { findFollowupContactsByEmail, listFollowupContacts } from "./contacts";
 import { conversationCpRelation } from "./cps";
 import { mapFollowupClientPage } from "./followup-clients";
@@ -189,6 +190,7 @@ export async function ingestInboundCold(
   }
 
   const page = await createPage(getFollowupConversationDbId(), properties);
+  invalidateBrandReplySignalCache();
   await markFollowupClientEngaged(target.brandId, {
     handlingMode: "Human",
     note: "客户主动来信，待人工处理。",

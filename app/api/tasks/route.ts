@@ -2,9 +2,10 @@ import { canAccessTestBrands, isTestOnlyViewer } from "@/lib/brand-access";
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { syncReplyInbox } from "@/lib/notion/followup-writes";
 import { taskQueryForViewer } from "@/lib/notion/owner-filter";
+import { runWithNotionLimit } from "@/lib/notion/rate-limit";
 import { DEFAULT_TASK_PAGE_SIZE, listFollowupTasksForViewerPage } from "@/lib/notion/tasks";
 
-export async function GET(request: Request) {
+async function getTasks(request: Request) {
   try {
     const viewer = await viewerFromRequest(request);
     if (!viewer.email) {
@@ -46,4 +47,8 @@ export async function GET(request: Request) {
     const message = error instanceof Error ? error.message : "Unexpected error";
     return Response.json({ error: message }, { status: 500 });
   }
+}
+
+export function GET(request: Request) {
+  return runWithNotionLimit(() => getTasks(request));
 }

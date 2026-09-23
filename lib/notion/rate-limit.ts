@@ -12,7 +12,7 @@ export function notionRetryDelayMs(response: Response, attempt: number) {
   if (header) {
     const seconds = Number(header);
     if (Number.isFinite(seconds) && seconds >= 0) {
-      return Math.min(seconds * 1000, MAX_DELAY_MS);
+      return seconds * 1000;
     }
   }
   return Math.min(400 * 2 ** Math.max(0, attempt - 1), MAX_DELAY_MS);
@@ -29,10 +29,15 @@ export function isRetryableNotionError(error: unknown) {
   return status != null && shouldRetryNotionStatus(status);
 }
 
-export function createNotionLimiter(options?: { concurrency?: number }) {
+export function createNotionLimiter(options?: {
+  concurrency?: number;
+  minIntervalMs?: number;
+}) {
   const concurrency = Math.max(1, options?.concurrency ?? 3);
+  const minIntervalMs = Math.max(0, options?.minIntervalMs ?? 0);
   let active = 0;
   let coolDownUntil = 0;
+  let nextStartAt = 0;
   const waiting: Array<() => void> = [];
 
   function coolDown(ms: number) {
@@ -40,23 +45,23 @@ export function createNotionLimiter(options?: { concurrency?: number }) {
   }
 
   async function schedule<T>(task: () => Promise<T>): Promise<T> {
-    const wait = coolDownUntil - Date.now();
-    if (wait > 0) {
-      await new Promise<void>((resolve) => {
-        setTimeout(resolve, wait);
-      });
-    }
-    await new Promise<void>((resolve) => {
+    while (true) {
+      const wait = Math.max(coolDownUntil, nextStartAt) - Date.now();
+      if (wait > 0) {
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, wait);
+        });
+        continue;
+      }
       if (active < concurrency) {
         active += 1;
-        resolve();
-        return;
+        nextStartAt = Date.now() + minIntervalMs;
+        break;
       }
-      waiting.push(() => {
-        active += 1;
-        resolve();
+      await new Promise<void>((resolve) => {
+        waiting.push(resolve);
       });
-    });
+    }
     try {
       return await task();
     } finally {
@@ -96,13 +101,24 @@ export function createNotionRetry(options?: {
   async function fetchWithRetry(doFetch: () => Promise<Response>) {
     let response: Response | undefined;
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      response = await schedule(doFetch);
+      response = await schedule(async () => {
+        const next = await doFetch();
+        if (shouldRetryNotionStatus(next.status) && attempt < maxAttempts) {
+          options?.coolDown?.(notionRetryDelayMs(next, attempt));
+        }
+        return next;
+      });
       if (!shouldRetryNotionStatus(response.status) || attempt === maxAttempts) {
         return response;
       }
-      await response.text().catch(() => undefined);
       const delay = notionRetryDelayMs(response, attempt);
-      options?.coolDown?.(delay);
+      const retryAfter = response.headers.get("Retry-After");
+      console.warn(
+        `[notion] ${response.status} on attempt ${attempt}/${maxAttempts}; ` +
+          `backing off ${delay}ms` +
+          (retryAfter ? ` (Retry-After: ${retryAfter})` : ""),
+      );
+      await response.text().catch(() => undefined);
       await sleep(delay);
     }
     return response as Response;

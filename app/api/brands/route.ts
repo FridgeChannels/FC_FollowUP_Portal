@@ -3,12 +3,13 @@ import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { createBrandWithContacts } from "@/lib/notion/create-brand";
 import { listCheckpoints } from "@/lib/notion/cps";
 import { listFollowupClientsForViewerPage } from "@/lib/notion/followup-clients";
+import { runWithNotionLimit } from "@/lib/notion/rate-limit";
 import {
   DEFAULT_BRAND_PAGE_SIZE,
   ownerPageIdFromQueryParam,
 } from "@/lib/notion/owner-filter";
 
-export async function GET(request: Request) {
+async function getBrands(request: Request) {
   try {
     const viewer = await viewerFromRequest(request);
     if (!viewer.email) {
@@ -73,6 +74,10 @@ export async function GET(request: Request) {
     const message = error instanceof Error ? error.message : "Unexpected error";
     return Response.json({ error: message }, { status: 500 });
   }
+}
+
+export function GET(request: Request) {
+  return runWithNotionLimit(() => getBrands(request));
 }
 
 type CreateBrandBody = {

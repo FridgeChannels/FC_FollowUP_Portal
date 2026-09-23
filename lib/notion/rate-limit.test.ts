@@ -45,6 +45,16 @@ describe("Notion request retry", () => {
     const response = new Response("", { status: 429 });
     assert.equal(notionRetryDelayMs(response, 1), 400);
     assert.equal(notionRetryDelayMs(response, 2), 800);
+    assert.equal(
+      notionRetryDelayMs(
+        new Response("", {
+          status: 429,
+          headers: { "Retry-After": "13" },
+        }),
+        1,
+      ),
+      13_000,
+    );
     assert.equal(shouldRetryNotionStatus(400), false);
     assert.equal(shouldRetryNotionStatus(429), true);
   });
@@ -105,8 +115,8 @@ describe("Notion error classification", () => {
   });
 });
 
-describe("request-scoped Notion limiter", () => {
-  it("reuses one limiter inside the same request context", async () => {
+describe("Notion limiter wrapper", () => {
+  it("preserves nested calls", async () => {
     await runWithNotionLimit(async () => {
       const retry = createNotionRetry({
         maxAttempts: 1,

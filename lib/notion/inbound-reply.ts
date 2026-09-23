@@ -8,6 +8,7 @@ import {
   titleFromProperties,
 } from "./client";
 import { getFollowupConversationDbId } from "./config";
+import { invalidateBrandReplySignalCache } from "./brand-reply-signal-cache";
 import { listFollowupContacts } from "./contacts";
 import {
   findConversationsByMessageId,
@@ -485,6 +486,7 @@ export async function ingestInboundReply(
   }
 
   const page = await createPage(getFollowupConversationDbId(), properties);
+  invalidateBrandReplySignalCache();
   await linkConversationToTask(page.id, taskId);
   await cancelUnsentBombSiblingTasks(outboundTask);
   await markFollowupClientEngaged(target.brandId, {

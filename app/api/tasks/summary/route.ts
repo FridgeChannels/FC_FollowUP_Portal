@@ -2,6 +2,7 @@ import { canAccessTestBrands, isTestOnlyViewer } from "@/lib/brand-access";
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { syncReplyInbox } from "@/lib/notion/followup-writes";
 import { taskQueryForViewer } from "@/lib/notion/owner-filter";
+import { runWithNotionLimit } from "@/lib/notion/rate-limit";
 import {
   countOpenPhoneBrandsForViewer,
   countOpenPhoneTasksForViewer,
@@ -9,7 +10,7 @@ import {
 } from "@/lib/notion/tasks";
 
 /** Lightweight ReplyTask menu badge — no full BrandTask mapping. */
-export async function GET(request: Request) {
+async function getTasksSummary(request: Request) {
   try {
     const viewer = await viewerFromRequest(request);
     if (!viewer.email) {
@@ -45,4 +46,8 @@ export async function GET(request: Request) {
     const message = error instanceof Error ? error.message : "Unexpected error";
     return Response.json({ error: message }, { status: 500 });
   }
+}
+
+export function GET(request: Request) {
+  return runWithNotionLimit(() => getTasksSummary(request));
 }

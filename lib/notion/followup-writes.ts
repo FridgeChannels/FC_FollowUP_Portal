@@ -23,6 +23,7 @@ import type {
 } from "../scheduling-engine/types";
 import { CHANNELS as SCHEDULE_CHANNELS } from "../scheduling-engine/types";
 import { notionScheduledAtProperty } from "./scheduled-at";
+import { invalidateBrandReplySignalCache } from "./brand-reply-signal-cache";
 import { listChannelCapacityConfig } from "./capacity";
 import { chooseConversationThreadId } from "./conversation-thread";
 import { listFollowupConversations } from "./conversations";
@@ -242,7 +243,9 @@ export async function updateFollowupClient(
     throw new Error("No brand fields to update");
   }
 
-  return updatePage(pageId, properties);
+  const page = await updatePage(pageId, properties);
+  invalidateBrandReplySignalCache();
+  return page;
 }
 
 export type CreateFollowupClientInput = {
@@ -908,6 +911,7 @@ export async function markInboundsReplied(
       }),
     ),
   );
+  invalidateBrandReplySignalCache();
 }
 
 export async function linkConversationToTask(conversationId: string, taskId: string) {

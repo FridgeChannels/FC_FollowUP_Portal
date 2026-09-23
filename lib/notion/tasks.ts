@@ -647,6 +647,32 @@ export async function listFollowupTasks(
   return sortTasks(tasks);
 }
 
+export type FollowupTaskSignal = Pick<
+  BrandTask,
+  "id" | "contactId" | "channel" | "status" | "callReviewStatus"
+>;
+
+/** Property-only task rows used by the Brands list interaction summary. */
+export async function listFollowupTaskSignals(
+  contactIds: string[],
+): Promise<FollowupTaskSignal[]> {
+  if (!contactIds.length) return [];
+  const pages = await queryTasksByContacts(contactIds);
+  return pages.map((page) => {
+    const properties = page.properties || {};
+    return {
+      id: page.id,
+      contactId:
+        firstRelationId(properties["Follow-up Contact"]) || null,
+      channel: propertyText(properties.Channel) || null,
+      status: propertyText(properties["Task Status"]) || null,
+      callReviewStatus: asCallReviewStatus(
+        propertyText(properties["Call Review Status"]),
+      ),
+    };
+  });
+}
+
 /** Open Source-Bomb tasks for a brand — property scan only, no Contact/Owner hydrate. */
 export async function hasOpenOmniReachTasks(contactIds: string[]): Promise<boolean> {
   if (!contactIds.length) return false;

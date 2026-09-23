@@ -471,6 +471,8 @@ type BrandListFilters = {
   replyTo: string;
 };
 
+const BRAND_SEARCH_DEBOUNCE_MS = 800;
+
 function brandListFiltersFromSearch(search: URLSearchParams): BrandListFilters {
   return {
     q: search.get("q") ?? "",
@@ -550,6 +552,12 @@ function mergeBrandListItem(current: BrandListItem, next: BrandListItem): BrandL
     handlingMode: next.handlingMode,
     currentCp: next.currentCp,
     currentCpId: next.currentCpId,
+    lastInteractionAt: next.lastInteractionAt,
+    lastInteractionChannel: next.lastInteractionChannel,
+    lastInteractionDirection: next.lastInteractionDirection,
+    lastInteractionStatus: next.lastInteractionStatus,
+    lastInteractionCallResult: next.lastInteractionCallResult,
+    lastReplyAt: next.lastReplyAt,
     needsReply: next.needsReply ?? current.needsReply,
     needsQualification: next.needsQualification ?? current.needsQualification,
     qualificationTaskCount: next.qualificationTaskCount ?? current.qualificationTaskCount,
@@ -598,13 +606,18 @@ export function BrandsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string>();
   const [debouncedQuery, setDebouncedQuery] = useState(query);
+  const [searchComposing, setSearchComposing] = useState(false);
   const [addBrandOpen, setAddBrandOpen] = useState(false);
   const [listEpoch, setListEpoch] = useState(0);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setDebouncedQuery(query), 300);
+    if (searchComposing) return;
+    const timer = window.setTimeout(
+      () => setDebouncedQuery(query),
+      BRAND_SEARCH_DEBOUNCE_MS,
+    );
     return () => window.clearTimeout(timer);
-  }, [query]);
+  }, [query, searchComposing]);
 
   const applyBrandUpdate = (brand: BrandListItem) => {
     cacheBrandItem(brand);
@@ -687,13 +700,14 @@ export function BrandsPage() {
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
     setLoading(true);
     setRefreshing(false);
     setError(undefined);
     const params = new URLSearchParams(brandsFilterKey);
     params.set("limit", String(DEFAULT_BRAND_PAGE_SIZE));
     if (cursor) params.set("cursor", cursor);
-    fetch(`/api/brands?${params.toString()}`)
+    fetch(`/api/brands?${params.toString()}`, { signal: controller.signal })
       .then(async (response) => {
         const payload = (await response.json()) as {
           brands?: BrandListItem[];
@@ -712,9 +726,51 @@ export function BrandsPage() {
         setNextCursor(payload.nextCursor || null);
         setHasMore(Boolean(payload.hasMore && payload.nextCursor));
         setError(undefined);
+        if (items.length) {
+          const signalParams = new URLSearchParams({
+            ids: items.map((item) => item.id).join(","),
+          });
+          void fetch(`/api/brands/signals?${signalParams.toString()}`, {
+            signal: controller.signal,
+          })
+            .then(async (response) => {
+              const signalPayload = (await response.json()) as {
+                signals?: Array<
+                  Pick<
+                    BrandListItem,
+                    | "id"
+                    | "lastInteractionAt"
+                    | "lastInteractionChannel"
+                    | "lastInteractionDirection"
+                    | "lastInteractionStatus"
+                    | "lastInteractionCallResult"
+                    | "lastReplyAt"
+                    | "needsQualification"
+                    | "qualificationTaskCount"
+                  >
+                >;
+              };
+              if (!response.ok) return [];
+              return signalPayload.signals || [];
+            })
+            .then((signals) => {
+              if (cancelled || !signals.length) return;
+              const byId = new Map(signals.map((signal) => [signal.id, signal]));
+              setBrands((current) =>
+                current.map((item) => {
+                  const signal = byId.get(item.id);
+                  if (!signal) return item;
+                  const merged = { ...item, ...signal };
+                  cacheBrandItem(merged);
+                  return merged;
+                }),
+              );
+            })
+            .catch(() => undefined);
+        }
       })
       .catch((err: unknown) => {
-        if (cancelled) return;
+        if (cancelled || (err instanceof DOMException && err.name === "AbortError")) return;
         setError(err instanceof Error ? err.message : "Failed to load brands");
         setBrands([]);
         setNextCursor(null);
@@ -727,6 +783,7 @@ export function BrandsPage() {
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [brandsFilterKey, cursor, state.currentRole, listEpoch]);
 
@@ -878,6 +935,13 @@ export function BrandsPage() {
             <Input
               value={query}
               onChange={(e) => setListParam("q", e.target.value)}
+              onCompositionStart={() => setSearchComposing(true)}
+              onCompositionEnd={() => setSearchComposing(false)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !searchComposing) {
+                  setDebouncedQuery(query);
+                }
+              }}
               placeholder="Search brand…"
               className="pl-9"
             />

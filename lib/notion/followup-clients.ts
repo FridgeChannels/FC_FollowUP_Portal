@@ -29,11 +29,11 @@ import {
 import { listFollowupContacts } from "./contacts";
 import { listFollowupConversations } from "./conversations";
 import {
-  attachBrandInteractionSignals,
   attachBrandReplySignals,
-  listBrandInteractionSignals,
   listBrandReplySignals,
+  type BrandReplySignal,
 } from "./brand-reply-signals";
+import { getCachedBrandReplyMetadata } from "./brand-reply-signal-cache";
 import {
   encodeBrandListCursor,
   parseBrandListCursor,
@@ -203,13 +203,14 @@ export type ListFollowupClientsPageResult = {
 type FilteredReplyBrand = {
   id: string;
   page: NotionPage;
+  brand: BrandListItem;
   dueAt: string | null;
 };
 
 async function listFilteredReplyBrands(
   input: ListFollowupClientsPageInput,
+  signals: Map<string, BrandReplySignal>,
 ): Promise<FilteredReplyBrand[]> {
-  const signals = await listBrandReplySignals([]).catch(() => new Map());
   const hasDueFilter = Boolean(input.replyFrom?.trim() || input.replyTo?.trim());
   const entries = [...signals.entries()]
     .filter(([, signal]) =>
@@ -218,28 +219,32 @@ async function listFilteredReplyBrands(
     .sort((a, b) => (a[1].dueAt || "").localeCompare(b[1].dueAt || ""));
   if (!entries.length) return [];
 
-  const pages = await Promise.all(
-    entries.map(([id]) => retrievePage(id).catch(() => null)),
-  );
-  const validPages: NotionPage[] = [];
+  const metadataKey = entries
+    .map(([id]) => pageKey(id))
+    .sort()
+    .join(",");
+  const metadata = await getCachedBrandReplyMetadata(metadataKey, async () => {
+    const pages = await Promise.all(
+      entries.map(([id]) => retrievePage(id).catch(() => null)),
+    );
+    const validPages = pages.filter((page): page is NotionPage => !!page);
+    const mapped = await mapFollowupClientPages(validPages);
+    const byKey = new Map(mapped.map((brand) => [pageKey(brand.id), brand]));
+    return validPages.flatMap((page) => {
+      const brand = byKey.get(pageKey(page.id));
+      return brand ? [{ page, brand }] : [];
+    });
+  });
+
   const dueByKey = new Map<string, string | null>();
   for (let index = 0; index < entries.length; index += 1) {
-    const page = pages[index];
-    if (!page) continue;
-    validPages.push(page);
-    dueByKey.set(pageKey(page.id), entries[index][1].dueAt);
+    dueByKey.set(pageKey(entries[index][0]), entries[index][1].dueAt);
   }
-  if (!validPages.length) return [];
-
-  const mapped = await mapFollowupClientPages(validPages);
-  const byKey = new Map(mapped.map((brand) => [pageKey(brand.id), brand]));
   const q = input.q?.trim().toLowerCase() || "";
   const cp = input.cp?.trim() || "all";
 
   const filtered: FilteredReplyBrand[] = [];
-  for (const page of validPages) {
-    const brand = byKey.get(pageKey(page.id));
-    if (!brand) continue;
+  for (const { page, brand } of metadata) {
     if (!matchesNeedsReplyBrandScope(brand, input)) continue;
     if (input.status && input.status !== "all" && brand.status !== input.status) continue;
     if (q && !brand.name.toLowerCase().includes(q)) continue;
@@ -247,6 +252,7 @@ async function listFilteredReplyBrands(
     filtered.push({
       id: page.id,
       page,
+      brand,
       dueAt: dueByKey.get(pageKey(page.id)) || null,
     });
   }
@@ -301,17 +307,21 @@ async function takeNonReplyClientPages(options: {
   };
 }
 
-async function enrichBrandPage(pages: NotionPage[]) {
+async function enrichBrandPage(
+  pages: NotionPage[],
+  replySignals: Map<string, BrandReplySignal>,
+  knownBrands: Map<string, BrandListItem> = new Map(),
+) {
   if (!pages.length) return [] as BrandListItem[];
-  const [mapped, replySignals, interactionSignals] = await Promise.all([
-    mapFollowupClientPages(pages),
-    listBrandReplySignals(pages).catch(() => new Map()),
-    listBrandInteractionSignals(pages).catch(() => new Map()),
-  ]);
-  return attachBrandInteractionSignals(
-    attachBrandReplySignals(mapped, replySignals),
-    interactionSignals,
-  );
+  const unknownPages = pages.filter((page) => !knownBrands.has(pageKey(page.id)));
+  const mapped = [
+    ...pages.flatMap((page) => {
+      const brand = knownBrands.get(pageKey(page.id));
+      return brand ? [brand] : [];
+    }),
+    ...(await mapFollowupClientPages(unknownPages)),
+  ];
+  return attachBrandReplySignals(mapped, replySignals);
 }
 
 /**
@@ -351,7 +361,13 @@ export async function listFollowupClientsForViewerPage(
     currentCpPageId,
   });
 
-  const replyBrands = await listFilteredReplyBrands(input);
+  const replySignals = await listBrandReplySignals([]).catch(
+    () => new Map<string, BrandReplySignal>(),
+  );
+  const replyBrands = await listFilteredReplyBrands(input, replySignals);
+  const replyBrandByKey = new Map(
+    replyBrands.map((item) => [pageKey(item.id), item.brand]),
+  );
   const replyKeys = new Set(replyBrands.map((item) => pageKey(item.id)));
   const cursor = parseBrandListCursor(input.cursor);
   const outPages: NotionPage[] = [];
@@ -371,7 +387,9 @@ export async function listFollowupClientsForViewerPage(
         buffer: [],
       });
       outPages.push(...rest.pages);
-      const brands = sortBrandListItems(await enrichBrandPage(outPages));
+      const brands = sortBrandListItems(
+        await enrichBrandPage(outPages, replySignals, replyBrandByKey),
+      );
       return {
         brands,
         pageSize,
@@ -388,7 +406,9 @@ export async function listFollowupClientsForViewerPage(
 
     if (replyHasMore) {
       return {
-        brands: sortBrandListItems(await enrichBrandPage(outPages)),
+        brands: sortBrandListItems(
+          await enrichBrandPage(outPages, replySignals, replyBrandByKey),
+        ),
         pageSize,
         nextCursor: encodeBrandListCursor({ phase: "reply", offset: nextReplyOffset }),
         hasMore: true,
@@ -403,7 +423,9 @@ export async function listFollowupClientsForViewerPage(
       buffer: [],
     });
     return {
-      brands: sortBrandListItems(await enrichBrandPage(outPages)),
+      brands: sortBrandListItems(
+        await enrichBrandPage(outPages, replySignals, replyBrandByKey),
+      ),
       pageSize,
       nextCursor: restPeek.hasMore || restPeek.pages.length
         ? encodeBrandListCursor({
@@ -427,7 +449,9 @@ export async function listFollowupClientsForViewerPage(
     buffer: cursor.buffer,
   });
   return {
-    brands: sortBrandListItems(await enrichBrandPage(rest.pages)),
+    brands: sortBrandListItems(
+      await enrichBrandPage(rest.pages, replySignals, replyBrandByKey),
+    ),
     pageSize,
     nextCursor: rest.hasMore
       ? encodeBrandListCursor({
@@ -482,11 +506,21 @@ async function listFollowupClientsByReplyDuePage(
   input: ListFollowupClientsPageInput,
   pageSize: number,
 ): Promise<ListFollowupClientsPageResult> {
-  const matching = await listFilteredReplyBrands(input);
+  const replySignals = await listBrandReplySignals([]).catch(
+    () => new Map<string, BrandReplySignal>(),
+  );
+  const matching = await listFilteredReplyBrands(input, replySignals);
+  const matchingBrandByKey = new Map(
+    matching.map((item) => [pageKey(item.id), item.brand]),
+  );
   const offset = Math.max(0, Number(input.cursor || 0) || 0);
   const slice = matching.slice(offset, offset + pageSize);
   const brands = sortBrandListItems(
-    await enrichBrandPage(slice.map((item) => item.page)),
+    await enrichBrandPage(
+      slice.map((item) => item.page),
+      replySignals,
+      matchingBrandByKey,
+    ),
   );
   const nextOffset = offset + pageSize;
   const hasMore = nextOffset < matching.length;
