@@ -21,6 +21,8 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
+import { EmailBodyEditor } from "./email-body-editor";
+import { emailBodyIsEmpty } from "@/lib/email-html";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { InteractionFeed } from "./interaction-feed";
@@ -1720,9 +1722,12 @@ export function ReplyDialog({
   });
   const effective = available.includes(channel) ? channel : available[0];
   const emailNeedsObject = effective === "Email";
+  const hasBody =
+    (emailNeedsObject ? !emailBodyIsEmpty(content) : !!content.trim()) ||
+    media.readyAttachments.length > 0;
   const canSubmit =
     !!contact &&
-    (!!content.trim() || media.readyAttachments.length > 0) &&
+    hasBody &&
     !!effective &&
     (!emailNeedsObject || !!object.trim()) &&
     !saving &&
@@ -1743,14 +1748,14 @@ export function ReplyDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
+      <DialogContent className="flex max-h-[90vh] flex-col overflow-hidden sm:max-w-lg">
+        <DialogHeader className="shrink-0">
           <DialogTitle>Send message</DialogTitle>
           <DialogDescription>
             Choose Email, Phone, SMS, WhatsApp, or LinkedIn. An active OmniReach will stop before this human message is sent.
           </DialogDescription>
         </DialogHeader>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid min-h-0 grid-cols-2 gap-3">
           <Select value={contact?.id} onValueChange={setContact}>
             <SelectTrigger className="w-full">
               <SelectValue />
@@ -1797,17 +1802,26 @@ export function ReplyDialog({
           <Input value={cc} onChange={(e) => setCc(e.target.value)} placeholder="CC (comma-separated)" />
         ) : null}
         <MessageMediaInputFrame channel={effective} media={media} disabled={saving}>
-          <Textarea
-            className="min-h-32"
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            placeholder="Write a reply…"
-          />
+          {emailNeedsObject ? (
+            <EmailBodyEditor
+              value={content}
+              onChange={setContent}
+              disabled={saving}
+              placeholder="Write an email…"
+            />
+          ) : (
+            <Textarea
+              className="max-h-60 min-h-32 resize-none overflow-y-auto [field-sizing:fixed]"
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              placeholder="Write a reply…"
+            />
+          )}
         </MessageMediaInputFrame>
-        <div className="flex justify-end">
+        <div className="flex shrink-0 justify-end">
           <SendTimingToggle value={deliveryMode} onValueChange={setDeliveryMode} />
         </div>
-        <DialogFooter>
+        <DialogFooter className="shrink-0">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>

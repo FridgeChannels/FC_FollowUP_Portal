@@ -2,6 +2,7 @@ import { canWriteBrand } from "@/lib/brand-access";
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { channelReachable, unavailableChannelMessage } from "@/lib/channel-availability";
 import { EmailCcError, normalizeEmailCc } from "@/lib/email-cc";
+import { prepareEmailContent } from "@/lib/email-html";
 import { firstRelationId, propertyText, relationIds, retrievePage } from "@/lib/notion/client";
 import { listFollowupContactIds, mapFollowupContact } from "@/lib/notion/contacts";
 import { mapFollowupClientPage } from "@/lib/notion/followup-clients";
@@ -109,7 +110,19 @@ export async function POST(request: Request, { params }: Params) {
     ) {
       return Response.json({ error: "Attachments are only supported on Email and WhatsApp" }, { status: 400 });
     }
-    if (!String(body.content || "").trim() && !attachments.length) {
+    let content = body.content || "";
+    if (channel === "Email") {
+      try {
+        const prepared = prepareEmailContent(content, isAllowedS3MediaUrl);
+        content = prepared.content;
+        if (prepared.kind === "empty" && !attachments.length) {
+          return Response.json({ error: "Message content is required" }, { status: 400 });
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Invalid email HTML";
+        return Response.json({ error: message }, { status: 400 });
+      }
+    } else if (!content.trim() && !attachments.length) {
       return Response.json({ error: "Message content is required" }, { status: 400 });
     }
 
@@ -125,7 +138,7 @@ export async function POST(request: Request, { params }: Params) {
       contactFollowupStatus,
       contactFollowupMode,
       channel,
-      content: body.content || "",
+      content,
       subject: channel === "Email" ? object : undefined,
       cc: channel === "Email" ? cc : undefined,
       sender: channel === "LinkedIn" ? undefined : viewer.email,

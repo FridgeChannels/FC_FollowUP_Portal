@@ -14,6 +14,8 @@ import { PhoneTaskBoard, UnqualifiedRecallForm, type QuoDialOpening } from "./ph
 import { QuoCallPanel } from "./quo-call-panel";
 import { useWorkspace } from "./workspace-store";
 import { MessageMediaPreview, MessageMediaThumbnails } from "./message-media";
+import { EmailHtmlBody } from "./email-html-body";
+import { htmlToPlainText, looksLikeEmailHtml } from "@/lib/email-html";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -62,6 +64,14 @@ function emailCcLabel(item: Interaction) {
   if (item.channel !== "Email") return null;
   const cc = item.cc?.trim();
   return cc || null;
+}
+
+function messagePreviewText(item: Interaction) {
+  if (!item.content?.trim()) return item.attachments?.length ? "Attachment" : "No message content";
+  if (item.channel === "Email" && looksLikeEmailHtml(item.content)) {
+    return htmlToPlainText(item.content) || (item.attachments?.length ? "Attachment" : "No message content");
+  }
+  return item.content.replace(/\s+/g, " ").trim();
 }
 
 function SourceBadge({ source }: { source: string }) {
@@ -630,7 +640,7 @@ function ConversationInbox({
           const contact = contacts.find((item) => item.id === latest.contactId);
           const needsReply = thread.some((item) => item.direction === "Inbound" && item.replyStatus === "Needs Reply");
           const sender = contact?.name || "Contact not linked";
-          const preview = latest.content?.replace(/\s+/g, " ").trim() || (latest.attachments?.length ? "Attachment" : "No message content");
+          const preview = messagePreviewText(latest);
           const latestSummary = inboxActivitySummary(latest);
           return (
             <button
@@ -848,7 +858,7 @@ function ThreadMessages({
           </div>
           {occurredAt ? <time dateTime={occurredAt} className="font-mono text-[11px] text-slate-500">{formatEasternDateTime(occurredAt)}</time> : null}
         </button>
-        {!expanded ? <><p className="mt-2 truncate text-sm text-slate-500">{item.content || (item.attachments?.length ? "Attachment" : "No message content")}</p>{timing ? <div className="mt-2 flex min-w-0 items-center gap-2 text-xs text-slate-500"><SendStatusBadge status={timing.label} />{scheduledAt ? <span className="truncate">{scheduledAt}</span> : null}</div> : null}</> : <>
+        {!expanded ? <><p className="mt-2 truncate text-sm text-slate-500">{messagePreviewText(item)}</p>{timing ? <div className="mt-2 flex min-w-0 items-center gap-2 text-xs text-slate-500"><SendStatusBadge status={timing.label} />{scheduledAt ? <span className="truncate">{scheduledAt}</span> : null}</div> : null}</> : <>
         {timing && (
           <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-slate-500">
             <SendStatusBadge status={timing.label} />
@@ -867,7 +877,13 @@ function ThreadMessages({
                 <span className="font-medium text-slate-500">CC:</span> {emailCc}
               </p>
             )}
-            {item.content ? <p className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">{item.content}</p> : null}
+            {item.content ? (
+              item.channel === "Email" ? (
+                <EmailHtmlBody html={item.content} />
+              ) : (
+                <p className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">{item.content}</p>
+              )
+            ) : null}
             {item.attachments?.length ? (
               <div className="pt-1">
                 <ThreadMedia attachments={item.attachments} />
