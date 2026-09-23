@@ -1,35 +1,11 @@
-# syntax=docker/dockerfile:1
+# Runtime image for Vinext / Cloudflare Worker local preview.
+# Heavy `npm run build` runs on the host or CI — this image only packages
+# prebuilt `dist/` plus wrangler to serve it.
+# Secrets are injected at runtime via .dev.vars (see scripts/docker-start.mjs).
 #
-# Multi-stage: vinext build runs inside Node 22, so the host can stay on Node 20.
-# Runtime still serves prebuilt dist/ with wrangler; secrets come from .dev.vars
-# at container start (scripts/docker-start.mjs).
-#
-# Usage (from the project root, with .env present):
-#   docker compose up -d --build
-
-FROM node:22-bookworm AS builder
-WORKDIR /app
-
-ENV NODE_ENV=development \
-    HOME=/tmp \
-    CLOUDFLARE_CF_FETCH_ENABLED=false \
-    WRANGLER_SEND_METRICS=false
-
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends python3 make g++ git ca-certificates \
-  && rm -rf /var/lib/apt/lists/* \
-  && corepack enable
-
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
-RUN pnpm install --frozen-lockfile
-
-COPY . .
-# .env is a BuildKit secret so it is available to vite/wrangler during build
-# without landing in the runtime image.
-RUN --mount=type=secret,id=portal_env,target=/app/.env,required=true \
-    node -v \
-    && npm run build \
-    && test -f dist/server/wrangler.json
+# Usage:
+#   npm run build   # reads SKIP_UNAVAILABLE_CHANNELS / DEV_CALL_PHONE from .env
+#   docker compose build && docker compose up -d
 
 FROM node:22-bookworm-slim AS runner
 WORKDIR /app
@@ -48,20 +24,23 @@ RUN apt-get update \
   && useradd --system --uid 1001 --gid portal --create-home portal \
   && mkdir -p /app/.wrangler/state /app/.sites-runtime
 
+# Pin wrangler to the same version as package.json, without installing the
+# full app dependency tree (vite/vinext/etc. are build-only).
 COPY package.json ./
 RUN WRANGLER_VERSION="$(node -p "require('./package.json').devDependencies.wrangler")" \
   && printf '%s\n' '{"name":"fc-followup-portal-runtime","private":true,"type":"module"}' > package.json \
   && npm install "wrangler@${WRANGLER_VERSION}" --omit=dev --no-audit --no-fund \
   && npm cache clean --force
 
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/scripts ./scripts
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/.openai ./.openai
+COPY dist ./dist
+COPY scripts ./scripts
+COPY public ./public
+COPY .openai ./.openai
 
 RUN chmod +x /app/scripts/docker-entrypoint.sh \
   && chown -R portal:portal /app
 
+# Start as root so the entrypoint can chown bind mounts, then drop to portal.
 EXPOSE 8787
 
 ENTRYPOINT ["tini", "--", "/app/scripts/docker-entrypoint.sh"]
