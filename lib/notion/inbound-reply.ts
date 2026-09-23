@@ -381,6 +381,7 @@ export async function ingestInboundReply(
       const taskId =
         duplicate.taskId ||
         (await resolveReplyTask({
+          brandId: target.brandId,
           brandName: target.brandName,
           brandOwnerId: target.brandOwnerId,
           contactId: target.contactId,
@@ -445,6 +446,7 @@ export async function ingestInboundReply(
       title: richText(`${target.brandName} — ${target.contactName} — ${channel} — Inbound`),
     },
     "Conversation Record ID": { rich_text: richText(`PORTAL-IN-${messageId}`) },
+    "Follow-up Client": { relation: [{ id: target.brandId }] },
     "Follow-up Contact": { relation: [{ id: target.contactId }] },
     "Follow-up Task": { relation: [{ id: taskId }] },
     Channel: { select: { name: channel } },

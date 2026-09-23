@@ -10,10 +10,10 @@ import {
   type NotionPage,
 } from "./client";
 import { getFollowupConversationDbId } from "./config";
-import { listFollowupConversations } from "./conversations";
+import { listFollowupConversationsByBrands } from "./conversations";
 import { getCachedBrandReplySignals } from "./brand-reply-signal-cache";
 import { REPLY_DUE_PROPERTY } from "./reply-due";
-import { listFollowupTaskSignals } from "./tasks";
+import { listFollowupTaskSignalsByBrands } from "./tasks";
 
 export type BrandReplySignal = {
   preview: string;
@@ -110,6 +110,7 @@ async function loadBrandReplySignals(clientPages: NotionPage[]) {
   const unresolvedContactIds = [
     ...new Set(
       pages.flatMap((page) => {
+        if (firstRelationId(page.properties?.["Follow-up Client"])) return [];
         const contactId = firstRelationId(
           page.properties?.["Follow-up Contact"],
         );
@@ -123,10 +124,10 @@ async function loadBrandReplySignals(clientPages: NotionPage[]) {
 
   for (const page of pages) {
     const contactId = firstRelationId(page.properties?.["Follow-up Contact"]);
-    if (!contactId) continue;
     const brandId =
-      contactToBrand.get(contactId) ||
-      contactCache.get(contactId) ||
+      firstRelationId(page.properties?.["Follow-up Client"]) ||
+      (contactId ? contactToBrand.get(contactId) : null) ||
+      (contactId ? contactCache.get(contactId) : null) ||
       null;
     if (!brandId) continue;
 
@@ -204,16 +205,8 @@ function interactionStatusLabel(
 
 export async function listBrandInteractionSignals(pages: NotionPage[]) {
   const signals = new Map<string, BrandInteractionSignal>();
-  const contactIdsByPage = new Map(
-    pages.map((page) => [
-      page.id,
-      relationIds(page.properties?.["Follow-up Contacts"]),
-    ]),
-  );
-  const allContactIds = [
-    ...new Set([...contactIdsByPage.values()].flat()),
-  ];
-  if (!allContactIds.length) {
+  const brandIds = pages.map((page) => page.id);
+  if (!brandIds.length) {
     for (const page of pages) {
       signals.set(page.id, {
         lastInteractionAt: null,
@@ -231,16 +224,16 @@ export async function listBrandInteractionSignals(pages: NotionPage[]) {
 
   try {
     const [allConversations, allTasks] = await Promise.all([
-      listFollowupConversations(allContactIds),
-      listFollowupTaskSignals(allContactIds),
+      listFollowupConversationsByBrands(brandIds),
+      listFollowupTaskSignalsByBrands(brandIds),
     ]);
     for (const page of pages) {
-      const contactIds = new Set(contactIdsByPage.get(page.id) || []);
+      const brandKey = pageKey(page.id);
       const conversations = allConversations.filter(
-        (item) => item.contactId && contactIds.has(item.contactId),
+        (item) => !!item.brandId && pageKey(item.brandId) === brandKey,
       );
       const tasks = allTasks.filter(
-        (task) => task.contactId && contactIds.has(task.contactId),
+        (task) => !!task.brandId && pageKey(task.brandId) === brandKey,
       );
       const taskStatusById = new Map(tasks.map((task) => [task.id, task.status]));
       const qualificationTaskCount = tasks.filter(

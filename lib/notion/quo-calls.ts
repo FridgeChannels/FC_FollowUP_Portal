@@ -151,6 +151,7 @@ export async function upsertQuoCallActivity(input: {
   eventType: string;
 }) {
   if (!input.task.contactId) throw new Error("Quo call cannot be linked without a contact");
+  if (!input.task.brandId) throw new Error("Quo call cannot be linked without a brand");
   const existing = (await findQuoCallConversation(input.data.callId))[0];
   const data = mergeQuoCallData(existing?.quo, {
     ...input.data,
@@ -173,6 +174,9 @@ export async function upsertQuoCallActivity(input: {
   } as Record<string, unknown>;
 
   if (existing) {
+    if (!existing.brandId) {
+      properties["Follow-up Client"] = { relation: [{ id: input.task.brandId }] };
+    }
     if (!existing.taskId && input.task.id) {
       properties["Follow-up Task"] = { relation: [{ id: input.task.id }] };
     }
@@ -205,6 +209,7 @@ export async function upsertQuoCallActivity(input: {
       cpAtInteraction: checkpoint.cpAtInteraction,
     });
     await createOutboundConversation({
+      brandId: input.task.brandId,
       brandName: input.task.brandName || "Untitled Brand",
       contactId: input.task.contactId,
       contactName: input.task.contactName || "Contact",

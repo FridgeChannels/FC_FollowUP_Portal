@@ -158,6 +158,7 @@ export async function ingestInboundCold(
       title: richText(`${target.brandName} — ${target.contactName} — ${input.channel} — Inbound`),
     },
     "Conversation Record ID": { rich_text: richText(`PORTAL-IN-${messageId}`) },
+    "Follow-up Client": { relation: [{ id: target.brandId }] },
     "Follow-up Contact": { relation: [{ id: target.contactId }] },
     Channel: { select: { name: input.channel } },
     Direction: { select: { name: "Inbound" } },

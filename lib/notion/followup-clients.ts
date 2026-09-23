@@ -41,8 +41,31 @@ import {
 } from "./brand-list-order";
 import { DEFAULT_BRAND_PAGE_SIZE, followupClientListFilter, matchesNeedsReplyBrandScope, type NeedsReplyBrandScope } from "./owner-filter";
 import { listFollowupTasks, type TaskResolveHints } from "./tasks";
-import { retrieveOwner, type FollowupOwner } from "./owners";
+import { queryOwnerPages, retrieveOwner, type FollowupOwner } from "./owners";
 const HANDLING_MODES = new Set(["Automated", "Human"]);
+const OWNER_DIRECTORY_CACHE_MS = 60_000;
+let ownerDirectoryCache:
+  | { expiresAt: number; items: FollowupOwner[] }
+  | null = null;
+let ownerDirectoryPending: Promise<FollowupOwner[]> | null = null;
+
+async function listOwnersForBrandMapping() {
+  if (ownerDirectoryCache && ownerDirectoryCache.expiresAt > Date.now()) {
+    return ownerDirectoryCache.items;
+  }
+  if (ownerDirectoryPending) return ownerDirectoryPending;
+  const promise = queryOwnerPages().then((items) => {
+    ownerDirectoryCache = {
+      expiresAt: Date.now() + OWNER_DIRECTORY_CACHE_MS,
+      items,
+    };
+    return items;
+  });
+  ownerDirectoryPending = promise;
+  return promise.finally(() => {
+    if (ownerDirectoryPending === promise) ownerDirectoryPending = null;
+  });
+}
 
 function asHandlingMode(value: string): HandlingMode | null {
   return HANDLING_MODES.has(value) ? (value as HandlingMode) : null;
@@ -123,11 +146,11 @@ export async function mapFollowupClientPage(
   const ownerId = firstRelationId(properties.Owner);
   const currentCpId = firstRelationId(properties["Current CP"]);
   const [clientName, owner, currentCpTitle] = await Promise.all([
-    resolveRelatedTitle(clientId, titleCache),
+    followupTitle ? Promise.resolve("") : resolveRelatedTitle(clientId, titleCache),
     resolveOwner(ownerId, ownerCache),
     resolveRelatedTitle(currentCpId, titleCache).catch(() => ""),
   ]);
-  const name = clientName || followupTitle || "Untitled Client";
+  const name = followupTitle || clientName || "Untitled Client";
 
   return {
     id: page.id,
@@ -153,6 +176,14 @@ export async function mapFollowupClientPage(
 export async function mapFollowupClientPages(pages: NotionPage[]) {
   const titleCache = new Map<string, string>();
   const ownerCache = new Map<string, FollowupOwner | null>();
+  const [owners, checkpoints] = await Promise.all([
+    listOwnersForBrandMapping(),
+    listCheckpoints(),
+  ]);
+  for (const owner of owners) ownerCache.set(owner.id, owner);
+  for (const checkpoint of checkpoints) {
+    titleCache.set(checkpoint.id, checkpoint.name);
+  }
   const brands = await Promise.all(
     pages.map((page) => mapFollowupClientPage(page, titleCache, ownerCache)),
   );
@@ -207,6 +238,27 @@ type FilteredReplyBrand = {
   dueAt: string | null;
 };
 
+async function listReplyBrandMetadata(
+  entries: Array<[string, BrandReplySignal]>,
+) {
+  const metadataKey = entries
+    .map(([id]) => pageKey(id))
+    .sort()
+    .join(",");
+  return getCachedBrandReplyMetadata(metadataKey, async () => {
+    const pages = await Promise.all(
+      entries.map(([id]) => retrievePage(id).catch(() => null)),
+    );
+    const validPages = pages.filter((page): page is NotionPage => !!page);
+    const mapped = await mapFollowupClientPages(validPages);
+    const byKey = new Map(mapped.map((brand) => [pageKey(brand.id), brand]));
+    return validPages.flatMap((page) => {
+      const brand = byKey.get(pageKey(page.id));
+      return brand ? [{ page, brand }] : [];
+    });
+  });
+}
+
 async function listFilteredReplyBrands(
   input: ListFollowupClientsPageInput,
   signals: Map<string, BrandReplySignal>,
@@ -219,22 +271,7 @@ async function listFilteredReplyBrands(
     .sort((a, b) => (a[1].dueAt || "").localeCompare(b[1].dueAt || ""));
   if (!entries.length) return [];
 
-  const metadataKey = entries
-    .map(([id]) => pageKey(id))
-    .sort()
-    .join(",");
-  const metadata = await getCachedBrandReplyMetadata(metadataKey, async () => {
-    const pages = await Promise.all(
-      entries.map(([id]) => retrievePage(id).catch(() => null)),
-    );
-    const validPages = pages.filter((page): page is NotionPage => !!page);
-    const mapped = await mapFollowupClientPages(validPages);
-    const byKey = new Map(mapped.map((brand) => [pageKey(brand.id), brand]));
-    return validPages.flatMap((page) => {
-      const brand = byKey.get(pageKey(page.id));
-      return brand ? [{ page, brand }] : [];
-    });
-  });
+  const metadata = await listReplyBrandMetadata(entries);
 
   const dueByKey = new Map<string, string | null>();
   for (let index = 0; index < entries.length; index += 1) {
@@ -474,23 +511,18 @@ export async function countNeedsReplyBrandsForViewer(
   input: NeedsReplyBrandScope = {},
 ): Promise<number> {
   const replySignals = await listBrandReplySignals([]).catch(() => new Map());
-  const brandIds = [...replySignals.keys()];
-  if (!brandIds.length) return 0;
-
-  const pages = (
-    await Promise.all(brandIds.map((id) => retrievePage(id).catch(() => null)))
-  ).filter((page): page is NotionPage => !!page);
+  const entries = [...replySignals.entries()];
+  if (!entries.length) return 0;
+  const metadata = await listReplyBrandMetadata(entries);
 
   let count = 0;
-  for (const page of pages) {
-    const ownerId = firstRelationId(page.properties?.Owner) || null;
-    const status = propertyText(page.properties?.["Follow-up Status"]);
+  for (const { brand } of metadata) {
     if (
       matchesNeedsReplyBrandScope(
         {
-          ownerId,
-          isTest: isTestFollowupClientPage(page),
-          status,
+          ownerId: brand.ownerId,
+          isTest: brand.isTest,
+          status: brand.status,
         },
         input,
       )

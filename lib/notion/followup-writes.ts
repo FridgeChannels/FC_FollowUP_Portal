@@ -401,6 +401,7 @@ function encodeOutboundExtendedParameters(
 }
 
 export async function createOutboundConversation(input: {
+  brandId: string;
   brandName: string;
   contactId: string;
   contactName: string;
@@ -457,6 +458,7 @@ export async function createOutboundConversation(input: {
   const properties: Record<string, unknown> = {
     "Conversation Record": { title: richText(title) },
     "Conversation Record ID": { rich_text: richText(`PORTAL-${Date.now()}`) },
+    "Follow-up Client": { relation: [{ id: input.brandId }] },
     "Follow-up Contact": { relation: [{ id: input.contactId }] },
     Channel: { select: { name: input.channel } },
     Direction: { select: { name: input.direction || "Outbound" } },
@@ -662,6 +664,7 @@ export async function updateFollowupTask(
 }
 
 export async function createFollowupTask(input: {
+  brandId: string;
   brandName: string;
   contactId: string;
   contactName: string;
@@ -679,6 +682,7 @@ export async function createFollowupTask(input: {
     "Follow-up Task": {
       title: richText(`${input.brandName} — ${input.contactName} — ${input.channel} — ${input.scheduledAt}`),
     },
+    "Follow-up Client": { relation: [{ id: input.brandId }] },
     "Follow-up Contact": { relation: [{ id: input.contactId }] },
     Owner: { relation: [{ id: input.ownerId }] },
     "Creation Method": { select: { name: input.creationMethod } },
@@ -811,6 +815,7 @@ export async function createHumanOutbound(input: {
 
   try {
     const created = await createFollowupTask({
+      brandId: input.brandId,
       brandName: input.brandName,
       contactId: input.contactId,
       contactName: input.contactName,
@@ -832,6 +837,7 @@ export async function createHumanOutbound(input: {
         })
       : null;
     const page = await createOutboundConversation({
+      brandId: input.brandId,
       brandName: input.brandName,
       contactId: input.contactId,
       contactName: input.contactName,
@@ -926,6 +932,7 @@ export async function linkConversationToTask(conversationId: string, taskId: str
 }
 
 export async function resolveReplyTask(input: {
+  brandId: string;
   brandName: string;
   brandOwnerId?: string | null;
   contactId: string;
@@ -943,6 +950,7 @@ export async function resolveReplyTask(input: {
   const ownerId = input.brandOwnerId || tasks.find((item) => item.ownerId)?.ownerId;
   if (!ownerId) throw new Error("Owner is required to create a follow-up task");
   const created = await createFollowupTask({
+    brandId: input.brandId,
     brandName: input.brandName,
     contactId: input.contactId,
     contactName: input.contactName,
@@ -964,8 +972,9 @@ async function backfillUnlinkedInbounds(tasks: BrandTask[], activities: BrandAct
     const sibling = tasks.find((item) => item.contactId === latest.contactId);
     if (!sibling?.contactId || !latest.channel) continue;
     const ownerId = sibling.brandOwnerId || sibling.ownerId;
-    if (!ownerId) continue;
+    if (!ownerId || !sibling.brandId) continue;
     const taskId = await resolveReplyTask({
+      brandId: sibling.brandId,
       brandName: sibling.brandName || "Untitled Client",
       brandOwnerId: ownerId,
       contactId: sibling.contactId,

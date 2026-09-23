@@ -47,6 +47,7 @@ function mapConversation(
     : attachmentsFromExtendedParameters(extendedParameters);
   return {
     id: page.id,
+    brandId: firstRelationId(properties["Follow-up Client"]) || null,
     contactId: firstRelationId(properties["Follow-up Contact"]) || null,
     taskId: firstRelationId(properties["Follow-up Task"]) || null,
     channel: propertyText(properties.Channel) || null,
@@ -79,25 +80,25 @@ function mapConversation(
   };
 }
 
-function contactRelationFilter(contactIds: string[]) {
-  if (contactIds.length === 1) {
+function relationFilter(property: string, ids: string[]) {
+  if (ids.length === 1) {
     return {
-      property: "Follow-up Contact",
-      relation: { contains: contactIds[0] },
+      property,
+      relation: { contains: ids[0] },
     };
   }
   return {
-    or: contactIds.map((id) => ({
-      property: "Follow-up Contact",
+    or: ids.map((id) => ({
+      property,
       relation: { contains: id },
     })),
   };
 }
 
-async function queryConversationsByContacts(contactIds: string[]) {
+async function queryConversationsByRelation(property: string, ids: string[]) {
   const pages: NotionPage[] = [];
-  for (let index = 0; index < contactIds.length; index += 100) {
-    const chunk = contactIds.slice(index, index + 100);
+  for (let index = 0; index < ids.length; index += 100) {
+    const chunk = ids.slice(index, index + 100);
     let cursor: string | undefined;
     do {
       const data = await notionFetch<{
@@ -109,7 +110,7 @@ async function queryConversationsByContacts(contactIds: string[]) {
         body: JSON.stringify({
           page_size: 100,
           start_cursor: cursor,
-          filter: contactRelationFilter(chunk),
+          filter: relationFilter(property, chunk),
         }),
       });
       pages.push(...data.results);
@@ -117,6 +118,14 @@ async function queryConversationsByContacts(contactIds: string[]) {
     } while (cursor);
   }
   return pages;
+}
+
+function queryConversationsByContacts(contactIds: string[]) {
+  return queryConversationsByRelation("Follow-up Contact", contactIds);
+}
+
+function queryConversationsByBrands(brandIds: string[]) {
+  return queryConversationsByRelation("Follow-up Client", brandIds);
 }
 
 export type ListConversationsPageOptions = {
@@ -140,7 +149,7 @@ async function queryConversationsPageByContacts(
   const chunk = contactIds.slice(0, 100);
   const body: Record<string, unknown> = {
     page_size: Math.min(Math.max(options.limit, 1), 100),
-    filter: contactRelationFilter(chunk),
+    filter: relationFilter("Follow-up Contact", chunk),
     sorts: [{ timestamp: "created_time", direction: "descending" }],
   };
   if (options.cursor) body.start_cursor = options.cursor;
@@ -271,6 +280,15 @@ export async function listFollowupConversations(
     }
   }
 
+  return attachConversationCp(pages.map((page) => mapConversation(page))).then(sortConversations);
+}
+
+/** Direct brand-relation query used by the Brands list after historical backfill. */
+export async function listFollowupConversationsByBrands(
+  brandIds: string[],
+): Promise<BrandActivity[]> {
+  if (!brandIds.length) return [];
+  const pages = await queryConversationsByBrands(brandIds);
   return attachConversationCp(pages.map((page) => mapConversation(page))).then(sortConversations);
 }
 

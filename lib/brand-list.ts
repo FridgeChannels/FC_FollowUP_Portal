@@ -268,6 +268,8 @@ export type BrandTask = {
 
 export type BrandActivity = {
   id: string;
+  /** Direct ConversationDB → Follow-up Client relation when available. */
+  brandId?: string | null;
   contactId: string | null;
   taskId: string | null;
   channel: string | null;

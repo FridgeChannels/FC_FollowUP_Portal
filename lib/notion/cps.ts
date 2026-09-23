@@ -55,18 +55,25 @@ function checkpointSortKey(item: CurrentCpOption) {
 }
 
 let checkpointCache: { at: number; items: CurrentCpOption[] } | null = null;
+let checkpointPending: Promise<CurrentCpOption[]> | null = null;
 const CHECKPOINT_CACHE_MS = 60_000;
 
 export async function listCheckpoints(): Promise<CurrentCpOption[]> {
   if (checkpointCache && Date.now() - checkpointCache.at < CHECKPOINT_CACHE_MS) {
     return checkpointCache.items;
   }
-  const pages = await queryDatabasePages(getFollowupCheckpointDbId());
-  const items = pages.map(mapCheckpointPage).sort((left, right) => {
-    return checkpointSortKey(left).localeCompare(checkpointSortKey(right));
+  if (checkpointPending) return checkpointPending;
+  const promise = queryDatabasePages(getFollowupCheckpointDbId()).then((pages) => {
+    const items = pages.map(mapCheckpointPage).sort((left, right) => {
+      return checkpointSortKey(left).localeCompare(checkpointSortKey(right));
+    });
+    checkpointCache = { at: Date.now(), items };
+    return items;
   });
-  checkpointCache = { at: Date.now(), items };
-  return items;
+  checkpointPending = promise;
+  return promise.finally(() => {
+    if (checkpointPending === promise) checkpointPending = null;
+  });
 }
 
 export function filterApplicableCheckpoints(items: CurrentCpOption[]): CurrentCpOption[] {

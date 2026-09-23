@@ -335,6 +335,7 @@ export async function launchFollowupBomb(input: {
     const baseNotes = `由 OmniReach 排班生成，尚未实际发送。方案：${bomb.name}。`;
     try {
       const task = await createFollowupTask({
+        brandId: input.brandId,
         brandName,
         contactId: write.followUpContactId,
         contactName: contact.name,
@@ -353,6 +354,7 @@ export async function launchFollowupBomb(input: {
       let displayContent = content;
       if (conversationContent || emailAttachments.length) {
         const page = await createOutboundConversation({
+          brandId: brand.id,
           brandName,
           contactId: contact.id,
           contactName: contact.name,

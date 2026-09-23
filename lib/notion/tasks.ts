@@ -86,7 +86,7 @@ function stubTaskFromPage(page: NotionPage): BrandTask {
     title: titleFromProperties(properties) || "Untitled Task",
     contactId: firstRelationId(properties["Follow-up Contact"]) || null,
     contactName: null,
-    brandId: null,
+    brandId: firstRelationId(properties["Follow-up Client"]) || null,
     brandName: null,
     brandOwnerId: null,
     brandIsTest: false,
@@ -124,6 +124,36 @@ async function brandIdsByContact(contactIds: string[]) {
   return brandByContact;
 }
 
+async function brandIdsByTaskPage(pages: NotionPage[]) {
+  const brandByTask = new Map<string, string | null>();
+  const unresolved = pages.filter((page) => {
+    const brandId = firstRelationId(page.properties?.["Follow-up Client"]);
+    if (!brandId) return true;
+    brandByTask.set(page.id, brandId);
+    return false;
+  });
+  const contactIds = [
+    ...new Set(
+      unresolved
+        .map((page) =>
+          firstRelationId(page.properties?.["Follow-up Contact"]),
+        )
+        .filter((id): id is string => !!id),
+    ),
+  ];
+  const brandByContact = await brandIdsByContact(contactIds);
+  for (const page of unresolved) {
+    const contactId = firstRelationId(
+      page.properties?.["Follow-up Contact"],
+    );
+    brandByTask.set(
+      page.id,
+      (contactId ? brandByContact.get(contactId) : null) || null,
+    );
+  }
+  return brandByTask;
+}
+
 type TestBrandScope = { includeTest?: boolean; onlyTest?: boolean };
 
 /** Keep / drop task pages by Follow-up Client `Is Test`. */
@@ -134,18 +164,10 @@ async function scopeTestBrandTaskPages(pages: NotionPage[], options: TestBrandSc
   const testIds = await queryTestFollowupClientIds().catch(() => new Set<string>());
   if (!testIds.size) return options.onlyTest ? [] : pages;
 
-  const contactIds = [
-    ...new Set(
-      pages
-        .map((page) => firstRelationId(page.properties?.["Follow-up Contact"]) || null)
-        .filter((id): id is string => !!id),
-    ),
-  ];
-  const brandByContact = await brandIdsByContact(contactIds);
+  const brandByTask = await brandIdsByTaskPage(pages);
 
   return pages.filter((page) => {
-    const contactId = firstRelationId(page.properties?.["Follow-up Contact"]) || null;
-    const brandId = contactId ? brandByContact.get(contactId) : null;
+    const brandId = brandByTask.get(page.id);
     if (!brandId) return !options.onlyTest;
     return options.onlyTest ? testIds.has(brandId) : !testIds.has(brandId);
   });
@@ -203,19 +225,12 @@ export async function countOpenPhoneBrandsForViewer(
   pages = await scopeTestBrandTaskPages(pages, options);
   if (!pages.length) return 0;
 
-  const contactIds = [
-    ...new Set(
-      pages
-        .map((page) => firstRelationId(page.properties?.["Follow-up Contact"]) || null)
-        .filter((id): id is string => !!id),
-    ),
-  ];
-  const brandByContact = await brandIdsByContact(contactIds);
+  const brandByTask = await brandIdsByTaskPage(pages);
 
   const keys = new Set<string>();
   for (const page of pages) {
     const contactId = firstRelationId(page.properties?.["Follow-up Contact"]) || null;
-    const brandId = contactId ? brandByContact.get(contactId) : null;
+    const brandId = brandByTask.get(page.id);
     if (brandId) keys.add(`brand:${brandId}`);
     else if (contactId) keys.add(`contact:${contactId}`);
     else keys.add(`task:${page.id}`);
@@ -393,6 +408,7 @@ async function warmCachesForTaskPages(
 
   const contactIds: string[] = [];
   const ownerIds: string[] = [];
+  const directBrandIds: string[] = [];
   for (const page of pages) {
     const properties = page.properties || {};
     const contactId = firstRelationId(properties["Follow-up Contact"]);
@@ -404,6 +420,8 @@ async function warmCachesForTaskPages(
     }
     const ownerId = firstRelationId(properties.Owner);
     if (ownerId) ownerIds.push(ownerId);
+    const directBrandId = firstRelationId(properties["Follow-up Client"]);
+    if (directBrandId) directBrandIds.push(directBrandId);
   }
 
   await Promise.all([
@@ -415,7 +433,7 @@ async function warmCachesForTaskPages(
   ]);
 
   const keyPersonEntries: Array<{ cacheKey: string; pageId: string }> = [];
-  const brandClientIds: string[] = [];
+  const brandClientIds: string[] = [...directBrandIds];
   for (const contactId of new Set(contactIds)) {
     const contact = caches.contacts.get(contactId) || null;
     if (!hints?.contactsById?.has(contactId)) {
@@ -528,6 +546,8 @@ async function mapTaskPage(
 ): Promise<BrandTask> {
   const properties = page.properties || {};
   const contactId = firstRelationId(properties["Follow-up Contact"]) || null;
+  const directBrandId =
+    firstRelationId(properties["Follow-up Client"]) || null;
   const ownerId = firstRelationId(properties.Owner) || null;
   const hintedContact = contactId ? hints?.contactsById?.get(contactId) : undefined;
   const owner = ownerId
@@ -549,6 +569,9 @@ async function mapTaskPage(
         isTest: Boolean(hints.brand.isTest),
       }
     : null;
+  if (!brand && directBrandId) {
+    brand = caches.brands.get(directBrandId) || null;
+  }
 
   if (!hintedContact || !brand) {
     const contact = await resolveContactPage(contactId || undefined, caches);
@@ -649,19 +672,27 @@ export async function listFollowupTasks(
 
 export type FollowupTaskSignal = Pick<
   BrandTask,
-  "id" | "contactId" | "channel" | "status" | "callReviewStatus"
+  "id" | "brandId" | "contactId" | "channel" | "status" | "callReviewStatus"
 >;
 
 /** Property-only task rows used by the Brands list interaction summary. */
-export async function listFollowupTaskSignals(
-  contactIds: string[],
+export async function listFollowupTaskSignalsByBrands(
+  brandIds: string[],
 ): Promise<FollowupTaskSignal[]> {
-  if (!contactIds.length) return [];
-  const pages = await queryTasksByContacts(contactIds);
+  if (!brandIds.length) return [];
+  const pages: NotionPage[] = [];
+  for (let index = 0; index < brandIds.length; index += 100) {
+    pages.push(
+      ...(await queryTaskPages(
+        relationFilter("Follow-up Client", brandIds.slice(index, index + 100)),
+      )),
+    );
+  }
   return pages.map((page) => {
     const properties = page.properties || {};
     return {
       id: page.id,
+      brandId: firstRelationId(properties["Follow-up Client"]) || null,
       contactId:
         firstRelationId(properties["Follow-up Contact"]) || null,
       channel: propertyText(properties.Channel) || null,
@@ -857,7 +888,14 @@ export async function listExistingTasksForSchedule(): Promise<ExistingTask[]> {
   const contactIds = [
     ...new Set(
       pages
-        .map((page) => firstRelationId(page.properties?.["Follow-up Contact"]) || null)
+        .filter(
+          (page) =>
+            !firstRelationId(page.properties?.["Follow-up Client"]),
+        )
+        .map(
+          (page) =>
+            firstRelationId(page.properties?.["Follow-up Contact"]) || null,
+        )
         .filter((id): id is string => !!id),
     ),
   ];
@@ -883,7 +921,9 @@ export async function listExistingTasksForSchedule(): Promise<ExistingTask[]> {
     const status = propertyText(properties["Task Status"]) as TaskStatus | null;
     const notes = propertyText(properties.Notes) || null;
     const contactId = firstRelationId(properties["Follow-up Contact"]) || null;
-    const clientId = contactId ? brandByContact.get(contactId) : null;
+    const clientId =
+      firstRelationId(properties["Follow-up Client"]) ||
+      (contactId ? brandByContact.get(contactId) : null);
     if (!clientId || !scheduledAt || !status || !TASK_STATUSES.has(status)) return [];
     if (!channel || !CHANNELS.includes(channel as Channel)) return [];
     // LinkedIn follow-up-after-reply does not occupy Channel Daily Max.

@@ -11,6 +11,12 @@ let cached:
       signals: Map<string, BrandReplySignal>;
     }
   | null = null;
+let signalsPending:
+  | {
+      generation: number;
+      promise: Promise<Map<string, BrandReplySignal>>;
+    }
+  | null = null;
 export type BrandReplyMetadata = {
   page: NotionPage;
   brand: BrandListItem;
@@ -22,6 +28,13 @@ let metadataCached:
       items: BrandReplyMetadata[];
     }
   | null = null;
+let metadataPending:
+  | {
+      generation: number;
+      key: string;
+      promise: Promise<BrandReplyMetadata[]>;
+    }
+  | null = null;
 
 export async function getCachedBrandReplySignals(
   load: () => Promise<Map<string, BrandReplySignal>>,
@@ -30,13 +43,25 @@ export async function getCachedBrandReplySignals(
     return new Map(cached.signals);
   }
   const loadGeneration = generation;
-  const signals = await load();
-  if (generation === loadGeneration) {
-    cached = {
-      expiresAt: Date.now() + BRAND_REPLY_SIGNAL_CACHE_MS,
-      signals: new Map(signals),
-    };
+  if (
+    signalsPending &&
+    signalsPending.generation === loadGeneration
+  ) {
+    return new Map(await signalsPending.promise);
   }
+  const promise = load().then((signals) => {
+    if (generation === loadGeneration) {
+      cached = {
+        expiresAt: Date.now() + BRAND_REPLY_SIGNAL_CACHE_MS,
+        signals: new Map(signals),
+      };
+    }
+    return signals;
+  });
+  signalsPending = { generation: loadGeneration, promise };
+  const signals = await promise.finally(() => {
+    if (signalsPending?.promise === promise) signalsPending = null;
+  });
   return new Map(signals);
 }
 
@@ -52,14 +77,27 @@ export async function getCachedBrandReplyMetadata(
     return [...metadataCached.items];
   }
   const loadGeneration = generation;
-  const items = await load();
-  if (generation === loadGeneration) {
-    metadataCached = {
-      expiresAt: Date.now() + BRAND_REPLY_SIGNAL_CACHE_MS,
-      key,
-      items: [...items],
-    };
+  if (
+    metadataPending &&
+    metadataPending.generation === loadGeneration &&
+    metadataPending.key === key
+  ) {
+    return [...(await metadataPending.promise)];
   }
+  const promise = load().then((items) => {
+    if (generation === loadGeneration) {
+      metadataCached = {
+        expiresAt: Date.now() + BRAND_REPLY_SIGNAL_CACHE_MS,
+        key,
+        items: [...items],
+      };
+    }
+    return items;
+  });
+  metadataPending = { generation: loadGeneration, key, promise };
+  const items = await promise.finally(() => {
+    if (metadataPending?.promise === promise) metadataPending = null;
+  });
   return [...items];
 }
 
@@ -67,4 +105,6 @@ export function invalidateBrandReplySignalCache() {
   generation += 1;
   cached = null;
   metadataCached = null;
+  signalsPending = null;
+  metadataPending = null;
 }
