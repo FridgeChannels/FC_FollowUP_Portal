@@ -3,7 +3,13 @@ import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { syncReplyInbox } from "@/lib/notion/followup-writes";
 import { taskQueryForViewer } from "@/lib/notion/owner-filter";
 import { runWithNotionLimit } from "@/lib/notion/rate-limit";
-import { DEFAULT_TASK_PAGE_SIZE, listFollowupTasksForViewerPage } from "@/lib/notion/tasks";
+import {
+  DEFAULT_TASK_PAGE_SIZE,
+  listFollowupTasksForViewerPage,
+  listOpenPhoneTaskStubsForViewer,
+  listOpenReplyTaskStubsForViewer,
+  retrieveFollowupTask,
+} from "@/lib/notion/tasks";
 
 async function getTasks(request: Request) {
   try {
@@ -28,10 +34,57 @@ async function getTasks(request: Request) {
     const limitRaw = Number(url.searchParams.get("limit") || DEFAULT_TASK_PAGE_SIZE);
     const pageSize = Number.isFinite(limitRaw) ? limitRaw : DEFAULT_TASK_PAGE_SIZE;
     const onlyTest = isTestOnlyViewer(viewer);
+    const query = {
+      ...taskQueryForViewer(viewer, ownerParam, statusParam),
+      dueFrom,
+      dueTo,
+    };
+    const testScope = {
+      includeTest: canAccessTestBrands(viewer),
+      onlyTest,
+    };
+
+    if (viewer.role !== "Caller" && query.statusScope === "open") {
+      const [phoneStubs, replyStubs] = await Promise.all([
+        listOpenPhoneTaskStubsForViewer(query, testScope),
+        listOpenReplyTaskStubsForViewer(query, testScope),
+      ]);
+      const annotatedReplies = await syncReplyInbox(replyStubs, { backfill: false });
+      const eligible = [
+        ...phoneStubs,
+        ...annotatedReplies.filter((task) => task.inboxStatus === "Needs Reply"),
+      ].sort(
+        (left, right) =>
+          (left.scheduledAt || "").localeCompare(right.scheduledAt || "") ||
+          left.id.localeCompare(right.id),
+      );
+      const offset = Math.max(0, Number(cursor || 0) || 0);
+      const selected = eligible.slice(offset, offset + pageSize);
+      const tasks = await Promise.all(
+        selected.map(async (stub) => {
+          const task = await retrieveFollowupTask(stub.id).catch(() => stub);
+          return {
+            ...task,
+            inboxStatus: stub.inboxStatus,
+            preview: stub.preview,
+            lastInboundAt: stub.lastInboundAt,
+          };
+        }),
+      );
+      const nextOffset = offset + selected.length;
+      const hasMore = nextOffset < eligible.length;
+      return Response.json({
+        tasks,
+        nextCursor: hasMore ? String(nextOffset) : null,
+        hasMore,
+        pageSize,
+        viewer: { isAdmin: viewer.isAdmin, ownerName: viewer.name },
+      });
+    }
 
     const listed = await listFollowupTasksForViewerPage(
-      { ...taskQueryForViewer(viewer, ownerParam, statusParam), dueFrom, dueTo },
-      { cursor, pageSize, includeTest: canAccessTestBrands(viewer), onlyTest },
+      query,
+      { cursor, pageSize, ...testScope },
     );
     // List path: annotate open non-Phone only; skip Notion backfill (detail/inbound handle writes).
     const tasks =

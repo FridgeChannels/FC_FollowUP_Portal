@@ -1,8 +1,18 @@
 import type { BrandListItem } from "./brand-list";
 
 const STORAGE_KEY = "fc-followup-brands-v1";
+const PAGE_STORAGE_KEY = "fc-followup-brand-list-page-v1";
 
 let memory: BrandListItem[] = [];
+let memoryPage: BrandListPageCache | null = null;
+
+export type BrandListPageCache = {
+  key: string;
+  brands: BrandListItem[];
+  nextCursor: string | null;
+  hasMore: boolean;
+  cachedAt: number;
+};
 
 function readStorage(): BrandListItem[] {
   if (typeof sessionStorage === "undefined") return memory;
@@ -44,4 +54,46 @@ export function getCachedBrand(id: string) {
 
 export function getCachedBrandList() {
   return readStorage();
+}
+
+export function cacheBrandListPage(page: BrandListPageCache) {
+  memoryPage = page;
+  if (typeof sessionStorage === "undefined") return;
+  try {
+    sessionStorage.setItem(PAGE_STORAGE_KEY, JSON.stringify(page));
+  } catch {
+    /* ignore quota */
+  }
+}
+
+export function getCachedBrandListPage(key: string) {
+  let cached = memoryPage;
+  if (typeof sessionStorage !== "undefined") {
+    try {
+      const raw = sessionStorage.getItem(PAGE_STORAGE_KEY);
+      if (raw) cached = JSON.parse(raw) as BrandListPageCache;
+    } catch {
+      /* use memory cache */
+    }
+  }
+  if (!cached || cached.key !== key || !Array.isArray(cached.brands)) return null;
+
+  const latestById = new Map(readStorage().map((brand) => [brand.id, brand]));
+  return {
+    ...cached,
+    brands: cached.brands.map((brand) => ({
+      ...brand,
+      ...(latestById.get(brand.id) || {}),
+    })),
+  };
+}
+
+export function clearBrandListPageCache() {
+  memoryPage = null;
+  if (typeof sessionStorage === "undefined") return;
+  try {
+    sessionStorage.removeItem(PAGE_STORAGE_KEY);
+  } catch {
+    /* ignore unavailable storage */
+  }
 }

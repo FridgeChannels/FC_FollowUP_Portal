@@ -180,7 +180,7 @@ function scopeTestBrandTasks(tasks: BrandTask[], options: TestBrandScope) {
 }
 
 /** Open Phone count — optionally excludes / restricts to `Is Test` Follow-up Clients. */
-export async function countOpenPhoneTasksForViewer(
+export async function listOpenPhoneTaskStubsForViewer(
   query: TaskListQuery,
   options: TestBrandScope = {},
 ) {
@@ -195,10 +195,18 @@ export async function countOpenPhoneTasksForViewer(
       }),
     );
   } catch {
-    return 0;
+    return [];
   }
   pages = await scopeTestBrandTaskPages(pages, options);
-  return pages.length;
+  return pages.map(stubTaskFromPage);
+}
+
+/** Open Phone count — optionally excludes / restricts to `Is Test` Follow-up Clients. */
+export async function countOpenPhoneTasksForViewer(
+  query: TaskListQuery,
+  options: TestBrandScope = {},
+) {
+  return (await listOpenPhoneTaskStubsForViewer(query, options)).length;
 }
 
 /**

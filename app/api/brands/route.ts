@@ -10,8 +10,16 @@ import {
 } from "@/lib/notion/owner-filter";
 
 async function getBrands(request: Request) {
+  const traceId = crypto.randomUUID().slice(0, 8);
+  const requestStartedAt = Date.now();
   try {
+    const viewerStartedAt = Date.now();
     const viewer = await viewerFromRequest(request);
+    console.info("[brands] phase", {
+      traceId,
+      phase: "viewer",
+      durationMs: Date.now() - viewerStartedAt,
+    });
     if (!viewer.email) {
       return Response.json({ error: "Sign in required" }, { status: 401 });
     }
@@ -45,9 +53,19 @@ async function getBrands(request: Request) {
     const status = viewer.isAdmin ? statusParam : "all";
     const excludeStatuses = viewer.isAdmin ? undefined : ["Paused", "Completed"];
 
+    const checkpointsStartedAt = Date.now();
     const [cps, listed] = await Promise.all([
-      listCheckpoints(),
+      listCheckpoints().then((items) => {
+        console.info("[brands] phase", {
+          traceId,
+          phase: "checkpoints",
+          durationMs: Date.now() - checkpointsStartedAt,
+          count: items.length,
+        });
+        return items;
+      }),
       listFollowupClientsForViewerPage({
+        traceId,
         ownerPageId,
         includeTest: canAccessTestBrands(viewer),
         onlyTest: isTestOnlyViewer(viewer),
@@ -61,6 +79,12 @@ async function getBrands(request: Request) {
         pageSize: DEFAULT_BRAND_PAGE_SIZE,
       }),
     ]);
+    console.info("[brands] request complete", {
+      traceId,
+      durationMs: Date.now() - requestStartedAt,
+      brandCount: listed.brands.length,
+      hasMore: listed.hasMore,
+    });
 
     return Response.json({
       brands: listed.brands,

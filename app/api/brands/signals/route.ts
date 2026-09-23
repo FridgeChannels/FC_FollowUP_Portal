@@ -11,6 +11,7 @@ import {
   type NotionPage,
 } from "@/lib/notion/client";
 import { listBrandInteractionSignals } from "@/lib/notion/brand-reply-signals";
+import { getCachedBrandPage } from "@/lib/notion/brand-page-cache";
 import { runWithNotionLimit } from "@/lib/notion/rate-limit";
 
 const MAX_BRANDS = 10;
@@ -27,8 +28,16 @@ function canViewListPage(viewer: BrandViewer, page: NotionPage) {
 }
 
 async function getBrandSignals(request: Request) {
+  const traceId = crypto.randomUUID().slice(0, 8);
+  const requestStartedAt = Date.now();
   try {
+    const viewerStartedAt = Date.now();
     const viewer = await viewerFromRequest(request);
+    console.info("[brands/signals] phase", {
+      traceId,
+      phase: "viewer",
+      durationMs: Date.now() - viewerStartedAt,
+    });
     if (!viewer.email) {
       return Response.json({ error: "Sign in required" }, { status: 401 });
     }
@@ -43,13 +52,35 @@ async function getBrandSignals(request: Request) {
     ].slice(0, MAX_BRANDS);
     if (!ids.length) return Response.json({ signals: [] });
 
+    const accessStartedAt = Date.now();
+    let cacheHitCount = 0;
     const pages = (
-      await Promise.all(ids.map((id) => retrievePage(id).catch(() => null)))
+      await Promise.all(ids.map((id) => {
+        const cached = getCachedBrandPage(id);
+        if (cached) {
+          cacheHitCount += 1;
+          return cached;
+        }
+        return retrievePage(id).catch(() => null);
+      }))
     ).filter(
       (page): page is NotionPage =>
         Boolean(page && canViewListPage(viewer, page)),
     );
-    const signals = await listBrandInteractionSignals(pages);
+    console.info("[brands/signals] phase", {
+      traceId,
+      phase: "brand-access",
+      durationMs: Date.now() - accessStartedAt,
+      requestedCount: ids.length,
+      allowedCount: pages.length,
+      cacheHitCount,
+    });
+    const signals = await listBrandInteractionSignals(pages, traceId);
+    console.info("[brands/signals] request complete", {
+      traceId,
+      durationMs: Date.now() - requestStartedAt,
+      signalCount: signals.size,
+    });
 
     return Response.json({
       signals: pages.flatMap((page) => {

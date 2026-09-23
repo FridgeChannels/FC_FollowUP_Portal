@@ -203,7 +203,10 @@ function interactionStatusLabel(
   return (item.taskId ? taskStatusById.get(item.taskId) : null) || null;
 }
 
-export async function listBrandInteractionSignals(pages: NotionPage[]) {
+export async function listBrandInteractionSignals(
+  pages: NotionPage[],
+  traceId?: string,
+) {
   const signals = new Map<string, BrandInteractionSignal>();
   const brandIds = pages.map((page) => page.id);
   if (!brandIds.length) {
@@ -223,10 +226,27 @@ export async function listBrandInteractionSignals(pages: NotionPage[]) {
   }
 
   try {
+    const logQuery = async <T>(
+      phase: string,
+      load: () => Promise<T[]>,
+    ): Promise<T[]> => {
+      const startedAt = Date.now();
+      const items = await load();
+      console.info("[brands/signals] phase", {
+        ...(traceId ? { traceId } : {}),
+        phase,
+        durationMs: Date.now() - startedAt,
+        count: items.length,
+      });
+      return items;
+    };
     const [allConversations, allTasks] = await Promise.all([
-      listFollowupConversationsByBrands(brandIds),
-      listFollowupTaskSignalsByBrands(brandIds),
+      logQuery("conversations", () =>
+        listFollowupConversationsByBrands(brandIds),
+      ),
+      logQuery("tasks", () => listFollowupTaskSignalsByBrands(brandIds)),
     ]);
+    const aggregateStartedAt = Date.now();
     for (const page of pages) {
       const brandKey = pageKey(page.id);
       const conversations = allConversations.filter(
@@ -258,7 +278,17 @@ export async function listBrandInteractionSignals(pages: NotionPage[]) {
         qualificationTaskCount,
       });
     }
-  } catch {
+    console.info("[brands/signals] phase", {
+      ...(traceId ? { traceId } : {}),
+      phase: "aggregate",
+      durationMs: Date.now() - aggregateStartedAt,
+      brandCount: pages.length,
+    });
+  } catch (error) {
+    console.warn("[brands/signals] failed", {
+      ...(traceId ? { traceId } : {}),
+      error: error instanceof Error ? error.message : String(error),
+    });
     // Leave unset so the Brands list keeps its Notion rollup fallback.
   }
   return signals;

@@ -218,7 +218,7 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
 
   const taskListQuery = useMemo(() => {
     const params = new URLSearchParams();
-    if (manager && assignee === "unassigned") params.set("owner", "unassigned");
+    if (manager && assignee !== "all") params.set("owner", assignee);
     params.set(
       "status",
       status === "Completed" ? "completed" : status === "All" ? "all" : "open",

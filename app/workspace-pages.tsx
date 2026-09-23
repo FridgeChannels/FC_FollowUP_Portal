@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { enUS } from "date-fns/locale";
 import {
@@ -22,7 +22,12 @@ import {
 import { type DateRange } from "react-day-picker";
 import { toast } from "sonner";
 import { useWorkspace } from "./workspace-store";
-import { cacheBrandItem } from "@/lib/brand-list-cache";
+import {
+  cacheBrandItem,
+  cacheBrandListPage,
+  clearBrandListPageCache,
+  getCachedBrandListPage,
+} from "@/lib/brand-list-cache";
 import {
   FOLLOW_UP_STATUSES,
   listApplicableCps,
@@ -472,6 +477,14 @@ type BrandListFilters = {
 };
 
 const BRAND_SEARCH_DEBOUNCE_MS = 800;
+const BRAND_LIST_PAGINATION_STORAGE_KEY = "followup.brand-list-pagination.v1";
+const BRAND_LIST_PAGE_CACHE_TTL_MS = 30_000;
+
+type BrandListPagination = {
+  cursor: string | null;
+  cursorStack: Array<string | null>;
+  page: number;
+};
 
 function brandListFiltersFromSearch(search: URLSearchParams): BrandListFilters {
   return {
@@ -484,7 +497,10 @@ function brandListFiltersFromSearch(search: URLSearchParams): BrandListFilters {
   };
 }
 
-function brandListPath(filters: BrandListFilters) {
+function brandListPath(
+  filters: BrandListFilters,
+  pagination?: Pick<BrandListPagination, "cursor" | "page">,
+) {
   const params = new URLSearchParams();
   if (filters.q.trim()) params.set("q", filters.q);
   if (filters.cp !== "all") params.set("cp", filters.cp);
@@ -492,8 +508,19 @@ function brandListPath(filters: BrandListFilters) {
   if (filters.owner !== "all") params.set("owner", filters.owner);
   if (filters.replyFrom) params.set("replyFrom", filters.replyFrom);
   if (filters.replyTo) params.set("replyTo", filters.replyTo);
+  if (pagination?.cursor) params.set("cursor", pagination.cursor);
+  if (pagination && pagination.page > 1) params.set("page", String(pagination.page));
   const qs = params.toString();
   return qs ? `/customers?${qs}` : "/customers";
+}
+
+function brandListPaginationStorageKey(filters: BrandListFilters, viewerId: string) {
+  return `${BRAND_LIST_PAGINATION_STORAGE_KEY}:${viewerId}:${brandListPath(filters)}`;
+}
+
+function pageFromSearch(search: URLSearchParams) {
+  const page = Number.parseInt(search.get("page") || "1", 10);
+  return Number.isFinite(page) && page > 0 ? page : 1;
 }
 
 /** Inclusive date-only range check for Reply Due At (YYYY-MM-DD). */
@@ -594,8 +621,10 @@ export function BrandsPage() {
   const effectiveStatus = isAdmin ? status : "all";
   const hasReplyDueFilter = Boolean(replyFrom || replyTo);
   const [brands, setBrands] = useState<BrandListItem[]>([]);
-  const [cursor, setCursor] = useState<string | null>(null);
+  const [cursor, setCursor] = useState<string | null>(() => searchParams.get("cursor"));
   const [cursorStack, setCursorStack] = useState<Array<string | null>>([]);
+  const [pageNumber, setPageNumber] = useState(() => pageFromSearch(searchParams));
+  const [paginationRestored, setPaginationRestored] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [ownerOptions, setOwnerOptions] = useState<Array<{ id: string; name: string }>>([]);
@@ -609,6 +638,43 @@ export function BrandsPage() {
   const [searchComposing, setSearchComposing] = useState(false);
   const [addBrandOpen, setAddBrandOpen] = useState(false);
   const [listEpoch, setListEpoch] = useState(0);
+  const paginationStorageKey = brandListPaginationStorageKey(filters, state.currentUserId);
+  const initialPaginationStorageKey = useRef(paginationStorageKey);
+
+  useEffect(() => {
+    try {
+      const saved = window.sessionStorage.getItem(initialPaginationStorageKey.current);
+      if (saved) {
+        const parsed = JSON.parse(saved) as Partial<BrandListPagination>;
+        const savedCursor = typeof parsed.cursor === "string" ? parsed.cursor : null;
+        if (
+          savedCursor === cursor &&
+          parsed.page === pageNumber &&
+          Array.isArray(parsed.cursorStack)
+        ) {
+          setCursorStack(
+            parsed.cursorStack.map((item) => (typeof item === "string" ? item : null)),
+          );
+        }
+      }
+    } catch {
+      // A missing or invalid session cache should not block the list.
+    } finally {
+      setPaginationRestored(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!paginationRestored) return;
+    try {
+      window.sessionStorage.setItem(
+        paginationStorageKey,
+        JSON.stringify({ cursor, cursorStack, page: pageNumber } satisfies BrandListPagination),
+      );
+    } catch {
+      // Pagination still works through the URL if session storage is unavailable.
+    }
+  }, [cursor, cursorStack, pageNumber, paginationRestored, paginationStorageKey]);
 
   useEffect(() => {
     if (searchComposing) return;
@@ -633,6 +699,7 @@ export function BrandsPage() {
     });
     setCursor(null);
     setCursorStack([]);
+    setPageNumber(1);
     setNextCursor(null);
     setHasMore(false);
   };
@@ -644,6 +711,7 @@ export function BrandsPage() {
     });
     setCursor(null);
     setCursorStack([]);
+    setPageNumber(1);
     setNextCursor(null);
     setHasMore(false);
   };
@@ -655,8 +723,9 @@ export function BrandsPage() {
   useEffect(() => {
     const onPopState = () => {
       setFilters(brandListFiltersFromSearch(new URLSearchParams(window.location.search)));
-      setCursor(null);
+      setCursor(new URLSearchParams(window.location.search).get("cursor"));
       setCursorStack([]);
+      setPageNumber(pageFromSearch(new URLSearchParams(window.location.search)));
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
@@ -697,13 +766,29 @@ export function BrandsPage() {
     if (replyTo) params.set("replyTo", replyTo);
     return params.toString();
   }, [debouncedQuery, cp, effectiveStatus, owner, replyFrom, replyTo, isAdmin]);
+  const brandListPageCacheKey = `${state.currentUserId}:${state.currentRole}:${brandsFilterKey}:${cursor || ""}`;
 
   useEffect(() => {
     let cancelled = false;
     const controller = new AbortController();
-    setLoading(true);
-    setRefreshing(false);
+    const cachedPage = getCachedBrandListPage(brandListPageCacheKey);
+    const cacheIsFresh =
+      Boolean(cachedPage) &&
+      Date.now() - (cachedPage?.cachedAt || 0) < BRAND_LIST_PAGE_CACHE_TTL_MS;
+    if (cachedPage) {
+      setBrands(cachedPage.brands);
+      setNextCursor(cachedPage.nextCursor);
+      setHasMore(cachedPage.hasMore);
+      setLoading(false);
+      setRefreshing(!cacheIsFresh);
+    } else {
+      setLoading(true);
+      setRefreshing(false);
+    }
     setError(undefined);
+    if (cacheIsFresh) {
+      return () => controller.abort();
+    }
     const params = new URLSearchParams(brandsFilterKey);
     params.set("limit", String(DEFAULT_BRAND_PAGE_SIZE));
     if (cursor) params.set("cursor", cursor);
@@ -721,10 +806,20 @@ export function BrandsPage() {
       .then((payload) => {
         if (cancelled) return;
         const items = payload.brands || [];
+        const resolvedNextCursor = payload.nextCursor || null;
+        const resolvedHasMore = Boolean(payload.hasMore && payload.nextCursor);
+        const cachedAt = Date.now();
         items.forEach(cacheBrandItem);
         setBrands(items);
-        setNextCursor(payload.nextCursor || null);
-        setHasMore(Boolean(payload.hasMore && payload.nextCursor));
+        setNextCursor(resolvedNextCursor);
+        setHasMore(resolvedHasMore);
+        cacheBrandListPage({
+          key: brandListPageCacheKey,
+          brands: items,
+          nextCursor: resolvedNextCursor,
+          hasMore: resolvedHasMore,
+          cachedAt,
+        });
         setError(undefined);
         if (items.length) {
           const signalParams = new URLSearchParams({
@@ -756,15 +851,23 @@ export function BrandsPage() {
             .then((signals) => {
               if (cancelled || !signals.length) return;
               const byId = new Map(signals.map((signal) => [signal.id, signal]));
-              setBrands((current) =>
-                current.map((item) => {
+              setBrands((current) => {
+                const mergedItems = current.map((item) => {
                   const signal = byId.get(item.id);
                   if (!signal) return item;
                   const merged = { ...item, ...signal };
                   cacheBrandItem(merged);
                   return merged;
-                }),
-              );
+                });
+                cacheBrandListPage({
+                  key: brandListPageCacheKey,
+                  brands: mergedItems,
+                  nextCursor: resolvedNextCursor,
+                  hasMore: resolvedHasMore,
+                  cachedAt,
+                });
+                return mergedItems;
+              });
             })
             .catch(() => undefined);
         }
@@ -772,9 +875,11 @@ export function BrandsPage() {
       .catch((err: unknown) => {
         if (cancelled || (err instanceof DOMException && err.name === "AbortError")) return;
         setError(err instanceof Error ? err.message : "Failed to load brands");
-        setBrands([]);
-        setNextCursor(null);
-        setHasMore(false);
+        if (!cachedPage) {
+          setBrands([]);
+          setNextCursor(null);
+          setHasMore(false);
+        }
       })
       .finally(() => {
         if (cancelled) return;
@@ -785,23 +890,40 @@ export function BrandsPage() {
       cancelled = true;
       controller.abort();
     };
-  }, [brandsFilterKey, cursor, state.currentRole, listEpoch]);
+  }, [brandListPageCacheKey, brandsFilterKey, cursor, listEpoch]);
 
   const goNextPage = () => {
     if (!nextCursor || !hasMore || loading) return;
-    setCursorStack((stack) => [...stack, cursor]);
+    const nextStack = [...cursorStack, cursor];
+    const nextPage = pageNumber + 1;
+    setCursorStack(nextStack);
     setCursor(nextCursor);
+    setPageNumber(nextPage);
+    window.history.replaceState(
+      window.history.state,
+      "",
+      brandListPath(filters, { cursor: nextCursor, page: nextPage }),
+    );
   };
   const goPrevPage = () => {
     if (!cursorStack.length || loading) return;
     const stack = [...cursorStack];
     const prev = stack.pop() ?? null;
+    const prevPage = Math.max(1, pageNumber - 1);
     setCursorStack(stack);
     setCursor(prev);
+    setPageNumber(prevPage);
+    window.history.replaceState(
+      window.history.state,
+      "",
+      brandListPath(filters, { cursor: prev, page: prevPage }),
+    );
   };
 
   const filtered = brands;
-  const pageNumber = cursorStack.length + 1;
+  const currentListPath = brandListPath(filters, { cursor, page: pageNumber });
+  const brandDetailPath = (brandId: string) =>
+    `/customers/${encodeURIComponent(brandId)}?returnTo=${encodeURIComponent(currentListPath)}`;
   const owners = useMemo(() => {
     if (ownerOptions.length) return ownerOptions;
     const seen = new Map<string, string>();
@@ -896,8 +1018,9 @@ export function BrandsPage() {
         owners={owners}
         cps={cps}
         onCreated={(brandId) => {
+          clearBrandListPageCache();
           setListEpoch((n) => n + 1);
-          router.push(`/customers/${brandId}`);
+          router.push(brandDetailPath(brandId));
         }}
       />
       {isAdmin && selected.length > 0 && (
@@ -1106,7 +1229,7 @@ export function BrandsPage() {
                     <TableRow
                       key={c.id}
                       className={`cursor-pointer hover:bg-violet-50/30 ${needsAttention ? "bg-rose-50/40" : ""}`}
-                      onClick={() => router.push(`/customers/${c.id}`)}
+                      onClick={() => router.push(brandDetailPath(c.id))}
                     >
                       {isAdmin && (
                         <TableCell className="pl-5" onClick={(e) => e.stopPropagation()}>

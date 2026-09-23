@@ -18,6 +18,7 @@ import {
   isTestFollowupClientPage,
   notionPageUrl,
   propertyText,
+  queryFollowupClientPages,
   queryFollowupClientPagesPage,
   relationIds,
   retrievePage,
@@ -34,6 +35,7 @@ import {
   type BrandReplySignal,
 } from "./brand-reply-signals";
 import { getCachedBrandReplyMetadata } from "./brand-reply-signal-cache";
+import { cacheBrandPages } from "./brand-page-cache";
 import {
   encodeBrandListCursor,
   parseBrandListCursor,
@@ -211,6 +213,8 @@ function pageKey(id: string) {
 }
 
 export type ListFollowupClientsPageInput = {
+  /** Request-scoped diagnostic ID for phase timing logs. */
+  traceId?: string;
   ownerPageId?: string | null;
   includeTest?: boolean;
   onlyTest?: boolean;
@@ -238,18 +242,63 @@ type FilteredReplyBrand = {
   dueAt: string | null;
 };
 
+function logBrandListPhase(
+  traceId: string | undefined,
+  phase: string,
+  startedAt: number,
+  details: Record<string, unknown> = {},
+) {
+  console.info("[brands] phase", {
+    ...(traceId ? { traceId } : {}),
+    phase,
+    durationMs: Date.now() - startedAt,
+    ...details,
+  });
+}
+
 async function listReplyBrandMetadata(
   entries: Array<[string, BrandReplySignal]>,
+  input: {
+    ownerPageId?: string | null;
+    includeTest?: boolean;
+    onlyTest?: boolean;
+    status?: string | null;
+    excludeStatuses?: string[];
+    q?: string | null;
+    cp?: string | null;
+  } = {},
 ) {
-  const metadataKey = entries
-    .map(([id]) => pageKey(id))
-    .sort()
-    .join(",");
+  const cp = input.cp?.trim() || "all";
+  let currentCpPageId: string | undefined;
+  if (cp !== "all") {
+    const checkpoints = await listCheckpoints();
+    currentCpPageId = checkpoints.find((item) => item.name === cp)?.id;
+    if (!currentCpPageId) return [];
+  }
+  const metadataKey = JSON.stringify({
+    ids: entries.map(([id]) => pageKey(id)).sort(),
+    ownerPageId: input.ownerPageId,
+    includeTest: input.includeTest,
+    onlyTest: input.onlyTest,
+    status:
+      input.status?.trim() && input.status.trim() !== "all"
+        ? input.status.trim()
+        : "",
+    excludeStatuses: input.excludeStatuses,
+    q: input.q?.trim().toLowerCase() || "",
+    currentCpPageId,
+  });
   return getCachedBrandReplyMetadata(metadataKey, async () => {
-    const pages = await Promise.all(
-      entries.map(([id]) => retrievePage(id).catch(() => null)),
-    );
-    const validPages = pages.filter((page): page is NotionPage => !!page);
+    const signalKeys = new Set(entries.map(([id]) => pageKey(id)));
+    const pages = await queryFollowupClientPages(input.ownerPageId, {
+      includeTest: input.includeTest,
+      onlyTest: input.onlyTest,
+      status: input.status,
+      excludeStatuses: input.excludeStatuses,
+      titleContains: input.q,
+      currentCpPageId,
+    });
+    const validPages = pages.filter((page) => signalKeys.has(pageKey(page.id)));
     const mapped = await mapFollowupClientPages(validPages);
     const byKey = new Map(mapped.map((brand) => [pageKey(brand.id), brand]));
     return validPages.flatMap((page) => {
@@ -263,15 +312,22 @@ async function listFilteredReplyBrands(
   input: ListFollowupClientsPageInput,
   signals: Map<string, BrandReplySignal>,
 ): Promise<FilteredReplyBrand[]> {
+  const startedAt = Date.now();
   const hasDueFilter = Boolean(input.replyFrom?.trim() || input.replyTo?.trim());
   const entries = [...signals.entries()]
     .filter(([, signal]) =>
       hasDueFilter ? replyDueInRange(signal.dueAt, input.replyFrom, input.replyTo) : true,
     )
     .sort((a, b) => (a[1].dueAt || "").localeCompare(b[1].dueAt || ""));
-  if (!entries.length) return [];
+  if (!entries.length) {
+    logBrandListPhase(input.traceId, "reply-metadata", startedAt, {
+      signalCount: 0,
+      matchedCount: 0,
+    });
+    return [];
+  }
 
-  const metadata = await listReplyBrandMetadata(entries);
+  const metadata = await listReplyBrandMetadata(entries, input);
 
   const dueByKey = new Map<string, string | null>();
   for (let index = 0; index < entries.length; index += 1) {
@@ -293,16 +349,23 @@ async function listFilteredReplyBrands(
       dueAt: dueByKey.get(pageKey(page.id)) || null,
     });
   }
-  return filtered.sort((a, b) => (a.dueAt || "").localeCompare(b.dueAt || ""));
+  const result = filtered.sort((a, b) => (a.dueAt || "").localeCompare(b.dueAt || ""));
+  logBrandListPhase(input.traceId, "reply-metadata", startedAt, {
+    signalCount: entries.length,
+    matchedCount: result.length,
+  });
+  return result;
 }
 
 async function takeNonReplyClientPages(options: {
+  traceId?: string;
   filter?: Record<string, unknown>;
   excludeKeys: Set<string>;
   need: number;
   notionCursor: string | null;
   buffer: string[];
 }) {
+  const startedAt = Date.now();
   const bufferIds = [...options.buffer];
   const collected: NotionPage[] = [];
   let notionCursor = options.notionCursor;
@@ -336,20 +399,29 @@ async function takeNonReplyClientPages(options: {
     if (collected.length >= options.need) break;
   }
 
-  return {
+  const result = {
     pages: collected,
     notionCursor,
     buffer: bufferIds,
     hasMore: bufferIds.length > 0 || !!notionCursor,
   };
+  logBrandListPhase(options.traceId, "client-page", startedAt, {
+    pageCount: collected.length,
+    bufferedCount: bufferIds.length,
+    hasMore: result.hasMore,
+  });
+  return result;
 }
 
 async function enrichBrandPage(
   pages: NotionPage[],
   replySignals: Map<string, BrandReplySignal>,
   knownBrands: Map<string, BrandListItem> = new Map(),
+  traceId?: string,
 ) {
   if (!pages.length) return [] as BrandListItem[];
+  const startedAt = Date.now();
+  cacheBrandPages(pages);
   const unknownPages = pages.filter((page) => !knownBrands.has(pageKey(page.id)));
   const mapped = [
     ...pages.flatMap((page) => {
@@ -358,7 +430,13 @@ async function enrichBrandPage(
     }),
     ...(await mapFollowupClientPages(unknownPages)),
   ];
-  return attachBrandReplySignals(mapped, replySignals);
+  const result = attachBrandReplySignals(mapped, replySignals);
+  logBrandListPhase(traceId, "brand-map", startedAt, {
+    pageCount: pages.length,
+    mappedCount: unknownPages.length,
+    reusedCount: pages.length - unknownPages.length,
+  });
+  return result;
 }
 
 /**
@@ -398,9 +476,13 @@ export async function listFollowupClientsForViewerPage(
     currentCpPageId,
   });
 
+  const replySignalsStartedAt = Date.now();
   const replySignals = await listBrandReplySignals([]).catch(
     () => new Map<string, BrandReplySignal>(),
   );
+  logBrandListPhase(input.traceId, "reply-signals", replySignalsStartedAt, {
+    signalCount: replySignals.size,
+  });
   const replyBrands = await listFilteredReplyBrands(input, replySignals);
   const replyBrandByKey = new Map(
     replyBrands.map((item) => [pageKey(item.id), item.brand]),
@@ -417,6 +499,7 @@ export async function listFollowupClientsForViewerPage(
 
     if (outPages.length < pageSize) {
       const rest = await takeNonReplyClientPages({
+        traceId: input.traceId,
         filter,
         excludeKeys: replyKeys,
         need: pageSize - outPages.length,
@@ -425,7 +508,7 @@ export async function listFollowupClientsForViewerPage(
       });
       outPages.push(...rest.pages);
       const brands = sortBrandListItems(
-        await enrichBrandPage(outPages, replySignals, replyBrandByKey),
+        await enrichBrandPage(outPages, replySignals, replyBrandByKey, input.traceId),
       );
       return {
         brands,
@@ -444,7 +527,7 @@ export async function listFollowupClientsForViewerPage(
     if (replyHasMore) {
       return {
         brands: sortBrandListItems(
-          await enrichBrandPage(outPages, replySignals, replyBrandByKey),
+          await enrichBrandPage(outPages, replySignals, replyBrandByKey, input.traceId),
         ),
         pageSize,
         nextCursor: encodeBrandListCursor({ phase: "reply", offset: nextReplyOffset }),
@@ -453,6 +536,7 @@ export async function listFollowupClientsForViewerPage(
     }
 
     const restPeek = await takeNonReplyClientPages({
+      traceId: input.traceId,
       filter,
       excludeKeys: replyKeys,
       need: 1,
@@ -461,7 +545,7 @@ export async function listFollowupClientsForViewerPage(
     });
     return {
       brands: sortBrandListItems(
-        await enrichBrandPage(outPages, replySignals, replyBrandByKey),
+        await enrichBrandPage(outPages, replySignals, replyBrandByKey, input.traceId),
       ),
       pageSize,
       nextCursor: restPeek.hasMore || restPeek.pages.length
@@ -479,6 +563,7 @@ export async function listFollowupClientsForViewerPage(
   }
 
   const rest = await takeNonReplyClientPages({
+    traceId: input.traceId,
     filter,
     excludeKeys: replyKeys,
     need: pageSize,
@@ -487,7 +572,7 @@ export async function listFollowupClientsForViewerPage(
   });
   return {
     brands: sortBrandListItems(
-      await enrichBrandPage(rest.pages, replySignals, replyBrandByKey),
+      await enrichBrandPage(rest.pages, replySignals, replyBrandByKey, input.traceId),
     ),
     pageSize,
     nextCursor: rest.hasMore
@@ -513,7 +598,7 @@ export async function countNeedsReplyBrandsForViewer(
   const replySignals = await listBrandReplySignals([]).catch(() => new Map());
   const entries = [...replySignals.entries()];
   if (!entries.length) return 0;
-  const metadata = await listReplyBrandMetadata(entries);
+  const metadata = await listReplyBrandMetadata(entries, input);
 
   let count = 0;
   for (const { brand } of metadata) {
@@ -552,6 +637,7 @@ async function listFollowupClientsByReplyDuePage(
       slice.map((item) => item.page),
       replySignals,
       matchingBrandByKey,
+      input.traceId,
     ),
   );
   const nextOffset = offset + pageSize;
