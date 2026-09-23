@@ -315,7 +315,7 @@ export function PhoneTaskBoard({
   callerReviewTaskId?: string | null;
   callerReviewHasConnectedCall?: boolean;
   callerReviewCanSubmit?: boolean;
-  onSubmitCallerReview?: (callId: string) => void | Promise<void>;
+  onSubmitCallerReview?: (callId: string, note?: string) => void | Promise<void>;
   submittingCallerReview?: boolean;
   showDial?: boolean;
 }) {
@@ -617,7 +617,7 @@ function PhoneTaskBlock({
   callerReviewTaskId?: string | null;
   callerReviewHasConnectedCall: boolean;
   callerReviewCanSubmit: boolean;
-  onSubmitCallerReview?: (callId: string) => void | Promise<void>;
+  onSubmitCallerReview?: (callId: string, note?: string) => void | Promise<void>;
   submittingCallerReview?: boolean;
 }) {
   const [scriptOpen, setScriptOpen] = useState(active || !isDone(task.status));
@@ -626,6 +626,7 @@ function PhoneTaskBlock({
   const [recallReason, setRecallReason] = useState("");
   const [selectingCall, setSelectingCall] = useState(false);
   const [selectedCallId, setSelectedCallId] = useState("");
+  const [callerNote, setCallerNote] = useState("");
   const dialOptions = dialPhoneOptions(
     contact || {},
     task.contactPhone,
@@ -713,19 +714,34 @@ function PhoneTaskBlock({
         onSelectCall={setSelectedCallId}
       >
         {pickingCall ? (
-          <div className="flex flex-wrap justify-end gap-2">
-            <Button size="sm" variant="ghost" disabled={submittingCallerReview} onClick={() => { setSelectingCall(false); setSelectedCallId(""); }}>Cancel</Button>
-            <Button
-              size="sm"
-              className="bg-amber-500 text-white hover:bg-amber-600"
-              disabled={submittingCallerReview || !canConfirmSelection}
-              onClick={() => { if (selectedCallId && canConfirmSelection) void Promise.resolve(onSubmitCallerReview?.(selectedCallId)); }}
-            >
-              {submittingCallerReview ? "Submitting…" : "Confirm selection"}
-            </Button>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-700">Notes <span className="font-normal text-slate-400">(optional)</span></label>
+              <Textarea
+                value={callerNote}
+                onChange={(event) => setCallerNote(event.target.value)}
+                className="min-h-20 resize-none bg-white"
+                placeholder="Add context for AccountManager…"
+                disabled={submittingCallerReview}
+              />
+            </div>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button size="sm" variant="ghost" disabled={submittingCallerReview} onClick={() => { setSelectingCall(false); setSelectedCallId(""); setCallerNote(""); }}>Cancel</Button>
+              <Button
+                size="sm"
+                className="bg-amber-500 text-white hover:bg-amber-600"
+                disabled={submittingCallerReview || !canConfirmSelection}
+                onClick={() => {
+                  if (!selectedCallId || !canConfirmSelection) return;
+                  void Promise.resolve(onSubmitCallerReview?.(selectedCallId, callerNote.trim() || undefined));
+                }}
+              >
+                {submittingCallerReview ? "Submitting…" : "Confirm selection"}
+              </Button>
+            </div>
           </div>
         ) : canSubmitThisRound ? (
-          <Button size="sm" className="bg-amber-500 text-white hover:bg-amber-600" onClick={() => { setSelectingCall(true); setSelectedCallId(""); }}>Submit as qualified communication</Button>
+          <Button size="sm" className="bg-amber-500 text-white hover:bg-amber-600" onClick={() => { setSelectingCall(true); setSelectedCallId(""); setCallerNote(""); }}>Submit as qualified communication</Button>
         ) : null}
         {showReviewActions ? recallOpen ? (
           <UnqualifiedRecallForm

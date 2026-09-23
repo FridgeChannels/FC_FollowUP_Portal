@@ -223,7 +223,7 @@ export function InteractionFeed({
   callerReviewTaskId?: string | null;
   callerReviewHasConnectedCall?: boolean;
   callerReviewCanSubmit?: boolean;
-  onSubmitCallerReview?: (callId: string) => void | Promise<void>;
+  onSubmitCallerReview?: (callId: string, note?: string) => void | Promise<void>;
   submittingCallerReview?: boolean;
   scriptsLoading?: boolean;
 }) {

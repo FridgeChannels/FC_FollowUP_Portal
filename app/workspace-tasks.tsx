@@ -782,14 +782,14 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
     && liveTask.callReviewStatus !== "Qualified"
     && (recalledByAccountManager || !isDone(liveTask))
     && hasConnectedCall;
-  const submitCallerReview = async (callId: string) => {
+  const submitCallerReview = async (callId: string, note?: string) => {
     if (!task.remote || !canSubmitCallerReview) return;
     setSubmittingReview(true);
     try {
       const response = await fetch(`/api/tasks/${task.id}/submit-review`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ callId }),
+        body: JSON.stringify({ callId, note: note?.trim() || undefined }),
       });
       const payload = await response.json() as TaskPayload;
       if (!response.ok) throw new Error(payload.error || "Unable to submit call review");
@@ -911,7 +911,7 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
               callerReviewTaskId={liveTask.id}
               callerReviewHasConnectedCall={hasConnectedCall}
               callerReviewCanSubmit={canSubmitCallerReview}
-              onSubmitCallerReview={(callId) => void submitCallerReview(callId)}
+              onSubmitCallerReview={(callId, note) => void submitCallerReview(callId, note)}
               submittingCallerReview={submittingReview}
               onRefreshQuo={task.remote ? refreshQuo : undefined}
               quoRefreshingCallId={quoRefreshingCallId}
