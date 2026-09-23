@@ -608,7 +608,7 @@ function daysSince(value: string | null) {
   );
 }
 
-export function BrandsPage() {
+export function BrandsPage({ active = true }: { active?: boolean }) {
   const { state, can } = useWorkspace();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -997,6 +997,7 @@ export function BrandsPage() {
           : undefined,
       empty: !loading && !refreshing && filtered.length === 0,
     }),
+    active,
   );
   const brandsBusy = loading || refreshing;
   return (

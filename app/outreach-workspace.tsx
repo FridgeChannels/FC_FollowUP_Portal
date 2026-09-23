@@ -286,12 +286,52 @@ export default function OutreachWorkspace({ children }: { children?: ReactNode }
 export function WorkspaceRouteContent() {
   const path = usePathname();
   const parts = path.split("/").filter(Boolean);
-  if (parts[0] === "customers" && parts[1]) return <BrandDetail customerId={parts[1]} />;
-  if (parts[0] === "tasks" || parts[0] === "inbox" || parts[0] === "call-tasks") {
-    return <TasksPage selectedId={parts[1]} />;
+  const section = parts[0] || "tasks";
+  const brandDetailId = section === "customers" ? parts[1] : undefined;
+  const omniReachRoute = /^(omnireach|bombs)$/i.test(section);
+  const taskRoute =
+    section === "tasks" ||
+    section === "inbox" ||
+    section === "call-tasks" ||
+    (section !== "customers" && !omniReachRoute);
+  const bombDetailId = omniReachRoute ? parts[1] : undefined;
+  const activeRoot =
+    section === "customers" && !brandDetailId
+      ? "brands"
+      : taskRoute
+        ? "tasks"
+        : omniReachRoute && !bombDetailId
+          ? "omnireach"
+          : undefined;
+  const [mountedRoots, setMountedRoots] = useState<Array<"brands" | "tasks" | "omnireach">>(
+    () => (activeRoot ? [activeRoot] : []),
+  );
+
+  if (activeRoot && !mountedRoots.includes(activeRoot)) {
+    setMountedRoots((current) => [...current, activeRoot]);
   }
-  if (/^(omnireach|bombs)$/i.test(parts[0] || "") && parts[1]) return <BombEditor bombId={parts[1]} />;
-  if (/^(omnireach|bombs)$/i.test(parts[0] || "")) return <BombsPage />;
-  if (parts[0] === "customers") return <BrandsPage />;
-  return <TasksPage />;
+
+  return (
+    <>
+      {mountedRoots.includes("brands") ? (
+        <div hidden={activeRoot !== "brands"}>
+          <BrandsPage active={activeRoot === "brands"} />
+        </div>
+      ) : null}
+      {brandDetailId ? <BrandDetail customerId={brandDetailId} /> : null}
+
+      {mountedRoots.includes("tasks") ? (
+        <div hidden={!taskRoute}>
+          <TasksPage selectedId={taskRoute ? parts[1] : undefined} />
+        </div>
+      ) : null}
+
+      {mountedRoots.includes("omnireach") ? (
+        <div hidden={activeRoot !== "omnireach"}>
+          <BombsPage />
+        </div>
+      ) : null}
+      {bombDetailId ? <BombEditor bombId={bombDetailId} /> : null}
+    </>
+  );
 }

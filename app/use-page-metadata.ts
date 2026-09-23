@@ -19,8 +19,9 @@ function upsertMeta(
   el.setAttribute("content", content);
 }
 
-export function usePageMetadata(page: PageMeta) {
+export function usePageMetadata(page: PageMeta, enabled = true) {
   useEffect(() => {
+    if (!enabled) return;
     const title = documentTitle(page.title);
     document.title = title;
     upsertMeta('meta[name="description"]', { name: "description" }, page.description);
@@ -31,5 +32,5 @@ export function usePageMetadata(page: PageMeta) {
       page.description,
     );
     upsertMeta('meta[property="og:site_name"]', { property: "og:site_name" }, APP_NAME);
-  }, [page.title, page.description]);
+  }, [enabled, page.title, page.description]);
 }
