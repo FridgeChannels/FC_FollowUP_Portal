@@ -6,6 +6,7 @@ import { attachBrandReplySignals, listBrandReplySignals } from "@/lib/notion/bra
 import { listCheckpoints, resolveCheckpoint } from "@/lib/notion/cps";
 import { mapFollowupClientDetail, mapFollowupClientPage } from "@/lib/notion/followup-clients";
 import { updateFollowupClient } from "@/lib/notion/followup-writes";
+import type { AmazonSampleProduct, ChannelType } from "@/lib/sample-product";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -61,6 +62,8 @@ export async function PATCH(request: Request, { params }: Params) {
       handlingMode?: string | null;
       evidence?: string;
       note?: string;
+      channelType?: ChannelType;
+      amazonSampleProduct?: AmazonSampleProduct;
     };
     const page = await retrievePage(id);
     const brand = await mapFollowupClientPage(page);
@@ -101,6 +104,8 @@ export async function PATCH(request: Request, { params }: Params) {
       status: body.status,
       handlingMode: body.handlingMode,
       notes,
+      channelType: body.channelType,
+      amazonSampleProduct: body.amazonSampleProduct,
     });
     const updatedPage = await retrievePage(id);
     const [updated, cps] = await Promise.all([
@@ -110,7 +115,9 @@ export async function PATCH(request: Request, { params }: Params) {
     return Response.json({ brand: updated, cps });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
-    const status = message.includes("404") ? 404 : 500;
+    const status = /^(Invalid channel type|Invalid Amazon product details|Enter a valid|Product details are too long)/.test(message)
+      ? 400
+      : message.includes("404") ? 404 : 500;
     return Response.json({ error: message }, { status });
   }
 }

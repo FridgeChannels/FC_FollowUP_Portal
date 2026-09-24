@@ -42,6 +42,7 @@ export async function POST(request: Request, { params }: Params) {
       taskId?: string;
       threadId?: string;
       deliveryMode?: string;
+      scheduledAt?: string;
       attachments?: unknown;
     };
     const contactId = body.contactId?.trim() || "";
@@ -147,6 +148,7 @@ export async function POST(request: Request, { params }: Params) {
       cpId: brand.currentCpId,
       cpAtInteraction: interactionCpCode(brand.currentCp),
       deliveryMode,
+      scheduledAt: body.scheduledAt,
       attachments,
     });
 

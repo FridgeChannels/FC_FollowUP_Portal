@@ -41,6 +41,7 @@ import {
   sanitizeEmailAttachments,
 } from "../email-attachments";
 import { retrieveOwner } from "./owners";
+import { type AmazonSampleProduct, type ChannelType, validHttpUrl } from "../sample-product";
 import {
   annotateTasksWithReplyInbox,
   groupConversationsByThread,
@@ -100,9 +101,16 @@ async function resolveHumanScheduledAt(input: {
   contactFollowupStatus?: string | null;
   contactFollowupMode?: string | null;
   channel: ScheduleChannel;
+  scheduledAt?: string | null;
 }) {
   if (input.deliveryMode === "immediate") {
     return scheduledAtNow();
+  }
+  if (input.scheduledAt?.trim()) {
+    const requested = Date.parse(input.scheduledAt.trim());
+    if (!Number.isFinite(requested)) throw new Error("Invalid scheduled send date");
+    if (requested <= Date.now()) throw new Error("Scheduled send date must be in the future");
+    return new Date(requested).toISOString();
   }
 
   const [capacity, existingTasks] = await Promise.all([
@@ -199,6 +207,8 @@ export async function updateFollowupClient(
     status?: string | null;
     handlingMode?: string | null;
     notes?: string | null;
+    channelType?: ChannelType;
+    amazonSampleProduct?: AmazonSampleProduct;
   },
 ) {
   const properties: Record<string, unknown> = {};
@@ -237,6 +247,22 @@ export async function updateFollowupClient(
 
   if (patch.notes !== undefined) {
     properties.Notes = { rich_text: richText(patch.notes || "") };
+  }
+
+  if (patch.channelType !== undefined) {
+    if (!["DTC", "Amazon", "DTC&Amazon"].includes(patch.channelType)) throw new Error("Invalid channel type");
+    properties["Portal Channel Type"] = { select: { name: patch.channelType } };
+  }
+
+  if (patch.amazonSampleProduct !== undefined) {
+    const product = patch.amazonSampleProduct;
+    if (!product || [product.url, product.name, product.price, product.imageUrl].some((value) => typeof value !== "string")) {
+      throw new Error("Invalid Amazon product details");
+    }
+    if (product.url && (!validHttpUrl(product.url) || !/amazon\./i.test(new URL(product.url).hostname))) throw new Error("Enter a valid Amazon product URL");
+    if (product.imageUrl && !validHttpUrl(product.imageUrl)) throw new Error("Enter a valid image URL");
+    if (JSON.stringify(product).length > 1800) throw new Error("Product details are too long");
+    properties["Amazon Sample Product"] = { rich_text: richText(JSON.stringify(product)) };
   }
 
   if (!Object.keys(properties).length) {
@@ -771,6 +797,7 @@ export async function createHumanOutbound(input: {
   cpId?: string | null;
   cpAtInteraction?: string | null;
   deliveryMode?: DeliveryMode;
+  scheduledAt?: string | null;
   attachments?: MediaAttachment[];
 }) {
   const isReply = !!(input.threadId?.trim() || input.existingTaskId);
@@ -795,6 +822,7 @@ export async function createHumanOutbound(input: {
     contactFollowupStatus: input.contactFollowupStatus,
     contactFollowupMode: input.contactFollowupMode,
     channel,
+    scheduledAt: input.scheduledAt,
   });
 
   let linkedIn = null as Awaited<ReturnType<typeof prepareLinkedInOutbound>> | null;
@@ -917,6 +945,13 @@ export async function markInboundsReplied(
       }),
     ),
   );
+  invalidateBrandReplySignalCache();
+}
+
+export async function markConversationRead(conversationId: string) {
+  await updatePage(conversationId, {
+    "Reply Status": { select: { name: "Replied" } },
+  });
   invalidateBrandReplySignalCache();
 }
 

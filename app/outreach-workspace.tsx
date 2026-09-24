@@ -19,6 +19,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { useWorkspace } from "./workspace-store";
 import { BrandsPage } from "./workspace-pages";
 import { BrandDetail } from "./workspace-customer";
+import { SampleManagementPage } from "./sample-management";
 import { TasksPage } from "./workspace-tasks";
 import { BombEditor, BombsPage } from "./workspace-bombs";
 import { useSession } from "./use-session";
@@ -128,7 +129,7 @@ export default function OutreachWorkspace({ children }: { children?: ReactNode }
       if (!can("customers")) router.replace(roleHome[state.currentRole]);
       return;
     }
-    const capability = screen === "Brands" ? "customers" : screen === "ReplyTask" ? "tasks" : screen === "OmniReach" ? "bombs" : screen.toLowerCase();
+    const capability = screen === "Brands" ? "customers" : screen === "ReplyTask" ? "tasks" : "bombs";
     if (!can(capability)) router.replace(roleHome[state.currentRole]);
   }, [sessionLoading, user, pathname, screen, state.currentRole, can, router]);
 
@@ -288,6 +289,7 @@ export function WorkspaceRouteContent() {
   const parts = path.split("/").filter(Boolean);
   const section = parts[0] || "tasks";
   const brandDetailId = section === "customers" ? parts[1] : undefined;
+  const sampleRoute = section === "customers" && parts[2]?.toLowerCase() === "sample";
   const omniReachRoute = /^(omnireach|bombs)$/i.test(section);
   const taskRoute =
     section === "tasks" ||
@@ -318,7 +320,8 @@ export function WorkspaceRouteContent() {
           <BrandsPage active={activeRoot === "brands"} />
         </div>
       ) : null}
-      {brandDetailId ? <BrandDetail customerId={brandDetailId} /> : null}
+      {brandDetailId && sampleRoute ? <SampleManagementPage key={brandDetailId} customerId={brandDetailId} /> : null}
+      {brandDetailId && !sampleRoute ? <BrandDetail customerId={brandDetailId} /> : null}
 
       {mountedRoots.includes("tasks") ? (
         <div hidden={!taskRoute}>

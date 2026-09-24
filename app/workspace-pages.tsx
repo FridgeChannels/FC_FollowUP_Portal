@@ -3,9 +3,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { enUS } from "date-fns/locale";
 import {
   Activity,
+  ArrowDownUp,
   ArrowRight,
   BarChart3,
   CalendarClock,
@@ -16,10 +16,10 @@ import {
   MessageCircle,
   PhoneCall,
   Plus,
+  RotateCcw,
   Search,
   Upload,
 } from "lucide-react";
-import { type DateRange } from "react-day-picker";
 import { toast } from "sonner";
 import { useWorkspace } from "./workspace-store";
 import {
@@ -41,7 +41,6 @@ import { formatEasternDateTime } from "./bomb-plan";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Calendar } from "@/components/ui/calendar";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -61,11 +60,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -472,6 +466,10 @@ type BrandListFilters = {
   status: string;
   cp: string;
   owner: string;
+  replyState: string;
+  handlingMode: string;
+  exhibition: string;
+  sort: string;
   replyFrom: string;
   replyTo: string;
 };
@@ -492,6 +490,10 @@ function brandListFiltersFromSearch(search: URLSearchParams): BrandListFilters {
     status: search.get("status") ?? "all",
     cp: search.get("cp") ?? "all",
     owner: search.get("owner") ?? "all",
+    replyState: search.get("replyState") ?? "all",
+    handlingMode: search.get("handlingMode") ?? "all",
+    exhibition: search.get("exhibition") ?? "all",
+    sort: search.get("sort") ?? "priority",
     replyFrom: search.get("replyFrom") ?? "",
     replyTo: search.get("replyTo") ?? "",
   };
@@ -506,6 +508,10 @@ function brandListPath(
   if (filters.cp !== "all") params.set("cp", filters.cp);
   if (filters.status !== "all") params.set("status", filters.status);
   if (filters.owner !== "all") params.set("owner", filters.owner);
+  if (filters.replyState !== "all") params.set("replyState", filters.replyState);
+  if (filters.handlingMode !== "all") params.set("handlingMode", filters.handlingMode);
+  if (filters.exhibition !== "all") params.set("exhibition", filters.exhibition);
+  if (filters.sort !== "priority") params.set("sort", filters.sort);
   if (filters.replyFrom) params.set("replyFrom", filters.replyFrom);
   if (filters.replyTo) params.set("replyTo", filters.replyTo);
   if (pagination?.cursor) params.set("cursor", pagination.cursor);
@@ -521,38 +527,6 @@ function brandListPaginationStorageKey(filters: BrandListFilters, viewerId: stri
 function pageFromSearch(search: URLSearchParams) {
   const page = Number.parseInt(search.get("page") || "1", 10);
   return Number.isFinite(page) && page > 0 ? page : 1;
-}
-
-/** Inclusive date-only range check for Reply Due At (YYYY-MM-DD). */
-function parseDateOnly(value: string): Date | undefined {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined;
-  const [year, month, day] = value.split("-").map(Number);
-  const date = new Date(year, month - 1, day);
-  return Number.isNaN(date.getTime()) ? undefined : date;
-}
-
-function formatDateOnly(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function formatDateOnlyLabel(value: string) {
-  const date = parseDateOnly(value);
-  if (!date) return "";
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  }).format(date);
-}
-
-function replyDueRangeLabel(from: string, to: string) {
-  if (from && to) return `${formatDateOnlyLabel(from)} – ${formatDateOnlyLabel(to)}`;
-  if (from) return `From ${formatDateOnlyLabel(from)}`;
-  if (to) return `Until ${formatDateOnlyLabel(to)}`;
-  return "Select dates";
 }
 
 async function patchBrandListItem(id: string, body: Record<string, unknown>) {
@@ -575,6 +549,7 @@ function mergeBrandListItem(current: BrandListItem, next: BrandListItem): BrandL
     ownerId: next.ownerId,
     ownerName: next.ownerName,
     ownerEmail: next.ownerEmail,
+    followupExhibition: next.followupExhibition ?? current.followupExhibition,
     status: next.status,
     handlingMode: next.handlingMode,
     currentCp: next.currentCp,
@@ -617,9 +592,8 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
   const [filters, setFilters] = useState<BrandListFilters>(() =>
     brandListFiltersFromSearch(searchParams),
   );
-  const { q: query, status, cp, owner, replyFrom, replyTo } = filters;
+  const { q: query, status, cp, owner, replyState, handlingMode, exhibition, sort, replyFrom, replyTo } = filters;
   const effectiveStatus = isAdmin ? status : "all";
-  const hasReplyDueFilter = Boolean(replyFrom || replyTo);
   const [brands, setBrands] = useState<BrandListItem[]>([]);
   const [cursor, setCursor] = useState<string | null>(() => searchParams.get("cursor"));
   const [cursorStack, setCursorStack] = useState<Array<string | null>>([]);
@@ -703,23 +677,28 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
     setNextCursor(null);
     setHasMore(false);
   };
-  const setReplyDueRange = (from: string, to: string) => {
-    setFilters((prev) => {
-      const next = { ...prev, replyFrom: from, replyTo: to };
-      window.history.replaceState(window.history.state, "", brandListPath(next));
-      return next;
-    });
+  const clearAllListFilters = () => {
+    const next: BrandListFilters = {
+      q: "",
+      status: "all",
+      cp: "all",
+      owner: "all",
+      replyState: "all",
+      handlingMode: "all",
+      exhibition: "all",
+      sort: "priority",
+      replyFrom: "",
+      replyTo: "",
+    };
+    setFilters(next);
+    window.history.replaceState(window.history.state, "", brandListPath(next));
+    setDebouncedQuery("");
     setCursor(null);
     setCursorStack([]);
     setPageNumber(1);
     setNextCursor(null);
     setHasMore(false);
   };
-  const clearReplyDueFilter = () => setReplyDueRange("", "");
-  const replyDueSelected: DateRange | undefined =
-    replyFrom || replyTo
-      ? { from: parseDateOnly(replyFrom), to: parseDateOnly(replyTo) }
-      : undefined;
   useEffect(() => {
     const onPopState = () => {
       setFilters(brandListFiltersFromSearch(new URLSearchParams(window.location.search)));
@@ -920,7 +899,33 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
     );
   };
 
-  const filtered = brands;
+  const exhibitionOptions = useMemo(
+    () => [...new Set(brands.map((item) => item.followupExhibition).filter((item): item is string => Boolean(item)))].sort((a, b) => a.localeCompare(b)),
+    [brands],
+  );
+  const filtered = useMemo(() => {
+    const now = Date.parse(state.simulatedDate);
+    const visible = brands.filter((item) => {
+      if (replyState === "needsReply" && !item.needsReply) return false;
+      if (replyState === "qualification" && !item.needsQualification) return false;
+      if (replyState === "replied" && (item.needsReply || !item.lastReplyAt)) return false;
+      if (replyState === "never" && item.lastReplyAt) return false;
+      if (replyState === "overdue" && (!item.needsReply || !item.replyDueAt || Date.parse(item.replyDueAt) >= now)) return false;
+      if (handlingMode !== "all" && item.handlingMode !== handlingMode) return false;
+      if (exhibition !== "all" && item.followupExhibition !== exhibition) return false;
+      return true;
+    });
+    const timeValue = (value?: string | null) => (value ? Date.parse(value) || 0 : 0);
+    const replyDueValue = (item: BrandListItem) => timeValue(item.replyDueAt || item.replyUpdatedAt);
+    return visible.sort((a, b) => {
+      if (sort === "nameAsc") return a.name.localeCompare(b.name);
+      if (sort === "nameDesc") return b.name.localeCompare(a.name);
+      if (sort === "lastNewest") return timeValue(b.lastInteractionAt) - timeValue(a.lastInteractionAt) || a.name.localeCompare(b.name);
+      if (sort === "lastOldest") return timeValue(a.lastInteractionAt) - timeValue(b.lastInteractionAt) || a.name.localeCompare(b.name);
+      if (sort === "replyDue") return replyDueValue(a) - replyDueValue(b) || a.name.localeCompare(b.name);
+      return 0;
+    });
+  }, [brands, exhibition, handlingMode, replyState, sort, state.simulatedDate]);
   const currentListPath = brandListPath(filters, { cursor, page: pageNumber });
   const brandDetailPath = (brandId: string) =>
     `/customers/${encodeURIComponent(brandId)}?returnTo=${encodeURIComponent(currentListPath)}`;
@@ -1006,12 +1011,31 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
         eyebrow={`${loading ? "Loading" : refreshing ? "Updating" : `${brands.length} on this page`}`}
         title="Brands"
       >
-        {can("importBrands") && (
-          <Button className="bg-slate-950 text-white hover:bg-slate-800" onClick={() => setAddBrandOpen(true)}>
-            <Plus className="mr-2 size-4" />
-            Add Brand
-          </Button>
-        )}
+        <div className="flex w-full items-center justify-end gap-3 sm:w-auto">
+          <div className="relative w-full sm:w-[26rem]">
+            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+            <Input
+              value={query}
+              onChange={(e) => setListParam("q", e.target.value)}
+              onCompositionStart={() => setSearchComposing(true)}
+              onCompositionEnd={() => setSearchComposing(false)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !searchComposing) {
+                  setDebouncedQuery(query);
+                }
+              }}
+              placeholder="Search brand…"
+              aria-label="Search brands"
+              className="h-10 pl-9"
+            />
+          </div>
+          {can("importBrands") && (
+            <Button className="shrink-0 bg-slate-950 text-white hover:bg-slate-800" onClick={() => setAddBrandOpen(true)}>
+              <Plus className="mr-2 size-4" />
+              Add Brand
+            </Button>
+          )}
+        </div>
       </PageHeader>
       <AddBrandDialog
         open={addBrandOpen}
@@ -1054,22 +1078,6 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
       )}
       <div className="overflow-hidden rounded-2xl bg-white">
         <div className="flex flex-col gap-3 p-4 sm:flex-row">
-          <div className="relative flex-1 sm:max-w-sm">
-            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
-            <Input
-              value={query}
-              onChange={(e) => setListParam("q", e.target.value)}
-              onCompositionStart={() => setSearchComposing(true)}
-              onCompositionEnd={() => setSearchComposing(false)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !searchComposing) {
-                  setDebouncedQuery(query);
-                }
-              }}
-              placeholder="Search brand…"
-              className="pl-9"
-            />
-          </div>
           <Select value={cp} onValueChange={(value) => setListParam("cp", value)}>
             <SelectTrigger className="w-full sm:w-32">
               <SelectValue />
@@ -1114,59 +1122,69 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
               </SelectContent>
             </Select>
           )}
+          <Select value={replyState} onValueChange={(value) => setListParam("replyState", value)}>
+            <SelectTrigger className="w-full sm:w-44">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All reply states</SelectItem>
+              <SelectItem value="needsReply">Needs reply</SelectItem>
+              <SelectItem value="overdue">Overdue reply</SelectItem>
+              <SelectItem value="replied">Replied</SelectItem>
+              <SelectItem value="never">Never replied</SelectItem>
+              <SelectItem value="qualification">Needs qualification</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={handlingMode} onValueChange={(value) => setListParam("handlingMode", value)}>
+            <SelectTrigger className="w-full sm:w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All handling modes</SelectItem>
+              <SelectItem value="Automated">Automated</SelectItem>
+              <SelectItem value="Human">Human</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={exhibition} onValueChange={(value) => setListParam("exhibition", value)}>
+            <SelectTrigger className="w-full sm:w-48">
+              <SelectValue placeholder="All exhibitions" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All exhibitions</SelectItem>
+              {exhibitionOptions.map((item) => (
+                <SelectItem key={item} value={item}>{item}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={sort} onValueChange={(value) => setListParam("sort", value)}>
+            <SelectTrigger
+              aria-label="Sort brands"
+              title="Sort brands"
+              className="size-9 justify-center px-0 sm:size-9 [&>svg:last-child]:hidden"
+            >
+              <ArrowDownUp className="size-4" />
+              <SelectValue className="sr-only" />
+            </SelectTrigger>
+            <SelectContent className="w-auto min-w-52">
+              <SelectItem value="priority">Needs attention first</SelectItem>
+              <SelectItem value="nameAsc">Brand name A–Z</SelectItem>
+              <SelectItem value="nameDesc">Brand name Z–A</SelectItem>
+              <SelectItem value="lastNewest">Recent interaction</SelectItem>
+              <SelectItem value="lastOldest">Oldest interaction</SelectItem>
+              <SelectItem value="replyDue">Reply due soonest</SelectItem>
+            </SelectContent>
+          </Select>
           <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className={cx(
-                    "w-full justify-start font-normal sm:w-[16.5rem]",
-                    !hasReplyDueFilter && "text-muted-foreground",
-                  )}
-                >
-                  <CalendarClock className="size-4 text-slate-400" />
-                  {replyDueRangeLabel(replyFrom, replyTo)}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent align="end" className="w-auto p-0" lang="en">
-                <Calendar
-                  mode="range"
-                  locale={enUS}
-                  numberOfMonths={1}
-                  selected={replyDueSelected}
-                  defaultMonth={replyDueSelected?.from || replyDueSelected?.to}
-                  onSelect={(range) => {
-                    setReplyDueRange(
-                      range?.from ? formatDateOnly(range.from) : "",
-                      range?.to ? formatDateOnly(range.to) : "",
-                    );
-                  }}
-                  formatters={{
-                    formatCaption: (date) =>
-                      new Intl.DateTimeFormat("en-US", {
-                        month: "long",
-                        year: "numeric",
-                      }).format(date),
-                    formatWeekdayName: (date) =>
-                      new Intl.DateTimeFormat("en-US", { weekday: "short" }).format(date),
-                    formatMonthDropdown: (date) =>
-                      new Intl.DateTimeFormat("en-US", { month: "short" }).format(date),
-                  }}
-                />
-              </PopoverContent>
-            </Popover>
-            {hasReplyDueFilter ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="text-slate-500"
-                onClick={clearReplyDueFilter}
-              >
-                Clear
-              </Button>
-            ) : null}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="text-slate-500 hover:text-slate-900"
+              onClick={clearAllListFilters}
+            >
+              <RotateCcw className="mr-1.5 size-3.5" />
+              Clear all
+            </Button>
           </div>
         </div>
         {error ? (

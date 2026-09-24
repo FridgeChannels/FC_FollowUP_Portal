@@ -35,6 +35,7 @@ import {
   type BrandReplySignal,
 } from "./brand-reply-signals";
 import { getCachedBrandReplyMetadata } from "./brand-reply-signal-cache";
+import { parseAmazonSampleProduct } from "../sample-product";
 import { cacheBrandPages } from "./brand-page-cache";
 import {
   brandListSourceIsExhausted,
@@ -120,10 +121,10 @@ async function resolveRelatedTitle(
   }
 }
 
-async function resolveFollowupExhibition(page: NotionPage) {
+async function resolveFollowupExhibition(page: NotionPage, titleCache = new Map<string, string>()) {
   const exhibitionId = firstRelationId(page.properties?.["Follow-up Exhibition"]);
   if (!exhibitionId) return null;
-  const title = await resolveRelatedTitle(exhibitionId, new Map());
+  const title = await resolveRelatedTitle(exhibitionId, titleCache);
   return title || null;
 }
 
@@ -142,6 +143,7 @@ export async function mapFollowupClientPage(
   page: NotionPage,
   titleCache = new Map<string, string>(),
   ownerCache = new Map<string, FollowupOwner | null>(),
+  exhibitionCache?: Map<string, string>,
 ): Promise<BrandListItem> {
   const properties = page.properties || {};
   const followupTitle = titleFromProperties(properties);
@@ -172,6 +174,10 @@ export async function mapFollowupClientPage(
     ownerId: owner?.id || ownerId || null,
     ownerName: owner?.name || null,
     ownerEmail: owner?.account || null,
+    // Exhibition names are resolved on the brand detail page. Resolving the
+    // relation for every list row would turn a single list request into many
+    // extra Notion requests and make the Brands page slow to open.
+    followupExhibition: exhibitionCache?.get(firstRelationId(properties["Follow-up Exhibition"]) || "") || null,
     isTest: isTestFollowupClientPage(page),
   };
 }
@@ -741,6 +747,10 @@ export async function mapFollowupClientDetail(
   );
   return {
     ...brand,
+    channelType: (["DTC", "Amazon", "DTC&Amazon"] as const).find(
+      (item) => item === propertyText(properties["Portal Channel Type"]),
+    ) || null,
+    amazonSampleProduct: parseAmazonSampleProduct(propertyText(properties["Amazon Sample Product"])),
     name: brandName,
     productDescription: company.productDescription,
     matchedCategory: company.matchedCategory,

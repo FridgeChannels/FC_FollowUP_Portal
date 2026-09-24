@@ -80,6 +80,7 @@ export function BrandReplyBox({
   actions,
   taskId,
   onSend,
+  open = true,
 }: {
   customerId: string;
   interaction: Interaction;
@@ -88,7 +89,8 @@ export function BrandReplyBox({
   interactions?: Interaction[];
   actions?: ScheduledAction[];
   taskId?: string;
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: DeliveryMode, attachments?: MediaAttachment[], cc?: string) => Promise<void>;
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: DeliveryMode, scheduledAt?: string, attachments?: MediaAttachment[], cc?: string) => Promise<void>;
+  open?: boolean;
 }) {
   const { state, can, sendHumanReply } = useWorkspace();
   const customer = state.customers.find(item => item.id === customerId);
@@ -100,10 +102,12 @@ export function BrandReplyBox({
   const [cc, setCc] = useState("");
   const [saving, setSaving] = useState(false);
   const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("scheduled");
+  const [scheduledAt, setScheduledAt] = useState("");
   const contact = people.find(item => item.id === interaction.contactId) || people[0];
   const channel = interaction.channel;
   const media = useMessageMedia(channel);
   const notionBacked = !!onSend;
+  if (!open) return null;
   if (!can("reply") || !people.length) return null;
   if (!notionBacked && customer?.status === "Closed") return null;
   if (!inboundNeedsComposer(state, interaction, interactions)) return null;
@@ -129,11 +133,11 @@ export function BrandReplyBox({
         </MessageMediaInputFrame>
         <div className="flex items-center justify-end gap-2">
           <div className="flex items-center gap-2">
-          <SendTimingToggle value={deliveryMode} onValueChange={setDeliveryMode} />
+          <SendTimingToggle value={deliveryMode} onValueChange={setDeliveryMode} scheduledAt={scheduledAt} onScheduledAtChange={setScheduledAt} />
           <Button className="h-9 px-3" disabled={!canSend} onClick={() => {
           if (onSend) {
             setSaving(true);
-            void onSend(contact.id, channel, content, replyTaskId, interaction.threadId, subject, deliveryMode, media.readyAttachments, channel === "Email" ? cc : undefined)
+            void onSend(contact.id, channel, content, replyTaskId, interaction.threadId, subject, deliveryMode, scheduledAt ? new Date(scheduledAt).toISOString() : undefined, media.readyAttachments, channel === "Email" ? cc : undefined)
               .then(() => { toast.success("Message saved as pending"); setContent(""); setSubject(""); setCc(""); media.reset(); })
               .catch(error => toast.error(error instanceof Error ? error.message : "Send failed"))
               .finally(() => setSaving(false));
@@ -162,7 +166,7 @@ export function ChannelSendBox({
   channel: Channel;
   contacts: Contact[];
   interactions: Interaction[];
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: DeliveryMode, attachments?: MediaAttachment[], cc?: string) => Promise<void>;
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: DeliveryMode, scheduledAt?: string, attachments?: MediaAttachment[], cc?: string) => Promise<void>;
 }) {
   const { state, can, sendHumanReply } = useWorkspace();
   const people = contacts.filter(item => channelAvailable(item, channel));
@@ -173,10 +177,12 @@ export function ChannelSendBox({
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
   const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("scheduled");
+  const [scheduledAt, setScheduledAt] = useState("");
   const media = useMessageMedia(channel);
   useEffect(() => {
     setContactId(latest?.contactId || people[0]?.id || "");
     setContent("");
+    setScheduledAt("");
     media.reset();
   }, [channel, customerId]);
   const contact = people.find(item => item.id === contactId) || people[0];
@@ -200,7 +206,7 @@ export function ChannelSendBox({
         <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
           <Select value={contact?.id} onValueChange={setContactId}>
             <SelectTrigger size="sm" className="w-44"><SelectValue placeholder="KeyPerson"/></SelectTrigger>
-            <SelectContent>{people.map(item => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectContent>
+            <SelectContent>{people.map(item => <SelectItem key={item.id} value={item.id}>{item.name} · {item.role}</SelectItem>)}</SelectContent>
           </Select>
           <span className="text-xs text-slate-400">Send {channel}</span>
         </div>
@@ -215,12 +221,12 @@ export function ChannelSendBox({
           </MessageMediaInputFrame>
           <div className="flex items-center justify-end gap-2">
             <div className="flex items-center gap-2">
-            <SendTimingToggle value={deliveryMode} onValueChange={setDeliveryMode} />
+            <SendTimingToggle value={deliveryMode} onValueChange={setDeliveryMode} scheduledAt={scheduledAt} onScheduledAtChange={setScheduledAt} />
             <Button className="h-9 px-3" disabled={!contact || (!content.trim() && !media.readyAttachments.length) || saving || media.uploading} onClick={() => {
             if (!contact) return;
             if (onSend) {
               setSaving(true);
-              void onSend(contact.id, channel, content, taskId, threadId, undefined, deliveryMode, media.readyAttachments)
+              void onSend(contact.id, channel, content, taskId, threadId, undefined, deliveryMode, scheduledAt ? new Date(scheduledAt).toISOString() : undefined, media.readyAttachments)
                 .then(() => { toast.success("Message saved as pending"); setContent(""); media.reset(); })
                 .catch(error => toast.error(error instanceof Error ? error.message : "Send failed"))
                 .finally(() => setSaving(false));

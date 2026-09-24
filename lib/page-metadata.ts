@@ -114,6 +114,9 @@ export function workspaceMetadata(
   query: Record<string, string | string[] | undefined> = {},
 ): Metadata {
   const [section, id] = path;
+  if (section === "customers" && id && path[2]?.toLowerCase() === "sample") {
+    return toMetadata({ title: "Sample", description: "Manage sample details and review tap activity." });
+  }
   if (section === "customers" && id) {
     const seed = createSeedState();
     const brand = seed.customers.find((item) => item.id === id);

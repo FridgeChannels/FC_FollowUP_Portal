@@ -184,6 +184,7 @@ export type BrandListItem = {
   ownerId: string | null;
   ownerName: string | null;
   ownerEmail: string | null;
+  followupExhibition?: string | null;
   /** Follow-up Client `Is Test` — Portal ACL hides these from all roles. */
   isTest?: boolean;
   needsReply?: boolean;
@@ -325,6 +326,8 @@ export type BrandAiMeetingLink = {
 };
 
 export type BrandDetail = BrandListItem & {
+  channelType?: import("./sample-product").ChannelType | null;
+  amazonSampleProduct?: import("./sample-product").AmazonSampleProduct;
   priority: string | null;
   notes: string | null;
   createdAt: string | null;
