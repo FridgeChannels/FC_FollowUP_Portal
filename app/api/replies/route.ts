@@ -24,7 +24,8 @@ export async function POST(request: Request) {
     });
 
     if (!result.duplicate && result.notify) {
-      notifyReplyReceived({
+      // Must await: fire-and-forget is killed when the Worker returns the response.
+      await notifyReplyReceived({
         channel: result.notify.channel,
         brandId: result.brandId,
         brandName: result.notify.brandName,

@@ -25,7 +25,8 @@ export async function POST(request: Request) {
     });
 
     if (result.notify) {
-      notifyInboundReceived({
+      // Must await: fire-and-forget is killed when the Worker returns the response.
+      await notifyInboundReceived({
         channel: result.notify.channel,
         brandId: result.brandId,
         brandName: result.notify.brandName,
