@@ -468,11 +468,14 @@ type BrandListFilters = {
   owner: string;
   replyState: string;
   handlingMode: string;
-  exhibition: string;
+  /** Follow-up Exhibition Notion page id (`all` = no filter). */
+  exhibitionId: string;
   sort: string;
   replyFrom: string;
   replyTo: string;
 };
+
+type ExhibitionOption = { id: string; name: string };
 
 const BRAND_SEARCH_DEBOUNCE_MS = 800;
 const BRAND_LIST_PAGINATION_STORAGE_KEY = "followup.brand-list-pagination.v1";
@@ -492,7 +495,7 @@ function brandListFiltersFromSearch(search: URLSearchParams): BrandListFilters {
     owner: search.get("owner") ?? "all",
     replyState: search.get("replyState") ?? "all",
     handlingMode: search.get("handlingMode") ?? "all",
-    exhibition: search.get("exhibition") ?? "all",
+    exhibitionId: search.get("exhibitionId") ?? "all",
     sort: search.get("sort") ?? "priority",
     replyFrom: search.get("replyFrom") ?? "",
     replyTo: search.get("replyTo") ?? "",
@@ -510,7 +513,7 @@ function brandListPath(
   if (filters.owner !== "all") params.set("owner", filters.owner);
   if (filters.replyState !== "all") params.set("replyState", filters.replyState);
   if (filters.handlingMode !== "all") params.set("handlingMode", filters.handlingMode);
-  if (filters.exhibition !== "all") params.set("exhibition", filters.exhibition);
+  if (filters.exhibitionId !== "all") params.set("exhibitionId", filters.exhibitionId);
   if (filters.sort !== "priority") params.set("sort", filters.sort);
   if (filters.replyFrom) params.set("replyFrom", filters.replyFrom);
   if (filters.replyTo) params.set("replyTo", filters.replyTo);
@@ -592,7 +595,10 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
   const [filters, setFilters] = useState<BrandListFilters>(() =>
     brandListFiltersFromSearch(searchParams),
   );
-  const { q: query, status, cp, owner, replyState, handlingMode, exhibition, sort, replyFrom, replyTo } = filters;
+  const { q: query, status, cp, owner, replyState, handlingMode, exhibitionId, sort, replyFrom, replyTo } = filters;
+  const [exhibitionOptions, setExhibitionOptions] = useState<ExhibitionOption[]>([]);
+  const [exhibitionOptionsLoading, setExhibitionOptionsLoading] = useState(false);
+  const [listReloadToken, setListReloadToken] = useState(0);
   const effectiveStatus = isAdmin ? status : "all";
   const [brands, setBrands] = useState<BrandListItem[]>([]);
   const [cursor, setCursor] = useState<string | null>(() => searchParams.get("cursor"));
@@ -685,7 +691,7 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
       owner: "all",
       replyState: "all",
       handlingMode: "all",
-      exhibition: "all",
+      exhibitionId: "all",
       sort: "priority",
       replyFrom: "",
       replyTo: "",
@@ -735,17 +741,67 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
     };
   }, [isAdmin]);
 
+  const loadExhibitionOptions = () => {
+    let cancelled = false;
+    setExhibitionOptionsLoading(true);
+    fetch("/api/exhibitions/options")
+      .then(async (response) => {
+        const payload = (await response.json()) as {
+          exhibitions?: ExhibitionOption[];
+          error?: string;
+        };
+        if (!response.ok) throw new Error(payload.error || "Failed to load exhibitions");
+        return payload.exhibitions || [];
+      })
+      .then((items) => {
+        if (!cancelled) setExhibitionOptions(items);
+      })
+      .catch(() => {
+        if (!cancelled) setExhibitionOptions([]);
+      })
+      .finally(() => {
+        if (!cancelled) setExhibitionOptionsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  };
+
+  useEffect(() => {
+    if (!active) return;
+    return loadExhibitionOptions();
+  }, [active, state.currentUserId, state.currentRole]);
+
+  useEffect(() => {
+    const onCachesCleared = () => {
+      clearBrandListPageCache();
+      loadExhibitionOptions();
+      setCursor(null);
+      setCursorStack([]);
+      setPageNumber(1);
+      setNextCursor(null);
+      setHasMore(false);
+      setListReloadToken((value) => value + 1);
+    };
+    window.addEventListener("fc-portal-caches-cleared", onCachesCleared);
+    return () => window.removeEventListener("fc-portal-caches-cleared", onCachesCleared);
+  }, []);
+
   const brandsFilterKey = useMemo(() => {
     const params = new URLSearchParams();
     if (debouncedQuery.trim()) params.set("q", debouncedQuery.trim());
     if (cp !== "all") params.set("cp", cp);
     if (isAdmin && effectiveStatus !== "all") params.set("status", effectiveStatus);
     if (isAdmin && owner !== "all") params.set("owner", owner);
+    if (replyState !== "all") params.set("replyState", replyState);
+    if (handlingMode !== "all") params.set("handlingMode", handlingMode);
+    if (exhibitionId !== "all") params.set("exhibitionId", exhibitionId);
+    if (sort !== "priority") params.set("sort", sort);
     if (replyFrom) params.set("replyFrom", replyFrom);
     if (replyTo) params.set("replyTo", replyTo);
     return params.toString();
-  }, [debouncedQuery, cp, effectiveStatus, owner, replyFrom, replyTo, isAdmin]);
-  const brandListPageCacheKey = `${state.currentUserId}:${state.currentRole}:${brandsFilterKey}:${cursor || ""}`;
+  }, [debouncedQuery, cp, effectiveStatus, owner, replyState, handlingMode, exhibitionId, sort, replyFrom, replyTo, isAdmin]);
+  const brandListPageCacheKey = `${state.currentUserId}:${state.currentRole}:${brandsFilterKey}:${cursor || ""}:${listReloadToken}`;
 
   useEffect(() => {
     let cancelled = false;
@@ -899,33 +955,8 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
     );
   };
 
-  const exhibitionOptions = useMemo(
-    () => [...new Set(brands.map((item) => item.followupExhibition).filter((item): item is string => Boolean(item)))].sort((a, b) => a.localeCompare(b)),
-    [brands],
-  );
-  const filtered = useMemo(() => {
-    const now = Date.parse(state.simulatedDate);
-    const visible = brands.filter((item) => {
-      if (replyState === "needsReply" && !item.needsReply) return false;
-      if (replyState === "qualification" && !item.needsQualification) return false;
-      if (replyState === "replied" && (item.needsReply || !item.lastReplyAt)) return false;
-      if (replyState === "never" && item.lastReplyAt) return false;
-      if (replyState === "overdue" && (!item.needsReply || !item.replyDueAt || Date.parse(item.replyDueAt) >= now)) return false;
-      if (handlingMode !== "all" && item.handlingMode !== handlingMode) return false;
-      if (exhibition !== "all" && item.followupExhibition !== exhibition) return false;
-      return true;
-    });
-    const timeValue = (value?: string | null) => (value ? Date.parse(value) || 0 : 0);
-    const replyDueValue = (item: BrandListItem) => timeValue(item.replyDueAt || item.replyUpdatedAt);
-    return visible.sort((a, b) => {
-      if (sort === "nameAsc") return a.name.localeCompare(b.name);
-      if (sort === "nameDesc") return b.name.localeCompare(a.name);
-      if (sort === "lastNewest") return timeValue(b.lastInteractionAt) - timeValue(a.lastInteractionAt) || a.name.localeCompare(b.name);
-      if (sort === "lastOldest") return timeValue(a.lastInteractionAt) - timeValue(b.lastInteractionAt) || a.name.localeCompare(b.name);
-      if (sort === "replyDue") return replyDueValue(a) - replyDueValue(b) || a.name.localeCompare(b.name);
-      return 0;
-    });
-  }, [brands, exhibition, handlingMode, replyState, sort, state.simulatedDate]);
+  // Sort / replyState / handlingMode / exhibitionId are applied server-side (global).
+  const filtered = brands;
   const currentListPath = brandListPath(filters, { cursor, page: pageNumber });
   const brandDetailPath = (brandId: string) =>
     `/customers/${encodeURIComponent(brandId)}?returnTo=${encodeURIComponent(currentListPath)}`;
@@ -1145,14 +1176,18 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
               <SelectItem value="Human">Human</SelectItem>
             </SelectContent>
           </Select>
-          <Select value={exhibition} onValueChange={(value) => setListParam("exhibition", value)}>
+          <Select
+            value={exhibitionId}
+            onValueChange={(value) => setListParam("exhibitionId", value)}
+            disabled={exhibitionOptionsLoading}
+          >
             <SelectTrigger className="w-full sm:w-48">
-              <SelectValue placeholder="All exhibitions" />
+              <SelectValue placeholder={exhibitionOptionsLoading ? "Loading exhibitions…" : "All exhibitions"} />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All exhibitions</SelectItem>
               {exhibitionOptions.map((item) => (
-                <SelectItem key={item} value={item}>{item}</SelectItem>
+                <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>
               ))}
             </SelectContent>
           </Select>

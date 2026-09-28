@@ -27,6 +27,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { InteractionFeed } from "./interaction-feed";
 import { ChannelIcon, ChannelOption } from "./channel-icon";
+import { easternDateTimeLocalToIso } from "@/lib/scheduling-engine/calendar";
 import { SendTimingToggle, type DeliveryMode } from "./send-timing-toggle";
 import { BrandNote } from "./brand-note";
 import { MessageMediaInputFrame, useMessageMedia } from "./message-media";
@@ -567,6 +568,7 @@ export function BrandDetail({customerId}:{customerId:string}){
     ...cached,
     priority:null,
     notes:null,
+    humanNotes:null,
     createdAt:null,
     lastEditedAt:null,
     currentCpFullName:null,
@@ -599,6 +601,7 @@ export function BrandDetail({customerId}:{customerId:string}){
       ...next,
       priority:null,
       notes:null,
+      humanNotes:null,
       createdAt:null,
       lastEditedAt:null,
       currentCpFullName:null,
@@ -900,7 +903,7 @@ export function BrandDetail({customerId}:{customerId:string}){
           setRemote(prev=>prev?{...prev,contacts}:prev);
         }:undefined}
       />
-      <div className="flex flex-wrap gap-2 xl:flex-col xl:items-stretch">{can("reply")&&<Button variant="outline" disabled={!brandReady||(notionBacked&&!c.contacts.length)} onClick={()=>setReply(true)}><Send className="mr-2 size-4"/>Send message</Button>}{can("launch")&&<LaunchOmniReachButton className="xl:w-full" disabled={!brandReady||hasActiveOmniReach} disabledReason={!brandReady?"Loading brand…":ACTIVE_OMNIREACH_BLOCK_REASON} onClick={()=>setLaunch(true)}/>}{can("changeCP")&&<Button disabled={!brandReady} onClick={()=>setCP(true)}>{currentCpOption(notionBacked&&remote?remote.currentCp:c.cp).name} · Change CP</Button>}<BrandNote key={c.id} customerId={c.id} />{notionBacked&&can("editBrand")&&<DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" disabled={!brandReady} aria-label="More follow-up actions" title="More follow-up actions"><MoreHorizontal className="size-5"/></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem disabled={saving||remote?.status==="Paused"||remote?.status==="Completed"} onSelect={()=>void updateFollowUpStatus("Paused")}>Pause FollowUp</DropdownMenuItem><DropdownMenuItem disabled={saving||remote?.status==="Completed"} onSelect={()=>void updateFollowUpStatus("Completed")}>Complete FollowUp</DropdownMenuItem></DropdownMenuContent></DropdownMenu>}</div>
+      <div className="flex flex-wrap gap-2 xl:flex-col xl:items-stretch">{can("reply")&&<Button variant="outline" disabled={!brandReady||(notionBacked&&!c.contacts.length)} onClick={()=>setReply(true)}><Send className="mr-2 size-4"/>Send message</Button>}{can("launch")&&<LaunchOmniReachButton className="xl:w-full" disabled={!brandReady||hasActiveOmniReach} disabledReason={!brandReady?"Loading brand…":ACTIVE_OMNIREACH_BLOCK_REASON} onClick={()=>setLaunch(true)}/>}{can("changeCP")&&<Button disabled={!brandReady} onClick={()=>setCP(true)}>{currentCpOption(notionBacked&&remote?remote.currentCp:c.cp).name} · Change CP</Button>}<BrandNote key={c.id} customerId={c.id} disabled={notionBacked&&!brandReady} value={notionBacked?remote?.humanNotes??"":undefined} onSave={notionBacked?async (next)=>{await patchBrand({humanNotes:next});}:undefined} />{notionBacked&&can("editBrand")&&<DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" disabled={!brandReady} aria-label="More follow-up actions" title="More follow-up actions"><MoreHorizontal className="size-5"/></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem disabled={saving||remote?.status==="Paused"||remote?.status==="Completed"} onSelect={()=>void updateFollowUpStatus("Paused")}>Pause FollowUp</DropdownMenuItem><DropdownMenuItem disabled={saving||remote?.status==="Completed"} onSelect={()=>void updateFollowUpStatus("Completed")}>Complete FollowUp</DropdownMenuItem></DropdownMenuContent></DropdownMenu>}</div>
     </section>
     <div className={`grid min-w-0 gap-6 ${partnershipContext?"xl:grid-cols-[minmax(0,1fr)_340px]":""}`}><section className="min-w-0"><h2 className="mb-3 font-bold">Brand activity</h2><div className="w-full min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white">
     <InteractionFeed key={`${c.id}-${currentCp}`} customerId={c.id} currentCp={currentCp} cpGoals={notionBacked?toCpGoals(remoteCps):undefined} interactions={interactions} contacts={c.contacts} bombInstances={bombPlan?.bombInstances} actions={bombPlan?.actions} loading={activityLoading} canReviewCalls={notionBacked&&can("reply")} tasks={remote?.tasks||[]} onMarkReplyRead={notionBacked&&can("reply")?markReplyRead:undefined} onRefreshQuo={notionBacked?refreshQuoForBrand:undefined} quoRefreshingCallId={quoRefreshingCallId} onPersistCallReview={notionBacked?async (taskId,status,reviewReason,reviewNote)=>{
@@ -908,12 +911,7 @@ export function BrandDetail({customerId}:{customerId:string}){
     const payload=await response.json() as {error?:string};
     if(!response.ok)throw new Error(payload.error||"Unable to save call review");
     await refreshBrandAndActivities();
-  }:undefined} onCancelBomb={async instance=>{if(!notionBacked){const result=cancelBomb(c.id,instance.id);if(!result.ok)throw new Error(result.message);toast.success(result.message);return;}const response=await fetch(`/api/brands/${c.id}/bombs/${instance.templateId}/cancel`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId:instance.targetContactId,omniReachRunId:instance.id.startsWith("run:")?instance.id.slice(4):undefined})});const payload=await response.json() as {cancelledTaskIds?:string[];error?:string};if(!response.ok)throw new Error(payload.error||"Unable to stop OmniReach");const cancelled=new Set(payload.cancelledTaskIds||[]);if(cancelled.size){setRemote(prev=>prev?{...prev,tasks:prev.tasks.map(task=>cancelled.has(task.id)?{...task,status:"Cancelled"}:task),handlingMode:prev.handlingMode==="Human"?prev.handlingMode:"Human"}:prev);}toast.success(`${payload.cancelledTaskIds?.length||0} remaining task${payload.cancelledTaskIds?.length===1?"":"s"} cancelled`);void Promise.all([refreshRemote(),fetchActivitiesPage(null,"replace")]);}} onCancelPending={notionBacked&&can("reply")?async taskId=>{const response=await fetch(`/api/tasks/${taskId}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({status:"Cancelled"})});const payload=await response.json() as {error?:string};if(!response.ok)throw new Error(payload.error||"Unable to cancel");setRemote(prev=>prev?{...prev,tasks:prev.tasks.map(task=>task.id===taskId?{...task,status:"Cancelled"}:task)}:prev);toast.success("Pending message cancelled");void Promise.all([refreshRemote(),fetchActivitiesPage(null,"replace")]);}:undefined} onSend={notionBacked?sendBrandMessage:undefined} onMarkHandled={notionBacked?async (inbound)=>{
-    const response=await fetch(`/api/brands/${c.id}/mark-reply-handled`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({conversationId:inbound.id,contactId:inbound.contactId,channel:inbound.channel,taskId:inbound.taskId,threadId:inbound.threadId})});
-    const payload=await response.json() as {error?:string};
-    if(!response.ok)throw new Error(payload.error||"Unable to mark as handled");
-    await Promise.all([refreshRemote(),fetchActivitiesPage(null,"replace")]);
-  }:undefined}/>
+  }:undefined} onCancelBomb={async instance=>{if(!notionBacked){const result=cancelBomb(c.id,instance.id);if(!result.ok)throw new Error(result.message);toast.success(result.message);return;}const response=await fetch(`/api/brands/${c.id}/bombs/${instance.templateId}/cancel`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId:instance.targetContactId,omniReachRunId:instance.id.startsWith("run:")?instance.id.slice(4):undefined})});const payload=await response.json() as {cancelledTaskIds?:string[];error?:string};if(!response.ok)throw new Error(payload.error||"Unable to stop OmniReach");const cancelled=new Set(payload.cancelledTaskIds||[]);if(cancelled.size){setRemote(prev=>prev?{...prev,tasks:prev.tasks.map(task=>cancelled.has(task.id)?{...task,status:"Cancelled"}:task),handlingMode:prev.handlingMode==="Human"?prev.handlingMode:"Human"}:prev);}toast.success(`${payload.cancelledTaskIds?.length||0} remaining task${payload.cancelledTaskIds?.length===1?"":"s"} cancelled`);void Promise.all([refreshRemote(),fetchActivitiesPage(null,"replace")]);}} onCancelPending={notionBacked&&can("reply")?async taskId=>{const response=await fetch(`/api/tasks/${taskId}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({status:"Cancelled"})});const payload=await response.json() as {error?:string};if(!response.ok)throw new Error(payload.error||"Unable to cancel");setRemote(prev=>prev?{...prev,tasks:prev.tasks.map(task=>task.id===taskId?{...task,status:"Cancelled"}:task)}:prev);toast.success("Pending message cancelled");void Promise.all([refreshRemote(),fetchActivitiesPage(null,"replace")]);}:undefined} onSend={notionBacked?sendBrandMessage:undefined}/>
   {notionBacked&&activitiesHasMore&&activitiesCursor&&(remote?.activities.length||0)>=ACTIVITY_PAGE_SIZE?<div className="border-t border-slate-100 p-3"><Button variant="outline" size="sm" className="w-full" disabled={activitiesLoadingMore||activitiesLoading} onClick={loadMoreActivities}>{activitiesLoadingMore?<span className="inline-flex items-center gap-2"><Spinner className="size-3.5"/>Loading…</span>:"Load more activity"}</Button></div>:null}
   </div></section>
     {(c.cp==="CP3"||partnershipContext)&&partnershipContext&&<aside><section className="rounded-2xl bg-emerald-50 p-5"><div className="text-xs font-semibold tracking-wide text-emerald-700">CP3 · Partnership context</div><h2 className="mt-2 font-bold text-emerald-950">{partnershipContext.headline}</h2><p className="mt-2 text-sm leading-6 text-emerald-900">{partnershipContext.summary}</p><div className="mt-4 space-y-2">{partnershipContext.signals.map(signal=><div key={signal} className="rounded-lg bg-white/70 px-3 py-2 text-xs leading-5 text-slate-700">{signal}</div>)}</div><div className="mt-3 text-[11px] text-emerald-700">Updated {dateOnly(partnershipContext.updatedAt)}</div></section></aside>}</div>
@@ -1879,7 +1877,7 @@ export function ReplyDialog({
                       content,
                       emailNeedsObject ? object.trim() : undefined,
                       deliveryMode,
-                      scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
+                      scheduledAt ? easternDateTimeLocalToIso(scheduledAt) : undefined,
                       media.readyAttachments,
                       emailNeedsObject ? cc : undefined,
                     );

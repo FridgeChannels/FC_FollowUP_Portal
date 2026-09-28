@@ -62,6 +62,7 @@ export async function PATCH(request: Request, { params }: Params) {
       handlingMode?: string | null;
       evidence?: string;
       note?: string;
+      humanNotes?: string | null;
       channelType?: ChannelType;
       amazonSampleProduct?: AmazonSampleProduct;
     };
@@ -104,6 +105,7 @@ export async function PATCH(request: Request, { params }: Params) {
       status: body.status,
       handlingMode: body.handlingMode,
       notes,
+      humanNotes: body.humanNotes,
       channelType: body.channelType,
       amazonSampleProduct: body.amazonSampleProduct,
     });

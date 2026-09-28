@@ -31,19 +31,30 @@ import { listFollowupContacts } from "./contacts";
 import { listFollowupConversations } from "./conversations";
 import {
   attachBrandReplySignals,
+  listBrandQualificationSignals,
   listBrandReplySignals,
   type BrandReplySignal,
 } from "./brand-reply-signals";
 import { getCachedBrandReplyMetadata } from "./brand-reply-signal-cache";
+import {
+  isNeedsReplySignalState,
+  isOverdueReplyDueAt,
+  normalizeBrandReplyState,
+} from "./brand-reply-state";
 import { parseAmazonSampleProduct } from "../sample-product";
 import { cacheBrandPages } from "./brand-page-cache";
 import {
   brandListSourceIsExhausted,
   encodeBrandListCursor,
+  isLastInteractionSort,
+  isNotionTitleSort,
+  compareBrandListItems,
+  normalizeBrandListSort,
   parseBrandListCursor,
-  sortBrandListItems,
+  sortBrandListItemsBy,
+  type BrandListSort,
 } from "./brand-list-order";
-import { DEFAULT_BRAND_PAGE_SIZE, followupClientListFilter, matchesNeedsReplyBrandScope, type NeedsReplyBrandScope } from "./owner-filter";
+import { DEFAULT_BRAND_PAGE_SIZE, followupClientListFilter, matchesNeedsReplyBrandScope, normalizeHandlingModeFilter, type NeedsReplyBrandScope } from "./owner-filter";
 import { listFollowupTasks, type TaskResolveHints } from "./tasks";
 import { queryOwnerPages, retrieveOwner, type FollowupOwner } from "./owners";
 const HANDLING_MODES = new Set(["Automated", "Human"]);
@@ -229,11 +240,35 @@ export type ListFollowupClientsPageInput = {
   excludeStatuses?: string[];
   q?: string | null;
   cp?: string | null;
+  /** Brands list “All reply states” — server-global filter. */
+  replyState?: string | null;
+  /** Brands list Handling Mode — Notion select filter. */
+  handlingMode?: string | null;
+  /** Brands list Follow-up Exhibition — relation page id. */
+  exhibitionId?: string | null;
+  /** Brands list sort — server-global; default priority keeps the hot path. */
+  sort?: string | null;
   replyFrom?: string | null;
   replyTo?: string | null;
   cursor?: string | null;
   pageSize?: number;
 };
+
+function normalizeExhibitionIdFilter(value?: string | null) {
+  const next = value?.trim();
+  if (!next || next === "all") return null;
+  return next;
+}
+
+function matchesExhibitionFilter(
+  page: NotionPage,
+  exhibitionId?: string | null,
+) {
+  const expected = normalizeExhibitionIdFilter(exhibitionId);
+  if (!expected) return true;
+  const linked = firstRelationId(page.properties?.["Follow-up Exhibition"]);
+  return !!linked && pageKey(linked) === pageKey(expected);
+}
 
 export type ListFollowupClientsPageResult = {
   brands: BrandListItem[];
@@ -263,6 +298,14 @@ function logBrandListPhase(
   });
 }
 
+function matchesHandlingModeFilter(
+  brand: { handlingMode?: string | null },
+  handlingMode?: string | null,
+) {
+  const mode = normalizeHandlingModeFilter(handlingMode);
+  return !mode || brand.handlingMode === mode;
+}
+
 async function listReplyBrandMetadata(
   entries: Array<[string, BrandReplySignal]>,
   input: {
@@ -273,6 +316,8 @@ async function listReplyBrandMetadata(
     excludeStatuses?: string[];
     q?: string | null;
     cp?: string | null;
+    handlingMode?: string | null;
+    exhibitionId?: string | null;
   } = {},
 ) {
   const cp = input.cp?.trim() || "all";
@@ -282,6 +327,8 @@ async function listReplyBrandMetadata(
     currentCpPageId = checkpoints.find((item) => item.name === cp)?.id;
     if (!currentCpPageId) return [];
   }
+  const handlingMode = normalizeHandlingModeFilter(input.handlingMode);
+  const exhibitionPageId = normalizeExhibitionIdFilter(input.exhibitionId);
   const metadataKey = JSON.stringify({
     ids: entries.map(([id]) => pageKey(id)).sort(),
     ownerPageId: input.ownerPageId,
@@ -294,6 +341,8 @@ async function listReplyBrandMetadata(
     excludeStatuses: input.excludeStatuses,
     q: input.q?.trim().toLowerCase() || "",
     currentCpPageId,
+    handlingMode: handlingMode || "",
+    exhibitionPageId: exhibitionPageId || "",
   });
   return getCachedBrandReplyMetadata(metadataKey, async () => {
     const signalKeys = new Set(entries.map(([id]) => pageKey(id)));
@@ -304,6 +353,8 @@ async function listReplyBrandMetadata(
       excludeStatuses: input.excludeStatuses,
       titleContains: input.q,
       currentCpPageId,
+      handlingMode,
+      exhibitionPageId,
     });
     const validPages = pages.filter((page) => signalKeys.has(pageKey(page.id)));
     const mapped = await mapFollowupClientPages(validPages);
@@ -318,18 +369,27 @@ async function listReplyBrandMetadata(
 async function listFilteredReplyBrands(
   input: ListFollowupClientsPageInput,
   signals: Map<string, BrandReplySignal>,
+  options: { overdueOnly?: boolean; nowMs?: number } = {},
 ): Promise<FilteredReplyBrand[]> {
   const startedAt = Date.now();
   const hasDueFilter = Boolean(input.replyFrom?.trim() || input.replyTo?.trim());
+  const nowMs = options.nowMs ?? Date.now();
   const entries = [...signals.entries()]
-    .filter(([, signal]) =>
-      hasDueFilter ? replyDueInRange(signal.dueAt, input.replyFrom, input.replyTo) : true,
-    )
+    .filter(([, signal]) => {
+      if (hasDueFilter && !replyDueInRange(signal.dueAt, input.replyFrom, input.replyTo)) {
+        return false;
+      }
+      if (options.overdueOnly && !isOverdueReplyDueAt(signal.dueAt, nowMs)) {
+        return false;
+      }
+      return true;
+    })
     .sort((a, b) => (a[1].dueAt || "").localeCompare(b[1].dueAt || ""));
   if (!entries.length) {
     logBrandListPhase(input.traceId, "reply-metadata", startedAt, {
       signalCount: 0,
       matchedCount: 0,
+      overdueOnly: Boolean(options.overdueOnly),
     });
     return [];
   }
@@ -347,6 +407,8 @@ async function listFilteredReplyBrands(
   for (const { page, brand } of metadata) {
     if (!matchesNeedsReplyBrandScope(brand, input)) continue;
     if (input.status && input.status !== "all" && brand.status !== input.status) continue;
+    if (!matchesHandlingModeFilter(brand, input.handlingMode)) continue;
+    if (!matchesExhibitionFilter(page, input.exhibitionId)) continue;
     if (q && !brand.name.toLowerCase().includes(q)) continue;
     if (cp !== "all" && brand.currentCp !== cp) continue;
     filtered.push({
@@ -360,8 +422,72 @@ async function listFilteredReplyBrands(
   logBrandListPhase(input.traceId, "reply-metadata", startedAt, {
     signalCount: entries.length,
     matchedCount: result.length,
+    overdueOnly: Boolean(options.overdueOnly),
   });
   return result;
+}
+
+async function listScopedClientBrandMetadata(
+  input: ListFollowupClientsPageInput,
+) {
+  let currentCpPageId: string | undefined;
+  const cp = input.cp?.trim() || "all";
+  if (cp !== "all") {
+    const checkpoints = await listCheckpoints();
+    currentCpPageId = checkpoints.find((item) => item.name === cp)?.id;
+    if (!currentCpPageId) return [];
+  }
+  const handlingMode = normalizeHandlingModeFilter(input.handlingMode);
+  const exhibitionPageId = normalizeExhibitionIdFilter(input.exhibitionId);
+  const metadataKey = JSON.stringify({
+    scope: "all-clients",
+    ownerPageId: input.ownerPageId,
+    includeTest: input.includeTest,
+    onlyTest: input.onlyTest,
+    status:
+      input.status?.trim() && input.status.trim() !== "all"
+        ? input.status.trim()
+        : "",
+    excludeStatuses: input.excludeStatuses,
+    q: input.q?.trim().toLowerCase() || "",
+    currentCpPageId,
+    handlingMode: handlingMode || "",
+    exhibitionPageId: exhibitionPageId || "",
+  });
+  return getCachedBrandReplyMetadata(metadataKey, async () => {
+    const pages = await queryFollowupClientPages(input.ownerPageId, {
+      includeTest: input.includeTest,
+      onlyTest: input.onlyTest,
+      status: input.status,
+      excludeStatuses: input.excludeStatuses,
+      titleContains: input.q,
+      currentCpPageId,
+      handlingMode,
+      exhibitionPageId,
+    });
+    const mapped = await mapFollowupClientPages(pages);
+    const byKey = new Map(mapped.map((brand) => [pageKey(brand.id), brand]));
+    return pages.flatMap((page) => {
+      const brand = byKey.get(pageKey(page.id));
+      return brand ? [{ page, brand }] : [];
+    });
+  });
+}
+
+function paginateOffsetSlice<T>(
+  items: T[],
+  cursor: string | null | undefined,
+  pageSize: number,
+) {
+  const offset = Math.max(0, Number(cursor || 0) || 0);
+  const slice = items.slice(offset, offset + pageSize);
+  const nextOffset = offset + pageSize;
+  const hasMore = nextOffset < items.length;
+  return {
+    slice,
+    nextCursor: hasMore ? String(nextOffset) : null,
+    hasMore,
+  };
 }
 
 async function takeNonReplyClientPages(options: {
@@ -435,13 +561,18 @@ async function enrichBrandPage(
   const startedAt = Date.now();
   cacheBrandPages(pages);
   const unknownPages = pages.filter((page) => !knownBrands.has(pageKey(page.id)));
-  const mapped = [
-    ...pages.flatMap((page) => {
-      const brand = knownBrands.get(pageKey(page.id));
-      return brand ? [brand] : [];
-    }),
-    ...(await mapFollowupClientPages(unknownPages)),
-  ];
+  const unknownMapped = unknownPages.length
+    ? await mapFollowupClientPages(unknownPages)
+    : [];
+  const unknownByKey = new Map(
+    unknownMapped.map((brand) => [pageKey(brand.id), brand]),
+  );
+  // Preserve caller page order (needed for Notion title / last-interaction sorts).
+  const mapped = pages.flatMap((page) => {
+    const key = pageKey(page.id);
+    const brand = knownBrands.get(key) || unknownByKey.get(key);
+    return brand ? [brand] : [];
+  });
   const result = attachBrandReplySignals(mapped, replySignals);
   logBrandListPhase(traceId, "brand-map", startedAt, {
     pageCount: pages.length,
@@ -453,7 +584,8 @@ async function enrichBrandPage(
 
 /**
  * Brands list pagination with global Needs Reply prefix, then remaining clients.
- * Reply-due date filter stays on the Needs Reply-only path.
+ * Exclusive replyState filters (Needs Reply / Overdue / Replied / Never /
+ * Qualification) use signal- or rollup-indexed global paths — never page-local only.
  */
 export async function listFollowupClientsForViewerPage(
   input: ListFollowupClientsPageInput = {},
@@ -462,10 +594,32 @@ export async function listFollowupClientsForViewerPage(
     Math.max(input.pageSize ?? DEFAULT_BRAND_PAGE_SIZE, 1),
     DEFAULT_BRAND_PAGE_SIZE,
   );
+  const replyState = normalizeBrandReplyState(input.replyState);
+  const sort = normalizeBrandListSort(input.sort);
   const hasReplyDueFilter = Boolean(input.replyFrom?.trim() || input.replyTo?.trim());
 
-  if (hasReplyDueFilter) {
-    return listFollowupClientsByReplyDuePage(input, pageSize);
+  if (hasReplyDueFilter || isNeedsReplySignalState(replyState)) {
+    return listFollowupClientsByReplySignalPage(
+      input,
+      pageSize,
+      replyState === "overdue" ? "overdue" : "needsReply",
+      sort,
+    );
+  }
+  if (replyState === "qualification") {
+    return listFollowupClientsByQualificationPage(input, pageSize, sort);
+  }
+  if (replyState === "replied" || replyState === "never") {
+    return listFollowupClientsByLastReplyPage(input, pageSize, replyState, sort);
+  }
+
+  // Non-default sorts: avoid reply-first mixing so global order is coherent.
+  // Title sort is Notion-native (fast). Last-interaction uses cached Client scope.
+  if (isNotionTitleSort(sort)) {
+    return listFollowupClientsByNotionTitlePage(input, pageSize, sort);
+  }
+  if (isLastInteractionSort(sort)) {
+    return listFollowupClientsByLastInteractionPage(input, pageSize, sort);
   }
 
   let currentCpPageId: string | undefined;
@@ -486,6 +640,8 @@ export async function listFollowupClientsForViewerPage(
     excludeStatuses: input.excludeStatuses,
     titleContains: input.q,
     currentCpPageId,
+    handlingMode: input.handlingMode,
+    exhibitionPageId: input.exhibitionId,
   });
 
   const replySignalsStartedAt = Date.now();
@@ -503,6 +659,9 @@ export async function listFollowupClientsForViewerPage(
   const cursor = parseBrandListCursor(input.cursor);
   const outPages: NotionPage[] = [];
 
+  const orderPage = (items: BrandListItem[]) =>
+    sortBrandListItemsBy(items, sort === "replyDue" ? "replyDue" : "priority");
+
   if (cursor.phase === "reply") {
     const slice = replyBrands.slice(cursor.offset, cursor.offset + pageSize);
     outPages.push(...slice.map((item) => item.page));
@@ -519,7 +678,7 @@ export async function listFollowupClientsForViewerPage(
         buffer: [],
       });
       outPages.push(...rest.pages);
-      const brands = sortBrandListItems(
+      const brands = orderPage(
         await enrichBrandPage(outPages, replySignals, replyBrandByKey, input.traceId),
       );
       return {
@@ -538,7 +697,7 @@ export async function listFollowupClientsForViewerPage(
 
     if (replyHasMore) {
       return {
-        brands: sortBrandListItems(
+        brands: orderPage(
           await enrichBrandPage(outPages, replySignals, replyBrandByKey, input.traceId),
         ),
         pageSize,
@@ -556,7 +715,7 @@ export async function listFollowupClientsForViewerPage(
       buffer: [],
     });
     return {
-      brands: sortBrandListItems(
+      brands: orderPage(
         await enrichBrandPage(outPages, replySignals, replyBrandByKey, input.traceId),
       ),
       pageSize,
@@ -583,7 +742,7 @@ export async function listFollowupClientsForViewerPage(
     buffer: cursor.buffer,
   });
   return {
-    brands: sortBrandListItems(
+    brands: orderPage(
       await enrichBrandPage(rest.pages, replySignals, replyBrandByKey, input.traceId),
     ),
     pageSize,
@@ -630,36 +789,320 @@ export async function countNeedsReplyBrandsForViewer(
   return count;
 }
 
-/** Reply-due path: paginate matching Needs Reply brand IDs (no full ClientDB scan). */
-async function listFollowupClientsByReplyDuePage(
+/** Needs Reply / Overdue: ConversationDB signal index + offset pagination (cached). */
+async function listFollowupClientsByReplySignalPage(
   input: ListFollowupClientsPageInput,
   pageSize: number,
+  mode: "needsReply" | "overdue",
+  sort: BrandListSort,
 ): Promise<ListFollowupClientsPageResult> {
   const replySignals = await listBrandReplySignals([]).catch(
     () => new Map<string, BrandReplySignal>(),
   );
-  const matching = await listFilteredReplyBrands(input, replySignals);
-  const matchingBrandByKey = new Map(
-    matching.map((item) => [pageKey(item.id), item.brand]),
+  const matching = await listFilteredReplyBrands(input, replySignals, {
+    overdueOnly: mode === "overdue",
+  });
+  const enrichedRows = matching.map((item) => ({
+    ...item,
+    brand: {
+      ...item.brand,
+      needsReply: true,
+      replyDueAt: item.dueAt,
+      replyUpdatedAt: item.dueAt,
+    },
+  }));
+  const effectiveSort: BrandListSort =
+    sort === "priority" || sort === "replyDue" ? "replyDue" : sort;
+  const orderedRows = [...enrichedRows].sort((a, b) =>
+    compareBrandListItems(a.brand, b.brand, effectiveSort),
   );
-  const offset = Math.max(0, Number(input.cursor || 0) || 0);
-  const slice = matching.slice(offset, offset + pageSize);
-  const brands = sortBrandListItems(
+  const matchingBrandByKey = new Map(
+    orderedRows.map((item) => [pageKey(item.id), item.brand]),
+  );
+  const { slice, nextCursor, hasMore } = paginateOffsetSlice(
+    orderedRows,
+    input.cursor,
+    pageSize,
+  );
+  const brands = await enrichBrandPage(
+    slice.map((item) => item.page),
+    replySignals,
+    matchingBrandByKey,
+    input.traceId,
+  );
+  return { brands, pageSize, nextCursor, hasMore };
+}
+
+/** Needs qualification: TaskDB Awaiting Review index + offset pagination (cached). */
+async function listFollowupClientsByQualificationPage(
+  input: ListFollowupClientsPageInput,
+  pageSize: number,
+  sort: BrandListSort,
+): Promise<ListFollowupClientsPageResult> {
+  const startedAt = Date.now();
+  const counts = await listBrandQualificationSignals().catch(
+    () => new Map<string, number>(),
+  );
+  const entries: Array<[string, BrandReplySignal]> = [...counts.entries()].map(
+    ([id]) => [id, { preview: "Awaiting call qualification", dueAt: null }],
+  );
+  if (!entries.length) {
+    logBrandListPhase(input.traceId, "qualification-metadata", startedAt, {
+      signalCount: 0,
+      matchedCount: 0,
+    });
+    return { brands: [], pageSize, nextCursor: null, hasMore: false };
+  }
+  const metadata = await listReplyBrandMetadata(entries, input);
+  const q = input.q?.trim().toLowerCase() || "";
+  const cp = input.cp?.trim() || "all";
+  const matching = metadata.filter(({ page, brand }) => {
+    if (!matchesNeedsReplyBrandScope(brand, input)) return false;
+    if (input.status && input.status !== "all" && brand.status !== input.status) return false;
+    if (!matchesHandlingModeFilter(brand, input.handlingMode)) return false;
+    if (!matchesExhibitionFilter(page, input.exhibitionId)) return false;
+    if (q && !brand.name.toLowerCase().includes(q)) return false;
+    if (cp !== "all" && brand.currentCp !== cp) return false;
+    return true;
+  });
+  const countByKey = new Map(
+    [...counts.entries()].map(([id, count]) => [pageKey(id), count]),
+  );
+  const enriched = matching.map(({ page, brand }) => ({
+    page,
+    brand: {
+      ...brand,
+      needsReply: false,
+      needsQualification: true,
+      qualificationTaskCount: countByKey.get(pageKey(page.id)) || 1,
+    },
+  }));
+  const orderedRows = [...enriched].sort((a, b) =>
+    compareBrandListItems(a.brand, b.brand, sort),
+  );
+  logBrandListPhase(input.traceId, "qualification-metadata", startedAt, {
+    signalCount: entries.length,
+    matchedCount: orderedRows.length,
+  });
+  const { slice, nextCursor, hasMore } = paginateOffsetSlice(
+    orderedRows,
+    input.cursor,
+    pageSize,
+  );
+  const emptyReplySignals = new Map<string, BrandReplySignal>();
+  const known = new Map(
+    slice.map(({ page, brand }) => [pageKey(page.id), brand]),
+  );
+  const brands = (
     await enrichBrandPage(
       slice.map((item) => item.page),
-      replySignals,
-      matchingBrandByKey,
+      emptyReplySignals,
+      known,
       input.traceId,
-    ),
+    )
+  ).map((brand) => ({
+    ...brand,
+    needsQualification: true,
+    qualificationTaskCount:
+      known.get(pageKey(brand.id))?.qualificationTaskCount || 1,
+  }));
+  return { brands, pageSize, nextCursor, hasMore };
+}
+
+/**
+ * Replied / Never replied: ClientDB `Last Reply At` rollup (scoped query cached 30s),
+ * minus current Needs Reply brands for “Replied”.
+ */
+async function listFollowupClientsByLastReplyPage(
+  input: ListFollowupClientsPageInput,
+  pageSize: number,
+  mode: "replied" | "never",
+  sort: BrandListSort,
+): Promise<ListFollowupClientsPageResult> {
+  const startedAt = Date.now();
+  const [metadata, replySignals] = await Promise.all([
+    listScopedClientBrandMetadata(input),
+    listBrandReplySignals([]).catch(() => new Map<string, BrandReplySignal>()),
+  ]);
+  const needsReplyKeys = new Set(
+    [...replySignals.keys()].map((id) => pageKey(id)),
   );
-  const nextOffset = offset + pageSize;
-  const hasMore = nextOffset < matching.length;
+  const q = input.q?.trim().toLowerCase() || "";
+  const cp = input.cp?.trim() || "all";
+  const matching = metadata.filter(({ page, brand }) => {
+    if (!matchesNeedsReplyBrandScope(brand, input)) return false;
+    if (input.status && input.status !== "all" && brand.status !== input.status) return false;
+    if (!matchesHandlingModeFilter(brand, input.handlingMode)) return false;
+    if (!matchesExhibitionFilter(page, input.exhibitionId)) return false;
+    if (q && !brand.name.toLowerCase().includes(q)) return false;
+    if (cp !== "all" && brand.currentCp !== cp) return false;
+    const hasReply = Boolean(brand.lastReplyAt);
+    const needsReply = needsReplyKeys.has(pageKey(brand.id));
+    if (mode === "never") return !hasReply;
+    return hasReply && !needsReply;
+  });
+  const orderedRows = [...matching]
+    .map((item) => ({
+      ...item,
+      brand: { ...item.brand, needsReply: false },
+    }))
+    .sort((a, b) => {
+      if (
+        mode === "replied" &&
+        (sort === "priority" || sort === "lastNewest" || sort === "lastOldest")
+      ) {
+        const aTime = a.brand.lastReplyAt || a.brand.lastInteractionAt || "";
+        const bTime = b.brand.lastReplyAt || b.brand.lastInteractionAt || "";
+        const cmp =
+          sort === "lastOldest" ? aTime.localeCompare(bTime) : bTime.localeCompare(aTime);
+        return cmp || a.brand.name.localeCompare(b.brand.name);
+      }
+      const effectiveSort: BrandListSort =
+        sort === "priority" ? (mode === "never" ? "nameAsc" : "lastNewest") : sort;
+      return compareBrandListItems(a.brand, b.brand, effectiveSort);
+    });
+  logBrandListPhase(input.traceId, "last-reply-metadata", startedAt, {
+    scopeCount: metadata.length,
+    matchedCount: orderedRows.length,
+    mode,
+    sort,
+  });
+  const { slice, nextCursor, hasMore } = paginateOffsetSlice(
+    orderedRows,
+    input.cursor,
+    pageSize,
+  );
+  const known = new Map(
+    slice.map(({ page, brand }) => [
+      pageKey(page.id),
+      {
+        ...brand,
+        needsReply: false,
+      },
+    ]),
+  );
+  const brands = await enrichBrandPage(
+    slice.map((item) => item.page),
+    replySignals,
+    known,
+    input.traceId,
+  );
+  return { brands, pageSize, nextCursor, hasMore };
+}
+
+/** Name A–Z / Z–A: Notion-native title sort + cursor pagination (no full ClientDB load). */
+async function listFollowupClientsByNotionTitlePage(
+  input: ListFollowupClientsPageInput,
+  pageSize: number,
+  sort: "nameAsc" | "nameDesc",
+): Promise<ListFollowupClientsPageResult> {
+  let currentCpPageId: string | undefined;
+  const cp = input.cp?.trim() || "all";
+  if (cp !== "all") {
+    const checkpoints = await listCheckpoints();
+    currentCpPageId = checkpoints.find((item) => item.name === cp)?.id;
+    if (!currentCpPageId) {
+      return { brands: [], pageSize, nextCursor: null, hasMore: false };
+    }
+  }
+  const filter = followupClientListFilter({
+    ownerPageId: input.ownerPageId,
+    includeTest: input.includeTest,
+    onlyTest: input.onlyTest,
+    status: input.status,
+    excludeStatuses: input.excludeStatuses,
+    titleContains: input.q,
+    currentCpPageId,
+    handlingMode: input.handlingMode,
+    exhibitionPageId: input.exhibitionId,
+  });
+  const cursor = parseBrandListCursor(input.cursor);
+  const notionCursor = cursor.phase === "rest" ? cursor.notionCursor : null;
+  const [batch, replySignals] = await Promise.all([
+    queryFollowupClientPagesPage({
+      filter,
+      startCursor: notionCursor,
+      pageSize,
+      sorts: [
+        {
+          property: "Follow-up Client",
+          direction: sort === "nameAsc" ? "ascending" : "descending",
+        },
+      ],
+    }),
+    listBrandReplySignals([]).catch(() => new Map<string, BrandReplySignal>()),
+  ]);
+  const brands = await enrichBrandPage(
+    batch.pages,
+    replySignals,
+    new Map(),
+    input.traceId,
+  );
   return {
     brands,
     pageSize,
-    nextCursor: hasMore ? String(nextOffset) : null,
-    hasMore,
+    nextCursor: batch.hasMore
+      ? encodeBrandListCursor({
+          phase: "rest",
+          notionCursor: batch.nextCursor,
+          buffer: [],
+        })
+      : null,
+    hasMore: batch.hasMore,
   };
+}
+
+/**
+ * Recent / oldest interaction: page a cached ClientDB scope sorted by rollup.
+ * Not used on the default priority hot path.
+ */
+async function listFollowupClientsByLastInteractionPage(
+  input: ListFollowupClientsPageInput,
+  pageSize: number,
+  sort: "lastNewest" | "lastOldest",
+): Promise<ListFollowupClientsPageResult> {
+  const startedAt = Date.now();
+  const [metadata, replySignals] = await Promise.all([
+    listScopedClientBrandMetadata(input),
+    listBrandReplySignals([]).catch(() => new Map<string, BrandReplySignal>()),
+  ]);
+  const q = input.q?.trim().toLowerCase() || "";
+  const cp = input.cp?.trim() || "all";
+  const matching = metadata.filter(({ brand }) => {
+    if (!matchesNeedsReplyBrandScope(brand, input)) return false;
+    if (input.status && input.status !== "all" && brand.status !== input.status) return false;
+    if (!matchesHandlingModeFilter(brand, input.handlingMode)) return false;
+    if (q && !brand.name.toLowerCase().includes(q)) return false;
+    if (cp !== "all" && brand.currentCp !== cp) return false;
+    return true;
+  });
+  const orderedBrands = sortBrandListItemsBy(
+    matching.map((item) => item.brand),
+    sort,
+  );
+  const byKey = new Map(matching.map((item) => [pageKey(item.brand.id), item]));
+  const orderedRows = orderedBrands.flatMap((brand) => {
+    const row = byKey.get(pageKey(brand.id));
+    return row ? [row] : [];
+  });
+  logBrandListPhase(input.traceId, "last-interaction-sort", startedAt, {
+    scopeCount: metadata.length,
+    matchedCount: orderedRows.length,
+    sort,
+  });
+  const { slice, nextCursor, hasMore } = paginateOffsetSlice(
+    orderedRows,
+    input.cursor,
+    pageSize,
+  );
+  const known = new Map(slice.map(({ page, brand }) => [pageKey(page.id), brand]));
+  const brands = await enrichBrandPage(
+    slice.map((item) => item.page),
+    replySignals,
+    known,
+    input.traceId,
+  );
+  return { brands, pageSize, nextCursor, hasMore };
 }
 
 async function resolveBombMeta(pageId: string) {
@@ -762,6 +1205,7 @@ export async function mapFollowupClientDetail(
     ),
     priority: propertyText(properties.Priority) || null,
     notes: propertyText(properties.Notes) || null,
+    humanNotes: propertyText(properties["Human Notes"]) || null,
     createdAt: page.created_time || properties["Created At"]?.created_time || null,
     lastEditedAt: page.last_edited_time || properties["Last Edited At"]?.last_edited_time || null,
     currentCpFullName: cpMeta.fullName,

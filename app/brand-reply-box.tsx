@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CheckCircle2, Send } from "lucide-react";
+import { Send } from "lucide-react";
 import { toast } from "sonner";
 import { Channel, Contact, Interaction, ScheduledAction, WorkspaceState } from "@/lib/outreach-domain";
 import { useWorkspace } from "./workspace-store";
@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { easternDateTimeLocalToIso } from "@/lib/scheduling-engine/calendar";
 import { SendTimingToggle, type DeliveryMode } from "./send-timing-toggle";
 import { MessageMediaInputFrame, useMessageMedia } from "./message-media";
 import { EmailBodyEditor } from "./email-body-editor";
@@ -81,7 +82,6 @@ export function BrandReplyBox({
   taskId,
   onSend,
   open = true,
-  onMarkHandled,
 }: {
   customerId: string;
   interaction: Interaction;
@@ -92,9 +92,8 @@ export function BrandReplyBox({
   taskId?: string;
   onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: DeliveryMode, scheduledAt?: string, attachments?: MediaAttachment[], cc?: string) => Promise<void>;
   open?: boolean;
-  onMarkHandled?: (interaction: Interaction) => Promise<void>;
 }) {
-  const { state, can, sendHumanReply, markReplyHandled } = useWorkspace();
+  const { state, can, sendHumanReply } = useWorkspace();
   const customer = state.customers.find(item => item.id === customerId);
   const people = contacts || customer?.contacts || [];
   const [content, setContent] = useState("");
@@ -103,13 +102,12 @@ export function BrandReplyBox({
   );
   const [cc, setCc] = useState("");
   const [saving, setSaving] = useState(false);
-  const [marking, setMarking] = useState(false);
   const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("scheduled");
   const [scheduledAt, setScheduledAt] = useState("");
   const contact = people.find(item => item.id === interaction.contactId) || people[0];
   const channel = interaction.channel;
   const media = useMessageMedia(channel);
-  const notionBacked = !!onSend || !!onMarkHandled;
+  const notionBacked = !!onSend;
   if (!open) return null;
   if (!can("reply") || !people.length) return null;
   if (!notionBacked && customer?.status === "Closed") return null;
@@ -117,36 +115,11 @@ export function BrandReplyBox({
   if (!contact || !channel) return null;
   const replyTaskId = interaction.taskId || actions?.find(item => item.bombInstanceId === bombInstanceId && item.channel === channel)?.id || taskId;
   const hasBody = (channel === "Email" ? !emailBodyIsEmpty(content) : !!content.trim()) || media.readyAttachments.length > 0;
-  const busy = saving || marking;
+  const busy = saving;
   const canSend = hasBody && !(channel === "Email" && !subject.trim()) && !busy && !media.uploading;
-  const handleMarkHandled = () => {
-    if (busy) return;
-    if (onMarkHandled) {
-      setMarking(true);
-      void onMarkHandled(interaction)
-        .then(() => toast.success("Marked as handled"))
-        .catch(error => toast.error(error instanceof Error ? error.message : "Unable to mark as handled"))
-        .finally(() => setMarking(false));
-      return;
-    }
-    show(markReplyHandled(interaction.id));
-  };
   return (
     <div className="mt-3 rounded-xl bg-slate-50 p-3">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
-        <div className="text-xs font-medium text-slate-600">{contact.name} · {channel}</div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-7 px-2.5 text-xs"
-          disabled={busy}
-          onClick={handleMarkHandled}
-        >
-          <CheckCircle2 className="mr-1 size-3.5" />
-          {marking ? "Saving…" : "Mark as handled"}
-        </Button>
-      </div>
+      <div className="mb-2 text-xs font-medium text-slate-600">{contact.name} · {channel}</div>
       <div className="min-w-0 space-y-2">
         {channel === "Email" && <Input value={subject} onChange={event => setSubject(event.target.value)} placeholder="Email subject" disabled={busy} />}
         {channel === "Email" && <Input value={cc} onChange={event => setCc(event.target.value)} placeholder="CC (comma-separated)" disabled={busy} />}
@@ -163,7 +136,7 @@ export function BrandReplyBox({
           <Button className="h-9 px-3" disabled={!canSend} onClick={() => {
           if (onSend) {
             setSaving(true);
-            void onSend(contact.id, channel, content, replyTaskId, interaction.threadId, subject, deliveryMode, scheduledAt ? new Date(scheduledAt).toISOString() : undefined, media.readyAttachments, channel === "Email" ? cc : undefined)
+            void onSend(contact.id, channel, content, replyTaskId, interaction.threadId, subject, deliveryMode, scheduledAt ? easternDateTimeLocalToIso(scheduledAt) : undefined, media.readyAttachments, channel === "Email" ? cc : undefined)
               .then(() => { toast.success("Message saved as pending"); setContent(""); setSubject(""); setCc(""); media.reset(); })
               .catch(error => toast.error(error instanceof Error ? error.message : "Send failed"))
               .finally(() => setSaving(false));
@@ -252,7 +225,7 @@ export function ChannelSendBox({
             if (!contact) return;
             if (onSend) {
               setSaving(true);
-              void onSend(contact.id, channel, content, taskId, threadId, undefined, deliveryMode, scheduledAt ? new Date(scheduledAt).toISOString() : undefined, media.readyAttachments)
+              void onSend(contact.id, channel, content, taskId, threadId, undefined, deliveryMode, scheduledAt ? easternDateTimeLocalToIso(scheduledAt) : undefined, media.readyAttachments)
                 .then(() => { toast.success("Message saved as pending"); setContent(""); media.reset(); })
                 .catch(error => toast.error(error instanceof Error ? error.message : "Send failed"))
                 .finally(() => setSaving(false));

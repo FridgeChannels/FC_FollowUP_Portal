@@ -330,6 +330,8 @@ export type BrandDetail = BrandListItem & {
   amazonSampleProduct?: import("./sample-product").AmazonSampleProduct;
   priority: string | null;
   notes: string | null;
+  /** Follow-up ClientDB `Human Notes` — Portal Add Note content. */
+  humanNotes: string | null;
   createdAt: string | null;
   lastEditedAt: string | null;
   currentCpFullName: string | null;

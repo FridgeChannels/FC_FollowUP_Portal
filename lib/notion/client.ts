@@ -204,6 +204,8 @@ export async function queryFollowupClientPages(
     excludeStatuses?: string[];
     titleContains?: string | null;
     currentCpPageId?: string | null;
+    handlingMode?: string | null;
+    exhibitionPageId?: string | null;
   },
 ) {
   return queryDatabasePages(
@@ -216,6 +218,8 @@ export async function queryFollowupClientPages(
       excludeStatuses: options?.excludeStatuses,
       titleContains: options?.titleContains,
       currentCpPageId: options?.currentCpPageId,
+      handlingMode: options?.handlingMode,
+      exhibitionPageId: options?.exhibitionPageId,
     }),
   );
 }

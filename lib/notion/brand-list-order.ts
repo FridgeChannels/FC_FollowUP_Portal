@@ -1,20 +1,91 @@
 import type { BrandListItem } from "../brand-list";
 
-/** Page-local / mixed-page order: Needs Reply first, then qualification, then recency. */
+export const BRAND_LIST_SORTS = [
+  "priority",
+  "nameAsc",
+  "nameDesc",
+  "lastNewest",
+  "lastOldest",
+  "replyDue",
+] as const;
+
+export type BrandListSort = (typeof BRAND_LIST_SORTS)[number];
+
+export function normalizeBrandListSort(value?: string | null): BrandListSort {
+  const next = value?.trim() || "priority";
+  return (BRAND_LIST_SORTS as readonly string[]).includes(next)
+    ? (next as BrandListSort)
+    : "priority";
+}
+
+/** Default list: Needs Reply first (by due), then qualification, then recency. */
 export function sortBrandListItems(brands: BrandListItem[]) {
-  return [...brands].sort((a, b) => {
-    const replyRank = (item: BrandListItem) => (item.needsReply ? 1 : 0);
-    const qualificationRank = (item: BrandListItem) => (item.needsQualification ? 1 : 0);
-    const aTime = a.replyDueAt || a.replyUpdatedAt || a.lastInteractionAt || "";
-    const bTime = b.replyDueAt || b.replyUpdatedAt || b.lastInteractionAt || "";
+  return sortBrandListItemsBy(brands, "priority");
+}
+
+export function sortBrandListItemsBy(
+  brands: BrandListItem[],
+  sort: BrandListSort,
+) {
+  return [...brands].sort((a, b) => compareBrandListItems(a, b, sort));
+}
+
+export function compareBrandListItems(
+  a: BrandListItem,
+  b: BrandListItem,
+  sort: BrandListSort,
+) {
+  const timeValue = (value?: string | null) => (value ? Date.parse(value) || 0 : 0);
+  if (sort === "nameAsc") return a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
+  if (sort === "nameDesc") return b.name.localeCompare(a.name) || a.id.localeCompare(b.id);
+  if (sort === "lastNewest") {
     return (
-      replyRank(b) - replyRank(a) ||
-      qualificationRank(b) - qualificationRank(a) ||
-      (a.needsReply && b.needsReply ? aTime.localeCompare(bTime) : 0) ||
-      bTime.localeCompare(aTime) ||
+      timeValue(b.lastInteractionAt) - timeValue(a.lastInteractionAt) ||
       a.name.localeCompare(b.name)
     );
-  });
+  }
+  if (sort === "lastOldest") {
+    return (
+      timeValue(a.lastInteractionAt) - timeValue(b.lastInteractionAt) ||
+      a.name.localeCompare(b.name)
+    );
+  }
+  if (sort === "replyDue") {
+    const replyRank = (item: BrandListItem) => (item.needsReply ? 1 : 0);
+    const aDue = itemDue(a);
+    const bDue = itemDue(b);
+    return (
+      replyRank(b) - replyRank(a) ||
+      (a.needsReply && b.needsReply ? aDue.localeCompare(bDue) : 0) ||
+      a.name.localeCompare(b.name)
+    );
+  }
+  // priority
+  const replyRank = (item: BrandListItem) => (item.needsReply ? 1 : 0);
+  const qualificationRank = (item: BrandListItem) => (item.needsQualification ? 1 : 0);
+  const aTime = itemDue(a) || a.lastInteractionAt || "";
+  const bTime = itemDue(b) || b.lastInteractionAt || "";
+  return (
+    replyRank(b) - replyRank(a) ||
+    qualificationRank(b) - qualificationRank(a) ||
+    (a.needsReply && b.needsReply ? aTime.localeCompare(bTime) : 0) ||
+    bTime.localeCompare(aTime) ||
+    a.name.localeCompare(b.name)
+  );
+}
+
+function itemDue(item: BrandListItem) {
+  return item.replyDueAt || item.replyUpdatedAt || "";
+}
+
+/** Title sorts use Notion DB sorts (no full ClientDB materialization). */
+export function isNotionTitleSort(sort: BrandListSort) {
+  return sort === "nameAsc" || sort === "nameDesc";
+}
+
+/** Last-interaction sorts page a cached ClientDB scope (not the default hot path). */
+export function isLastInteractionSort(sort: BrandListSort) {
+  return sort === "lastNewest" || sort === "lastOldest";
 }
 
 export type BrandListCursor =

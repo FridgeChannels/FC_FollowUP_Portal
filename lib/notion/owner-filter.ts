@@ -40,6 +40,15 @@ export function ownerRelationFilter(ownerPageId?: string | null) {
 /** Default Brands table page size. */
 export const DEFAULT_BRAND_PAGE_SIZE = 10;
 
+const HANDLING_MODE_VALUES = new Set(["Automated", "Human"]);
+
+/** Brands list Handling Mode filter — `null` means all modes. */
+export function normalizeHandlingModeFilter(value?: string | null) {
+  const next = value?.trim();
+  if (!next || next === "all") return null;
+  return HANDLING_MODE_VALUES.has(next) ? next : null;
+}
+
 export function followupClientListFilter(options: {
   ownerPageId?: string | null;
   includeTest?: boolean;
@@ -53,6 +62,10 @@ export function followupClientListFilter(options: {
   titleContains?: string | null;
   /** Current CP relation page id. */
   currentCpPageId?: string | null;
+  /** Exact Handling Mode (`Automated` / `Human`), or omit / "all". */
+  handlingMode?: string | null;
+  /** Follow-up Exhibition relation page id. */
+  exhibitionPageId?: string | null;
 } = {}) {
   const testScope = options.onlyTest
     ? testClientFilter()
@@ -83,6 +96,20 @@ export function followupClientListFilter(options: {
     filters.push({
       property: "Current CP",
       relation: { contains: options.currentCpPageId },
+    });
+  }
+  const handlingMode = normalizeHandlingModeFilter(options.handlingMode);
+  if (handlingMode) {
+    filters.push({
+      property: "Handling Mode",
+      select: { equals: handlingMode },
+    });
+  }
+  const exhibitionPageId = options.exhibitionPageId?.trim();
+  if (exhibitionPageId && exhibitionPageId !== "all") {
+    filters.push({
+      property: "Follow-up Exhibition",
+      relation: { contains: exhibitionPageId },
     });
   }
   return andFilters(...filters);

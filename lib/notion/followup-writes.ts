@@ -24,6 +24,7 @@ import type {
 import { CHANNELS as SCHEDULE_CHANNELS } from "../scheduling-engine/types";
 import { notionScheduledAtProperty } from "./scheduled-at";
 import { invalidateBrandReplySignalCache } from "./brand-reply-signal-cache";
+import { invalidateExhibitionOptionsCache } from "./exhibition-options-cache";
 import { listChannelCapacityConfig } from "./capacity";
 import { chooseConversationThreadId } from "./conversation-thread";
 import { listFollowupConversations } from "./conversations";
@@ -207,6 +208,7 @@ export async function updateFollowupClient(
     status?: string | null;
     handlingMode?: string | null;
     notes?: string | null;
+    humanNotes?: string | null;
     channelType?: ChannelType;
     amazonSampleProduct?: AmazonSampleProduct;
   },
@@ -247,6 +249,10 @@ export async function updateFollowupClient(
 
   if (patch.notes !== undefined) {
     properties.Notes = { rich_text: richText(patch.notes || "") };
+  }
+
+  if (patch.humanNotes !== undefined) {
+    properties["Human Notes"] = { rich_text: richText(patch.humanNotes || "") };
   }
 
   if (patch.channelType !== undefined) {
@@ -340,7 +346,9 @@ export async function createFollowupClient(input: CreateFollowupClientInput) {
     properties.Notes = { rich_text: richText(input.notes.trim()) };
   }
 
-  return createPage(getFollowupClientDbId(), properties);
+  const page = await createPage(getFollowupClientDbId(), properties);
+  if (exhibitionId) invalidateExhibitionOptionsCache();
+  return page;
 }
 
 export async function markFollowupClientEngaged(

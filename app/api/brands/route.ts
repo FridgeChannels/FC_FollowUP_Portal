@@ -40,8 +40,12 @@ async function getBrands(request: Request) {
     const statusParam = url.searchParams.get("status");
     const cpParam = url.searchParams.get("cp");
     const qParam = url.searchParams.get("q");
+    const replyState = url.searchParams.get("replyState");
+    const handlingMode = url.searchParams.get("handlingMode");
+    const exhibitionId = url.searchParams.get("exhibitionId");
     const replyFrom = url.searchParams.get("replyFrom");
     const replyTo = url.searchParams.get("replyTo");
+    const sort = url.searchParams.get("sort");
     const cursor = url.searchParams.get("cursor");
 
     const ownerPageId = ownerPageIdFromQueryParam(
@@ -73,8 +77,12 @@ async function getBrands(request: Request) {
         excludeStatuses,
         q: qParam,
         cp: cpParam,
+        replyState,
+        handlingMode,
+        exhibitionId,
         replyFrom,
         replyTo,
+        sort,
         cursor,
         pageSize: DEFAULT_BRAND_PAGE_SIZE,
       }),

@@ -3,10 +3,12 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  Bomb, ChevronDown, ClipboardCheck, LogOut,
+  Bomb, ChevronDown, ClipboardCheck, LogOut, RefreshCw,
   Users, Zap,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Role } from "@/lib/outreach-domain";
+import { clearBrandListPageCache } from "@/lib/brand-list-cache";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import {
@@ -52,6 +54,8 @@ export default function OutreachWorkspace({ children }: { children?: ReactNode }
   const screen = routeScreen(pathname);
   const [taskCount, setTaskCount] = useState(0);
   const [brandReplyCount, setBrandReplyCount] = useState(0);
+  const [clearingCache, setClearingCache] = useState(false);
+  const isAdmin = user?.role === "Admin" || state.currentRole === "Admin";
 
   useEffect(() => {
     if (sessionLoading) return;
@@ -262,6 +266,32 @@ export default function OutreachWorkspace({ children }: { children?: ReactNode }
                 <span className="block truncate text-xs text-muted-foreground">{user.email}</span>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
+              {isAdmin ? (
+                <DropdownMenuItem
+                  disabled={clearingCache}
+                  onClick={() => {
+                    void (async () => {
+                      if (clearingCache) return;
+                      setClearingCache(true);
+                      try {
+                        const response = await fetch("/api/admin/cache/clear", { method: "POST" });
+                        const payload = await response.json() as { error?: string };
+                        if (!response.ok) throw new Error(payload.error || "Unable to clear caches");
+                        clearBrandListPageCache();
+                        window.dispatchEvent(new Event("fc-portal-caches-cleared"));
+                        toast.success("Portal caches cleared");
+                      } catch (error) {
+                        toast.error(error instanceof Error ? error.message : "Unable to clear caches");
+                      } finally {
+                        setClearingCache(false);
+                      }
+                    })();
+                  }}
+                >
+                  <RefreshCw className={`size-4 ${clearingCache ? "animate-spin" : ""}`} />
+                  {clearingCache ? "Clearing caches…" : "Clear caches"}
+                </DropdownMenuItem>
+              ) : null}
               <DropdownMenuItem
                 onClick={async () => {
                   await signOut();

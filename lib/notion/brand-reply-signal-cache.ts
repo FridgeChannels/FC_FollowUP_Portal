@@ -101,10 +101,55 @@ export async function getCachedBrandReplyMetadata(
   return [...items];
 }
 
+let qualificationCached:
+  | {
+      expiresAt: number;
+      signals: Map<string, number>;
+    }
+  | null = null;
+let qualificationPending:
+  | {
+      generation: number;
+      promise: Promise<Map<string, number>>;
+    }
+  | null = null;
+
+/** brandId → Awaiting Review Phone task count (cached like Needs Reply signals). */
+export async function getCachedBrandQualificationSignals(
+  load: () => Promise<Map<string, number>>,
+): Promise<Map<string, number>> {
+  if (qualificationCached && qualificationCached.expiresAt > Date.now()) {
+    return new Map(qualificationCached.signals);
+  }
+  const loadGeneration = generation;
+  if (
+    qualificationPending &&
+    qualificationPending.generation === loadGeneration
+  ) {
+    return new Map(await qualificationPending.promise);
+  }
+  const promise = load().then((signals) => {
+    if (generation === loadGeneration) {
+      qualificationCached = {
+        expiresAt: Date.now() + BRAND_REPLY_SIGNAL_CACHE_MS,
+        signals: new Map(signals),
+      };
+    }
+    return signals;
+  });
+  qualificationPending = { generation: loadGeneration, promise };
+  const signals = await promise.finally(() => {
+    if (qualificationPending?.promise === promise) qualificationPending = null;
+  });
+  return new Map(signals);
+}
+
 export function invalidateBrandReplySignalCache() {
   generation += 1;
   cached = null;
   metadataCached = null;
   signalsPending = null;
   metadataPending = null;
+  qualificationCached = null;
+  qualificationPending = null;
 }

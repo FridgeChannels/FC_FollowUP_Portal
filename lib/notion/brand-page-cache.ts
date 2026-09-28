@@ -31,3 +31,7 @@ export function getCachedBrandPage(id: string) {
   }
   return cached.page;
 }
+
+export function clearBrandPageCache() {
+  pages.clear();
+}

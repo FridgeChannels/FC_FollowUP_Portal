@@ -4,6 +4,7 @@ import {
   andFilters,
   followupClientListFilter,
   nonTestClientFilter,
+  normalizeHandlingModeFilter,
   ownerPageIdFromQueryParam,
   ownerRelationFilter,
   parseDateOnlyParam,
@@ -83,7 +84,7 @@ describe("followupClientListFilter", () => {
     });
   });
 
-  it("combines owner, status, title, and non-test", () => {
+  it("combines owner, status, title, handling mode, and non-test", () => {
     assert.deepEqual(
       followupClientListFilter({
         ownerPageId: "owner-1",
@@ -91,6 +92,8 @@ describe("followupClientListFilter", () => {
         excludeStatuses: ["Paused"],
         titleContains: "Acme",
         currentCpPageId: "cp-1",
+        handlingMode: "Human",
+        exhibitionPageId: "ex-1",
       }),
       {
         and: [
@@ -100,9 +103,20 @@ describe("followupClientListFilter", () => {
           { property: "Follow-up Status", status: { does_not_equal: "Paused" } },
           { property: "Follow-up Client", title: { contains: "Acme" } },
           { property: "Current CP", relation: { contains: "cp-1" } },
+          { property: "Handling Mode", select: { equals: "Human" } },
+          { property: "Follow-up Exhibition", relation: { contains: "ex-1" } },
         ],
       },
     );
+  });
+});
+
+describe("normalizeHandlingModeFilter", () => {
+  it("accepts Automated / Human and ignores all/unknown", () => {
+    assert.equal(normalizeHandlingModeFilter("Automated"), "Automated");
+    assert.equal(normalizeHandlingModeFilter("Human"), "Human");
+    assert.equal(normalizeHandlingModeFilter("all"), null);
+    assert.equal(normalizeHandlingModeFilter("Other"), null);
   });
 });
 

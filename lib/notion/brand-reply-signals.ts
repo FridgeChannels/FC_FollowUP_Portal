@@ -9,9 +9,12 @@ import {
   titleFromProperties,
   type NotionPage,
 } from "./client";
-import { getFollowupConversationDbId } from "./config";
+import { getFollowupConversationDbId, getFollowupTaskDbId } from "./config";
 import { listFollowupConversationsByBrands } from "./conversations";
-import { getCachedBrandReplySignals } from "./brand-reply-signal-cache";
+import {
+  getCachedBrandQualificationSignals,
+  getCachedBrandReplySignals,
+} from "./brand-reply-signal-cache";
 import { REPLY_DUE_PROPERTY } from "./reply-due";
 import { listFollowupTaskSignalsByBrands } from "./tasks";
 
@@ -148,6 +151,27 @@ async function loadBrandReplySignals(clientPages: NotionPage[]) {
 
 export async function listBrandReplySignals(clientPages: NotionPage[] = []) {
   return getCachedBrandReplySignals(() => loadBrandReplySignals(clientPages));
+}
+
+async function loadBrandQualificationSignals() {
+  const pages = await queryDatabasePages(getFollowupTaskDbId(), {
+    and: [
+      { property: "Call Review Status", select: { equals: "Awaiting Review" } },
+      { property: "Channel", select: { equals: "Phone" } },
+    ],
+  });
+  const counts = new Map<string, number>();
+  for (const page of pages) {
+    const brandId = firstRelationId(page.properties?.["Follow-up Client"]);
+    if (!brandId) continue;
+    counts.set(brandId, (counts.get(brandId) || 0) + 1);
+  }
+  return counts;
+}
+
+/** Global Phone “Awaiting Review” brand → task count (TaskDB index, 30s cache). */
+export async function listBrandQualificationSignals() {
+  return getCachedBrandQualificationSignals(() => loadBrandQualificationSignals());
 }
 
 function pageKey(id: string) {

@@ -118,6 +118,30 @@ export function easternMinuteOfDayCeil(value: string | Date = new Date()): numbe
   return minute;
 }
 
+/** `YYYY-MM-DDTHH:mm` in America/New_York wall time (datetime-local style). */
+export function formatEasternDateTimeLocal(value: string | Date = new Date()): string {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new Error(`Invalid datetime for formatEasternDateTimeLocal: ${String(value)}`);
+  }
+  const parts = zonedParts(date, SCHEDULE_TIME_ZONE);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${parts.year}-${pad(parts.month)}-${pad(parts.day)}T${pad(parts.hour)}:${pad(parts.minute)}`;
+}
+
+/**
+ * Parse Eastern wall-time `YYYY-MM-DDTHH:mm` to a UTC ISO instant.
+ * Does not treat the string as the browser's local zone.
+ */
+export function easternDateTimeLocalToIso(local: string): string {
+  const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})$/.exec(local.trim());
+  if (!match) {
+    throw new Error(`Invalid Eastern local datetime: ${local}`);
+  }
+  const minuteOfDay = Number(match[2]) * 60 + Number(match[3]);
+  return easternDateTimeIso(match[1], minuteOfDay);
+}
+
 /** Build ISO instant for an America/New_York local date + minute-of-day. */
 export function easternDateTimeIso(dateOnly: string, minuteOfDay: number): string {
   assertDateOnly(dateOnly, "dateOnly");
