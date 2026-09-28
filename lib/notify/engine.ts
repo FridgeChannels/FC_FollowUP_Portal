@@ -48,12 +48,15 @@ export async function emitNotification(
   });
 }
 
-/** Fire-and-forget — safe on API success paths. */
+/**
+ * Emit without throwing — callers should still `await` this before returning a
+ * Worker response, otherwise Cloudflare may kill the Slack fetch mid-flight.
+ */
 export function emitNotificationSafe(
   event: NotificationEvent,
   options: EmitOptions = {},
-): void {
-  void emitNotification(event, options).catch((error) => {
+): Promise<void> {
+  return emitNotification(event, options).catch((error) => {
     const message = error instanceof Error ? error.message : String(error);
     console.error("notify emit failed", { eventType: event.eventType, error: message });
   });

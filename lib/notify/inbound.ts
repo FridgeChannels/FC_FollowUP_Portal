@@ -81,10 +81,10 @@ export function buildInboundNotificationEvent(
   };
 }
 
-export function notifyReplyReceived(ctx: IngestNotifyContext): void {
-  emitNotificationSafe(buildReplyNotificationEvent(ctx));
+export function notifyReplyReceived(ctx: IngestNotifyContext): Promise<void> {
+  return emitNotificationSafe(buildReplyNotificationEvent(ctx));
 }
 
-export function notifyInboundReceived(ctx: IngestNotifyContext): void {
-  emitNotificationSafe(buildInboundNotificationEvent(ctx));
+export function notifyInboundReceived(ctx: IngestNotifyContext): Promise<void> {
+  return emitNotificationSafe(buildInboundNotificationEvent(ctx));
 }

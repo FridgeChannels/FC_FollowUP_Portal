@@ -170,6 +170,7 @@ export function InteractionFeed({
   actions,
   maxHeight,
   onSend,
+  onMarkHandled,
   onCancelBomb,
   onCancelPending,
   initialChannel,
@@ -204,6 +205,7 @@ export function InteractionFeed({
   bombInstances?: BombInstance[];
   actions?: ScheduledAction[];
   onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, scheduledAt?: string, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string) => Promise<void>;
+  onMarkHandled?: (interaction: Interaction) => Promise<void>;
   onCancelBomb?: (instance: BombInstance) => Promise<void>;
   onCancelPending?: (taskId: string) => Promise<void>;
   initialChannel?: Channel;
@@ -413,6 +415,7 @@ export function InteractionFeed({
       channel={activeChannel}
       bombInstances={planState.bombInstances}
       onSend={onSend}
+      onMarkHandled={onMarkHandled}
       onCancelPending={onCancelPending}
       onRefreshQuo={onRefreshQuo}
       quoRefreshingCallId={quoRefreshingCallId}
@@ -454,7 +457,7 @@ export function InteractionFeed({
                   }}>{cancellingBombId === instance.id ? "Stopping…" : "Stop OmniReach"}</Button>}
                 </div>
               </div>
-              <BombExecutionPlan state={planState} instanceId={instance.id} contacts={contacts} onSend={onSend}/>
+              <BombExecutionPlan state={planState} instanceId={instance.id} contacts={contacts} onSend={onSend} onMarkHandled={onMarkHandled}/>
             </div>
           ))}
         </div>
@@ -469,6 +472,7 @@ function ChannelTranscript({
   channel,
   bombInstances,
   onSend,
+  onMarkHandled,
   onCancelPending,
   onRefreshQuo,
   quoRefreshingCallId,
@@ -483,6 +487,7 @@ function ChannelTranscript({
   channel: Channel;
   bombInstances: BombInstance[];
   onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, scheduledAt?: string, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string) => Promise<void>;
+  onMarkHandled?: (interaction: Interaction) => Promise<void>;
   onCancelPending?: (taskId: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
@@ -514,6 +519,7 @@ function ChannelTranscript({
           bombInstances={bombInstances}
           onBack={() => setSelectedThread(null)}
           onSend={onSend}
+          onMarkHandled={onMarkHandled}
           onCancelPending={onCancelPending}
           onRefreshQuo={onRefreshQuo}
           quoRefreshingCallId={quoRefreshingCallId}
@@ -534,7 +540,7 @@ function ChannelTranscript({
     ) : (
       <div className="divide-y">
         {contactGroups.map(group => (
-          <ContactThreads key={group.contact?.id || "unknown"} group={group} replyPool={messages} channel={channel} bombInstances={bombInstances} onSend={onSend} onCancelPending={onCancelPending} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId} resolveReview={resolveReview} canReviewCalls={canReviewCalls} reviewingTaskId={reviewingTaskId} onReviewCall={onReviewCall} onMarkReplyRead={onMarkReplyRead}/>
+          <ContactThreads key={group.contact?.id || "unknown"} group={group} replyPool={messages} channel={channel} bombInstances={bombInstances} onSend={onSend} onMarkHandled={onMarkHandled} onCancelPending={onCancelPending} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId} resolveReview={resolveReview} canReviewCalls={canReviewCalls} reviewingTaskId={reviewingTaskId} onReviewCall={onReviewCall} onMarkReplyRead={onMarkReplyRead}/>
         ))}
       </div>
     )}
@@ -690,6 +696,7 @@ function ConversationDetail({
   bombInstances,
   onBack,
   onSend,
+  onMarkHandled,
   onCancelPending,
   onRefreshQuo,
   quoRefreshingCallId,
@@ -706,6 +713,7 @@ function ConversationDetail({
   bombInstances: BombInstance[];
   onBack: () => void;
   onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, scheduledAt?: string, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string) => Promise<void>;
+  onMarkHandled?: (interaction: Interaction) => Promise<void>;
   onCancelPending?: (taskId: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
@@ -729,7 +737,7 @@ function ConversationDetail({
         {contact ? <p className="mt-1 truncate text-sm text-slate-500">{contact.name}{endpoint ? ` · ${endpoint}` : ""}</p> : null}
       </div>
       <div className="px-5 pb-5">
-        <ThreadMessages thread={thread} replyPool={replyPool} contact={contact} channel={channel} endpoint={endpoint} bombInstances={bombInstances} collapseOlder expandAll={expandAll} onSend={onSend} onCancelPending={onCancelPending} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId} resolveReview={resolveReview} canReviewCalls={canReviewCalls} reviewingTaskId={reviewingTaskId} onReviewCall={onReviewCall} onMarkReplyRead={onMarkReplyRead} />
+        <ThreadMessages thread={thread} replyPool={replyPool} contact={contact} channel={channel} endpoint={endpoint} bombInstances={bombInstances} collapseOlder expandAll={expandAll} onSend={onSend} onMarkHandled={onMarkHandled} onCancelPending={onCancelPending} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId} resolveReview={resolveReview} canReviewCalls={canReviewCalls} reviewingTaskId={reviewingTaskId} onReviewCall={onReviewCall} onMarkReplyRead={onMarkReplyRead} />
       </div>
     </section>
   );
@@ -741,6 +749,7 @@ function ContactThreads({
   channel,
   bombInstances,
   onSend,
+  onMarkHandled,
   onCancelPending,
   onRefreshQuo,
   quoRefreshingCallId,
@@ -755,6 +764,7 @@ function ContactThreads({
   channel: Channel;
   bombInstances: BombInstance[];
   onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, scheduledAt?: string, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string) => Promise<void>;
+  onMarkHandled?: (interaction: Interaction) => Promise<void>;
   onCancelPending?: (taskId: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
@@ -782,7 +792,7 @@ function ContactThreads({
     </div>
     <div className="space-y-6">
       {threads.map(thread => (
-        <ThreadMessages key={threadKey(thread[0])} thread={thread} replyPool={replyPool} contact={group.contact} channel={channel} endpoint={endpoint} bombInstances={bombInstances} onSend={onSend} onCancelPending={onCancelPending} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId} resolveReview={resolveReview} canReviewCalls={canReviewCalls} reviewingTaskId={reviewingTaskId} onReviewCall={onReviewCall} onMarkReplyRead={onMarkReplyRead}/>
+        <ThreadMessages key={threadKey(thread[0])} thread={thread} replyPool={replyPool} contact={group.contact} channel={channel} endpoint={endpoint} bombInstances={bombInstances} onSend={onSend} onMarkHandled={onMarkHandled} onCancelPending={onCancelPending} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId} resolveReview={resolveReview} canReviewCalls={canReviewCalls} reviewingTaskId={reviewingTaskId} onReviewCall={onReviewCall} onMarkReplyRead={onMarkReplyRead}/>
       ))}
     </div>
   </section>;
@@ -796,6 +806,7 @@ function ThreadMessages({
   endpoint,
   bombInstances,
   onSend,
+  onMarkHandled,
   onCancelPending,
   onRefreshQuo,
   quoRefreshingCallId,
@@ -814,6 +825,7 @@ function ThreadMessages({
   endpoint?: string;
   bombInstances: BombInstance[];
   onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, scheduledAt?: string, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string) => Promise<void>;
+  onMarkHandled?: (interaction: Interaction) => Promise<void>;
   onCancelPending?: (taskId: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
@@ -1003,6 +1015,7 @@ function ThreadMessages({
             taskId={item.taskId}
             onSend={onSend}
             open={replyOpenIds.has(item.id)}
+            onMarkHandled={onMarkHandled}
           />
         )}
         </div>
