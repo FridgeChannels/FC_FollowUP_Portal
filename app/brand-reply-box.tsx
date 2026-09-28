@@ -102,7 +102,7 @@ export function BrandReplyBox({
   );
   const [cc, setCc] = useState("");
   const [saving, setSaving] = useState(false);
-  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("scheduled");
+  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("queue");
   const [scheduledAt, setScheduledAt] = useState("");
   const contact = people.find(item => item.id === interaction.contactId) || people[0];
   const channel = interaction.channel;
@@ -175,12 +175,13 @@ export function ChannelSendBox({
   const [contactId, setContactId] = useState(latest?.contactId || people[0]?.id || "");
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
-  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("scheduled");
+  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("queue");
   const [scheduledAt, setScheduledAt] = useState("");
   const media = useMessageMedia(channel);
   useEffect(() => {
     setContactId(latest?.contactId || people[0]?.id || "");
     setContent("");
+    setDeliveryMode("queue");
     setScheduledAt("");
     media.reset();
   }, [channel, customerId]);

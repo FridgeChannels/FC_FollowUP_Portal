@@ -13,6 +13,9 @@ import {
 
 export type DeliveryMode = "immediate" | "scheduled" | "queue";
 
+/** Temporarily hide Schedule + date/time picker. Flip to true to re-enable. */
+export const ALLOW_SCHEDULED_SEND = false;
+
 function parseCivilDate(value: string): Date | undefined {
   const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value.trim());
   if (!match) return undefined;
@@ -63,6 +66,20 @@ export function SendTimingToggle({
     [selectedDate],
   );
   const minTime = selectedDate === todayEt ? nowEtLocal.slice(11, 16) : undefined;
+  const effectiveValue =
+    !ALLOW_SCHEDULED_SEND && value === "scheduled" ? "queue" : value;
+  const modes = (
+    ALLOW_SCHEDULED_SEND
+      ? ([
+          ["queue", "Queue"],
+          ["immediate", "Send now"],
+          ["scheduled", "Schedule"],
+        ] as const)
+      : ([
+          ["queue", "Queue"],
+          ["immediate", "Send now"],
+        ] as const)
+  );
 
   const commit = (date: string, time: string) => {
     if (!date || !time) {
@@ -75,23 +92,22 @@ export function SendTimingToggle({
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
       <div className="flex rounded-lg bg-slate-100 p-1" role="group" aria-label="Send timing">
-        {([
-          ["queue", "Queue"],
-          ["immediate", "Send now"],
-          ["scheduled", "Schedule"],
-        ] as const).map(([mode, label]) => (
+        {modes.map(([mode, label]) => (
           <button
             key={mode}
             type="button"
-            onClick={() => onValueChange(mode)}
-            className={`rounded-md px-2.5 py-1.5 text-xs font-medium transition ${value === mode ? "bg-white text-violet-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
-            aria-pressed={value === mode}
+            onClick={() => {
+              onValueChange(mode);
+              if (mode !== "scheduled") onScheduledAtChange("");
+            }}
+            className={`rounded-md px-2.5 py-1.5 text-xs font-medium transition ${effectiveValue === mode ? "bg-white text-violet-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+            aria-pressed={effectiveValue === mode}
           >
             {label}
           </button>
         ))}
       </div>
-      {value === "scheduled" && (
+      {ALLOW_SCHEDULED_SEND && effectiveValue === "scheduled" && (
         <div className="flex flex-wrap items-center gap-2" lang="en">
           <Popover open={open} onOpenChange={setOpen}>
             <PopoverTrigger asChild>

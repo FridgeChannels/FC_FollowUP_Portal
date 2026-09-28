@@ -1704,7 +1704,7 @@ export function ReplyDialog({
   const [cc, setCc] = useState("");
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
-  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("scheduled");
+  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("queue");
   const [scheduledAt, setScheduledAt] = useState("");
   const media = useMessageMedia(channel);
   const [linkedinGate, setLinkedinGate] = useState<{
@@ -1720,7 +1720,7 @@ export function ReplyDialog({
     setObject("");
     setCc("");
     setContent("");
-    setDeliveryMode("scheduled");
+    setDeliveryMode("queue");
     setScheduledAt("");
     setLinkedinGate(null);
     media.reset();
