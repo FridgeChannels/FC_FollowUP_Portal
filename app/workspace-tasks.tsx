@@ -952,6 +952,23 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
                   }
                   toast.success("Pending message cancelled");
                 } : undefined}
+                onMarkHandled={task.remote && can("reply") ? async (inbound) => {
+                  const response = await fetch(`/api/brands/${customer.id}/mark-reply-handled`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      conversationId: inbound.id,
+                      contactId: inbound.contactId,
+                      channel: inbound.channel,
+                      taskId: inbound.taskId,
+                      threadId: inbound.threadId,
+                    }),
+                  });
+                  const payload = await response.json() as { error?: string };
+                  if (!response.ok) throw new Error(payload.error || "Unable to mark as handled");
+                  const nextResponse = await fetch(`/api/tasks/${task.id}`);
+                  applyTaskPayload(await nextResponse.json() as TaskPayload);
+                } : undefined}
               />
               </div>
             </section>

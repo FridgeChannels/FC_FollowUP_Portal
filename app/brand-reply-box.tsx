@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Send } from "lucide-react";
+import { CheckCircle2, Send } from "lucide-react";
 import { toast } from "sonner";
 import { Channel, Contact, Interaction, ScheduledAction, WorkspaceState } from "@/lib/outreach-domain";
 import { useWorkspace } from "./workspace-store";
@@ -80,6 +80,7 @@ export function BrandReplyBox({
   actions,
   taskId,
   onSend,
+  onMarkHandled,
 }: {
   customerId: string;
   interaction: Interaction;
@@ -89,8 +90,9 @@ export function BrandReplyBox({
   actions?: ScheduledAction[];
   taskId?: string;
   onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: DeliveryMode, attachments?: MediaAttachment[], cc?: string) => Promise<void>;
+  onMarkHandled?: (interaction: Interaction) => Promise<void>;
 }) {
-  const { state, can, sendHumanReply } = useWorkspace();
+  const { state, can, sendHumanReply, markReplyHandled } = useWorkspace();
   const customer = state.customers.find(item => item.id === customerId);
   const people = contacts || customer?.contacts || [];
   const [content, setContent] = useState("");
@@ -99,32 +101,56 @@ export function BrandReplyBox({
   );
   const [cc, setCc] = useState("");
   const [saving, setSaving] = useState(false);
+  const [marking, setMarking] = useState(false);
   const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("scheduled");
   const contact = people.find(item => item.id === interaction.contactId) || people[0];
   const channel = interaction.channel;
   const media = useMessageMedia(channel);
-  const notionBacked = !!onSend;
+  const notionBacked = !!onSend || !!onMarkHandled;
   if (!can("reply") || !people.length) return null;
   if (!notionBacked && customer?.status === "Closed") return null;
   if (!inboundNeedsComposer(state, interaction, interactions)) return null;
   if (!contact || !channel) return null;
   const replyTaskId = interaction.taskId || actions?.find(item => item.bombInstanceId === bombInstanceId && item.channel === channel)?.id || taskId;
   const hasBody = (channel === "Email" ? !emailBodyIsEmpty(content) : !!content.trim()) || media.readyAttachments.length > 0;
-  const canSend = hasBody && !(channel === "Email" && !subject.trim()) && !saving && !media.uploading;
+  const busy = saving || marking;
+  const canSend = hasBody && !(channel === "Email" && !subject.trim()) && !busy && !media.uploading;
+  const handleMarkHandled = () => {
+    if (busy) return;
+    if (onMarkHandled) {
+      setMarking(true);
+      void onMarkHandled(interaction)
+        .then(() => toast.success("Marked as handled"))
+        .catch(error => toast.error(error instanceof Error ? error.message : "Unable to mark as handled"))
+        .finally(() => setMarking(false));
+      return;
+    }
+    show(markReplyHandled(interaction.id));
+  };
   return (
     <div className="mt-3 rounded-xl bg-slate-50 p-3">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
         <div className="text-xs font-medium text-slate-600">{contact.name} · {channel}</div>
-        <span className="text-xs text-slate-400">Reply needed</span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-7 px-2.5 text-xs"
+          disabled={busy}
+          onClick={handleMarkHandled}
+        >
+          <CheckCircle2 className="mr-1 size-3.5" />
+          {marking ? "Saving…" : "Mark as handled"}
+        </Button>
       </div>
       <div className="min-w-0 space-y-2">
-        {channel === "Email" && <Input value={subject} onChange={event => setSubject(event.target.value)} placeholder="Email subject" />}
-        {channel === "Email" && <Input value={cc} onChange={event => setCc(event.target.value)} placeholder="CC (comma-separated)" />}
-        <MessageMediaInputFrame channel={channel} media={media} disabled={saving}>
+        {channel === "Email" && <Input value={subject} onChange={event => setSubject(event.target.value)} placeholder="Email subject" disabled={busy} />}
+        {channel === "Email" && <Input value={cc} onChange={event => setCc(event.target.value)} placeholder="CC (comma-separated)" disabled={busy} />}
+        <MessageMediaInputFrame channel={channel} media={media} disabled={busy}>
           {channel === "Email" ? (
-            <EmailBodyEditor value={content} onChange={setContent} disabled={saving} placeholder="Write a reply…" />
+            <EmailBodyEditor value={content} onChange={setContent} disabled={busy} placeholder="Write a reply…" />
           ) : (
-            <Textarea value={content} onChange={event => setContent(event.target.value)} className="min-h-20 resize-none" placeholder="Write a reply…"/>
+            <Textarea value={content} onChange={event => setContent(event.target.value)} className="min-h-20 resize-none" placeholder="Write a reply…" disabled={busy} />
           )}
         </MessageMediaInputFrame>
         <div className="flex items-center justify-end gap-2">
