@@ -210,6 +210,8 @@ export type BrandContact = {
   officePhone: string | null;
   whatsapp?: string | null;
   linkedin: string | null;
+  /** KeyPersonDB `LinkedIn Connected` multi_select account names. */
+  linkedinConnected?: string[];
   /** KeyPersonDB page id, when this contact is linked to Notion. */
   keyPersonId?: string | null;
   emailValid: boolean;

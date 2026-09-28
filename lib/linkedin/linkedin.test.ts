@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   evaluateLinkedInSamePersonGate,
   resolveLinkedInOutreachKind,
+  senderIsLinkedInConnected,
 } from "./gate.ts";
 import {
   appendLinkedInGateNote,
@@ -60,6 +61,23 @@ describe("linkedin notes", () => {
       false,
     );
   });
+
+  it("does not count connected LinkedIn against cold capacity", () => {
+    const notes = formatLinkedInGateNote({
+      outreachKind: "connected",
+      senderAccount: "Paula LIU",
+      countsAgainstQuota: false,
+    });
+    assert.deepEqual(parseLinkedInGateNote(notes), {
+      outreachKind: "connected",
+      senderAccount: "Paula LIU",
+      countsAgainstQuota: false,
+    });
+    assert.equal(
+      isLinkedInColdCapacityTask({ channel: "LinkedIn", status: "Pending", notes }),
+      false,
+    );
+  });
 });
 
 describe("linkedin same-person gate", () => {
@@ -78,7 +96,9 @@ describe("linkedin same-person gate", () => {
 
   it("allows followup after inbound", () => {
     assert.equal(
-      resolveLinkedInOutreachKind([{ channel: "LinkedIn", direction: "Inbound" }]),
+      resolveLinkedInOutreachKind({
+        activities: [{ channel: "LinkedIn", direction: "Inbound" }],
+      }),
       "followup_after_reply",
     );
     const result = evaluateLinkedInSamePersonGate({
@@ -113,5 +133,60 @@ describe("linkedin same-person gate", () => {
       activities: [],
     });
     assert.equal(result.ok, false);
+  });
+
+  it("allows connected outreach even with unreplied cold history", () => {
+    const result = evaluateLinkedInSamePersonGate({
+      outreachKind: "connected",
+      tasks: [{
+        channel: "LinkedIn",
+        status: "Completed",
+        notes: "[LI_GATE] outreachKind=cold;senderAccount=Paula LIU;countsAgainstQuota=1",
+      }],
+      activities: [],
+    });
+    assert.equal(result.ok, true);
+  });
+});
+
+describe("linkedin connected outreach kind", () => {
+  it("matches sender against LinkedIn Connected names", () => {
+    assert.equal(senderIsLinkedInConnected("Paula LIU", ["Billy HAO", "Paula LIU"]), true);
+    assert.equal(senderIsLinkedInConnected("paula liu", ["Paula LIU"]), true);
+    assert.equal(senderIsLinkedInConnected("Paula LIU", ["Billy HAO"]), false);
+    assert.equal(senderIsLinkedInConnected("Paula LIU", []), false);
+  });
+
+  it("uses connected when active sender is listed and there is no inbound", () => {
+    assert.equal(
+      resolveLinkedInOutreachKind({
+        activities: [],
+        senderAccount: "Paula LIU",
+        connectedAccounts: ["Paula LIU"],
+      }),
+      "connected",
+    );
+  });
+
+  it("stays cold when only another account is connected", () => {
+    assert.equal(
+      resolveLinkedInOutreachKind({
+        activities: [],
+        senderAccount: "Paula LIU",
+        connectedAccounts: ["Billy HAO"],
+      }),
+      "cold",
+    );
+  });
+
+  it("prefers inbound followup over connected", () => {
+    assert.equal(
+      resolveLinkedInOutreachKind({
+        activities: [{ channel: "LinkedIn", direction: "Inbound" }],
+        senderAccount: "Paula LIU",
+        connectedAccounts: ["Paula LIU"],
+      }),
+      "followup_after_reply",
+    );
   });
 });

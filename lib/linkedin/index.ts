@@ -18,6 +18,7 @@ export {
   evaluateLinkedInSamePersonGate,
   pickFollowupSenderAccount,
   resolveLinkedInOutreachKind,
+  senderIsLinkedInConnected,
 } from "./gate.ts";
 export {
   clearLinkedInAccountCache,

@@ -930,6 +930,8 @@ type DetailContact = {
   officePhone?: string | null;
   whatsapp?: string | null;
   linkedin?: string | null;
+  /** KeyPersonDB LinkedIn Connected account names. */
+  linkedinConnected?: string[];
   keyPersonId?: string | null;
   title?: string | null;
   contactOrder?: string | null;
@@ -941,6 +943,21 @@ function linkedinLabel(value?: string | null) {
   if (!value) return undefined;
   const match = value.match(/linkedin\.com\/in\/([^/?#]+)/i);
   return match ? `linkedin.com/in/${match[1]}` : value;
+}
+
+function linkedinHref(value?: string | null) {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  const label = linkedinLabel(trimmed);
+  if (!label) return undefined;
+  if (/^linkedin\.com\//i.test(label)) return `https://www.${label}`;
+  if (/^[\w.-]+$/i.test(label)) return `https://www.linkedin.com/in/${label}`;
+  return `https://${label.replace(/^\/+/, "")}`;
+}
+
+function linkedinFriendAccounts(contact: Pick<DetailContact, "linkedinConnected">) {
+  return (contact.linkedinConnected || []).map((name) => name.trim()).filter(Boolean);
 }
 
 type EnrichField =
@@ -1298,6 +1315,10 @@ function BrandContactList({
                         field === "linkedin"
                           ? isPending(contact.id, field)
                           : false;
+                      const friendAccounts =
+                        field === "linkedin" && value ? linkedinFriendAccounts(contact) : [];
+                      const linkedinUrl =
+                        field === "linkedin" && value ? linkedinHref(value) : undefined;
                       return (
                         <div
                           key={`${label}-${field}`}
@@ -1305,11 +1326,31 @@ function BrandContactList({
                         >
                           <ChannelIcon channel={channel} className="size-4 shrink-0" />
                           <span className="w-[5.5rem] shrink-0 text-slate-400">{label}</span>
-                          <span
-                            className={`truncate ${value ? "" : "text-slate-400"} ${pendingField ? "text-amber-700" : ""}`}
-                          >
-                            {value || "—"}
-                          </span>
+                          {linkedinUrl ? (
+                            <a
+                              href={linkedinUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className={`truncate text-sky-700 underline-offset-2 hover:underline ${pendingField ? "text-amber-700" : ""}`}
+                            >
+                              {value}
+                            </a>
+                          ) : (
+                            <span
+                              className={`truncate ${value ? "" : "text-slate-400"} ${pendingField ? "text-amber-700" : ""}`}
+                            >
+                              {value || "—"}
+                            </span>
+                          )}
+                          {friendAccounts.length > 0 ? (
+                            <Badge
+                              variant="secondary"
+                              title={`LinkedIn Connected: ${friendAccounts.join(", ")}`}
+                              className="shrink-0 border-sky-200 bg-sky-50 px-1.5 py-0 text-[10px] font-semibold text-sky-700 hover:bg-sky-50"
+                            >
+                              Connected
+                            </Badge>
+                          ) : null}
                           {pendingField && value ? (
                             <span className="shrink-0 text-[10px] font-medium text-amber-600">
                               待确认

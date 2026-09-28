@@ -1,6 +1,7 @@
 import type { BrandActivity, BrandTask } from "../brand-list.ts";
 import { listChannelCapacityConfig } from "../notion/capacity.ts";
 import { isScheduleTestMode } from "../notion/config.ts";
+import { retrieveFollowupContact } from "../notion/contacts.ts";
 import { listFollowupConversations } from "../notion/conversations.ts";
 import { listExistingTasksForSchedule, listFollowupTasks } from "../notion/tasks.ts";
 import { easternDateOnly, parseScheduledAt } from "../scheduling-engine/calendar.ts";
@@ -29,6 +30,7 @@ async function assertLinkedInColdBandwidthAvailable() {
   if (isScheduleTestMode()) return;
   const [capacity, existing] = await Promise.all([
     listChannelCapacityConfig(),
+    // Already drops followup_after_reply / connected via isLinkedInColdCapacityTask.
     listExistingTasksForSchedule(),
   ]);
   const dailyMax = dailyMaxFor(capacity.dailyMax, "LinkedIn");
@@ -51,16 +53,38 @@ async function loadLinkedInContext(input: {
   contactId: string;
   tasks?: BrandTask[];
   activities?: BrandActivity[];
+  connectedAccounts?: string[];
 }) {
-  const [tasks, activities] = await Promise.all([
+  const [tasks, activities, connectedAccounts] = await Promise.all([
     input.tasks
       ? Promise.resolve(input.tasks)
       : listFollowupTasks([input.contactId]),
     input.activities
       ? Promise.resolve(input.activities)
       : listFollowupConversations([input.contactId]),
+    input.connectedAccounts
+      ? Promise.resolve(input.connectedAccounts)
+      : retrieveFollowupContact(input.contactId)
+          .then((contact) => contact.linkedinConnected || [])
+          .catch(() => [] as string[]),
   ]);
-  return { tasks, activities };
+  return { tasks, activities, connectedAccounts };
+}
+
+function buildNonColdDecision(input: {
+  outreachKind: "followup_after_reply" | "connected";
+  senderAccount: string;
+}): LinkedInCreateDecision {
+  const meta = {
+    outreachKind: input.outreachKind,
+    senderAccount: input.senderAccount,
+    countsAgainstQuota: false,
+  } as const;
+  return {
+    ...meta,
+    countsAgainstBandwidth: false,
+    noteLine: formatLinkedInGateNote(meta),
+  };
 }
 
 /** Read-only gate used by Send message UI. Never reserves monthly quota. */
@@ -68,19 +92,26 @@ export async function evaluateLinkedInSendability(input: {
   contactId: string;
   tasks?: BrandTask[];
   activities?: BrandActivity[];
+  connectedAccounts?: string[];
   checkBandwidth?: boolean;
 }): Promise<LinkedInSendability> {
   try {
-    const { tasks, activities } = await loadLinkedInContext(input);
-    const outreachKind = resolveLinkedInOutreachKind(activities);
-    const samePerson = evaluateLinkedInSamePersonGate({ outreachKind, tasks, activities });
-    if (!samePerson.ok) {
-      return { available: false, reason: samePerson.error, outreachKind };
-    }
+    const { tasks, activities, connectedAccounts } = await loadLinkedInContext(input);
 
     const active = await resolveActiveLinkedInAccount();
     if (!active.ok) {
+      const outreachKind = resolveLinkedInOutreachKind({ activities, connectedAccounts });
       return { available: false, reason: active.error, outreachKind };
+    }
+
+    const outreachKind = resolveLinkedInOutreachKind({
+      activities,
+      senderAccount: active.account.name,
+      connectedAccounts,
+    });
+    const samePerson = evaluateLinkedInSamePersonGate({ outreachKind, tasks, activities });
+    if (!samePerson.ok) {
+      return { available: false, reason: samePerson.error, outreachKind };
     }
 
     if (outreachKind === "cold" && input.checkBandwidth !== false) {
@@ -104,19 +135,24 @@ export async function prepareLinkedInOutbound(input: {
   contactId: string;
   tasks?: BrandTask[];
   activities?: BrandActivity[];
+  connectedAccounts?: string[];
   /** When false, skip Daily Max (e.g. OmniReach already reserved a slot). */
   checkBandwidth?: boolean;
   /** When false, only validate and pick Sender; do not pre-debit monthly quota. */
   reserveQuota?: boolean;
 }): Promise<LinkedInCreateDecision> {
-  const { tasks, activities } = await loadLinkedInContext(input);
-
-  const outreachKind = resolveLinkedInOutreachKind(activities);
-  const samePerson = evaluateLinkedInSamePersonGate({ outreachKind, tasks, activities });
-  if (!samePerson.ok) throw new Error(samePerson.error);
+  const { tasks, activities, connectedAccounts } = await loadLinkedInContext(input);
 
   const active = await resolveActiveLinkedInAccount();
   if (!active.ok) throw new Error(active.error);
+
+  const outreachKind = resolveLinkedInOutreachKind({
+    activities,
+    senderAccount: active.account.name,
+    connectedAccounts,
+  });
+  const samePerson = evaluateLinkedInSamePersonGate({ outreachKind, tasks, activities });
+  if (!samePerson.ok) throw new Error(samePerson.error);
 
   if (outreachKind === "followup_after_reply") {
     const preferred = pickFollowupSenderAccount(tasks, activities, active.account.name);
@@ -129,16 +165,14 @@ export async function prepareLinkedInOutbound(input: {
       preferredAccount.status !== "Exhausted"
         ? preferredAccount.name
         : active.account.name;
-    const meta = {
-      outreachKind,
-      senderAccount,
-      countsAgainstQuota: false,
-    } as const;
-    return {
-      ...meta,
-      countsAgainstBandwidth: false,
-      noteLine: formatLinkedInGateNote(meta),
-    };
+    return buildNonColdDecision({ outreachKind, senderAccount });
+  }
+
+  if (outreachKind === "connected") {
+    return buildNonColdDecision({
+      outreachKind: "connected",
+      senderAccount: active.account.name,
+    });
   }
 
   if (input.checkBandwidth !== false) {

@@ -4,7 +4,7 @@ export type LinkedInAccountName = (typeof LINKEDIN_ACCOUNT_NAMES)[number];
 
 export type LinkedInAccountStatus = "Active" | "Standby" | "Exhausted" | "Paused";
 
-export type LinkedInOutreachKind = "cold" | "followup_after_reply";
+export type LinkedInOutreachKind = "cold" | "followup_after_reply" | "connected";
 
 export type LinkedInAccount = {
   id: string;

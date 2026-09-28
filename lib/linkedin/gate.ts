@@ -14,10 +14,27 @@ export function contactHasLinkedInInbound(
   );
 }
 
-export function resolveLinkedInOutreachKind(
-  activities: Array<Pick<BrandActivity, "channel" | "direction">>,
-): LinkedInOutreachKind {
-  return contactHasLinkedInInbound(activities) ? "followup_after_reply" : "cold";
+export function senderIsLinkedInConnected(
+  senderAccount: string | null | undefined,
+  connectedAccounts: string[] | null | undefined,
+) {
+  const sender = senderAccount?.trim().toLowerCase();
+  if (!sender) return false;
+  return (connectedAccounts || []).some(
+    (name) => name.trim().toLowerCase() === sender,
+  );
+}
+
+export function resolveLinkedInOutreachKind(input: {
+  activities: Array<Pick<BrandActivity, "channel" | "direction">>;
+  senderAccount?: string | null;
+  connectedAccounts?: string[] | null;
+}): LinkedInOutreachKind {
+  if (contactHasLinkedInInbound(input.activities)) return "followup_after_reply";
+  if (senderIsLinkedInConnected(input.senderAccount, input.connectedAccounts)) {
+    return "connected";
+  }
+  return "cold";
 }
 
 function taskLooksLikeColdLinkedIn(task: Pick<BrandTask, "channel" | "status" | "notes">) {
@@ -33,14 +50,14 @@ export function evaluateLinkedInSamePersonGate(input: {
   tasks: Array<Pick<BrandTask, "channel" | "status" | "notes">>;
   activities: Array<Pick<BrandActivity, "channel" | "direction">>;
 }): { ok: true } | { ok: false; error: string } {
-  if (input.outreachKind === "followup_after_reply") {
-    if (!contactHasLinkedInInbound(input.activities)) {
+  if (input.outreachKind === "followup_after_reply" || input.outreachKind === "connected") {
+    if (input.outreachKind === "followup_after_reply" && !contactHasLinkedInInbound(input.activities)) {
       return {
         ok: false,
         error: "This contact has no LinkedIn reply yet, so a follow-up cannot be created.",
       };
     }
-    // Open LinkedIn tasks are expected while a reply is needed — do not block follow-ups.
+    // Open LinkedIn tasks are expected while a reply is needed — do not block follow-ups / connected DMs.
     return { ok: true };
   }
 

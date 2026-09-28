@@ -27,7 +27,13 @@ export function parseLinkedInGateNote(notes?: string | null): LinkedInGateMeta |
   );
   const outreachKind = parts.outreachKind as LinkedInOutreachKind | undefined;
   const senderAccount = parts.senderAccount?.trim();
-  if (outreachKind !== "cold" && outreachKind !== "followup_after_reply") return null;
+  if (
+    outreachKind !== "cold" &&
+    outreachKind !== "followup_after_reply" &&
+    outreachKind !== "connected"
+  ) {
+    return null;
+  }
   if (!senderAccount) return null;
   return {
     outreachKind,

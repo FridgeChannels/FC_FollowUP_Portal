@@ -3,6 +3,7 @@ import { getFollowupContactDbId, getKeyPersonDbId } from "./config";
 import {
   firstRelationId,
   notionFetch,
+  propertyMultiSelectNames,
   propertyText,
   queryDatabasePages,
   retrievePage,
@@ -43,6 +44,7 @@ function mapKeyPerson(page: NotionPage | null, fallbackName: string) {
     officePhone,
     whatsapp,
     linkedin: propertyText(properties["LinkedIn URL"]) || null,
+    linkedinConnected: propertyMultiSelectNames(properties["LinkedIn Connected"]),
     keyPersonId: page?.id || null,
     emailValid: !!email && VERIFIED_EMAIL_STATUSES.has(emailStatus),
     phoneValid: !!phone,

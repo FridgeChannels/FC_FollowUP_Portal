@@ -32,6 +32,7 @@ export type NotionProperty = {
   rich_text?: NotionRichText[];
   status?: { name?: string } | null;
   select?: { name?: string } | null;
+  multi_select?: Array<{ name?: string }>;
   people?: NotionUser[];
   checkbox?: boolean;
   email?: string | null;
@@ -105,6 +106,12 @@ export function propertyNumber(property?: NotionProperty) {
 
 export function propertyCheckbox(property?: NotionProperty) {
   return Boolean(property?.checkbox);
+}
+
+export function propertyMultiSelectNames(property?: NotionProperty) {
+  return (property?.multi_select || [])
+    .map((item) => item.name?.trim() || "")
+    .filter(Boolean);
 }
 
 /** True when Follow-up Client `Is Test` checkbox is checked. */

@@ -934,7 +934,7 @@ export async function listExistingTasksForSchedule(): Promise<ExistingTask[]> {
       (contactId ? brandByContact.get(contactId) : null);
     if (!clientId || !scheduledAt || !status || !TASK_STATUSES.has(status)) return [];
     if (!channel || !CHANNELS.includes(channel as Channel)) return [];
-    // LinkedIn follow-up-after-reply does not occupy Channel Daily Max.
+    // LinkedIn follow-up-after-reply / connected do not occupy Channel Daily Max.
     if (
       channel === "LinkedIn" &&
       !isLinkedInColdCapacityTask({ channel, status, notes })
