@@ -30,6 +30,14 @@ describe("resolveInboundEmailAttachments", () => {
         && error.status === 400
         && /only supported on Email/.test(error.message),
     );
+    // LinkedIn may attach on outbound; inbound webhooks stay Email-only.
+    assert.throws(
+      () => resolveInboundEmailAttachments("LinkedIn", [sampleAttachment]),
+      (error: unknown) =>
+        error instanceof InboundReplyError
+        && error.status === 400
+        && /only supported on Email/.test(error.message),
+    );
   });
 
   it("rejects invalid items and non-S3 urls", () => {

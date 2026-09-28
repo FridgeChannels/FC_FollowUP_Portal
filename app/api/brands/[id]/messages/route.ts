@@ -109,7 +109,7 @@ export async function POST(request: Request, { params }: Params) {
       !channelSupportsMedia(channel) &&
       !channelSupportsEmailAttachments(channel)
     ) {
-      return Response.json({ error: "Attachments are only supported on Email and WhatsApp" }, { status: 400 });
+      return Response.json({ error: "Attachments are only supported on Email, WhatsApp, and LinkedIn" }, { status: 400 });
     }
     let content = body.content || "";
     if (channel === "Email") {

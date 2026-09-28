@@ -13,7 +13,8 @@ export const DEFAULT_EMAIL_ATTACHMENT_MIME_TYPES = [
 export const DEFAULT_EMAIL_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 export const DEFAULT_EMAIL_ATTACHMENT_MAX_COUNT = 5;
 
-const EMAIL_CHANNELS = new Set(["Email"]);
+/** Outbound channels that store file attachments on ConversationDB `Attachments`. */
+const FILE_ATTACHMENT_CHANNELS = new Set(["Email", "LinkedIn"]);
 
 function envValue(name: string) {
   return (typeof process !== "undefined" ? process.env[name] : undefined)?.trim() || "";
@@ -47,7 +48,7 @@ export function emailAttachmentAccept() {
 }
 
 export function channelSupportsEmailAttachments(channel?: string | null) {
-  return EMAIL_CHANNELS.has((channel || "").trim());
+  return FILE_ATTACHMENT_CHANNELS.has((channel || "").trim());
 }
 
 export function emailAttachmentKindFromMime(mimeType?: string | null): MediaKind | null {

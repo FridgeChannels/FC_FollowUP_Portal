@@ -1,6 +1,5 @@
 import { captionForAttachments, type MediaAttachment } from "../media-attachments.ts";
 import {
-  channelSupportsEmailAttachments,
   emailAttachmentKindFromMime,
   emailAttachmentMaxBytes,
   emailAttachmentMaxCount,
@@ -41,7 +40,8 @@ export function resolveInboundEmailAttachments(
     throw new InboundReplyError("attachments must be an array", 400);
   }
   if (!raw.length) return [];
-  if (!channelSupportsEmailAttachments(channel)) {
+  // Inbound attachments remain Email-only; LinkedIn outbound reuses the same storage shape.
+  if ((channel || "").trim() !== "Email") {
     throw new InboundReplyError("attachments are only supported on Email", 400);
   }
   const maxCount = emailAttachmentMaxCount();

@@ -9,9 +9,11 @@ import {
 } from "./email-attachments.ts";
 
 describe("email attachments", () => {
-  it("only enables attachments on Email", () => {
+  it("enables Attachments property channels (Email and LinkedIn)", () => {
     assert.equal(channelSupportsEmailAttachments("Email"), true);
+    assert.equal(channelSupportsEmailAttachments("LinkedIn"), true);
     assert.equal(channelSupportsEmailAttachments("WhatsApp"), false);
+    assert.equal(channelSupportsEmailAttachments("SMS"), false);
   });
 
   it("validates default mime types and size", () => {

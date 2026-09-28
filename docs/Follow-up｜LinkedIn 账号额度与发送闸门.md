@@ -161,9 +161,10 @@ Manual / P0 **不得** 绕过上述 LinkedIn 闸门与冷触达月额度（可�
 | `taskId` | Follow-up Task 页面 ID 或标题 |
 | `scheduledAt` | 计划发送时刻 |
 | `sender` / `senderAccountId` | 必须等于本系统当前 Active（冷触达）；跟进按第 2 节 |
-| `outreachKind` | `cold` 或 `followup_after_reply` |
+| `outreachKind` | `cold`、`followup_after_reply` 或 `connected` |
 | 联系人 LinkedIn | Key Person 的 LinkedIn URL / handle |
 | 正文 | Outbound Conversation 内容 |
+| `Attachments` | ConversationDB `Attachments` rich_text：JSON 数组（与 Email 相同）。每项含 `id/kind/name/mimeType/size/url`；`url` 为本系统 S3 公网 HTTPS。无附件时为空。第三方投递时应下载并随消息发送 |
 | `threadId` | 系统线程 ID（如 `THR-…-LinkedIn`），回写时复用 |
 
 ### 10.2 第三方行为约束
@@ -224,3 +225,4 @@ Conversation.`Sender` 写发送账号展示名（不再用 Portal 登录邮箱�
 | --- | --- |
 | 2026-09-17 | 初版：串行 3×15、Key Person 闸门、创建预扣/取消释放、第三方职责排除；账号 Paula LIU / Billy HAO / Ella ZHANG |
 | 2026-09-17 | 落地 Notion 账号库与本仓闸门实现；补充 Task Notes `[LI_GATE]` 约定 |
+| 2026-09-28 | 人工 Send message 支持 LinkedIn 出站附件：复用 Email `Attachments` JSON / S3；第三方需读取该字段投递 |

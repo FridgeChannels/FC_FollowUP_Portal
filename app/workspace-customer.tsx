@@ -1870,6 +1870,12 @@ export function ReplyDialog({
             </SelectContent>
           </Select>
         </div>
+        {notionBacked &&
+        contact &&
+        channelAvailable(contact, "LinkedIn") &&
+        !linkedInAllowed ? (
+          <p className="text-xs text-amber-700">LinkedIn unavailable: {linkedInBlockedReason}</p>
+        ) : null}
         {emailNeedsObject ? (
           <Input value={object} onChange={(e) => setObject(e.target.value)} placeholder="Email subject" />
         ) : null}
