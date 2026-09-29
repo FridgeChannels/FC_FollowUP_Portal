@@ -900,7 +900,7 @@ export async function createHumanOutbound(input: {
       notes: isReply
         ? "人工追加回复，尚未实际发送。"
         : "人工消息，尚未实际发送。",
-      forceNewThread: false,
+      forceNewThread: !isReply && channel === "Email",
       attachments: input.attachments,
     });
     // New task has no Conversations yet; conversation already links Follow-up Task on create.

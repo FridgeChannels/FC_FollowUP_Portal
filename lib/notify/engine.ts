@@ -6,6 +6,7 @@ import {
   isNotifyEnabled,
   isSlackNotifyEnabled,
   portalBrandUrl,
+  portalSampleUrl,
   shouldNotifyPhone,
 } from "./config.ts";
 import { emitNotification as emitNotificationCore } from "./core.ts";
@@ -20,6 +21,7 @@ export type EmitOptions = {
 
 function defaultEventAllowed(event: NotificationEvent) {
   if (!eventTypeEnabled(event.eventType)) return false;
+  if (event.eventType === "sample.visited") return true;
   if (event.channel === "Phone" && !shouldNotifyPhone()) return false;
   return true;
 }
@@ -31,7 +33,10 @@ function defaultProviders(): NotifyProvider[] {
       enabled: isSlackNotifyEnabled(),
       contentMaxChars: getNotifyContentMaxChars(),
       formatDueAt: (iso) => formatScheduledDateTime(iso) || iso,
-      resolvePortalUrl: (event) => portalBrandUrl(event.brandId),
+      resolvePortalUrl: (event) =>
+        event.eventType === "sample.visited"
+          ? portalSampleUrl(event.brandId)
+          : portalBrandUrl(event.brandId),
     }),
   ];
 }

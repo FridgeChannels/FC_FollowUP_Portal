@@ -1,6 +1,9 @@
 /** Domain notification event — providers must not require Slack-specific fields. */
 
-export type NotificationEventType = "reply.received" | "inbound.received";
+export type NotificationEventType =
+  | "reply.received"
+  | "inbound.received"
+  | "sample.visited";
 
 export type NotificationEvent = {
   eventType: NotificationEventType;

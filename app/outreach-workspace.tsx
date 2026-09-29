@@ -338,9 +338,13 @@ export function WorkspaceRouteContent() {
   const [mountedRoots, setMountedRoots] = useState<Array<"brands" | "tasks" | "omnireach">>(
     () => (activeRoot ? [activeRoot] : []),
   );
+  const [mountedSampleBrandIds, setMountedSampleBrandIds] = useState<string[]>([]);
 
   if (activeRoot && !mountedRoots.includes(activeRoot)) {
     setMountedRoots((current) => [...current, activeRoot]);
+  }
+  if (sampleRoute && brandDetailId && !mountedSampleBrandIds.includes(brandDetailId)) {
+    setMountedSampleBrandIds((current) => [...current, brandDetailId]);
   }
 
   return (
@@ -350,8 +354,16 @@ export function WorkspaceRouteContent() {
           <BrandsPage active={activeRoot === "brands"} />
         </div>
       ) : null}
-      {brandDetailId && sampleRoute ? <SampleManagementPage key={brandDetailId} customerId={brandDetailId} /> : null}
-      {brandDetailId && !sampleRoute ? <BrandDetail customerId={brandDetailId} /> : null}
+      {brandDetailId ? (
+        <div hidden={!!sampleRoute}>
+          <BrandDetail key={brandDetailId} customerId={brandDetailId} />
+        </div>
+      ) : null}
+      {brandDetailId && mountedSampleBrandIds.includes(brandDetailId) ? (
+        <div hidden={!sampleRoute}>
+          <SampleManagementPage key={brandDetailId} customerId={brandDetailId} />
+        </div>
+      ) : null}
 
       {mountedRoots.includes("tasks") ? (
         <div hidden={!taskRoute}>

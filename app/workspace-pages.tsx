@@ -76,6 +76,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { BrandContactsEditor, emptyContactDraft, validContactDrafts, type ContactDraft } from "./brand-contacts-editor";
+import { BrandNote } from "./brand-note";
 
 const cx = (...v: (string | false | undefined | null)[]) =>
   v.filter(Boolean).join(" ");
@@ -553,6 +554,7 @@ function mergeBrandListItem(current: BrandListItem, next: BrandListItem): BrandL
     ownerName: next.ownerName,
     ownerEmail: next.ownerEmail,
     followupExhibition: next.followupExhibition ?? current.followupExhibition,
+    humanNotes: next.humanNotes ?? current.humanNotes,
     status: next.status,
     handlingMode: next.handlingMode,
     currentCp: next.currentCp,
@@ -1269,6 +1271,7 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
                   <TableHead>CP</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Handling Mode</TableHead>
+                  <TableHead className="min-w-40">Human Note</TableHead>
                   <TableHead>Last interaction</TableHead>
                   <TableHead className="whitespace-nowrap">Days since last interaction</TableHead>
                   <TableHead className="whitespace-nowrap pr-5">Days since last reply</TableHead>
@@ -1339,6 +1342,26 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
                       </TableCell>
                       <TableCell>
                         <HandlingMode value={c.handlingMode} />
+                      </TableCell>
+                      <TableCell
+                        className="max-w-56 align-top"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        <BrandNote
+                          key={c.id}
+                          customerId={c.id}
+                          variant="inline"
+                          value={c.humanNotes ?? ""}
+                          onSave={
+                            can("editBrand")
+                              ? async (next) => {
+                                  applyBrandUpdate(
+                                    await patchBrandListItem(c.id, { humanNotes: next }),
+                                  );
+                                }
+                              : undefined
+                          }
+                        />
                       </TableCell>
                       <TableCell className="max-w-60 text-xs text-slate-500">
                         {c.lastInteractionAt ? (

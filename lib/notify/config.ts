@@ -7,6 +7,7 @@ type NotifyEnvName =
   | "NOTIFY_ON_REPLY"
   | "NOTIFY_ON_INBOUND"
   | "NOTIFY_ON_PHONE"
+  | "NOTIFY_ON_SAMPLE_VISIT"
   | "NOTIFY_CONTENT_MAX_CHARS"
   | "PORTAL_BASE_URL";
 
@@ -51,6 +52,10 @@ export function shouldNotifyPhone() {
   return asBool(raw("NOTIFY_ON_PHONE"), true);
 }
 
+export function shouldNotifySampleVisit() {
+  return asBool(raw("NOTIFY_ON_SAMPLE_VISIT"), true);
+}
+
 export function getNotifyContentMaxChars() {
   const parsed = Number(raw("NOTIFY_CONTENT_MAX_CHARS") || "300");
   if (!Number.isFinite(parsed) || parsed <= 0) return 300;
@@ -69,7 +74,15 @@ export function portalBrandUrl(brandId: string | null | undefined) {
   return `${getPortalBaseUrl()}/customers/${encodeURIComponent(id)}`;
 }
 
-export function eventTypeEnabled(eventType: "reply.received" | "inbound.received") {
+export function portalSampleUrl(brandId: string | null | undefined) {
+  const base = portalBrandUrl(brandId);
+  return base ? `${base}/sample` : null;
+}
+
+export function eventTypeEnabled(
+  eventType: "reply.received" | "inbound.received" | "sample.visited",
+) {
   if (eventType === "reply.received") return shouldNotifyReply();
-  return shouldNotifyInbound();
+  if (eventType === "inbound.received") return shouldNotifyInbound();
+  return shouldNotifySampleVisit();
 }

@@ -22,6 +22,7 @@
     "test:email-html": "node --experimental-strip-types --test lib/email-html.test.ts lib/email-attachments.test.ts",
     "test:inbound": "node --experimental-strip-types --test lib/notion/inbound-cold.test.ts",
     "test:notify": "node --experimental-strip-types --test lib/notify/notify.test.ts",
+    "test:sample": "node --experimental-strip-types --test lib/sample/sample.test.ts",
     "notify:slack-test": "node scripts/notify-slack-test.mjs",
     "test:variables": "node --experimental-strip-types --test lib/template-variables.test.ts",
     "test:icypeas": "node --experimental-strip-types --test lib/icypeas/enrich.test.ts",

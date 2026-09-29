@@ -10,6 +10,7 @@ export type SlackWebhookProviderOptions = {
   formatDueAt?: (iso: string) => string;
   resolvePortalUrl?: (event: NotificationEvent) => string | null;
   fetchImpl?: typeof fetch;
+  supports?: (event: NotificationEvent) => boolean;
 };
 
 export function createSlackWebhookProvider(
@@ -23,6 +24,7 @@ export function createSlackWebhookProvider(
   return {
     id: "slack",
     enabled,
+    supports: options.supports,
     async send(event: NotificationEvent) {
       if (!webhookUrl) {
         throw new Error("SLACK_WEBHOOK_URL is empty");

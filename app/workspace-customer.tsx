@@ -55,6 +55,8 @@ function BrandMeetingNoteLink({
   customerId: string;
   sampleType: string;
 }) {
+  const router = useRouter();
+  const sampleHref = `/customers/${encodeURIComponent(customerId)}/sample`;
   const note = notes?.[0];
   return (
     <>
@@ -75,7 +77,21 @@ function BrandMeetingNoteLink({
         <p className="text-sm font-medium text-slate-400">Exhibition Meeting</p>
       )}
       <a
-        href={`/customers/${encodeURIComponent(customerId)}/sample`}
+        href={sampleHref}
+        onClick={(event) => {
+          if (
+            event.defaultPrevented ||
+            event.button !== 0 ||
+            event.metaKey ||
+            event.altKey ||
+            event.ctrlKey ||
+            event.shiftKey
+          ) {
+            return;
+          }
+          event.preventDefault();
+          router.push(sampleHref);
+        }}
         className="inline-flex min-h-11 items-center gap-1 rounded-xl bg-violet-100 px-3 text-sm font-semibold text-violet-800 transition-colors hover:bg-violet-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600"
         title="Open Sample details"
       >

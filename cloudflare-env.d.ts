@@ -29,8 +29,20 @@ declare namespace Cloudflare {
     NOTIFY_ON_REPLY?: string;
     NOTIFY_ON_INBOUND?: string;
     NOTIFY_ON_PHONE?: string;
+    NOTIFY_ON_SAMPLE_VISIT?: string;
     NOTIFY_CONTENT_MAX_CHARS?: string;
     PORTAL_BASE_URL?: string;
+    SUPABASE_URL?: string;
+    SUPABASE_SERVICE_ROLE_KEY?: string;
+    SUPABASE_ANON_KEY?: string;
+    POSTHOG_HOST?: string;
+    POSTHOG_PERSONAL_API_KEY?: string;
+    POSTHOG_PROJECT_ID?: string;
+    SAMPLE_SYNC_SECRET?: string;
+    SAMPLE_SYNC_MAX_SNS_PER_RUN?: string;
+    SAMPLE_SYNC_LIMIT_PER_SN?: string;
+    SAMPLE_NOTIFY_DEDUPE_MINUTES?: string;
+    SAMPLE_PAGE_SYNC_STALE_MINUTES?: string; // default 360; set 0 to disable page-triggered sync
     QUO_API_KEY?: string;
     QUO_FROM_NUMBER?: string;
     DEV_CALL_PHONE?: string;
@@ -54,5 +66,7 @@ declare namespace Cloudflare {
     EMAIL_ATTACHMENT_MIME_TYPES?: string;
     EMAIL_ATTACHMENT_MAX_BYTES?: string;
     EMAIL_ATTACHMENT_MAX_COUNT?: string;
+    DTC_DASHBOARD_URL?: string;
+    DTC_DASHBOARD_KEY?: string;
   }
 }

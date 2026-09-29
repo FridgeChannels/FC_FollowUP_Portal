@@ -23,6 +23,7 @@ function brand(partial: Partial<BrandListItem> & Pick<BrandListItem, "id" | "nam
     ownerId: null,
     ownerName: null,
     ownerEmail: null,
+    humanNotes: null,
     ...partial,
   };
 }

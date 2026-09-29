@@ -88,7 +88,13 @@ function asHandlingMode(value: string): HandlingMode | null {
 
 async function resolveClientCompany(pageId?: string | null) {
   if (!pageId) {
-    return { companyName: null, productDescription: null, matchedCategory: null, icpGroup: null };
+    return {
+      companyName: null,
+      productDescription: null,
+      matchedCategory: null,
+      icpGroup: null,
+      nfcCardSn: null,
+    };
   }
   try {
     const page = await retrievePage(pageId);
@@ -108,9 +114,16 @@ async function resolveClientCompany(pageId?: string | null) {
       productDescription: propertyText(properties["Product Description"]) || null,
       matchedCategory: categories.filter(Boolean).join(", ") || null,
       icpGroup: propertyText(properties["ICP Group"]) || null,
+      nfcCardSn: propertyText(properties["NFC Card SN"])?.trim() || null,
     };
   } catch {
-    return { companyName: null, productDescription: null, matchedCategory: null, icpGroup: null };
+    return {
+      companyName: null,
+      productDescription: null,
+      matchedCategory: null,
+      icpGroup: null,
+      nfcCardSn: null,
+    };
   }
 }
 
@@ -189,6 +202,8 @@ export async function mapFollowupClientPage(
     // relation for every list row would turn a single list request into many
     // extra Notion requests and make the Brands page slow to open.
     followupExhibition: exhibitionCache?.get(firstRelationId(properties["Follow-up Exhibition"]) || "") || null,
+    // Human Notes is a rich_text field on the same page — no extra Notion fetch.
+    humanNotes: propertyText(properties["Human Notes"]) || null,
     isTest: isTestFollowupClientPage(page),
   };
 }
@@ -1198,6 +1213,7 @@ export async function mapFollowupClientDetail(
     productDescription: company.productDescription,
     matchedCategory: company.matchedCategory,
     icpGroup: company.icpGroup,
+    nfcCardSn: company.nfcCardSn,
     followupExhibition,
     meetingNotes,
     aiMeetingLinks: sortAiMeetingLinks(

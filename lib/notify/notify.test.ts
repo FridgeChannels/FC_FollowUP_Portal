@@ -64,6 +64,30 @@ describe("formatSlackNotificationText", () => {
     );
     assert.match(text, /^Cold Inbound · Email/m);
   });
+
+  it("formats sample tap without empty reply fields", () => {
+    const text = formatSlackNotificationText(
+      {
+        eventType: "sample.visited",
+        channel: "Amazon",
+        brandName: "Ancient Nutrition",
+        ownerName: "Ella",
+        subject: "93H68D44ER",
+        sender: "Tokyo, Japan",
+        contactName: "Mobile Safari · iOS",
+        contentPreview: "https://tap.fridgechannels.com/p/93H68D44ER",
+        portalUrl: "https://portal.example/customers/brand-1/sample",
+      },
+      { contentMaxChars: 300 },
+    );
+    assert.match(text, /^Sample tap · Amazon/m);
+    assert.match(text, /^Owner: Ella$/m);
+    assert.match(text, /^SN: 93H68D44ER$/m);
+    assert.match(text, /^Location: Tokyo, Japan$/m);
+    assert.match(text, /^Device: Mobile Safari · iOS$/m);
+    assert.match(text, /^URL: https:\/\/tap\.fridgechannels\.com\/p\/93H68D44ER$/m);
+    assert.doesNotMatch(text, /Contact:|From:|Status:|Subject:/);
+  });
 });
 
 describe("formatSlackNotificationBlocks", () => {

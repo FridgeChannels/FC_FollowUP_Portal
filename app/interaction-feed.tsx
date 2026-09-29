@@ -8,7 +8,7 @@ import { callReviewsFromTasks, type CallReviewStatus } from "@/lib/call-review-m
 import { getDisplayTimeZone } from "@/lib/display-time";
 import { BombInstance, Channel, Contact, CPCode, CP_CODES, Interaction, ScheduledAction, compareInteractionSort, interactionSortAt, interactionSortMs } from "@/lib/outreach-domain";
 import { BombExecutionPlan, formatEasternDateTime } from "./bomb-plan";
-import { BrandReplyBox, inboundNeedsComposer } from "./brand-reply-box";
+import { BrandReplyBox, ThreadSendBox, inboundNeedsComposer } from "./brand-reply-box";
 import { ChannelIcon } from "./channel-icon";
 import { PhoneTaskBoard, UnqualifiedRecallForm, type QuoDialOpening } from "./phone-task-board";
 import { QuoCallPanel } from "./quo-call-panel";
@@ -510,12 +510,12 @@ function ChannelTranscript({
         <ConversationDetail
           thread={activeThread}
           contact={contact}
+          contacts={contacts}
           channel={channel}
           replyPool={messages}
           bombInstances={bombInstances}
           onBack={() => setSelectedThread(null)}
           onSend={onSend}
-         
           onCancelPending={onCancelPending}
           onRefreshQuo={onRefreshQuo}
           quoRefreshingCallId={quoRefreshingCallId}
@@ -687,6 +687,7 @@ function ConversationInbox({
 function ConversationDetail({
   thread,
   contact,
+  contacts,
   channel,
   replyPool,
   bombInstances,
@@ -703,6 +704,7 @@ function ConversationDetail({
 }: {
   thread: Interaction[];
   contact?: Contact;
+  contacts: Contact[];
   channel: Channel;
   replyPool: Interaction[];
   bombInstances: BombInstance[];
@@ -731,8 +733,19 @@ function ConversationDetail({
         {contact ? <p className="mt-1 truncate text-sm text-slate-500">{contact.name}{endpoint ? ` · ${endpoint}` : ""}</p> : null}
       </div>
       <div className="px-5 pb-5">
-        <ThreadMessages thread={thread} replyPool={replyPool} contact={contact} channel={channel} endpoint={endpoint} bombInstances={bombInstances} collapseOlder expandAll={expandAll} onSend={onSend} onCancelPending={onCancelPending} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId} resolveReview={resolveReview} canReviewCalls={canReviewCalls} reviewingTaskId={reviewingTaskId} onReviewCall={onReviewCall} onMarkReplyRead={onMarkReplyRead} />
+        <ThreadMessages thread={thread} replyPool={replyPool} contact={contact} contacts={contacts} channel={channel} endpoint={endpoint} bombInstances={bombInstances} collapseOlder expandAll={expandAll} onSend={onSend} onCancelPending={onCancelPending} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId} resolveReview={resolveReview} canReviewCalls={canReviewCalls} reviewingTaskId={reviewingTaskId} onReviewCall={onReviewCall} onMarkReplyRead={onMarkReplyRead} />
       </div>
+      {channel === "Email" ? (
+        <ThreadSendBox
+          customerId={thread[0]!.customerId}
+          channel={channel}
+          contact={contact}
+          contacts={contacts}
+          thread={thread}
+          interactions={replyPool}
+          onSend={onSend}
+        />
+      ) : null}
     </section>
   );
 }
@@ -794,6 +807,7 @@ function ThreadMessages({
   thread,
   replyPool,
   contact,
+  contacts,
   channel,
   endpoint,
   bombInstances,
@@ -812,6 +826,7 @@ function ThreadMessages({
   thread: Interaction[];
   replyPool: Interaction[];
   contact?: Contact;
+  contacts?: Contact[];
   channel: Channel;
   endpoint?: string;
   bombInstances: BombInstance[];
@@ -840,11 +855,13 @@ function ThreadMessages({
       const inbound = item.direction === "Inbound";
       const source = sourceLabel(item, bombInstances);
       const phoneCall = channel === "Phone";
+      const itemContact = (item.contactId && contacts?.find((person) => person.id === item.contactId)) || contact;
+      const itemEndpoint = itemContact ? contactPoint(itemContact, channel) : endpoint;
       const who = inbound
         ? phoneCall
-          ? `${endpoint || contact?.name || "Contact"} call`
-          : `${endpoint || contact?.name || "Contact"} Reply`
-        : `To ${endpoint || contact?.name || "Contact"}`;
+          ? `${itemEndpoint || itemContact?.name || "Contact"} call`
+          : `${itemEndpoint || itemContact?.name || "Contact"} Reply`
+        : `To ${itemEndpoint || itemContact?.name || "Contact"}`;
       const callId = item.quo?.callId;
       const canRefresh = !!callId && !callId.startsWith("ACsim") && !!onRefreshQuo;
       const timing = !inbound && !phoneCall ? deliveryTiming(item) : null;

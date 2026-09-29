@@ -88,6 +88,10 @@ export default defineConfig(async ({ mode }) => {
     process.env.EMAIL_ATTACHMENT_MAX_BYTES || loadedEnv.EMAIL_ATTACHMENT_MAX_BYTES;
   const emailAttachmentMaxCount =
     process.env.EMAIL_ATTACHMENT_MAX_COUNT || loadedEnv.EMAIL_ATTACHMENT_MAX_COUNT;
+  const dtcDashboardUrl =
+    process.env.DTC_DASHBOARD_URL || loadedEnv.DTC_DASHBOARD_URL;
+  const dtcDashboardKey =
+    process.env.DTC_DASHBOARD_KEY || loadedEnv.DTC_DASHBOARD_KEY;
   const rawDevAllowedHosts =
     process.env.DEV_ALLOWED_HOSTS || loadedEnv.DEV_ALLOWED_HOSTS || "";
   // `true` / `*` / `all` disables Vite host checks (needed for reverse-proxy domains).
@@ -173,6 +177,8 @@ export default defineConfig(async ({ mode }) => {
       ...(emailAttachmentMaxCount
         ? { EMAIL_ATTACHMENT_MAX_COUNT: emailAttachmentMaxCount }
         : {}),
+      ...(dtcDashboardUrl ? { DTC_DASHBOARD_URL: dtcDashboardUrl } : {}),
+      ...(dtcDashboardKey ? { DTC_DASHBOARD_KEY: dtcDashboardKey } : {}),
     },
     d1_databases: d1
       ? [

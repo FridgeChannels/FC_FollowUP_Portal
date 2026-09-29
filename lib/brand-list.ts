@@ -185,6 +185,8 @@ export type BrandListItem = {
   ownerName: string | null;
   ownerEmail: string | null;
   followupExhibition?: string | null;
+  /** Follow-up ClientDB `Human Notes` — Portal Add Note content. */
+  humanNotes?: string | null;
   /** Follow-up Client `Is Test` — Portal ACL hides these from all roles. */
   isTest?: boolean;
   needsReply?: boolean;
@@ -332,7 +334,7 @@ export type BrandDetail = BrandListItem & {
   amazonSampleProduct?: import("./sample-product").AmazonSampleProduct;
   priority: string | null;
   notes: string | null;
-  /** Follow-up ClientDB `Human Notes` — Portal Add Note content. */
+  /** Required on detail; list may omit for older cache entries. */
   humanNotes: string | null;
   createdAt: string | null;
   lastEditedAt: string | null;
@@ -342,6 +344,8 @@ export type BrandDetail = BrandListItem & {
   matchedCategory: string | null;
   /** ClientDB → ICP Group (formula, e.g. A / B / A&B). */
   icpGroup: string | null;
+  /** ClientDB → NFC Card SN (Sample magnet serial). */
+  nfcCardSn?: string | null;
   followupExhibition: string | null;
   meetingNotes: BrandMeetingNote[];
   aiMeetingLinks: BrandAiMeetingLink[];

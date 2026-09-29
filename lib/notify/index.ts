@@ -13,4 +13,5 @@ export {
 } from "./inbound.ts";
 export { formatSlackNotificationText, formatSlackNotificationBlocks, truncatePreview } from "./format.ts";
 export { createSlackWebhookProvider } from "./slack-provider.ts";
-export { portalBrandUrl, getPortalBaseUrl } from "./config.ts";
+export { createInAppNotifyProvider } from "./in-app-provider.ts";
+export { portalBrandUrl, portalSampleUrl, getPortalBaseUrl } from "./config.ts";

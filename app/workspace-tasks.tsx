@@ -208,6 +208,7 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [detailTask, setDetailTask] = useState<UnifiedTask | null>(null);
+  const [ownerOptions, setOwnerOptions] = useState<Array<{ id: string; name: string }>>([]);
 
   useEffect(() => {
     setType(state.currentRole === "Caller" ? "Call" : "All");
@@ -215,6 +216,34 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
     setDueFrom("");
     setDueTo("");
   }, [state.currentRole]);
+
+  useEffect(() => {
+    if (!manager) {
+      setOwnerOptions([]);
+      return;
+    }
+    let cancelled = false;
+    fetch("/api/owners")
+      .then(async (response) => {
+        const payload = (await response.json()) as {
+          owners?: Array<{ id: string; name: string; role?: string }>;
+          error?: string;
+        };
+        if (!response.ok) throw new Error(payload.error || "Failed to load owners");
+        return (payload.owners || [])
+          .filter((owner) => owner.role !== "Admin")
+          .map(({ id, name }) => ({ id, name }));
+      })
+      .then((items) => {
+        if (!cancelled) setOwnerOptions(items);
+      })
+      .catch(() => {
+        if (!cancelled) setOwnerOptions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [manager]);
 
   const taskListQuery = useMemo(() => {
     const params = new URLSearchParams();
@@ -356,7 +385,7 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
     <div className="mb-4 flex flex-col gap-3 rounded-2xl bg-white p-3 lg:flex-row lg:items-center">
       <div className="relative min-w-56 flex-1 lg:max-w-sm"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400"/><Input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search brand or task…" className="pl-9"/></div>
       {state.currentRole !== "Caller" && <Select value={type} onValueChange={value => setType(value as TaskType | "All")}><SelectTrigger className="w-full lg:w-40"><SelectValue/></SelectTrigger><SelectContent>{["All", "Call", "Reply"].map(value => <SelectItem key={value} value={value}>{value === "All" ? "All types" : value}</SelectItem>)}</SelectContent></Select>}
-      {manager && <Select value={assignee} onValueChange={setAssignee}><SelectTrigger className="w-full lg:w-44"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">All AccountManagers</SelectItem><SelectItem value="unassigned">Unassigned</SelectItem>{state.users.map(user => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}</SelectContent></Select>}
+      {manager && <Select value={assignee} onValueChange={setAssignee}><SelectTrigger className="w-full lg:w-44"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">All AccountManagers</SelectItem><SelectItem value="unassigned">Unassigned</SelectItem>{ownerOptions.map(user => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}</SelectContent></Select>}
       {isCaller && <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto">
         <Popover>
           <PopoverTrigger asChild>

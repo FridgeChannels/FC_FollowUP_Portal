@@ -154,6 +154,168 @@ export function BrandReplyBox({
   );
 }
 
+function threadEmailSubject(thread: Interaction[]) {
+  for (let index = thread.length - 1; index >= 0; index -= 1) {
+    const item = thread[index]!;
+    if (item.channel !== "Email") continue;
+    const subject = item.title?.trim();
+    if (!subject || subject === "Email" || subject === "Conversation") continue;
+    return subject;
+  }
+  return "";
+}
+
+function threadSendContext(thread: Interaction[]) {
+  const withThreadId = [...thread].reverse().find((item) => item.threadId);
+  const latestOutbound = [...thread].reverse().find((item) => item.direction === "Outbound");
+  return {
+    threadId: withThreadId?.threadId || latestOutbound?.threadId || thread.at(-1)?.threadId,
+    taskId: latestOutbound?.taskId || withThreadId?.taskId || thread.at(-1)?.taskId,
+    bombInstanceId: latestOutbound?.bombInstanceId || withThreadId?.bombInstanceId,
+  };
+}
+
+/** Bottom composer for an opened Email thread when nothing in that thread awaits reply. */
+export function ThreadSendBox({
+  customerId,
+  channel,
+  contact: defaultContact,
+  contacts,
+  thread,
+  interactions,
+  onSend,
+}: {
+  customerId: string;
+  channel: Channel;
+  contact?: Contact;
+  contacts: Contact[];
+  thread: Interaction[];
+  interactions: Interaction[];
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: DeliveryMode, scheduledAt?: string, attachments?: MediaAttachment[], cc?: string) => Promise<void>;
+}) {
+  const { state, can, sendHumanReply } = useWorkspace();
+  const customer = state.customers.find((item) => item.id === customerId);
+  const notionBacked = !!onSend;
+  const people = contacts.filter((item) => channelAvailable(item, channel));
+  const initialContactId = (defaultContact && channelAvailable(defaultContact, channel) ? defaultContact.id : null)
+    || people[0]?.id
+    || "";
+  const prefilledSubject = channel === "Email" ? threadEmailSubject(thread) : "";
+  const [contactId, setContactId] = useState(initialContactId);
+  const [content, setContent] = useState("");
+  const [subject, setSubject] = useState(prefilledSubject);
+  const [cc, setCc] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("queue");
+  const [scheduledAt, setScheduledAt] = useState("");
+  const media = useMessageMedia(channel);
+  const threadKey = thread.map((item) => item.id).join(",");
+
+  useEffect(() => {
+    const nextId = (defaultContact && channelAvailable(defaultContact, channel) ? defaultContact.id : null)
+      || people[0]?.id
+      || "";
+    setContactId(nextId);
+    setContent("");
+    setSubject(channel === "Email" ? threadEmailSubject(thread) : "");
+    setCc("");
+    setDeliveryMode("queue");
+    setScheduledAt("");
+    media.reset();
+  }, [channel, customerId, defaultContact?.id, threadKey]);
+
+  const contact = people.find((item) => item.id === contactId) || people[0];
+  const threadHasPendingReply = thread.some((item) => inboundNeedsComposer(state, item, interactions));
+  if (!can("reply")) return null;
+  if (!notionBacked && customer?.status === "Closed") return null;
+  if (threadHasPendingReply) return null;
+  if (!people.length) {
+    return <div className="border-t border-slate-200 px-5 py-4 text-sm text-slate-400">No contact has a valid {channel} endpoint.</div>;
+  }
+
+  const { threadId, taskId, bombInstanceId } = threadSendContext(thread);
+  const hasBody = (channel === "Email" ? !emailBodyIsEmpty(content) : !!content.trim()) || media.readyAttachments.length > 0;
+  const busy = saving;
+  const canSend = !!contact && hasBody && !(channel === "Email" && !subject.trim()) && !busy && !media.uploading;
+
+  return (
+    <div className="border-t border-slate-200 px-5 py-4">
+      <div className="rounded-xl bg-slate-50 p-3">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+          <Select value={contact?.id} onValueChange={setContactId} disabled={busy}>
+            <SelectTrigger size="sm" className="w-56">
+              <SelectValue placeholder="Recipient" />
+            </SelectTrigger>
+            <SelectContent>
+              {people.map((item) => (
+                <SelectItem key={item.id} value={item.id}>
+                  {item.name}{item.email ? ` · ${item.email}` : item.role ? ` · ${item.role}` : ""}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <span className="text-xs text-slate-400">Send {channel}</span>
+        </div>
+        <div className="min-w-0 space-y-2">
+          {channel === "Email" && <Input value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="Email subject" disabled={busy} />}
+          {channel === "Email" && <Input value={cc} onChange={(event) => setCc(event.target.value)} placeholder="CC (comma-separated)" disabled={busy} />}
+          <MessageMediaInputFrame channel={channel} media={media} disabled={busy}>
+            {channel === "Email" ? (
+              <EmailBodyEditor value={content} onChange={setContent} disabled={busy} placeholder="Write a follow-up…" />
+            ) : (
+              <Textarea value={content} onChange={(event) => setContent(event.target.value)} className="min-h-20 resize-none" placeholder={`Write a ${channel} message…`} disabled={busy} />
+            )}
+          </MessageMediaInputFrame>
+          <div className="flex items-center justify-end gap-2">
+            <div className="flex items-center gap-2">
+              <SendTimingToggle value={deliveryMode} onValueChange={setDeliveryMode} scheduledAt={scheduledAt} onScheduledAtChange={setScheduledAt} />
+              <Button
+                className="h-9 px-3"
+                disabled={!canSend}
+                onClick={() => {
+                  if (!contact) return;
+                  if (onSend) {
+                    setSaving(true);
+                    void onSend(
+                      contact.id,
+                      channel,
+                      content,
+                      taskId,
+                      threadId,
+                      channel === "Email" ? subject : undefined,
+                      deliveryMode,
+                      scheduledAt ? easternDateTimeLocalToIso(scheduledAt) : undefined,
+                      media.readyAttachments,
+                      channel === "Email" ? cc : undefined,
+                    )
+                      .then(() => {
+                        toast.success("Message saved as pending");
+                        setContent("");
+                        setCc("");
+                        media.reset();
+                      })
+                      .catch((error) => toast.error(error instanceof Error ? error.message : "Send failed"))
+                      .finally(() => setSaving(false));
+                    return;
+                  }
+                  const result = sendHumanReply(customerId, contact.id, channel, content, bombInstanceId);
+                  show(result);
+                  if (result.ok) {
+                    setContent("");
+                    media.reset();
+                  }
+                }}
+              >
+                <Send className="size-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ChannelSendBox({
   customerId,
   channel,
