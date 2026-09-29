@@ -9,10 +9,34 @@ import {
   pathnameForSn,
   sampleTypeToExperience,
 } from "./paths.ts";
+import { parseNfcCardSns, pickSelectedSn } from "./sns.ts";
 
 describe("pathnameForSn", () => {
   it("builds /p/{SN} path", () => {
     assert.equal(pathnameForSn("TGW4K9ZM6G"), "/p/TGW4K9ZM6G");
+  });
+});
+
+describe("parseNfcCardSns", () => {
+  it("returns empty for blank input", () => {
+    assert.deepEqual(parseNfcCardSns(null), []);
+    assert.deepEqual(parseNfcCardSns(""), []);
+    assert.deepEqual(parseNfcCardSns("  , , "), []);
+  });
+
+  it("parses single and comma-separated SNs with trim + order-preserving dedupe", () => {
+    assert.deepEqual(parseNfcCardSns("TGW4K9ZM6G"), ["TGW4K9ZM6G"]);
+    assert.deepEqual(parseNfcCardSns("AAA, BBB ,CCC,"), ["AAA", "BBB", "CCC"]);
+    assert.deepEqual(parseNfcCardSns("AAA,BBB,AAA"), ["AAA", "BBB"]);
+  });
+});
+
+describe("pickSelectedSn", () => {
+  it("prefers requested SN when it belongs to the list", () => {
+    assert.equal(pickSelectedSn(["A", "B"], "B"), "B");
+    assert.equal(pickSelectedSn(["A", "B"], "Z"), "A");
+    assert.equal(pickSelectedSn(["A", "B"], null), "A");
+    assert.equal(pickSelectedSn([], "A"), null);
   });
 });
 

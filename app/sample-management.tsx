@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Check, Clock3, Copy, ExternalLink, Link2, MousePointerClick, UserRound } from "lucide-react";
+import { ArrowLeft, Check, Clock3, Copy, ExternalLink, Loader2, MousePointerClick, UserRound } from "lucide-react";
 import Image from "next/image";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -53,6 +53,7 @@ type ExperienceFormState = {
 };
 type SampleClick = {
   id: string;
+  sn?: string;
   clickedAt: string;
   person: string;
   role: string;
@@ -69,10 +70,20 @@ type SampleSummary = {
   uniqueVisitors: number;
   lastClickedAt: string | null;
 };
+type SampleMagnetSummary = {
+  sn: string;
+  sampleUrl?: string | null;
+  pathname?: string | null;
+  configuredExperience?: "dtc" | "asin_plus" | null;
+  defaultSampleType?: SampleType | null;
+  magnetParam?: MagnetParam | null;
+};
 type SampleBrand = { name: string; amazonSampleProduct?: AmazonSampleProduct; nfcCardSn?: string | null };
 type SamplePayload = {
   error?: string;
   nfcCardSn?: string | null;
+  nfcCardSns?: string[];
+  samples?: SampleMagnetSummary[];
   brandName?: string | null;
   sampleUrl?: string | null;
   configuredExperience?: "dtc" | "asin_plus" | null;
@@ -84,6 +95,7 @@ type SamplePayload = {
     skipped?: boolean;
     scheduled?: boolean;
     reason?: string;
+    sn?: string | null;
   } | null;
   summary?: SampleSummary | null;
   summaryByType?: {
@@ -93,6 +105,12 @@ type SamplePayload = {
   } | null;
   clicks?: SampleClick[];
 };
+
+function experienceLabel(value: "dtc" | "asin_plus" | null | undefined) {
+  if (value === "asin_plus") return "Amazon";
+  if (value === "dtc") return "DTC";
+  return null;
+}
 
 const EMPTY_EXPERIENCE_FORM: ExperienceFormState = {
   brandName: "",
@@ -353,6 +371,20 @@ export function SampleManagementPage({ customerId }: { customerId: string }) {
   const [productImageUploading, setProductImageUploading] = useState(false);
   const [markingDeviceId, setMarkingDeviceId] = useState<string | null>(null);
   const [extractingColors, setExtractingColors] = useState(false);
+  const [snSwitching, setSnSwitching] = useState(false);
+  const [pendingSn, setPendingSn] = useState<string | null>(null);
+
+  const fetchSamplePayload = async (sn?: string | null) => {
+    const query = sn ? `?sn=${encodeURIComponent(sn)}` : "";
+    const response = await fetch(
+      `/api/brands/${encodeURIComponent(customerId)}/sample${query}`,
+    );
+    const data = (await response.json()) as SamplePayload;
+    if (!response.ok && response.status !== 503) {
+      throw new Error(data.error || "Unable to load sample activity");
+    }
+    return data;
+  };
 
   useEffect(() => {
     let active = true;
@@ -363,7 +395,7 @@ export function SampleManagementPage({ customerId }: { customerId: string }) {
     setBrand(null);
     setSample(null);
 
-    const loadBrand = fetch(`/api/brands/${encodeURIComponent(customerId)}`)
+    fetch(`/api/brands/${encodeURIComponent(customerId)}`)
       .then(async (response) => {
         const data = (await response.json()) as { error?: string; brand?: SampleBrand };
         if (!response.ok || !data.brand) throw new Error(data.error || "Unable to load brand");
@@ -383,11 +415,7 @@ export function SampleManagementPage({ customerId }: { customerId: string }) {
       });
 
     const loadSample = async () => {
-      const response = await fetch(`/api/brands/${encodeURIComponent(customerId)}/sample`);
-      const data = (await response.json()) as SamplePayload;
-      if (!response.ok && response.status !== 503) {
-        throw new Error(data.error || "Unable to load sample activity");
-      }
+      const data = await fetchSamplePayload();
       if (!active) return data;
       setSample(data);
       if (data.defaultSampleType === "DTC" || data.defaultSampleType === "Amazon") {
@@ -401,14 +429,17 @@ export function SampleManagementPage({ customerId }: { customerId: string }) {
         for (let attempt = 0; attempt < 3; attempt += 1) {
           await new Promise((resolve) => window.setTimeout(resolve, 2500));
           if (!active) return data;
-          const refreshed = await fetch(`/api/brands/${encodeURIComponent(customerId)}/sample`);
-          const next = (await refreshed.json()) as SamplePayload;
-          if (!active || !refreshed.ok) continue;
-          setSample(next);
-          if (next.defaultSampleType === "DTC" || next.defaultSampleType === "Amazon") {
-            setSelectedType(next.defaultSampleType);
+          try {
+            const next = await fetchSamplePayload(data.nfcCardSn);
+            if (!active) return data;
+            setSample(next);
+            if (next.defaultSampleType === "DTC" || next.defaultSampleType === "Amazon") {
+              setSelectedType(next.defaultSampleType);
+            }
+            if (!next.sync?.scheduled) break;
+          } catch {
+            // keep last good payload
           }
-          if (!next.sync?.scheduled) break;
         }
         if (active) setSyncRefreshing(false);
       }
@@ -434,14 +465,17 @@ export function SampleManagementPage({ customerId }: { customerId: string }) {
       : sample?.defaultSampleType && types.includes(sample.defaultSampleType)
         ? sample.defaultSampleType
         : types[0];
-  const nfcCardSn = sample?.nfcCardSn || brand?.nfcCardSn || null;
+  const nfcCardSns =
+    sample?.nfcCardSns?.length
+      ? sample.nfcCardSns
+      : sample?.nfcCardSn
+        ? [sample.nfcCardSn]
+        : brand?.nfcCardSn
+          ? [brand.nfcCardSn]
+          : [];
+  const nfcCardSn = sample?.nfcCardSn || nfcCardSns[0] || null;
   const sampleUrl = sample?.sampleUrl || "";
-  const configuredLabel =
-    sample?.configuredExperience === "asin_plus"
-      ? "Amazon"
-      : sample?.configuredExperience === "dtc"
-        ? "DTC"
-        : null;
+  const configuredLabel = experienceLabel(sample?.configuredExperience);
   const clicks = [...(sample?.clicks || [])]
     .filter((item) => item.sampleType === activeType && !item.isInternal)
     .sort((a, b) => Date.parse(b.clickedAt) - Date.parse(a.clickedAt));
@@ -449,6 +483,45 @@ export function SampleManagementPage({ customerId }: { customerId: string }) {
     totalClicks: clicks.length,
     uniqueVisitors: new Set(clicks.map((item) => item.deviceId || item.person).filter(Boolean)).size,
     lastClickedAt: clicks[0]?.clickedAt || null,
+  };
+
+  const selectSn = async (nextSn: string) => {
+    if (!nextSn || nextSn === nfcCardSn || snSwitching) return;
+    setPendingSn(nextSn);
+    setSnSwitching(true);
+    setSyncRefreshing(false);
+    try {
+      const data = await fetchSamplePayload(nextSn);
+      setSample(data);
+      setPendingSn(null);
+      if (data.defaultSampleType === "DTC" || data.defaultSampleType === "Amazon") {
+        setSelectedType(data.defaultSampleType);
+      } else {
+        setSelectedType(null);
+      }
+      setSnSwitching(false);
+      if (data.sync?.scheduled) {
+        setSyncRefreshing(true);
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          await new Promise((resolve) => window.setTimeout(resolve, 2500));
+          try {
+            const next = await fetchSamplePayload(nextSn);
+            setSample(next);
+            if (next.defaultSampleType === "DTC" || next.defaultSampleType === "Amazon") {
+              setSelectedType(next.defaultSampleType);
+            }
+            if (!next.sync?.scheduled) break;
+          } catch {
+            break;
+          }
+        }
+        setSyncRefreshing(false);
+      }
+    } catch (cause) {
+      setPendingSn(null);
+      setSnSwitching(false);
+      toast.error(cause instanceof Error ? cause.message : "Unable to switch magnet");
+    }
   };
 
   const copyLink = async () => {
@@ -585,22 +658,34 @@ export function SampleManagementPage({ customerId }: { customerId: string }) {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          sn: nfcCardSn,
           sampleType: experienceTarget,
           ...experienceForm,
         }),
       });
       const data = (await response.json()) as SamplePayload & { error?: string };
       if (!response.ok) throw new Error(data.error || "Unable to save experience");
-      setSample((current) =>
-        current
-          ? {
-              ...current,
-              configuredExperience: data.configuredExperience ?? current.configuredExperience,
-              defaultSampleType: data.defaultSampleType ?? experienceTarget,
-              magnetParam: data.magnetParam ?? current.magnetParam,
-            }
-          : current,
-      );
+      setSample((current) => {
+        if (!current) return current;
+        const samples = (current.samples || []).map((item) =>
+          item.sn === nfcCardSn
+            ? {
+                ...item,
+                configuredExperience:
+                  data.configuredExperience ?? item.configuredExperience,
+                defaultSampleType: data.defaultSampleType ?? experienceTarget,
+                magnetParam: data.magnetParam ?? item.magnetParam,
+              }
+            : item,
+        );
+        return {
+          ...current,
+          configuredExperience: data.configuredExperience ?? current.configuredExperience,
+          defaultSampleType: data.defaultSampleType ?? experienceTarget,
+          magnetParam: data.magnetParam ?? current.magnetParam,
+          samples,
+        };
+      });
       if (experienceTarget === "Amazon") {
         setBrand((current) =>
           current
@@ -679,13 +764,65 @@ export function SampleManagementPage({ customerId }: { customerId: string }) {
             {syncRefreshing ? (
               <p className="mt-4 text-xs text-slate-500">Refreshing taps in the background…</p>
             ) : null}
-            <section className="mt-8 border-b border-slate-200 pb-6" aria-label="Sample link">
-              <div className="flex items-center gap-2 text-sm font-semibold">
-                <Link2 className="size-4 text-violet-600" />
-                Sample link
-              </div>
+            <section className="mt-8 border-b border-slate-200 pb-6" aria-label="Sample magnet">
+              {nfcCardSns.length > 1 ? (
+                <div>
+                  <p className="text-xs text-slate-500">
+                    {nfcCardSns.length} magnets on this ClientDB — pick one to configure.
+                  </p>
+                  <div
+                    className="mt-2 flex flex-wrap gap-2"
+                    role="tablist"
+                    aria-label="NFC Card SN"
+                  >
+                    {nfcCardSns.map((sn) => {
+                      const entry = sample?.samples?.find((item) => item.sn === sn);
+                      const label = experienceLabel(entry?.configuredExperience);
+                      const activeSn = pendingSn || nfcCardSn;
+                      const selected = sn === activeSn;
+                      return (
+                        <button
+                          key={sn}
+                          type="button"
+                          role="tab"
+                          aria-selected={selected}
+                          disabled={snSwitching}
+                          onClick={() => void selectSn(sn)}
+                          className={`inline-flex items-center rounded-md border px-2.5 py-1.5 text-left text-xs transition ${
+                            selected
+                              ? "border-violet-600 bg-violet-50 text-violet-900"
+                              : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
+                          } ${snSwitching && !selected ? "opacity-60" : ""}`}
+                        >
+                          {snSwitching && selected ? (
+                            <Loader2 className="mr-1.5 size-3.5 shrink-0 animate-spin text-violet-600" />
+                          ) : null}
+                          <span className="font-medium">{sn}</span>
+                          <span
+                            className={`ml-1.5 ${label ? "text-slate-500" : "text-slate-400"}`}
+                          >
+                            · {label || "Not set"}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+              <div
+                className={`relative ${snSwitching ? "pointer-events-none opacity-50" : ""}`}
+                aria-busy={snSwitching}
+              >
+              {snSwitching ? (
+                <div className="absolute inset-0 z-10 flex items-start justify-center pt-6">
+                  <p className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm">
+                    <Loader2 className="size-3.5 animate-spin text-violet-600" />
+                    Loading {pendingSn || "magnet"}…
+                  </p>
+                </div>
+              ) : null}
               {nfcCardSn ? (
-                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-slate-500">
+                <div className={`${nfcCardSns.length > 1 ? "mt-2" : ""} flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-slate-500`}>
                   <p>
                     NFC Card SN · <span className="font-medium text-slate-700">{nfcCardSn}</span>
                     {configuredLabel ? (
@@ -706,7 +843,7 @@ export function SampleManagementPage({ customerId }: { customerId: string }) {
                     variant="outline"
                     size="sm"
                     className="h-8 min-h-8 px-2.5 text-[11px]"
-                    disabled={!sample || brandLoading}
+                    disabled={!sample || brandLoading || snSwitching}
                     onClick={() =>
                       openExperienceForm(
                         configuredLabel === "Amazon"
@@ -721,7 +858,7 @@ export function SampleManagementPage({ customerId }: { customerId: string }) {
                   </Button>
                 </div>
               ) : (
-                <p className="mt-2 text-xs text-amber-700">
+                <p className="text-xs text-amber-700">
                   No NFC Card SN on ClientDB for this brand. Add SN to resolve the tap link.
                 </p>
               )}
@@ -756,7 +893,12 @@ export function SampleManagementPage({ customerId }: { customerId: string }) {
                   PostHog is not configured — tap activity will stay empty until sync credentials are set.
                 </p>
               ) : null}
+            </div>
             </section>
+            <div
+              className={`relative ${snSwitching ? "pointer-events-none opacity-50" : ""}`}
+              aria-busy={snSwitching}
+            >
             <section className="mt-8 grid grid-cols-3 gap-3 sm:gap-8" aria-label="Click summary">
               <SummaryStat label="Total clicks" value={String(summary.totalClicks)} icon={MousePointerClick} />
               <SummaryStat label="Unique visitors" value={String(summary.uniqueVisitors)} icon={UserRound} />
@@ -847,6 +989,7 @@ export function SampleManagementPage({ customerId }: { customerId: string }) {
                 </table>
               </div>
             </section>
+            </div>
               </>
             ) : (
               <p className="mt-6 text-sm text-slate-500">No sample data available.</p>
@@ -856,7 +999,14 @@ export function SampleManagementPage({ customerId }: { customerId: string }) {
           <Dialog open={experienceFormOpen} onOpenChange={setExperienceFormOpen}>
             <DialogContent className="flex max-h-[85vh] flex-col gap-4 overflow-hidden sm:max-w-2xl">
               <DialogHeader className="shrink-0 pr-8">
-                <DialogTitle>Configure {experienceTarget} experience</DialogTitle>
+                <DialogTitle>
+                  Configure {experienceTarget} experience
+                  {nfcCardSn ? (
+                    <span className="mt-1 block text-sm font-normal text-slate-500">
+                      NFC Card SN · {nfcCardSn}
+                    </span>
+                  ) : null}
+                </DialogTitle>
                 <DialogDescription>
                   Fill in the tap page details, then save to switch this magnet to {experienceTarget}.
                 </DialogDescription>

@@ -27,6 +27,7 @@ import {
   titleFromProperties,
   type NotionPage,
 } from "./client";
+import { parseNfcCardSns } from "../sample/sns";
 import { listFollowupContacts } from "./contacts";
 import { listFollowupConversations } from "./conversations";
 import {
@@ -41,7 +42,7 @@ import {
   isOverdueReplyDueAt,
   normalizeBrandReplyState,
 } from "./brand-reply-state";
-import { parseAmazonSampleProduct } from "../sample-product";
+import { parseAmazonSampleProduct, resolveChannelType } from "../sample-product";
 import { cacheBrandPages } from "./brand-page-cache";
 import {
   brandListSourceIsExhausted,
@@ -114,7 +115,7 @@ async function resolveClientCompany(pageId?: string | null) {
       productDescription: propertyText(properties["Product Description"]) || null,
       matchedCategory: categories.filter(Boolean).join(", ") || null,
       icpGroup: propertyText(properties["ICP Group"]) || null,
-      nfcCardSn: propertyText(properties["NFC Card SN"])?.trim() || null,
+      nfcCardSn: parseNfcCardSns(propertyText(properties["NFC Card SN"]))[0] || null,
     };
   } catch {
     return {
@@ -1205,9 +1206,10 @@ export async function mapFollowupClientDetail(
   );
   return {
     ...brand,
-    channelType: (["DTC", "Amazon", "DTC&Amazon"] as const).find(
-      (item) => item === propertyText(properties["Portal Channel Type"]),
-    ) || null,
+    channelType: resolveChannelType({
+      portal: propertyText(properties["Portal Channel Type"]),
+      icpGroup: company.icpGroup,
+    }),
     amazonSampleProduct: parseAmazonSampleProduct(propertyText(properties["Amazon Sample Product"])),
     name: brandName,
     productDescription: company.productDescription,

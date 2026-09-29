@@ -71,15 +71,20 @@ export async function syncSampleVisitsForSn(input: {
   let brandName = input.brandName || null;
   let ownerId = input.ownerId || null;
   let sampleUrl = input.sampleUrl || null;
-  if (result.brandId && (!brandName || !ownerId || !sampleUrl)) {
+  if (result.brandId && (!brandName || !ownerId)) {
     try {
       const link = await resolveBrandSampleLink(result.brandId);
       brandName = brandName || link.brandName;
       ownerId = ownerId || link.ownerId;
-      sampleUrl = sampleUrl || link.sampleUrl;
+      if (!sampleUrl) {
+        sampleUrl = `https://tap.fridgechannels.com${pathnameForSn(sn)}`;
+      }
     } catch {
       // keep partial metadata
     }
+  }
+  if (!sampleUrl) {
+    sampleUrl = `https://tap.fridgechannels.com${pathnameForSn(sn)}`;
   }
 
   const cursor = await getSyncCursor(sn);
@@ -158,7 +163,12 @@ export async function syncSampleVisitsBatch(options?: {
 
   if (options?.brandId) {
     const link = await resolveBrandSampleLink(options.brandId);
-    if (!link.nfcCardSn) {
+    const sns = link.nfcCardSns?.length
+      ? link.nfcCardSns
+      : link.nfcCardSn
+        ? [link.nfcCardSn]
+        : [];
+    if (!sns.length) {
       return {
         results: [
           {
@@ -172,15 +182,17 @@ export async function syncSampleVisitsBatch(options?: {
         ],
       };
     }
-    results.push(
-      await syncSampleVisitsForSn({
-        sn: link.nfcCardSn,
-        brandId: link.brandId,
-        brandName: link.brandName,
-        ownerId: link.ownerId,
-        sampleUrl: link.sampleUrl,
-      }),
-    );
+    for (const sn of sns.slice(0, maxSns)) {
+      results.push(
+        await syncSampleVisitsForSn({
+          sn,
+          brandId: link.brandId,
+          brandName: link.brandName,
+          ownerId: link.ownerId,
+          sampleUrl: `https://tap.fridgechannels.com${pathnameForSn(sn)}`,
+        }),
+      );
+    }
     return { results };
   }
 
@@ -207,38 +219,49 @@ export async function syncSampleVisitsBatch(options?: {
 export async function planBrandSampleSync(input: {
   brandId: string;
   link?: BrandSampleLink | null;
+  /** When set, page-trigger sync only evaluates this SN (multi-SN brands). */
+  sn?: string | null;
 }): Promise<{
   link: BrandSampleLink;
+  sn: string | null;
   shouldSync: boolean;
   reason: "no_sn" | "disabled" | "fresh" | "running" | "stale";
 }> {
   const link = input.link || (await resolveBrandSampleLink(input.brandId));
-  if (!link.nfcCardSn) return { link, shouldSync: false, reason: "no_sn" };
-  if (!isSamplePageSyncEnabled()) return { link, shouldSync: false, reason: "disabled" };
+  const sns = link.nfcCardSns?.length
+    ? link.nfcCardSns
+    : link.nfcCardSn
+      ? [link.nfcCardSn]
+      : [];
+  const requested = (input.sn || "").trim();
+  const sn =
+    requested && sns.includes(requested) ? requested : sns[0] || null;
+  if (!sn) return { link, sn: null, shouldSync: false, reason: "no_sn" };
+  if (!isSamplePageSyncEnabled()) return { link, sn, shouldSync: false, reason: "disabled" };
 
-  const cursor = await getSyncCursor(link.nfcCardSn);
+  const cursor = await getSyncCursor(sn);
   if (cursor?.status === "running") {
-    return { link, shouldSync: false, reason: "running" };
+    return { link, sn, shouldSync: false, reason: "running" };
   }
   const staleMinutes = getSamplePageSyncStaleMinutes();
   const lastRun = cursor?.last_run_at ? Date.parse(cursor.last_run_at) : NaN;
   const stale =
     !Number.isFinite(lastRun) || Date.now() - lastRun > staleMinutes * 60_000;
-  if (!stale) return { link, shouldSync: false, reason: "fresh" };
-  return { link, shouldSync: true, reason: "stale" };
+  if (!stale) return { link, sn, shouldSync: false, reason: "fresh" };
+  return { link, sn, shouldSync: true, reason: "stale" };
 }
 
-export async function syncBrandSampleIfStale(brandId: string) {
-  const plan = await planBrandSampleSync({ brandId });
-  if (!plan.shouldSync) {
+export async function syncBrandSampleIfStale(brandId: string, sn?: string | null) {
+  const plan = await planBrandSampleSync({ brandId, sn });
+  if (!plan.shouldSync || !plan.sn) {
     return { skipped: true as const, reason: plan.reason, link: plan.link };
   }
   const sync = await syncSampleVisitsForSn({
-    sn: plan.link.nfcCardSn!,
+    sn: plan.sn,
     brandId: plan.link.brandId,
     brandName: plan.link.brandName,
     ownerId: plan.link.ownerId,
-    sampleUrl: plan.link.sampleUrl,
+    sampleUrl: `https://tap.fridgechannels.com${pathnameForSn(plan.sn)}`,
   });
   return { skipped: false as const, link: plan.link, sync };
 }

@@ -12,6 +12,7 @@ import {
   getMagnetBrandParamBySn,
   getMagnetBySn,
   updateMagnetBrandParamBySn,
+  type MagnetBrandParam,
   type MagnetBrandParamPatch,
 } from "@/lib/sample/magnet";
 import { countUnreadSampleNotifications, markSampleNotificationsRead } from "@/lib/sample/notifications";
@@ -25,11 +26,11 @@ import {
   type SampleChannelType,
 } from "@/lib/sample/paths";
 import {
-  readNfcCardSnFromClientPage,
-  resolveBrandSampleLinkFromPage,
+  pickSelectedSn,
+  readNfcCardSnsFromClientPage,
 } from "@/lib/sample/resolve";
 import { planBrandSampleSync, syncSampleVisitsForSn } from "@/lib/sample/sync";
-import { listVisitsForBrand, listVisitsForSn } from "@/lib/sample/visits";
+import { listVisitsForSn } from "@/lib/sample/visits";
 import { isPosthogConfigured } from "@/lib/posthog/config";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { validHttpUrl } from "@/lib/sample-product";
@@ -73,6 +74,10 @@ function runInBackground(job: Promise<unknown>, label: string) {
   }
 }
 
+function sampleUrlForSn(sn: string, magnetUrl: string | null | undefined) {
+  return magnetUrl || `https://tap.fridgechannels.com${pathnameForSn(sn)}`;
+}
+
 export async function GET(request: Request, { params }: Params) {
   try {
     const viewer = await viewerFromRequest(request);
@@ -88,10 +93,20 @@ export async function GET(request: Request, { params }: Params) {
 
     if (!isSupabaseConfigured()) {
       return Response.json(
-        { error: "Supabase is not configured", nfcCardSn: null, sampleUrl: null, clicks: [], summary: null },
+        {
+          error: "Supabase is not configured",
+          nfcCardSn: null,
+          nfcCardSns: [],
+          samples: [],
+          sampleUrl: null,
+          clicks: [],
+          summary: null,
+        },
         { status: 503 },
       );
     }
+
+    const requestedSn = new URL(request.url).searchParams.get("sn");
 
     // Fast path: reuse the Follow-up page already fetched for auth; only ClientDB for SN.
     const properties = page.properties || {};
@@ -102,20 +117,30 @@ export async function GET(request: Request, { params }: Params) {
       propertyText(properties["Company Name"]) ||
       brand.name ||
       null;
-    const nfcCardSn = await readNfcCardSnFromClientPage(clientPageId);
+    const nfcCardSns = await readNfcCardSnsFromClientPage(clientPageId);
+    const nfcCardSn = pickSelectedSn(nfcCardSns, requestedSn);
 
-    const [magnet, magnetParam, brandVisits, internalDeviceIds, plan] = await Promise.all([
-      nfcCardSn ? getMagnetBySn(nfcCardSn) : Promise.resolve(null),
-      nfcCardSn ? getMagnetBrandParamBySn(nfcCardSn) : Promise.resolve(null),
-      nfcCardSn ? listVisitsForBrand(id, 200) : Promise.resolve([]),
+    const [magnetEntries, visits, internalDeviceIds, plan] = await Promise.all([
+      Promise.all(
+        nfcCardSns.map(async (sn) => {
+          const [magnet, magnetParam] = await Promise.all([
+            getMagnetBySn(sn),
+            getMagnetBrandParamBySn(sn),
+          ]);
+          return { sn, magnet, magnetParam };
+        }),
+      ),
+      nfcCardSn ? listVisitsForSn(nfcCardSn, 200) : Promise.resolve([]),
       getInternalDeviceIds(),
       planBrandSampleSync({
         brandId: id,
+        sn: nfcCardSn,
         link: {
           brandId: id,
           brandName,
           ownerId,
           clientPageId,
+          nfcCardSns,
           nfcCardSn,
           sampleUrl: nfcCardSn
             ? `https://tap.fridgechannels.com${pathnameForSn(nfcCardSn)}`
@@ -125,22 +150,30 @@ export async function GET(request: Request, { params }: Params) {
       }),
     ]);
 
-    const sampleUrl =
-      magnet?.url ||
-      (nfcCardSn ? `https://tap.fridgechannels.com${pathnameForSn(nfcCardSn)}` : null);
-    const visits =
-      brandVisits.length > 0
-        ? brandVisits
-        : nfcCardSn
-          ? await listVisitsForSn(nfcCardSn, 200)
-          : [];
-    const configuredExperience = magnetParam?.experience || null;
-    const defaultSampleType = experienceToSampleType(configuredExperience);
+    const samples = magnetEntries.map(({ sn, magnet, magnetParam }) => {
+      const configuredExperience = magnetParam?.experience || null;
+      return {
+        sn,
+        sampleUrl: sampleUrlForSn(sn, magnet?.url),
+        pathname: pathnameForSn(sn),
+        configuredExperience,
+        defaultSampleType: experienceToSampleType(configuredExperience),
+        magnetParam,
+      };
+    });
+
+    const selected =
+      samples.find((item) => item.sn === nfcCardSn) || samples[0] || null;
+    const sampleUrl = selected?.sampleUrl || null;
+    const magnetParam: MagnetBrandParam | null = selected?.magnetParam || null;
+    const configuredExperience = selected?.configuredExperience || null;
+    const defaultSampleType = selected?.defaultSampleType || null;
 
     const clicks = visits.map((visit) => {
       const experience = normalizeMagnetExperience(visit.experience);
       return {
         id: visit.id,
+        sn: visit.sn,
         clickedAt: visit.occurred_at,
         person: "Anonymous",
         role: "Unknown",
@@ -161,24 +194,24 @@ export async function GET(request: Request, { params }: Params) {
       Unknown: clicks.filter((item) => !item.sampleType),
     };
 
-    const unreadNotifications = nfcCardSn
+    const unreadNotifications = nfcCardSns.length
       ? await countUnreadSampleNotifications(id, internalDeviceIds)
       : 0;
 
     // Clear banner after we've captured the count; don't block the response.
-    if (nfcCardSn) {
+    if (nfcCardSns.length) {
       runInBackground(markSampleNotificationsRead(id), "mark-read");
     }
 
-    // PostHog sync stays off the critical path (webhook + cron are primary).
-    if (plan.shouldSync && plan.link.nfcCardSn) {
+    // PostHog sync stays off the critical path — only the selected SN on page load.
+    if (plan.shouldSync && plan.sn) {
       runInBackground(
         syncSampleVisitsForSn({
-          sn: plan.link.nfcCardSn,
+          sn: plan.sn,
           brandId: plan.link.brandId,
           brandName: plan.link.brandName || brandName,
           ownerId: plan.link.ownerId || ownerId,
-          sampleUrl: plan.link.sampleUrl || sampleUrl,
+          sampleUrl: sampleUrlForSn(plan.sn, null),
         }),
         "page-sync",
       );
@@ -186,6 +219,8 @@ export async function GET(request: Request, { params }: Params) {
 
     return Response.json({
       nfcCardSn,
+      nfcCardSns,
+      samples,
       brandName,
       sampleUrl,
       pathname: nfcCardSn ? pathnameForSn(nfcCardSn) : null,
@@ -197,6 +232,7 @@ export async function GET(request: Request, { params }: Params) {
         skipped: !plan.shouldSync,
         scheduled: plan.shouldSync,
         reason: plan.reason,
+        sn: plan.sn,
       },
       unreadNotifications,
       summary: summarizeClicks(clicks),
@@ -233,6 +269,7 @@ export async function PATCH(request: Request, { params }: Params) {
     }
 
     const body = (await request.json()) as {
+      sn?: string | null;
       sampleType?: string | null;
       experience?: string | null;
       brandName?: string | null;
@@ -263,8 +300,27 @@ export async function PATCH(request: Request, { params }: Params) {
       );
     }
 
-    const link = await resolveBrandSampleLinkFromPage(page, id);
-    if (!link.nfcCardSn) {
+    const properties = page.properties || {};
+    const clientPageId = firstRelationId(properties.Client) || null;
+    const nfcCardSns = await readNfcCardSnsFromClientPage(clientPageId);
+    if (!nfcCardSns.length) {
+      return Response.json({ error: "Brand has no NFC Card SN" }, { status: 400 });
+    }
+    const requestedSn = (body.sn || "").trim();
+    if (nfcCardSns.length > 1 && !requestedSn) {
+      return Response.json(
+        { error: "sn is required when the brand has multiple NFC Card SNs" },
+        { status: 400 },
+      );
+    }
+    if (requestedSn && !nfcCardSns.includes(requestedSn)) {
+      return Response.json(
+        { error: "SN is not on this brand's ClientDB NFC Card SN list" },
+        { status: 400 },
+      );
+    }
+    const targetSn = pickSelectedSn(nfcCardSns, requestedSn);
+    if (!targetSn) {
       return Response.json({ error: "Brand has no NFC Card SN" }, { status: 400 });
     }
 
@@ -329,7 +385,7 @@ export async function PATCH(request: Request, { params }: Params) {
       patch.discountAsin = body.discountAsin;
     }
 
-    const updated = await updateMagnetBrandParamBySn(link.nfcCardSn, patch);
+    const updated = await updateMagnetBrandParamBySn(targetSn, patch);
     if (!updated) {
       return Response.json(
         { error: "No magnet_brand_param row for this SN — cannot switch experience" },
@@ -349,7 +405,8 @@ export async function PATCH(request: Request, { params }: Params) {
     }
 
     return Response.json({
-      nfcCardSn: link.nfcCardSn,
+      nfcCardSn: targetSn,
+      nfcCardSns,
       configuredExperience: updated.experience,
       defaultSampleType: experienceToSampleType(updated.experience),
       magnetParam: updated,
@@ -357,7 +414,7 @@ export async function PATCH(request: Request, { params }: Params) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
     console.error("[sample] PATCH failed", { message, error });
-    const status = /required|Enter a valid|must be/.test(message)
+    const status = /required|Enter a valid|must be|not on this brand/.test(message)
       ? 400
       : message.includes("404")
         ? 404

@@ -93,12 +93,11 @@ export async function ingestSampleTapEvents(
       const link = await resolveBrandSampleLink(result.brandId);
       brandName = link.brandName;
       ownerId = link.ownerId;
-      sampleUrl = link.sampleUrl;
     } catch {
       // brand metadata optional for ingest
     }
   }
-  if (!sampleUrl) {
+  {
     const magnet = await getMagnetBySn(sn);
     sampleUrl = magnet?.url || `https://tap.fridgechannels.com${pathnameForSn(sn)}`;
   }

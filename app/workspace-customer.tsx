@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, Bomb, ChevronRight, CircleAlert, ExternalLink, History, MoreHorizontal, Plus, Search, Send } from "lucide-react";
+import { ArrowLeft, Bomb, ChevronRight, CircleAlert, ExternalLink, History, Loader2, MoreHorizontal, Plus, Search, Send } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "./workspace-store";
 import { cacheBrandItem, getCachedBrand } from "@/lib/brand-list-cache";
@@ -36,6 +36,7 @@ import { buildTemplateVariableContext, ownerNameFromContacts, resolveLaunchStepC
 import { brandHasActiveOmniReach } from "@/lib/notion/reply-inbox";
 import { buildInteractionCpFallbacks, resolveInteractionDisplayCp } from "@/lib/interaction-cp";
 import { channelAvailable } from "@/lib/channel-availability";
+import { CHANNEL_TYPES, resolveChannelType, type ChannelType } from "@/lib/sample-product";
 import { cn } from "@/lib/utils";
 
 const show=(r:{ok:boolean;message:string})=>r.ok?toast.success(r.message):toast.error(r.message);
@@ -201,17 +202,73 @@ export function LaunchOmniReachButton({
     </TooltipProvider>
   );
 }
-function formatIcpGroupLabel(value?: string | null): string {
-  if (value === "Amazon" || value === "DTC&Amazon" || value === "DTC") return value;
-  const normalized = (value || "").trim().replace(/\s*&\s*/g, "&").toUpperCase();
-  if (normalized === "B") return "Amazon";
-  if (normalized === "A&B") return "DTC&Amazon";
-  return "DTC";
+function formatIcpGroupLabel(value?: string | null): ChannelType {
+  return resolveChannelType({ portal: value, icpGroup: value });
 }
 const Status=({value}:{value:string})=><Badge className={value.includes("Bomb")||value.includes("OmniReach")?"bg-blue-100 text-blue-700":value.includes("Human")||value.includes("Reply")?"bg-violet-100 text-violet-700":value.includes("Due")?"bg-amber-100 text-amber-700":"bg-slate-100 text-slate-700"}>{value === "Bomb Running" ? "OmniReach Running" : value}</Badge>;
 function BadgeSelect({value,options,onChange,disabled}:{value:string;options:readonly string[];onChange:(value:string)=>void;disabled?:boolean}){
   return <Select value={value||undefined} onValueChange={onChange} disabled={disabled}><SelectTrigger className="h-auto w-auto gap-0 border-0 bg-transparent p-0 shadow-none focus-visible:ring-0 [&>svg]:hidden">{value?<Status value={value}/>:<span className="text-xs text-slate-400">—</span>}</SelectTrigger><SelectContent>{options.map(item=><SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent></Select>;
 }
+function ChannelTypeSelect({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: ChannelType;
+  onChange: (value: ChannelType) => void | Promise<void>;
+  disabled?: boolean;
+}) {
+  const [pending, setPending] = useState<ChannelType | null>(null);
+  const display = pending || value;
+  const busy = Boolean(pending) || Boolean(disabled);
+
+  useEffect(() => {
+    if (pending && value === pending) setPending(null);
+  }, [value, pending]);
+
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Portal Channel Type"
+      aria-busy={Boolean(pending)}
+      className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-50 p-0.5"
+    >
+      {CHANNEL_TYPES.map((item) => {
+        const selected = item === display;
+        return (
+          <button
+            key={item}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            disabled={busy}
+            onClick={() => {
+              if (selected || busy) return;
+              setPending(item);
+              void Promise.resolve(onChange(item)).catch(() => {
+                setPending(null);
+              });
+            }}
+            className={cn(
+              "inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-semibold transition",
+              selected
+                ? "bg-white text-slate-900 shadow-sm ring-1 ring-slate-200"
+                : "text-slate-500 hover:text-slate-800",
+              busy && !selected && "opacity-60",
+              busy && "cursor-not-allowed",
+            )}
+          >
+            {pending === item ? (
+              <Loader2 className="size-3 animate-spin text-violet-600" />
+            ) : null}
+            {item}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 const MESSAGE_CHANNELS:Channel[]=["Email","Phone","SMS","WhatsApp","LinkedIn"];
 const ACTIVITY_CHANNELS = new Set<Channel>(MESSAGE_CHANNELS);
 
@@ -906,7 +963,7 @@ export function BrandDetail({customerId}:{customerId:string}){
     <button onClick={()=>router.replace(backPath)} className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900"><ArrowLeft className="size-4"/>{can("customers")?"Brands":"ReplyTask"}</button>
     <section className="mb-8 grid gap-6 rounded-2xl border border-slate-200 bg-white p-5 xl:grid-cols-[minmax(0,1fr)_minmax(260px,.8fr)_176px] xl:items-start">
       <div className="min-w-0">
-        <div className="flex items-start gap-4"><Avatar className="size-14"><AvatarFallback className="bg-violet-100 font-bold text-violet-700">{c.initials}</AvatarFallback></Avatar><div className="min-w-0"><h1 className="text-2xl font-bold tracking-tight">{c.name}</h1><div className="mt-2 flex flex-wrap gap-2">{notionBacked&&remote?.status?(can("editBrand")?<BadgeSelect value={remote.status} options={FOLLOW_UP_STATUSES} disabled={saving||!brandReady} onChange={value=>{void patchBrand({status:value}).then(()=>toast.success("Status updated")).catch(error=>toast.error(error instanceof Error?error.message:"Update failed"));}}/>:<Status value={remote.status}/>):(c.status?<Status value={c.status}/>:null)}{notionBacked&&can("editBrand")?<BadgeSelect value={remote?.handlingMode||""} options={HANDLING_MODES} disabled={saving||!brandReady} onChange={value=>{void patchBrand({handlingMode:value}).then(()=>toast.success("Handling Mode updated")).catch(error=>toast.error(error instanceof Error?error.message:"Update failed"));}}/>:notionBacked&&remote?.handlingMode?<Status value={remote.handlingMode}/>:null}{notionBacked&&!brandReady?<span className="inline-flex items-center gap-1 text-xs font-medium text-slate-400"><Spinner className="size-3"/>Loading details…</span>:null}</div>{brandReady?<><div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1"><BrandMeetingNoteLink notes={notionBacked?remote?.meetingNotes||[]:null} fallback={summary} customerId={c.id} sampleType={formatIcpGroupLabel(remote?.channelType||remote?.icpGroup)}/>{notionBacked&&<Button type="button" variant="ghost" size="sm" className="h-auto px-1.5 py-0.5 text-sm font-medium text-slate-600 hover:text-slate-900" disabled={!brandReady} onClick={()=>setMeetingHistory(true)}><History className="mr-1 size-3.5"/>Follow up Meeting</Button>}{notionBacked&&can("editBrand")&&<Button type="button" variant="ghost" size="icon" className="size-7 text-slate-600 hover:text-slate-900" disabled={!brandReady||creatingMeeting} aria-label="Create Follow up Meeting" title="Create Follow up Meeting" onClick={()=>void createMeeting()}>{creatingMeeting?<Spinner className="size-3.5"/>:<Plus className="size-4"/>}</Button>}</div>{notionBacked&&displayNote(remote?.notes)&&<p className="mt-2 text-sm leading-6 text-slate-600">{displayNote(remote?.notes)}</p>}</>:<p className="mt-3 text-sm text-slate-400">Loading brand details…</p>}<div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500"><span>Latest: {remote?.lastInteractionAt?dateOnly(remote.lastInteractionAt):activityLoading?"Loading…":last?.title||"No activity"}</span>{!notionBacked&&<span>Source: {c.source}</span>}<span>AccountManager: {remote?.ownerName||state.users.find(u=>u.id===c.ownerId)?.name||"Unassigned"}</span></div>{can("assignOwner")&&<div className="mt-3 flex flex-wrap items-center gap-2"><Select value={ownerDraft??c.ownerId??"unassigned"} onValueChange={setOwnerDraft} disabled={!brandReady}><SelectTrigger size="sm" className="w-44"><SelectValue placeholder="Select owner"/></SelectTrigger><SelectContent><SelectItem value="unassigned">Unassigned</SelectItem>{ownerChoices.map(u=><SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent></Select><Button size="sm" disabled={saving||!brandReady||(ownerDraft??c.ownerId??"unassigned")===(c.ownerId||"unassigned")} onClick={()=>void handleAssign()}>Assign</Button></div>}</div></div>
+        <div className="flex items-start gap-4"><Avatar className="size-14"><AvatarFallback className="bg-violet-100 font-bold text-violet-700">{c.initials}</AvatarFallback></Avatar><div className="min-w-0"><h1 className="text-2xl font-bold tracking-tight">{c.name}</h1><div className="mt-2 flex flex-wrap gap-2">{notionBacked&&remote?.status?(can("editBrand")?<BadgeSelect value={remote.status} options={FOLLOW_UP_STATUSES} disabled={saving||!brandReady} onChange={value=>{void patchBrand({status:value}).then(()=>toast.success("Status updated")).catch(error=>toast.error(error instanceof Error?error.message:"Update failed"));}}/>:<Status value={remote.status}/>):(c.status?<Status value={c.status}/>:null)}{notionBacked&&can("editBrand")?<BadgeSelect value={remote?.handlingMode||""} options={HANDLING_MODES} disabled={saving||!brandReady} onChange={value=>{void patchBrand({handlingMode:value}).then(()=>toast.success("Handling Mode updated")).catch(error=>toast.error(error instanceof Error?error.message:"Update failed"));}}/>:notionBacked&&remote?.handlingMode?<Status value={remote.handlingMode}/>:null}{notionBacked&&can("editBrand")?<ChannelTypeSelect value={(remote?.channelType||"DTC") as ChannelType} disabled={saving||!brandReady} onChange={async value=>{try{await patchBrand({channelType:value});toast.success("Channel Type updated");}catch(error){toast.error(error instanceof Error?error.message:"Update failed");throw error;}}}/>:notionBacked&&remote?.channelType?<Status value={remote.channelType}/>:null}{notionBacked&&!brandReady?<span className="inline-flex items-center gap-1 text-xs font-medium text-slate-400"><Spinner className="size-3"/>Loading details…</span>:null}</div>{brandReady?<><div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1"><BrandMeetingNoteLink notes={notionBacked?remote?.meetingNotes||[]:null} fallback={summary} customerId={c.id} sampleType={remote?.channelType||formatIcpGroupLabel(remote?.icpGroup)}/>{notionBacked&&<Button type="button" variant="ghost" size="sm" className="h-auto px-1.5 py-0.5 text-sm font-medium text-slate-600 hover:text-slate-900" disabled={!brandReady} onClick={()=>setMeetingHistory(true)}><History className="mr-1 size-3.5"/>Follow up Meeting</Button>}{notionBacked&&can("editBrand")&&<Button type="button" variant="ghost" size="icon" className="size-7 text-slate-600 hover:text-slate-900" disabled={!brandReady||creatingMeeting} aria-label="Create Follow up Meeting" title="Create Follow up Meeting" onClick={()=>void createMeeting()}>{creatingMeeting?<Spinner className="size-3.5"/>:<Plus className="size-4"/>}</Button>}</div>{notionBacked&&displayNote(remote?.notes)&&<p className="mt-2 text-sm leading-6 text-slate-600">{displayNote(remote?.notes)}</p>}</>:<p className="mt-3 text-sm text-slate-400">Loading brand details…</p>}<div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500"><span>Latest: {remote?.lastInteractionAt?dateOnly(remote.lastInteractionAt):activityLoading?"Loading…":last?.title||"No activity"}</span>{!notionBacked&&<span>Source: {c.source}</span>}<span>AccountManager: {remote?.ownerName||state.users.find(u=>u.id===c.ownerId)?.name||"Unassigned"}</span></div>{can("assignOwner")&&<div className="mt-3 flex flex-wrap items-center gap-2"><Select value={ownerDraft??c.ownerId??"unassigned"} onValueChange={setOwnerDraft} disabled={!brandReady}><SelectTrigger size="sm" className="w-44"><SelectValue placeholder="Select owner"/></SelectTrigger><SelectContent><SelectItem value="unassigned">Unassigned</SelectItem>{ownerChoices.map(u=><SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent></Select><Button size="sm" disabled={saving||!brandReady||(ownerDraft??c.ownerId??"unassigned")===(c.ownerId||"unassigned")} onClick={()=>void handleAssign()}>Assign</Button></div>}</div></div>
       </div>
       <BrandContactList
         brandId={c.id}
