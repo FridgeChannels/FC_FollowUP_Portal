@@ -100,16 +100,13 @@ function escapeDevVar(value) {
 }
 
 const lines = [];
+const presentKeys = [];
 for (const key of WORKER_ENV_KEYS) {
   const value = process.env[key];
   if (value == null || value === "") continue;
   lines.push(`${key}=${escapeDevVar(value)}`);
+  presentKeys.push(key);
 }
-
-writeFileSync(path.join(projectRoot, ".dev.vars"), `${lines.join("\n")}\n`, {
-  encoding: "utf8",
-  mode: 0o600,
-});
 
 mkdirSync(path.join(projectRoot, ".wrangler", "state"), { recursive: true });
 
@@ -120,7 +117,28 @@ const wranglerBin = path.join(
   "bin",
   "wrangler.js",
 );
+// Wrangler loads `.dev.vars` from the *config file directory*, not cwd:
+//   getVarsForDev → resolve(dirname(configPath), ".dev.vars")
 const wranglerConfig = path.join(projectRoot, "dist", "server", "wrangler.json");
+const configDir = path.dirname(wranglerConfig);
+const devVarsPath = path.join(configDir, ".dev.vars");
+
+mkdirSync(configDir, { recursive: true });
+writeFileSync(devVarsPath, `${lines.join("\n")}\n`, {
+  encoding: "utf8",
+  mode: 0o600,
+});
+
+const hasSupabase = presentKeys.includes("SUPABASE_SERVICE_ROLE_KEY");
+console.log(
+  `[docker-start] Wrote ${presentKeys.length} secrets → ${path.relative(projectRoot, devVarsPath)}` +
+    ` (SUPABASE_SERVICE_ROLE_KEY=${hasSupabase ? "yes" : "NO"})`,
+);
+if (!hasSupabase) {
+  console.warn(
+    "[docker-start] SUPABASE_SERVICE_ROLE_KEY missing from container env — /api/.../sample will return 503",
+  );
+}
 
 const child = spawn(
   process.execPath,
