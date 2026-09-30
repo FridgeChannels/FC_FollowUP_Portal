@@ -1,9 +1,13 @@
+import { notifyInboundReceived } from "../notify";
+import { ingestQuoColdInbound } from "../notion/quo-cold-inbound";
+import { resolveOpenPhoneTaskForQuoCall } from "../notion/quo-phone-line";
 import {
   callPhones,
   resolveFollowupTaskForQuoWebhook,
   upsertQuoCallActivity,
 } from "../notion/quo-calls";
 import { removeQuoDialAttempt } from "./dial-attempts";
+import { shouldResolveOpenPhoneTask } from "./webhook-order";
 import type { HandledQuoWebhookType } from "./webhook-event";
 import type { QuoCallData } from "./types";
 import {
@@ -24,6 +28,82 @@ export {
 } from "./webhook-retry";
 
 const chains = new Map<string, Promise<unknown>>();
+
+async function resolveQuoWebhookTarget(data: QuoCallData) {
+  const resolved = await resolveFollowupTaskForQuoWebhook({
+    callId: data.callId,
+    call: data.call,
+    eventAt: data.lastEventAt,
+  });
+  if (!shouldResolveOpenPhoneTask({
+    hasTask: !!resolved.task,
+    existingTaskId: resolved.existing?.taskId,
+  })) {
+    return resolved;
+  }
+  const task = await resolveOpenPhoneTaskForQuoCall(data.call);
+  if (!task) return resolved;
+  console.info("Quo webhook resolve step: matched by open phone task", {
+    callId: data.callId,
+    taskId: task.id,
+    phone: task.contactPhone || null,
+  });
+  return {
+    ...resolved,
+    task,
+    matchedBy: "phone" as const,
+  };
+}
+
+async function finishWithoutTask(
+  type: HandledQuoWebhookType,
+  data: QuoCallData,
+): Promise<QuoWebhookJobResult> {
+  const cold = await ingestQuoColdInbound({ data, eventType: type });
+  if (cold.kind === "created") {
+    await notifyInboundReceived({
+      channel: "Phone",
+      brandId: cold.brandId,
+      brandName: cold.brandName,
+      ownerId: cold.ownerId,
+      ownerName: cold.ownerName,
+      contactId: cold.contactId,
+      contactName: cold.contactName,
+      sender: cold.sender,
+      content: cold.content,
+      conversationId: cold.conversationId,
+      taskId: cold.taskId,
+      threadId: cold.threadId,
+      messageId: cold.messageId,
+      inboxStatus: null,
+      occurredAt: cold.occurredAt,
+    });
+  }
+  const recorded = cold.kind === "created" || cold.kind === "updated";
+  const taskId = recorded ? cold.taskId : null;
+  const ringing = type === "call.ringing";
+  const body: Record<string, unknown> = {
+    ok: true,
+    linked: Boolean(taskId),
+    taskId,
+    callId: data.callId,
+    matchedBy: null,
+    coldInbound: recorded,
+  };
+  if (ringing) body.pending = true;
+  if (cold.kind === "created" || cold.kind === "updated") {
+    body.conversationId = cold.conversationId;
+    body.contactId = cold.contactId;
+    body.brandId = cold.brandId;
+  } else {
+    body.coldInboundReason = cold.reason;
+  }
+  console.info(recorded ? "Quo webhook cold inbound recorded" : "Quo webhook cold inbound skipped", {
+    type,
+    ...body,
+  });
+  return { status: recorded || ringing ? 200 : 202, body };
+}
 
 export async function processQuoWebhookEvent(
   type: HandledQuoWebhookType,
@@ -48,23 +128,8 @@ export async function processQuoWebhookEvent(
     // Persist the call as soon as ringing is linked. The Call ID then becomes
     // the durable association key for completed, recording, transcript, and
     // summary callbacks, even when several calls share one task.
-    const resolved = await resolveFollowupTaskForQuoWebhook({
-      callId: data.callId,
-      call: data.call,
-      eventAt: data.lastEventAt,
-    });
-    if (!resolved.task) {
-      const body = {
-        ok: true,
-        pending: true,
-        linked: false,
-        taskId: null,
-        callId: data.callId,
-        matchedBy: null,
-      };
-      console.info("Quo webhook ringing unresolved", body);
-      return { status: 200, body };
-    }
+    const resolved = await resolveQuoWebhookTarget(data);
+    if (!resolved.task) return finishWithoutTask(type, data);
 
     const created = !resolved.existing;
     await upsertQuoCallActivity({ task: resolved.task, data, eventType: type });
@@ -92,11 +157,7 @@ export async function processQuoWebhookEvent(
     phones,
     eventAt: data.lastEventAt || null,
   });
-  const resolved = await resolveFollowupTaskForQuoWebhook({
-    callId: data.callId,
-    call: data.call,
-    eventAt: data.lastEventAt,
-  });
+  const resolved = await resolveQuoWebhookTarget(data);
   console.info("Quo webhook resolve result", {
     callId: data.callId,
     type,
@@ -105,11 +166,7 @@ export async function processQuoWebhookEvent(
     existingConversationId: resolved.existing?.id || null,
     existingHasQuo: !!resolved.existing?.quo,
   });
-  if (!resolved.task) {
-    const body = { ok: true, linked: false, callId: data.callId, matchedBy: resolved.matchedBy };
-    console.info("Quo webhook skipped upsert: not linked", body);
-    return { status: 202, body };
-  }
+  if (!resolved.task) return finishWithoutTask(type, data);
 
   const created = !resolved.existing;
   console.info("Quo webhook upsert start", {

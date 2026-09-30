@@ -20,7 +20,7 @@ export function callPhones(call?: QuoCall | null) {
     .filter(Boolean);
 }
 
-function callResult(call?: QuoCall | null) {
+export function callResult(call?: QuoCall | null) {
   if (!call) return null;
   if (call.voicemail || call.hasVoicemail) return "Voicemail";
   if (call.status === "answered" || call.answeredAt) return "Connected";
@@ -35,7 +35,7 @@ function callResult(call?: QuoCall | null) {
   return null;
 }
 
-function eventTime(data: QuoCallData) {
+export function eventTime(data: QuoCallData) {
   return data.call?.completedAt || data.call?.createdAt || data.transcript?.createdAt || data.lastEventAt || new Date().toISOString();
 }
 
@@ -52,7 +52,7 @@ async function brandCheckpoint(task: BrandTask) {
   return { cpId, cpAtInteraction: fromBomb || fromBrand };
 }
 
-function readableContent(data: QuoCallData) {
+export function readableContent(data: QuoCallData) {
   const summary = data.summary?.summary?.filter(Boolean) || [];
   const voicemail = data.voicemail?.transcript || data.call?.voicemail?.transcript;
   if (summary.length) return summary.join("\n");

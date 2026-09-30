@@ -25,7 +25,7 @@ import {
   resolveReplyTask,
 } from "./followup-writes";
 import { annotateTasksWithReplyInbox } from "./reply-inbox";
-import { pickOutboundCandidate, taskIsSent } from "./reply-sent-guard";
+import { pickOutboundCandidate } from "./reply-sent-guard";
 import { resolveCurrentContactForBrand, resolveReplyTargetByBrandName, resolveReplyTargetByThreadId, senderForChannel } from "./reply-target";
 import { retrieveFollowupTask } from "./tasks";
 import { interactionCpCode } from "../outreach-domain";
@@ -416,12 +416,6 @@ export async function ingestInboundReply(
       : null;
   if (!outboundTask?.id) {
     throw new InboundReplyError("Sent outbound message is not linked to a Follow-up Task", 422);
-  }
-  if (!taskIsSent(outboundTask.status)) {
-    throw new InboundReplyError(
-      `Task Status must be Completed before writing a reply. Current Task Status: ${outboundTask.status || "empty"}.`,
-      409,
-    );
   }
 
   const threadId = (

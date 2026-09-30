@@ -214,6 +214,8 @@ curl -sS -X POST "http://127.0.0.1:5173/api/inbound" \
 
 `content` 可省略，空则写入 `Inbound call`。Phone 不写 `Reply Status`。
 
+Quo 来电在任务线和电话线都未命中时，由 webhook 按对方号码查 KeyPerson `Phone` 后写冷进线，并新建一条 Phone Task。公开接口仍须自带 `FollowUpClientId`，规则见 [Quo 电话回写匹配](./Follow-up｜Quo%20电话回写匹配.md) §9。
+
 ---
 
 ## 写入后行为

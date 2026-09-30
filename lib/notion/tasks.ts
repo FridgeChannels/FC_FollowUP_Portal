@@ -179,6 +179,14 @@ function scopeTestBrandTasks(tasks: BrandTask[], options: TestBrandScope) {
   return tasks;
 }
 
+/** Every open Phone task, including test clients. Phone-line lookup only. */
+export async function listOpenPhoneTasks() {
+  const pages = await queryTaskPages(
+    taskListFilter({ channel: "Phone", statusScope: "open" }),
+  );
+  return mapTaskPages(pages);
+}
+
 /** Open Phone count — optionally excludes / restricts to `Is Test` Follow-up Clients. */
 export async function listOpenPhoneTaskStubsForViewer(
   query: TaskListQuery,

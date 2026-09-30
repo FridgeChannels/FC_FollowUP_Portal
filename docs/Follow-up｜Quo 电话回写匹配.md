@@ -3,7 +3,7 @@
 约定 `POST /api/webhooks/quo` 如何把一通电话挂到 Follow-up Task。  
 Phone 主路径是 Quo webhook + Call Review；[`POST /api/replies`](./Follow-up｜Reply%20回写接口.md) 的 Phone 仅作补充，不走本规则。
 
-**实现状态：** 任务线（Call ID / 拨打记录）已上线。电话线（对方号码 → 未关闭 Phone Task）为已定方案，尚未实现。实现时按本文拆模块，不要把两套规则写进同一个函数。
+**实现状态：** 任务线（Call ID / 拨打记录）和电话线（对方号码 → 未关闭 Phone Task）已上线。两条都没有 Task 的来电走冷进线（§9）。
 
 ---
 
@@ -35,12 +35,12 @@ Phone 主路径是 Quo webhook + Call Review；[`POST /api/replies`](./Follow-up
 ```
 Webhook
   └─ Orchestrator（只决定顺序，不含匹配规则）
-        ├─ 1. TaskIdentityResolver     // 任务线，独立模块
-        └─ 2. OpenPhoneTaskResolver    // 仅当 1 没有 taskId 才调用，独立模块
-              └─ 命中后共用 upsert（写库，不是匹配）
+        ├─ 1. TaskIdentityResolver     // 任务线，已上线
+        ├─ 2. OpenPhoneTaskResolver    // 电话线，已上线；有 taskId 则结束
+        └─ 3. ColdInbound              // 仍没有 taskId 时；来电才写，见 §9
 ```
 
-编排层唯一规则：**任务线有 Task ID → 结束；没有 → 才调用电话线。**
+编排层规则：**任务线有 Task ID → 结束。没有 → 电话线。仍然没有 → 冷进线。**
 
 禁止：
 
@@ -61,9 +61,10 @@ Webhook
 | --- | --- | --- |
 | 同一 `callId` 已挂过 Task | 任务线 | 多次 call 共存时，用 Call ID 认「这一通」 |
 | 点过 Call with Quo，拨打记录还在 | 任务线 | 已有 Task ID，电话线不准抢 |
-| 没点按钮、也还没有 Conversation | 电话线 | 这才是「拿不到任务 ID」 |
+| 没点按钮、也还没有 Conversation | 电话线，未命中再冷进线 | 这才是「拿不到任务 ID」 |
 | 电话线挂上并写了 `QUO_CALL:<id>` | 之后全走任务线 | 电话线只做首次挂接 |
-| 两条线都未命中 | 不写 Conversation | 与现状一致，不改成冷进线 |
+| 任务线未命中，来电且对方号码恰好对应 1 个联系人 | 冷进线（§9） | 新建一条 Phone Task，Caller 可提交评审 |
+| 去电未命中，或号码命中 0 / 多条联系人 | 不写 Conversation | 不猜品牌 |
 
 同一 `callId` 的后续事件（recording / transcript / summary）经常没有号码。第一次用号码（若走到电话线），之后必须用 `callId`。
 
@@ -160,23 +161,37 @@ Qualified / Cancelled / Failed 之后的新电话：电话线不会挂到已关�
 
 ## 8. 实现时的模块边界
 
-尚未实现。落地时建议：
+模块已经分开。电话线不读取 Call ID 或拨打记录；任务线不按 KeyPerson 手机号找 Task。
 
 | 模块 | 职责 |
 | --- | --- |
-| 任务线 Resolver | 现有 Call ID + 拨打记录，原样迁出或就地改名 |
+| 任务线 Resolver | Call ID + 拨打记录，仍在原模块，匹配规则未改 |
 | 电话线 Resolver | 只做对方号码 → 未关闭 Phone Task + §6 |
-| Orchestrator | 先任务线，没有 `taskId` 再电话线 |
-| upsert | 两条线命中后共用写库 |
+| 冷进线 | 任务线与电话线都没有 `taskId` 时，按 §9 写来电并新建一条 Phone Task |
+| Orchestrator | 先任务线，没有 `taskId` 再电话线，仍然没有再冷进线 |
+| upsert | 任务线 / 电话线命中后共用写库 |
 
 单测分开：任务线不准 mock KeyPerson 手机号查询；电话线不准 mock 拨打记录。编排只测「有 Task ID 就不调用电话线」。
 
 ---
 
-## 9. 相关文档
+## 9. 冷进线（任务线和电话线都没有 Task ID）
+
+只在两条匹配线都给不出 Task ID 时进入。有未关闭 Phone Task 的来电先挂任务，不要落到这里。
+
+1. 这条 `callId` 已有 Conversation、且没有 Follow-up Task：更新通话结果、录音、转写、摘要，并补上一条 Phone Task。不再按号码重查。
+2. 这条 `callId` 已挂着 Task，但任务读失败：不另建冷进线。
+3. 还没有 Conversation：只处理来电（`direction` 为 `incoming` / `inbound`）。去电未匹配仍不写库。
+4. 对方号码只用 `from`。按 §6 归一成 NANP 10 位；无效则不写。
+5. 用这 10 位查 KeyPerson `Phone`，再找到 Follow-up Contact。恰好 1 条才写；0 条或 ≥2 条不写。
+6. 新建 Thread、不写 Reply Status、客户改为 Human，并按 Inbound 通知。同时新建一条 Phone Task：Creation Method `Manual`、Priority `P0`、状态 `In Progress`、Owner 用品牌 Owner（测试品牌没有 Owner 时用测试 Caller）。Conversation 的 Follow-up Task 和 Task 的 Conversations 都指向这通电话，Caller 才能在任务里提交评审。测试品牌仍只出现在测试 Caller 的任务列表。`Message ID` 固定为 `QUO_CALL:<callId>`，同时写入 Call Result 与 Extended Parameters。后续事件因已挂 Task，改走任务线续写，不再新建任务。
+
+`/api/inbound` 的 Phone 仍然要求调用方自带 `FollowUpClientId`。本路径只给 Quo webhook 使用。
+
+## 10. 相关文档
 
 - [Reply 回写接口](./Follow-up｜Reply%20回写接口.md) — Phone 补充路径；Quo Call ID 不要当作 `threadId`
-- [Inbound 回写接口](./Follow-up｜Inbound%20回写接口.md) — 无已发 Task 的冷进线；Phone **不支持**仅凭号码全局查找。本电话线命中的是未关闭 Phone Task，不是冷进线
+- [Inbound 回写接口](./Follow-up｜Inbound%20回写接口.md) — 无已发 Task 的来电。公开接口的 Phone 仍须自带品牌；Quo 未匹配来电按 §9 查 KeyPerson `Phone` 并新建 Phone Task
 - [V1 数据架构规划](./Follow-up｜V1%20数据架构规划.md) §11.1 / §11.4 — 联系方式不在 Task/Contact 上重复保存
 - [Thread ID 与 CP 挂靠规则](./Follow-up｜Thread%20ID%20与%20CP%20挂靠规则.md)
 - [Test FridgeChannel Peter 五渠道人工测试清单](./Follow-up｜Test%20FridgeChannel%20Peter%20五渠道人工测试清单.md) §10

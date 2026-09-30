@@ -1,10 +1,4 @@
-import type { BrandActivity, BrandTask } from "../brand-list";
-
-export const SENT_TASK_STATUSES = new Set(["Completed"]);
-
-export function taskIsSent(status?: string | null) {
-  return SENT_TASK_STATUSES.has(status || "");
-}
+import type { BrandActivity } from "../brand-list";
 
 export function pickOutboundCandidate(
   activities: BrandActivity[],
@@ -45,7 +39,6 @@ export function pickOutboundCandidate(
 export function evaluateSentOutbound(input: {
   channel: string;
   activities: BrandActivity[];
-  task?: BrandTask | null;
   taskId?: string | null;
   threadId?: string | null;
   inReplyToMessageId?: string | null;
@@ -56,15 +49,6 @@ export function evaluateSentOutbound(input: {
       ok: false as const,
       status: 422,
       error: `No outbound ${input.channel} message found. A reply can only be written after a message has been sent.`,
-    };
-  }
-  const taskStatus = input.task?.status || null;
-  if (!taskIsSent(taskStatus)) {
-    return {
-      ok: false as const,
-      status: 409,
-      error: `Task Status must be Completed before writing a reply. Current Task Status: ${taskStatus || "empty"}.`,
-      outbound,
     };
   }
   return { ok: true as const, outbound };

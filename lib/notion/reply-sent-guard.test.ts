@@ -1,10 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { BrandActivity, BrandTask } from "../brand-list.ts";
+import type { BrandActivity } from "../brand-list.ts";
 import {
   evaluateSentOutbound,
   pickOutboundCandidate,
-  taskIsSent,
 } from "./reply-sent-guard.ts";
 
 const outbound = (patch: Partial<BrandActivity>): BrandActivity => ({
@@ -29,56 +28,25 @@ const outbound = (patch: Partial<BrandActivity>): BrandActivity => ({
   ...patch,
 });
 
-const task = (status: string): BrandTask => ({
-  id: "t1",
-  title: "Email task",
-  contactId: "ct1",
-  contactName: "Melissa",
-  brandId: "b1",
-  brandName: "Oxyfresh",
-  brandOwnerId: null,
-  ownerId: null,
-  ownerName: null,
-  channel: "Email",
-  status,
-  priority: "P0",
-  creationMethod: "Automated",
-  scheduledAt: "2026-09-14",
-  endedAt: null,
-  notes: null,
-  conversationIds: [],
-  templateId: null,
-  sourceBombId: null,
-  sourceBombName: null,
-  sourceBombCp: null,
-});
-
 describe("reply sent guard", () => {
-  it("uses Task Status Completed as the sent gate", () => {
-    assert.equal(taskIsSent("In Progress"), false);
-    assert.equal(taskIsSent("Completed"), true);
-  });
-
-  it("accepts outbound when the linked task is Completed", () => {
+  it("accepts outbound regardless of linked task status", () => {
     const pending = outbound({ status: null });
     const result = evaluateSentOutbound({
       channel: "Email",
       activities: [pending],
-      task: task("Completed"),
     });
     assert.equal(result.ok, true);
     if (result.ok) assert.equal(result.outbound.id, pending.id);
   });
 
-  it("rejects outbound when the task is still In Progress", () => {
+  it("rejects when no outbound message exists", () => {
     const result = evaluateSentOutbound({
       channel: "Email",
-      activities: [outbound({})],
-      task: task("In Progress"),
+      activities: [],
     });
     assert.equal(result.ok, false);
-    assert.equal(result.status, 409);
-    assert.match(result.error, /Task Status must be Completed/);
+    assert.equal(result.status, 422);
+    assert.match(result.error, /No outbound Email message found/);
   });
 
   it("prefers inReplyTo outbound over later messages", () => {

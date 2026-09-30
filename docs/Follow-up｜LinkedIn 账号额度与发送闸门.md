@@ -58,7 +58,7 @@
 
 - 读取本系统中 **可发送** 的 LinkedIn 任务（`Sender` = 当前活跃号，状态允许发送）；
 - 按 `Scheduled At` 节奏发送；
-- 发送成功后将对应 Follow-up Task 的 **Task Status 标为 Completed**（本系统 Reply 回写依赖该门闩）；
+- 发送成功后将对应 Follow-up Task 的 **Task Status 标为 Completed**；
 - 失败时将 Task 标为 Failed（或不改状态并人工处理），**不要自动切换** 本系统的活跃账号。
 
 账号切换（额度用尽或人工指定）只由本系统账号配置完成；第三方 **不得** 自行在 Paula LIU / Billy HAO / Ella ZHANG 之间轮询。

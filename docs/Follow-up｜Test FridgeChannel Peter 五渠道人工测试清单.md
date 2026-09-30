@@ -273,7 +273,7 @@ curl -sS -X POST "$BASE/api/inbound" \
 
 ## 8. Reply 回写（`POST /api/replies`）
 
-前置：该渠道已有 **Task Status = Completed** 的 Outbound，并记下其 `taskId` + 系统 `threadId`（`THR-…-Channel`）。
+前置：该渠道已有可挂靠的 Outbound（有 `taskId` + 系统 `threadId`，`THR-…-Channel`）。不要求 Task Status = Completed。
 
 先核对目标：
 
@@ -347,8 +347,7 @@ curl -sS -X POST "$BASE/api/replies" \
 | 8.4 | WhatsApp | 同上 | 同上 | ☐ | |
 | 8.5 | 横切 | 若有同 run 未发 Task | 未发 → Cancelled | ☐ | |
 | 8.6 | 横切 | **同一 messageId 再提交** | 200 + `duplicate: true`；Slack **不再**多推 | ☐ | |
-| 8.7 | 负例 | Task 未 Completed | **409** | ☐ | |
-| 8.8 | 负例 | taskId 与 threadId 不匹配 | **409** | ☐ | |
+| 8.7 | 负例 | taskId 与 threadId 不匹配 | **409** | ☐ | |
 
 ### 8.Phone（补充，非主路径）
 
@@ -385,7 +384,7 @@ curl -sS -X POST "$BASE/api/replies" \
 
 ## 10. Phone 主路径（Quo + Call Review）
 
-匹配规则见 [Quo 电话回写匹配](./Follow-up｜Quo%20电话回写匹配.md)。当前环境仍走任务线（Call ID / 拨打记录）；按对方号码挂未关闭 Phone Task 的电话线尚未实现。
+匹配规则见 [Quo 电话回写匹配](./Follow-up｜Quo%20电话回写匹配.md)。顺序是任务线（Call ID / 拨打记录）→ 未关闭 Phone Task 的对方号码 → 来电冷进线。
 
 | # | 步骤 | 期望 | 结果 | 备注 |
 | --- | --- | --- | --- | --- |
@@ -395,6 +394,7 @@ curl -sS -X POST "$BASE/api/replies" \
 | 10.4 | Call Review：Qualified | 评审写入；状态符合产品 | ☐ | |
 | 10.5 | Call Review：Unqualified → 改派 | 按现网改派规则（如 Beril） | ☐ | |
 | 10.6 | （可选）testcaller 仅见测试 Phone | 与 §2.4 一致 | ☐ | |
+| 10.7 | 来电找不到已有 Phone Task | 冷进线新建一条 In Progress Phone Task，挂上这通电话；testcaller 可见并可 Submit Review | ☐ | 正式 Caller 看不到 Is Test 品牌 |
 
 ---
 
