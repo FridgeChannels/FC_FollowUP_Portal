@@ -5,7 +5,6 @@ import { runWithNotionLimit } from "@/lib/notion/rate-limit";
 import {
   countOpenNeedsReplyTasksForViewer,
   countOpenPhoneBrandsForViewer,
-  countOpenPhoneTasksForViewer,
 } from "@/lib/notion/tasks";
 
 /** Lightweight ReplyTask menu badge — no full BrandTask mapping. */
@@ -24,14 +23,15 @@ async function getTasksSummary(request: Request) {
     const onlyTest = isTestOnlyViewer(viewer);
     const testScope = { includeTest, onlyTest };
 
+    // Shared Phone rule: one badge unit per Follow-up Client with an open Phone task.
+    // Admin / AccountManager also count Needs Reply rows (Caller queue is Phone-only).
     if (viewer.role === "Caller") {
-      // Caller ReplyTask is brand-scoped: one badge unit per Follow-up Client.
-      const openCount = await countOpenPhoneBrandsForViewer(query, testScope);
-      return Response.json({ openCount });
+      const phoneOpenCount = await countOpenPhoneBrandsForViewer(query, testScope);
+      return Response.json({ openCount: phoneOpenCount, phoneOpenCount });
     }
 
     const [phoneOpenCount, needsReplyCount] = await Promise.all([
-      countOpenPhoneTasksForViewer(query, testScope),
+      countOpenPhoneBrandsForViewer(query, testScope),
       countOpenNeedsReplyTasksForViewer(query, testScope),
     ]);
     return Response.json({
