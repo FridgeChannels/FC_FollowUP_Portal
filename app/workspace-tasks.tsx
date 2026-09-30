@@ -108,7 +108,6 @@ function fromNotionTask(task: BrandTask): UnifiedTask {
 }
 
 const show = (result: { ok: boolean; message: string }) => result.ok ? toast.success(result.message) : toast.error(result.message);
-const priorityRank: Record<UnifiedTask["priority"], number> = { Urgent: 0, High: 1, Normal: 2, Low: 3 };
 const isDone = (task: UnifiedTask) => isClosedTaskStatus(task.status);
 type CallReviewView = Pick<CallReviewMetadata, "status" | "recallRequested"> & { taskId?: string | null };
 const reviewFromNotion = (task: { id: string; callReviewStatus?: CallReviewStatus | null }): CallReviewView | undefined =>
@@ -273,7 +272,8 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
         };
         if (!response.ok) throw new Error(payload.error || "Failed to load tasks");
         const items = (payload.tasks || []).map(fromNotionTask);
-        const more = Boolean(payload.hasMore && payload.nextCursor && items.length >= DEFAULT_TASK_PAGE_SIZE);
+        // Trust API cursor — page may be short after test-brand filter / brand dedupe.
+        const more = Boolean(payload.hasMore && payload.nextCursor);
         return {
           items,
           nextCursor: more ? (payload.nextCursor || null) : null,
@@ -311,7 +311,7 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
         };
         if (!response.ok) throw new Error(payload.error || "Failed to load tasks");
         const items = (payload.tasks || []).map(fromNotionTask);
-        const more = Boolean(payload.hasMore && payload.nextCursor && items.length >= DEFAULT_TASK_PAGE_SIZE);
+        const more = Boolean(payload.hasMore && payload.nextCursor);
         return {
           items,
           nextCursor: more ? (payload.nextCursor || null) : null,
@@ -344,15 +344,9 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
       const matchesReplyOpen = !(task.remote && status === "Open" && task.type === "Reply" && task.status !== "Needs Reply" && task.status !== "Waiting for Reply");
       const matchesDue = !isCaller || matchesDueRange(task, dueFrom, dueTo);
       return matchesQuery && matchesScope && matchesType && matchesAssignee && matchesStatus && matchesReplyOpen && matchesDue;
-    }).sort((a, b) => {
-      if (isDone(a) !== isDone(b)) return isDone(a) ? 1 : -1;
-      const aDue = isDue(a, state.simulatedDate);
-      const bDue = isDue(b, state.simulatedDate);
-      if (aDue !== bDue) return aDue ? -1 : 1;
-      if (priorityRank[a.priority] !== priorityRank[b.priority]) return priorityRank[a.priority] - priorityRank[b.priority];
-      return a.dueAt.localeCompare(b.dueAt);
     });
-    // Caller queue is brand-level: one list row per Follow-up Client.
+    // Keep API order (Scheduled At asc). Do not re-sort by due/priority — that breaks cursor pages.
+    // Caller queue is brand-level: one list row per Follow-up Client (server already dedupes; keep as safety).
     return isCaller ? dedupeCallerTasksByBrand(filtered) : filtered;
   }, [allTasks, state, query, type, assignee, status, isCaller, dueFrom, dueTo]);
 
@@ -442,7 +436,7 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
           <TableCell className="whitespace-nowrap text-xs text-slate-500">{dateOnly(task.dueAt)}</TableCell>
         </TableRow>;
       })}</TableBody></Table>
-        {hasMore && nextCursor && (remoteTasks?.length || 0) >= DEFAULT_TASK_PAGE_SIZE ? (
+        {hasMore && nextCursor ? (
           <div className="border-t border-slate-100 p-3">
             <Button variant="outline" size="sm" className="w-full" disabled={loadingMore || remoteLoading} onClick={loadMoreTasks}>
               {loadingMore ? <span className="inline-flex items-center gap-2"><Spinner className="size-3.5"/>Loading…</span> : "Load more"}

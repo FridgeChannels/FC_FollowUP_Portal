@@ -6,9 +6,7 @@ import { runWithNotionLimit } from "@/lib/notion/rate-limit";
 import {
   DEFAULT_TASK_PAGE_SIZE,
   listFollowupTasksForViewerPage,
-  listOpenPhoneTaskStubsForViewer,
-  listOpenReplyTaskStubsForViewer,
-  retrieveFollowupTask,
+  listOpenManagerTasksForViewerPage,
 } from "@/lib/notion/tasks";
 
 async function getTasks(request: Request) {
@@ -45,47 +43,27 @@ async function getTasks(request: Request) {
     };
 
     if (viewer.role !== "Caller" && query.statusScope === "open") {
-      const [phoneStubs, replyStubs] = await Promise.all([
-        listOpenPhoneTaskStubsForViewer(query, testScope),
-        listOpenReplyTaskStubsForViewer(query, testScope),
-      ]);
-      const annotatedReplies = await syncReplyInbox(replyStubs, { backfill: false });
-      const eligible = [
-        ...phoneStubs,
-        ...annotatedReplies.filter((task) => task.inboxStatus === "Needs Reply"),
-      ].sort(
-        (left, right) =>
-          (left.scheduledAt || "").localeCompare(right.scheduledAt || "") ||
-          left.id.localeCompare(right.id),
-      );
-      const offset = Math.max(0, Number(cursor || 0) || 0);
-      const selected = eligible.slice(offset, offset + pageSize);
-      const tasks = await Promise.all(
-        selected.map(async (stub) => {
-          const task = await retrieveFollowupTask(stub.id).catch(() => stub);
-          return {
-            ...task,
-            inboxStatus: stub.inboxStatus,
-            preview: stub.preview,
-            lastInboundAt: stub.lastInboundAt,
-          };
-        }),
-      );
-      const nextOffset = offset + selected.length;
-      const hasMore = nextOffset < eligible.length;
-      return Response.json({
-        tasks,
-        nextCursor: hasMore ? String(nextOffset) : null,
-        hasMore,
+      const listed = await listOpenManagerTasksForViewerPage(query, {
+        cursor,
         pageSize,
+        ...testScope,
+      });
+      return Response.json({
+        tasks: listed.tasks,
+        nextCursor: listed.nextCursor,
+        hasMore: listed.hasMore,
+        pageSize: listed.pageSize,
         viewer: { isAdmin: viewer.isAdmin, ownerName: viewer.name },
       });
     }
 
-    const listed = await listFollowupTasksForViewerPage(
-      query,
-      { cursor, pageSize, ...testScope },
-    );
+    const listed = await listFollowupTasksForViewerPage(query, {
+      cursor,
+      pageSize,
+      ...testScope,
+      // Caller ReplyTask table only needs brand name + task properties — skip Contact/Owner/KeyPerson.
+      hydrate: viewer.role === "Caller" ? "caller-list" : "full",
+    });
     // List path: annotate open non-Phone only; skip Notion backfill (detail/inbound handle writes).
     const tasks =
       viewer.role === "Caller" ? listed.tasks : await syncReplyInbox(listed.tasks, { backfill: false });

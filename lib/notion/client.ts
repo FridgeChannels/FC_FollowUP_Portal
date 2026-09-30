@@ -261,9 +261,35 @@ export async function queryFollowupClientPagesPage(options: {
 }
 
 /** Page IDs of Follow-up Clients with `Is Test` checked (for task list exclusion). */
+const TEST_CLIENT_IDS_CACHE_MS = 60_000;
+let testClientIdsCache:
+  | { expiresAt: number; ids: Set<string> }
+  | null = null;
+let testClientIdsPending: Promise<Set<string>> | null = null;
+
 export async function queryTestFollowupClientIds() {
-  const pages = await queryDatabasePages(getFollowupClientDbId(), testClientFilter());
-  return new Set(pages.map((page) => page.id));
+  if (testClientIdsCache && testClientIdsCache.expiresAt > Date.now()) {
+    return new Set(testClientIdsCache.ids);
+  }
+  if (testClientIdsPending) return new Set(await testClientIdsPending);
+
+  const pending = queryDatabasePages(
+    getFollowupClientDbId(),
+    testClientFilter(),
+  ).then((pages) => {
+    const ids = new Set(pages.map((page) => page.id));
+    testClientIdsCache = {
+      expiresAt: Date.now() + TEST_CLIENT_IDS_CACHE_MS,
+      ids,
+    };
+    return ids;
+  });
+  testClientIdsPending = pending;
+  try {
+    return new Set(await pending);
+  } finally {
+    if (testClientIdsPending === pending) testClientIdsPending = null;
+  }
 }
 
 export async function retrievePage(pageId: string) {

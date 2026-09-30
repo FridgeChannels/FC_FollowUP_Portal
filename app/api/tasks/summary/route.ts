@@ -1,12 +1,11 @@
 import { canAccessTestBrands, isTestOnlyViewer } from "@/lib/brand-access";
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
-import { syncReplyInbox } from "@/lib/notion/followup-writes";
 import { taskQueryForViewer } from "@/lib/notion/owner-filter";
 import { runWithNotionLimit } from "@/lib/notion/rate-limit";
 import {
+  countOpenNeedsReplyTasksForViewer,
   countOpenPhoneBrandsForViewer,
   countOpenPhoneTasksForViewer,
-  listOpenReplyTaskStubsForViewer,
 } from "@/lib/notion/tasks";
 
 /** Lightweight ReplyTask menu badge — no full BrandTask mapping. */
@@ -31,12 +30,10 @@ async function getTasksSummary(request: Request) {
       return Response.json({ openCount });
     }
 
-    const [phoneOpenCount, replyStubs] = await Promise.all([
+    const [phoneOpenCount, needsReplyCount] = await Promise.all([
       countOpenPhoneTasksForViewer(query, testScope),
-      listOpenReplyTaskStubsForViewer(query, testScope),
+      countOpenNeedsReplyTasksForViewer(query, testScope),
     ]);
-    const annotated = await syncReplyInbox(replyStubs, { backfill: false });
-    const needsReplyCount = annotated.filter((item) => item.inboxStatus === "Needs Reply").length;
     return Response.json({
       openCount: phoneOpenCount + needsReplyCount,
       phoneOpenCount,

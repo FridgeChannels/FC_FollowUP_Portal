@@ -152,7 +152,7 @@ export function matchesNeedsReplyBrandScope(
 }
 
 /** Default list page size for `/api/tasks` and ReplyTask UI. */
-export const DEFAULT_TASK_PAGE_SIZE = 25;
+export const DEFAULT_TASK_PAGE_SIZE = 10;
 
 /** Default list scope matches ReplyTask UI "Open". */
 export type TaskStatusScope = "open" | "completed" | "all";

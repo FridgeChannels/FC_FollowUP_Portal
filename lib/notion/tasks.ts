@@ -17,6 +17,15 @@ import { getFollowupTaskDbId } from "./config";
 import { taskListFilter, type TaskListQuery, DEFAULT_TASK_PAGE_SIZE } from "./owner-filter";
 import { retrieveOwner, type FollowupOwner } from "./owners";
 import { historyFromTask } from "../call-review-history";
+import { listNeedsReplyConversations } from "./conversations";
+import { annotateTasksWithReplyInbox, isOpenTaskStatus } from "./reply-inbox";
+import { callerListTaskFromPage } from "./tasks-caller-list";
+import { compareOpenTaskOrder, mergeOpenTaskStubs } from "./open-task-order";
+import {
+  callerBrandKey,
+  encodeCallerListCursor,
+  parseCallerListCursor,
+} from "./caller-list-cursor";
 
 const CONTACT_TASK_KEYS = ["Follow-up Tasks", "Tasks"];
 
@@ -217,41 +226,93 @@ export async function countOpenPhoneTasksForViewer(
   return (await listOpenPhoneTaskStubsForViewer(query, options)).length;
 }
 
+const OPEN_PHONE_BRAND_COUNT_CACHE_MS = 30_000;
+const openPhoneBrandCountCache = new Map<
+  string,
+  { expiresAt: number; count: number }
+>();
+const openPhoneBrandCountPending = new Map<string, Promise<number>>();
+
+function openPhoneBrandCountCacheKey(
+  query: TaskListQuery,
+  options: TestBrandScope,
+) {
+  return JSON.stringify({
+    ownerPageId: query.ownerPageId ?? null,
+    statusScope: query.statusScope ?? "open",
+    dueFrom: query.dueFrom ?? null,
+    dueTo: query.dueTo ?? null,
+    includeTest: Boolean(options.includeTest),
+    onlyTest: Boolean(options.onlyTest),
+  });
+}
+
+export function invalidateOpenPhoneBrandCountCache() {
+  openPhoneBrandCountCache.clear();
+  openPhoneBrandCountPending.clear();
+}
+
 /**
  * Open Phone brand count for Caller ReplyTask badge.
  * Same brand with multiple Phone tasks counts as 1.
+ * Short TTL cache so list + badge on /tasks do not both scan TaskDB.
  */
 export async function countOpenPhoneBrandsForViewer(
   query: TaskListQuery,
   options: TestBrandScope = {},
 ) {
-  let pages: NotionPage[] = [];
+  const cacheKey = openPhoneBrandCountCacheKey(query, options);
+  const hit = openPhoneBrandCountCache.get(cacheKey);
+  if (hit && hit.expiresAt > Date.now()) return hit.count;
+
+  const pending = openPhoneBrandCountPending.get(cacheKey);
+  if (pending) return pending;
+
+  const load = (async () => {
+    let pages: NotionPage[] = [];
+    try {
+      pages = await queryTaskPages(
+        taskListFilter({
+          ...query,
+          channel: "Phone",
+          channels: undefined,
+          statusScope: "open",
+        }),
+      );
+    } catch {
+      return 0;
+    }
+    pages = await scopeTestBrandTaskPages(pages, options);
+    if (!pages.length) return 0;
+
+    const brandByTask = await brandIdsByTaskPage(pages);
+
+    const keys = new Set<string>();
+    for (const page of pages) {
+      const contactId =
+        firstRelationId(page.properties?.["Follow-up Contact"]) || null;
+      const brandId = brandByTask.get(page.id);
+      if (brandId) keys.add(`brand:${brandId}`);
+      else if (contactId) keys.add(`contact:${contactId}`);
+      else keys.add(`task:${page.id}`);
+    }
+    return keys.size;
+  })().then((count) => {
+    openPhoneBrandCountCache.set(cacheKey, {
+      expiresAt: Date.now() + OPEN_PHONE_BRAND_COUNT_CACHE_MS,
+      count,
+    });
+    return count;
+  });
+
+  openPhoneBrandCountPending.set(cacheKey, load);
   try {
-    pages = await queryTaskPages(
-      taskListFilter({
-        ...query,
-        channel: "Phone",
-        channels: undefined,
-        statusScope: "open",
-      }),
-    );
-  } catch {
-    return 0;
+    return await load;
+  } finally {
+    if (openPhoneBrandCountPending.get(cacheKey) === load) {
+      openPhoneBrandCountPending.delete(cacheKey);
+    }
   }
-  pages = await scopeTestBrandTaskPages(pages, options);
-  if (!pages.length) return 0;
-
-  const brandByTask = await brandIdsByTaskPage(pages);
-
-  const keys = new Set<string>();
-  for (const page of pages) {
-    const contactId = firstRelationId(page.properties?.["Follow-up Contact"]) || null;
-    const brandId = brandByTask.get(page.id);
-    if (brandId) keys.add(`brand:${brandId}`);
-    else if (contactId) keys.add(`contact:${contactId}`);
-    else keys.add(`task:${page.id}`);
-  }
-  return keys.size;
 }
 
 /**
@@ -278,6 +339,200 @@ export async function listOpenReplyTaskStubsForViewer(
   }
   pages = await scopeTestBrandTaskPages(pages, options);
   return pages.map(stubTaskFromPage);
+}
+
+function scheduledAtInRange(
+  scheduledAt: string | null | undefined,
+  dueFrom?: string | null,
+  dueTo?: string | null,
+) {
+  if (!dueFrom && !dueTo) return true;
+  const day = (scheduledAt || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return false;
+  let start = dueFrom || "";
+  let end = dueTo || "";
+  if (start && end && start > end) {
+    const swap = start;
+    start = end;
+    end = swap;
+  }
+  if (start && day < start) return false;
+  if (end && day > end) return false;
+  return true;
+}
+
+function taskPageMatchesManagerReplyQuery(page: NotionPage, query: TaskListQuery) {
+  const properties = page.properties || {};
+  const status = propertyText(properties["Task Status"]);
+  if (!isOpenTaskStatus(status)) return false;
+  const channel = propertyText(properties.Channel);
+  if (!channel || channel === "Phone" || !CHANNELS.includes(channel as Channel)) {
+    return false;
+  }
+  if (query.ownerPageId !== undefined) {
+    const ownerId = firstRelationId(properties.Owner) || null;
+    if (query.ownerPageId === null) {
+      if (ownerId) return false;
+    } else if (ownerId !== query.ownerPageId) {
+      return false;
+    }
+  }
+  return scheduledAtInRange(
+    propertyDate(properties["Scheduled At"]),
+    query.dueFrom,
+    query.dueTo,
+  );
+}
+
+/**
+ * Open non-Phone tasks that currently need a reply.
+ * Starts from ConversationDB `Needs Reply` rows instead of scanning every open reply task's inbox.
+ */
+export async function listOpenNeedsReplyTaskStubsForViewer(
+  query: TaskListQuery,
+  options: TestBrandScope = {},
+) {
+  const activities = await listNeedsReplyConversations().catch(() => []);
+  if (!activities.length) return [];
+
+  const contactIds = [
+    ...new Set(
+      activities
+        .map((item) => item.contactId)
+        .filter((id): id is string => !!id),
+    ),
+  ];
+  if (!contactIds.length) return [];
+
+  let pages: NotionPage[] = [];
+  try {
+    pages = await queryTasksByContacts(contactIds);
+  } catch {
+    pages = [];
+  }
+  pages = pages.filter((page) => taskPageMatchesManagerReplyQuery(page, query));
+  pages = await scopeTestBrandTaskPages(pages, options);
+  const stubs = pages.map(stubTaskFromPage);
+  return annotateTasksWithReplyInbox(stubs, activities).filter(
+    (task) => task.inboxStatus === "Needs Reply",
+  );
+}
+
+export async function countOpenNeedsReplyTasksForViewer(
+  query: TaskListQuery,
+  options: TestBrandScope = {},
+) {
+  return (await listOpenNeedsReplyTaskStubsForViewer(query, options)).length;
+}
+
+/**
+ * Admin / AccountManager open ReplyTask page:
+ * Phone (cursor-scanned with early stop) + Needs Reply, then list-level brand hydrate only.
+ */
+export async function listOpenManagerTasksForViewerPage(
+  query: TaskListQuery,
+  options: {
+    cursor?: string | null;
+    pageSize?: number;
+  } & TestBrandScope = {},
+) {
+  const pageSize = Math.min(
+    Math.max(options.pageSize ?? DEFAULT_TASK_PAGE_SIZE, 1),
+    100,
+  );
+  const offset = Math.max(0, Number(options.cursor || 0) || 0);
+  const need = offset + pageSize;
+
+  const replyEligible = await listOpenNeedsReplyTaskStubsForViewer(query, options);
+  replyEligible.sort(compareOpenTaskOrder);
+
+  const phonePagesById = new Map<string, NotionPage>();
+  const phoneStubs: BrandTask[] = [];
+  let notionCursor: string | null | undefined = undefined;
+  let phoneExhausted = false;
+
+  while (!phoneExhausted) {
+    let batch = {
+      pages: [] as NotionPage[],
+      nextCursor: null as string | null,
+      hasMore: false,
+    };
+    try {
+      batch = await queryTaskPagesOnce({
+        filter: taskListFilter({
+          ...query,
+          channel: "Phone",
+          channels: undefined,
+          statusScope: "open",
+        }),
+        startCursor: notionCursor,
+        pageSize: 100,
+        sorts: TASK_LIST_SORTS,
+      });
+    } catch {
+      batch = { pages: [], nextCursor: null, hasMore: false };
+    }
+
+    const scoped = await scopeTestBrandTaskPages(batch.pages, options);
+    for (const page of scoped) {
+      phonePagesById.set(page.id, page);
+      phoneStubs.push(stubTaskFromPage(page));
+    }
+    notionCursor = batch.nextCursor;
+    if (!batch.nextCursor) phoneExhausted = true;
+
+    const merged = mergeOpenTaskStubs(phoneStubs, replyEligible);
+    if (merged.length >= need) {
+      const cutoff = merged[need - 1]?.scheduledAt || "";
+      const lastPhoneAt = phoneStubs.at(-1)?.scheduledAt || "";
+      if (phoneExhausted || lastPhoneAt >= cutoff) break;
+    } else if (phoneExhausted) {
+      break;
+    }
+  }
+
+  const eligible = mergeOpenTaskStubs(phoneStubs, replyEligible);
+  const selected = eligible.slice(offset, offset + pageSize);
+
+  const pagesForHydrate: NotionPage[] = [];
+  const missingIds: string[] = [];
+  for (const stub of selected) {
+    const page = phonePagesById.get(stub.id);
+    if (page) pagesForHydrate.push(page);
+    else missingIds.push(stub.id);
+  }
+  if (missingIds.length) {
+    const retrieved = await Promise.all(
+      missingIds.map((id) => retrievePage(id).catch(() => null)),
+    );
+    for (const page of retrieved) {
+      if (page) pagesForHydrate.push(page);
+    }
+  }
+
+  const hydrated = await mapTaskPagesForCallerList(pagesForHydrate);
+  const byId = new Map(hydrated.map((task) => [task.id, task]));
+  const tasks = selected.map((stub) => {
+    const task = byId.get(stub.id) || stub;
+    return {
+      ...task,
+      inboxStatus: stub.inboxStatus ?? null,
+      preview: stub.preview ?? null,
+      lastInboundAt: stub.lastInboundAt ?? null,
+    };
+  });
+
+  const nextOffset = offset + selected.length;
+  const hasMore =
+    nextOffset < eligible.length ||
+    (!phoneExhausted && selected.length >= pageSize);
+
+  return {
+    tasks,
+    nextCursor: hasMore ? String(nextOffset) : null,
+    hasMore,
+    pageSize,
+  };
 }
 
 async function queryTasksByContacts(contactIds: string[]) {
@@ -647,6 +902,27 @@ async function mapTaskPages(pages: NotionPage[], hints?: TaskResolveHints) {
   return Promise.all(pages.map((page) => mapTaskPage(page, caches, hints)));
 }
 
+/**
+ * Caller ReplyTask list hydrate: resolve Follow-up Client (+ Client title) only.
+ * Skips Contact/KeyPerson/Owner retrieves when the task already has Follow-up Client.
+ */
+async function mapTaskPagesForCallerList(pages: NotionPage[]): Promise<BrandTask[]> {
+  if (!pages.length) return [];
+  const brandByTask = await brandIdsByTaskPage(pages);
+  const brandIds = [
+    ...new Set(
+      [...brandByTask.values()].filter((id): id is string => !!id),
+    ),
+  ];
+  const caches = emptyCaches();
+  await prefetchBrands(brandIds, caches);
+  return pages.map((page) => {
+    const brandId = brandByTask.get(page.id) || null;
+    const brand = brandId ? caches.brands.get(brandId) || null : null;
+    return callerListTaskFromPage(page, brand);
+  });
+}
+
 function asCallReviewStatus(value?: string | null): BrandTask["callReviewStatus"] {
   if (value === "Awaiting Review" || value === "Qualified" || value === "Unqualified") return value;
   return null;
@@ -804,11 +1080,179 @@ export async function listFollowupTasksForViewer(
   return sortTasks(scopeTestBrandTasks(mapped, options));
 }
 
+export type TaskListHydrate = "full" | "caller-list";
+
+async function takeCallerBrandTaskPages(
+  query: TaskListQuery,
+  options: {
+    cursor?: string | null;
+    pageSize: number;
+  } & TestBrandScope,
+) {
+  const pageSize = options.pageSize;
+  const parsed = parseCallerListCursor(options.cursor);
+  const seen = new Set(parsed.seen);
+  const selected: NotionPage[] = [];
+  let notionCursor: string | null = parsed.notionCursor;
+  // Buffered IDs with no Notion cursor mean the previous batch already reached EOF.
+  let sourceExhausted =
+    Boolean(options.cursor) &&
+    parsed.notionCursor === null &&
+    parsed.buffer.length > 0;
+
+  const pageQueue: NotionPage[] = [];
+  const brandByPageId = new Map<string, string | null>();
+
+  async function enqueuePages(pages: NotionPage[]) {
+    if (!pages.length) return;
+    const scoped = await scopeTestBrandTaskPages(pages, options);
+    const brands = await brandIdsByTaskPage(scoped);
+    for (const page of scoped) {
+      pageQueue.push(page);
+      brandByPageId.set(page.id, brands.get(page.id) || null);
+    }
+  }
+
+  if (parsed.buffer.length) {
+    const restored = await Promise.all(
+      parsed.buffer.map((id) => retrievePage(id).catch(() => null)),
+    );
+    await enqueuePages(
+      restored.filter((page): page is NotionPage => !!page),
+    );
+    // Finished the final buffered tail with no upstream cursor.
+    if (parsed.notionCursor === null) sourceExhausted = true;
+  }
+
+  while (selected.length < pageSize) {
+    while (pageQueue.length && selected.length < pageSize) {
+      const page = pageQueue.shift()!;
+      const contactId =
+        firstRelationId(page.properties?.["Follow-up Contact"]) || null;
+      const key = callerBrandKey({
+        id: page.id,
+        brandId: brandByPageId.get(page.id) || null,
+        contactId,
+      });
+      if (seen.has(key)) continue;
+      seen.add(key);
+      selected.push(page);
+    }
+
+    if (selected.length >= pageSize) break;
+    if (sourceExhausted) break;
+
+    let batch = {
+      pages: [] as NotionPage[],
+      nextCursor: null as string | null,
+      hasMore: false,
+    };
+    try {
+      batch = await queryTaskPagesOnce({
+        filter: taskListFilter(query),
+        startCursor: notionCursor,
+        pageSize: Math.min(Math.max(pageSize * 3, 30), 100),
+        sorts: TASK_LIST_SORTS,
+      });
+    } catch {
+      batch = { pages: [], nextCursor: null, hasMore: false };
+    }
+
+    notionCursor = batch.nextCursor;
+    if (!batch.nextCursor) sourceExhausted = true;
+    if (!batch.pages.length) break;
+    await enqueuePages(batch.pages);
+  }
+
+  const leftoverIds = pageQueue.map((page) => page.id);
+  const hasMore = leftoverIds.length > 0 || (!sourceExhausted && !!notionCursor);
+  const nextCursor = hasMore
+    ? encodeCallerListCursor({
+        notionCursor,
+        buffer: leftoverIds,
+        seen: [...seen],
+      })
+    : null;
+
+  return { pages: selected, nextCursor, hasMore };
+}
+
 export async function listFollowupTasksForViewerPage(
   query: TaskListQuery = {},
-  options: { cursor?: string | null; pageSize?: number } & TestBrandScope = {},
+  options: {
+    cursor?: string | null;
+    pageSize?: number;
+    /** `caller-list` skips Contact/Owner/KeyPerson — ReplyTask table needs brand name only. */
+    hydrate?: TaskListHydrate;
+  } & TestBrandScope = {},
 ) {
   const pageSize = Math.min(Math.max(options.pageSize ?? DEFAULT_TASK_PAGE_SIZE, 1), 100);
+  const hydrate: TaskListHydrate = options.hydrate ?? "full";
+  const mapPages =
+    hydrate === "caller-list" ? mapTaskPagesForCallerList : mapTaskPages;
+
+  // Caller ReplyTask: page by unique Follow-up Client (one Phone row per brand).
+  if (hydrate === "caller-list") {
+    if (options.onlyTest) {
+      let pages: NotionPage[] = [];
+      try {
+        pages = await queryTaskPages(taskListFilter(query));
+      } catch {
+        pages = [];
+      }
+      pages = await scopeTestBrandTaskPages(pages, {
+        includeTest: true,
+        onlyTest: true,
+      });
+      pages.sort((left, right) => {
+        const leftAt =
+          propertyDate(left.properties?.["Scheduled At"]) || "";
+        const rightAt =
+          propertyDate(right.properties?.["Scheduled At"]) || "";
+        return leftAt.localeCompare(rightAt) || left.id.localeCompare(right.id);
+      });
+      const brandByTask = await brandIdsByTaskPage(pages);
+      const uniquePages: NotionPage[] = [];
+      const seen = new Set<string>();
+      for (const page of pages) {
+        const contactId =
+          firstRelationId(page.properties?.["Follow-up Contact"]) || null;
+        const key = callerBrandKey({
+          id: page.id,
+          brandId: brandByTask.get(page.id) || null,
+          contactId,
+        });
+        if (seen.has(key)) continue;
+        seen.add(key);
+        uniquePages.push(page);
+      }
+      const offset = Math.max(0, Number(options.cursor || 0) || 0);
+      const slice = uniquePages.slice(offset, offset + pageSize);
+      const tasks = await mapTaskPagesForCallerList(slice);
+      const nextOffset = offset + pageSize;
+      const hasMore = nextOffset < uniquePages.length;
+      return {
+        tasks,
+        nextCursor: hasMore ? String(nextOffset) : null,
+        hasMore,
+        pageSize,
+      };
+    }
+
+    const taken = await takeCallerBrandTaskPages(query, {
+      cursor: options.cursor,
+      pageSize,
+      includeTest: options.includeTest,
+      onlyTest: options.onlyTest,
+    });
+    const tasks = await mapTaskPagesForCallerList(taken.pages);
+    return {
+      tasks,
+      nextCursor: taken.nextCursor,
+      hasMore: taken.hasMore,
+      pageSize,
+    };
+  }
 
   // Test-only viewers: keep only Is Test Phone rows. Dataset is small, so filter
   // the full open list then offset-page (Notion cursor + post-filter would skip rows).
@@ -840,12 +1284,13 @@ export async function listFollowupTasksForViewerPage(
   } catch {
     batch = { pages: [], nextCursor: null, hasMore: false };
   }
-  const mapped = await mapTaskPages(batch.pages);
+  const mapped = await mapPages(batch.pages);
   const tasks = scopeTestBrandTasks(mapped, options);
   return {
     tasks,
     nextCursor: batch.nextCursor,
-    hasMore: batch.hasMore,
+    // Keep Notion cursor even when test-brand filter shortens this page.
+    hasMore: Boolean(batch.nextCursor),
     pageSize,
   };
 }

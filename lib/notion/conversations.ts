@@ -283,6 +283,33 @@ export async function listFollowupConversations(
   return attachConversationCp(pages.map((page) => mapConversation(page))).then(sortConversations);
 }
 
+const REPLY_CHANNELS = ["Email", "LinkedIn", "SMS", "WhatsApp"] as const;
+
+/**
+ * ConversationDB rows awaiting a human reply.
+ * Used by Admin/AM ReplyTask open list — avoids scanning every open non-Phone task's inbox.
+ */
+export async function listNeedsReplyConversations(
+  options: { trimPayload?: boolean } = {},
+): Promise<BrandActivity[]> {
+  const pages = await queryDatabasePages(getFollowupConversationDbId(), {
+    and: [
+      { property: "Reply Status", select: { equals: "Needs Reply" } },
+      { property: "Direction", select: { equals: "Inbound" } },
+      {
+        or: REPLY_CHANNELS.map((channel) => ({
+          property: "Channel",
+          select: { equals: channel },
+        })),
+      },
+    ],
+  });
+  // List annotate only needs contact/task/thread fields — skip CP resolve.
+  return pages.map((page) =>
+    mapConversation(page, { trimPayload: options.trimPayload !== false }),
+  );
+}
+
 /** Direct brand-relation query used by the Brands list after historical backfill. */
 export async function listFollowupConversationsByBrands(
   brandIds: string[],
