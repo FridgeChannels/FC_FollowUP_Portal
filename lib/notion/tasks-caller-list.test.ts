@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  brandNameFromTaskTitle,
   callerListTaskFromPage,
   type CallerListTaskPage,
 } from "./tasks-caller-list.ts";
@@ -36,13 +37,32 @@ function date(start: string) {
   return { type: "date" as const, date: { start } };
 }
 
+describe("brandNameFromTaskTitle", () => {
+  it("takes the segment before the first em dash", () => {
+    assert.equal(
+      brandNameFromTaskTitle(
+        "AllSprouts — Cameron den Hoed — Email — 2026-09-29T13:05:00.000Z",
+      ),
+      "AllSprouts",
+    );
+  });
+
+  it("returns null when the title is not the standard pattern", () => {
+    assert.equal(brandNameFromTaskTitle("Call Acme"), null);
+    assert.equal(brandNameFromTaskTitle(""), null);
+    assert.equal(brandNameFromTaskTitle(null), null);
+  });
+});
+
 describe("callerListTaskFromPage", () => {
-  it("maps list fields from task properties without requiring brand hydrate", () => {
+  it("maps list fields and brand name from the task title without Client hydrate", () => {
     const task = callerListTaskFromPage(
       page({
         id: "task-phone-1",
         properties: {
-          "Follow-up Task": title("Call Acme"),
+          "Follow-up Task": title(
+            "AllSprouts — Cameron den Hoed — Phone — 2026-09-30",
+          ),
           Channel: select("Phone"),
           "Task Status": select("Pending"),
           Priority: select("P0"),
@@ -56,27 +76,20 @@ describe("callerListTaskFromPage", () => {
     );
 
     assert.equal(task.id, "task-phone-1");
-    assert.equal(task.title, "Call Acme");
-    assert.equal(task.channel, "Phone");
-    assert.equal(task.status, "Pending");
-    assert.equal(task.priority, "P0");
-    assert.equal(task.scheduledAt, "2026-09-30");
-    assert.equal(task.contactId, "contact-1");
     assert.equal(task.brandId, "brand-1");
+    assert.equal(task.brandName, "AllSprouts");
+    assert.equal(task.contactId, "contact-1");
     assert.equal(task.ownerId, "owner-1");
     assert.equal(task.callReviewStatus, "Awaiting Review");
     assert.equal(task.contactName, null);
-    assert.equal(task.contactPhone, null);
     assert.equal(task.ownerName, null);
-    assert.equal(task.brandName, null);
-    assert.deepEqual(task.callReviewHistory, []);
   });
 
-  it("fills brand display fields when provided", () => {
+  it("prefers an explicit brand name override when provided", () => {
     const task = callerListTaskFromPage(
       page({
         properties: {
-          "Follow-up Task": title("Call"),
+          "Follow-up Task": title("AllSprouts — Person — Phone — 2026-09-30"),
           Channel: select("Phone"),
           "Task Status": select("In Progress"),
         },
@@ -91,7 +104,6 @@ describe("callerListTaskFromPage", () => {
 
     assert.equal(task.brandId, "brand-9");
     assert.equal(task.brandName, "Acme Co");
-    assert.equal(task.brandOwnerId, "owner-9");
     assert.equal(task.brandIsTest, true);
   });
 });

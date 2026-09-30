@@ -25,9 +25,115 @@ import {
   callerBrandKey,
   encodeCallerListCursor,
   parseCallerListCursor,
+  type CallerListBufferStub,
 } from "./caller-list-cursor";
 
 const CONTACT_TASK_KEYS = ["Follow-up Tasks", "Tasks"];
+
+function callerListStubFromPage(
+  page: NotionPage,
+  brandId?: string | null,
+): CallerListBufferStub {
+  const properties = page.properties || {};
+  return {
+    id: page.id,
+    created_time: page.created_time || null,
+    title: titleFromProperties(properties) || "Untitled Task",
+    brandId:
+      brandId || firstRelationId(properties["Follow-up Client"]) || null,
+    contactId: firstRelationId(properties["Follow-up Contact"]) || null,
+    ownerId: firstRelationId(properties.Owner) || null,
+    channel: propertyText(properties.Channel) || null,
+    status: propertyText(properties["Task Status"]) || null,
+    priority: propertyText(properties.Priority) || null,
+    scheduledAt: propertyDate(properties["Scheduled At"]),
+    endedAt: propertyDate(properties["Ended At"]),
+    creationMethod: propertyText(properties["Creation Method"]) || null,
+    callReviewStatus: propertyText(properties["Call Review Status"]) || null,
+    callReviewReason: propertyText(properties["Call Review Reason"]) || null,
+    callQualifiedAt: propertyDate(properties["Call Qualified At"]),
+    templateId: firstRelationId(properties.Template) || null,
+    sourceBombId: firstRelationId(properties["Source Bomb"]) || null,
+    omniReachRunId: propertyText(properties["OmniReach Run Id"]) || null,
+  };
+}
+
+function notionPageFromCallerListStub(stub: CallerListBufferStub): NotionPage {
+  return {
+    id: stub.id,
+    created_time: stub.created_time || undefined,
+    properties: {
+      "Follow-up Task": {
+        type: "title",
+        title: [{ plain_text: stub.title }],
+      },
+      "Follow-up Client": {
+        type: "relation",
+        relation: stub.brandId ? [{ id: stub.brandId }] : [],
+      },
+      "Follow-up Contact": {
+        type: "relation",
+        relation: stub.contactId ? [{ id: stub.contactId }] : [],
+      },
+      Owner: {
+        type: "relation",
+        relation: stub.ownerId ? [{ id: stub.ownerId }] : [],
+      },
+      Channel: {
+        type: "select",
+        select: stub.channel ? { name: stub.channel } : null,
+      },
+      "Task Status": {
+        type: "status",
+        status: stub.status ? { name: stub.status } : null,
+      },
+      Priority: {
+        type: "select",
+        select: stub.priority ? { name: stub.priority } : null,
+      },
+      "Scheduled At": {
+        type: "date",
+        date: stub.scheduledAt ? { start: stub.scheduledAt } : null,
+      },
+      "Ended At": {
+        type: "date",
+        date: stub.endedAt ? { start: stub.endedAt } : null,
+      },
+      "Creation Method": {
+        type: "select",
+        select: stub.creationMethod ? { name: stub.creationMethod } : null,
+      },
+      "Call Review Status": {
+        type: "select",
+        select: stub.callReviewStatus ? { name: stub.callReviewStatus } : null,
+      },
+      "Call Review Reason": {
+        type: "rich_text",
+        rich_text: stub.callReviewReason
+          ? [{ plain_text: stub.callReviewReason }]
+          : [],
+      },
+      "Call Qualified At": {
+        type: "date",
+        date: stub.callQualifiedAt ? { start: stub.callQualifiedAt } : null,
+      },
+      Template: {
+        type: "relation",
+        relation: stub.templateId ? [{ id: stub.templateId }] : [],
+      },
+      "Source Bomb": {
+        type: "relation",
+        relation: stub.sourceBombId ? [{ id: stub.sourceBombId }] : [],
+      },
+      "OmniReach Run Id": {
+        type: "rich_text",
+        rich_text: stub.omniReachRunId
+          ? [{ plain_text: stub.omniReachRunId }]
+          : [],
+      },
+    },
+  } as NotionPage;
+}
 
 function relationFilter(property: string, ids: string[]) {
   if (ids.length === 1) {
@@ -903,24 +1009,11 @@ async function mapTaskPages(pages: NotionPage[], hints?: TaskResolveHints) {
 }
 
 /**
- * Caller ReplyTask list hydrate: resolve Follow-up Client (+ Client title) only.
- * Skips Contact/KeyPerson/Owner retrieves when the task already has Follow-up Client.
+ * ReplyTask list hydrate: no Follow-up Client / Client title retrieves.
+ * Brand name is parsed from the task title; brand id from the task relation.
  */
 async function mapTaskPagesForCallerList(pages: NotionPage[]): Promise<BrandTask[]> {
-  if (!pages.length) return [];
-  const brandByTask = await brandIdsByTaskPage(pages);
-  const brandIds = [
-    ...new Set(
-      [...brandByTask.values()].filter((id): id is string => !!id),
-    ),
-  ];
-  const caches = emptyCaches();
-  await prefetchBrands(brandIds, caches);
-  return pages.map((page) => {
-    const brandId = brandByTask.get(page.id) || null;
-    const brand = brandId ? caches.brands.get(brandId) || null : null;
-    return callerListTaskFromPage(page, brand);
-  });
+  return pages.map((page) => callerListTaskFromPage(page));
 }
 
 function asCallReviewStatus(value?: string | null): BrandTask["callReviewStatus"] {
@@ -1094,11 +1187,11 @@ async function takeCallerBrandTaskPages(
   const seen = new Set(parsed.seen);
   const selected: NotionPage[] = [];
   let notionCursor: string | null = parsed.notionCursor;
-  // Buffered IDs with no Notion cursor mean the previous batch already reached EOF.
+  // Buffered rows with no Notion cursor mean the previous batch already reached EOF.
   let sourceExhausted =
     Boolean(options.cursor) &&
     parsed.notionCursor === null &&
-    parsed.buffer.length > 0;
+    (parsed.buffer.length > 0 || parsed.legacyBufferIds.length > 0);
 
   const pageQueue: NotionPage[] = [];
   const brandByPageId = new Map<string, string | null>();
@@ -1114,13 +1207,21 @@ async function takeCallerBrandTaskPages(
   }
 
   if (parsed.buffer.length) {
+    for (const stub of parsed.buffer) {
+      const page = notionPageFromCallerListStub(stub);
+      pageQueue.push(page);
+      brandByPageId.set(page.id, stub.brandId);
+    }
+    if (parsed.notionCursor === null) sourceExhausted = true;
+  }
+
+  if (parsed.legacyBufferIds.length) {
     const restored = await Promise.all(
-      parsed.buffer.map((id) => retrievePage(id).catch(() => null)),
+      parsed.legacyBufferIds.map((id) => retrievePage(id).catch(() => null)),
     );
     await enqueuePages(
       restored.filter((page): page is NotionPage => !!page),
     );
-    // Finished the final buffered tail with no upstream cursor.
     if (parsed.notionCursor === null) sourceExhausted = true;
   }
 
@@ -1164,12 +1265,15 @@ async function takeCallerBrandTaskPages(
     await enqueuePages(batch.pages);
   }
 
-  const leftoverIds = pageQueue.map((page) => page.id);
-  const hasMore = leftoverIds.length > 0 || (!sourceExhausted && !!notionCursor);
+  const leftover = pageQueue.map((page) =>
+    callerListStubFromPage(page, brandByPageId.get(page.id) || null),
+  );
+  const hasMore = leftover.length > 0 || (!sourceExhausted && !!notionCursor);
   const nextCursor = hasMore
     ? encodeCallerListCursor({
         notionCursor,
-        buffer: leftoverIds,
+        buffer: leftover,
+        legacyBufferIds: [],
         seen: [...seen],
       })
     : null;

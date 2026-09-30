@@ -55,24 +55,39 @@ function titleFromProperties(properties?: CallerListTaskPage["properties"]) {
 }
 
 /**
- * Caller ReplyTask list row from TaskDB query properties only.
- * Brand fields are filled later by list hydrate (Client pages, not Contact/Owner/KeyPerson).
+ * Task titles are written as `{brand} — {contact} — {channel} — {scheduledAt|Inbound}`.
+ * List hydrate uses the first segment so we do not retrieve Follow-up Client / Client pages.
+ */
+export function brandNameFromTaskTitle(title?: string | null) {
+  const value = title?.trim() || "";
+  if (!value) return null;
+  const separator = " — ";
+  const index = value.indexOf(separator);
+  if (index <= 0) return null;
+  const brand = value.slice(0, index).trim();
+  return brand || null;
+}
+
+/**
+ * Caller / manager ReplyTask list row from TaskDB query properties only.
+ * Brand display name comes from the task title; brand id from Follow-up Client relation.
  */
 export function callerListTaskFromPage(
   page: CallerListTaskPage,
   brand?: CallerListBrand | null,
 ): BrandTask {
   const properties = page.properties || {};
+  const title = titleFromProperties(properties) || "Untitled Task";
   const brandId =
     brand?.id || firstRelationId(properties["Follow-up Client"]) || null;
   const callReviewStatus = propertyText(properties["Call Review Status"]);
   return {
     id: page.id,
-    title: titleFromProperties(properties) || "Untitled Task",
+    title,
     contactId: firstRelationId(properties["Follow-up Contact"]) || null,
     contactName: null,
     brandId,
-    brandName: brand?.name || null,
+    brandName: brand?.name || brandNameFromTaskTitle(title),
     brandOwnerId: brand?.ownerId || null,
     brandIsTest: Boolean(brand?.isTest),
     ownerId: firstRelationId(properties.Owner) || null,
