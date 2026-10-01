@@ -38,7 +38,7 @@ function formatQualifiedTime(value: string, timeZone: string) {
 }
 
 function formatTaskDate(value: string | null, timeZone: string) {
-  return value ? formatQualifiedTime(value, timeZone) : "Not recorded";
+  return value ? formatDay(value, timeZone) : "Not recorded";
 }
 
 function taskDetailHref(taskId: string, callId: string | null) {

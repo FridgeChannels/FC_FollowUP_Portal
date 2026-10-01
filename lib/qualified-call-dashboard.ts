@@ -69,7 +69,9 @@ export function buildQualifiedCallDashboard(
     const item: QualifiedCallDashboardItem = {
       taskId: task.id,
       taskTitle: task.title,
-      taskDate: task.scheduledAt || task.endedAt || task.callQualifiedAt,
+      // Keep every exported task date aligned with the Dashboard's Qualified
+      // day grouping. A week report must not split one day by task schedule.
+      taskDate: day,
       brandName: task.brandName,
       qualifiedAt: task.callQualifiedAt,
       reviewerName: round?.reviewerName || null,
