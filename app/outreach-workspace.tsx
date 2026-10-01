@@ -29,7 +29,7 @@ import { QualifiedCallsDashboard } from "./qualified-calls-dashboard";
 
 type Screen = "Dashboard" | "Brands" | "ReplyTask" | "OmniReach";
 const nav: { label: Screen; path: string; icon: typeof Users; cap: string; badge?: boolean }[] = [
-  { label: "Dashboard", path: "/dashboard", icon: LayoutDashboard, cap: "dashboard" },
+  { label: "Caller Dashboard", path: "/dashboard", icon: LayoutDashboard, cap: "dashboard" },
   { label: "Brands", path: "/customers", icon: Users, cap: "customers" },
   { label: "ReplyTask", path: "/tasks", icon: ClipboardCheck, cap: "tasks", badge: true },
   { label: "OmniReach", path: "/omnireach", icon: Bomb, cap: "bombs" },

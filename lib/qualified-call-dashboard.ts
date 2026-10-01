@@ -3,6 +3,7 @@ import type { BrandTask } from "./brand-list";
 export type QualifiedCallDashboardItem = {
   taskId: string;
   taskTitle: string;
+  taskDate: string | null;
   brandName: string | null;
   qualifiedAt: string;
   reviewerName: string | null;
@@ -68,6 +69,7 @@ export function buildQualifiedCallDashboard(
     const item: QualifiedCallDashboardItem = {
       taskId: task.id,
       taskTitle: task.title,
+      taskDate: task.scheduledAt || task.endedAt || task.callQualifiedAt,
       brandName: task.brandName,
       qualifiedAt: task.callQualifiedAt,
       reviewerName: round?.reviewerName || null,

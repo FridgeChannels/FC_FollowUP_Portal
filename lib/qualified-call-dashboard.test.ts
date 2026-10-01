@@ -53,6 +53,7 @@ describe("buildQualifiedCallDashboard", () => {
     assert.equal(result[0].total, 2);
     assert.equal(result[0].callers[0].calls[0].reviewerName, "Taylor");
     assert.equal(result[0].callers[0].calls[0].callId, "call-123");
+    assert.equal(result[0].callers[0].calls[0].taskDate, "2026-10-02T15:03:05.000Z");
     assert.equal(result[0].callers[0].name, "Jamie at call time");
     assert.equal(result[0].callers[0].email, "jamie@example.com");
   });

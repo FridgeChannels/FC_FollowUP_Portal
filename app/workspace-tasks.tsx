@@ -800,7 +800,7 @@ function TaskDetail({ task, selectedCallId, returnToDashboard = false }: { task:
   }, [task.remote, liveTask.callReviewStatus, remote?.timeline]);
   if (task.remote && !detailHydrated) {
     return <div className="mx-auto max-w-[1540px]">
-      <button onClick={() => router.push(returnToDashboard ? "/dashboard" : "/tasks")} className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900"><ArrowLeft className="size-4"/>{returnToDashboard ? "Dashboard" : "ReplyTask"}</button>
+      <button onClick={() => router.push(returnToDashboard ? "/dashboard" : "/tasks")} className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900"><ArrowLeft className="size-4"/>{returnToDashboard ? "Caller Dashboard" : "ReplyTask"}</button>
       <main className="grid min-h-[55vh] place-items-center bg-white px-6 text-center">
         <div className="flex flex-col items-center gap-3 text-sm text-slate-500"><Spinner className="size-5"/><p>Loading the selected task and call record…</p></div>
       </main>
@@ -931,7 +931,7 @@ function TaskDetail({ task, selectedCallId, returnToDashboard = false }: { task:
   ) as Partial<Record<CPCode, string>>;
 
   return <div className="mx-auto max-w-[1540px]">
-    <button onClick={() => router.push(returnToDashboard ? "/dashboard" : "/tasks")} className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900"><ArrowLeft className="size-4"/>{returnToDashboard ? "Dashboard" : "ReplyTask"}</button>
+    <button onClick={() => router.push(returnToDashboard ? "/dashboard" : "/tasks")} className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900"><ArrowLeft className="size-4"/>{returnToDashboard ? "Caller Dashboard" : "ReplyTask"}</button>
     {detailError ? <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900"><span>Latest task details could not load. Showing the task link while it reconnects.</span><Button size="sm" variant="outline" onClick={() => setDetailRequest((value) => value + 1)}>Try again</Button></div> : null}
     <main className="min-w-0 overflow-hidden rounded-2xl bg-white">
     <header className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 bg-white px-5 py-4 lg:px-7">
