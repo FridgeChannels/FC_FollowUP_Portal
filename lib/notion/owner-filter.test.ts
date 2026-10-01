@@ -205,6 +205,18 @@ describe("taskListFilter", () => {
       },
     );
   });
+
+  it("filters current Qualified Phone tasks for the dashboard", () => {
+    assert.deepEqual(
+      taskListFilter({ channel: "Phone", callReviewStatus: "Qualified", statusScope: "all" }),
+      {
+        and: [
+          { property: "Channel", select: { equals: "Phone" } },
+          { property: "Call Review Status", select: { equals: "Qualified" } },
+        ],
+      },
+    );
+  });
 });
 
 describe("scheduledAtRangeFilters", () => {

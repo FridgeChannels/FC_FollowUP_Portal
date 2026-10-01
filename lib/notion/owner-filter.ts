@@ -225,6 +225,8 @@ export type TaskListQuery = {
   channel?: string;
   /** OR of multiple Channel selects (e.g. reply channels). */
   channels?: string[];
+  /** Optional Phone review state, used by the Qualified calls dashboard. */
+  callReviewStatus?: "Awaiting Review" | "Qualified" | "Unqualified";
   /** Defaults to open when omitted. */
   statusScope?: TaskStatusScope;
   /** Inclusive due-date start (YYYY-MM-DD), filters `Scheduled At`. */
@@ -250,6 +252,12 @@ export function taskListFilter(query: TaskListQuery = {}) {
     }
   } else if (query.channel) {
     filters.push({ property: "Channel", select: { equals: query.channel } });
+  }
+  if (query.callReviewStatus) {
+    filters.push({
+      property: "Call Review Status",
+      select: { equals: query.callReviewStatus },
+    });
   }
   const status = taskStatusFilter(query.statusScope ?? "open");
   if (status) filters.push(status);

@@ -3,7 +3,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  Bomb, ChevronDown, ClipboardCheck, LogOut, RefreshCw,
+  Bomb, ChevronDown, ClipboardCheck, LayoutDashboard, LogOut, RefreshCw,
   Users, Zap,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -25,20 +25,22 @@ import { SampleManagementPage } from "./sample-management";
 import { TasksPage } from "./workspace-tasks";
 import { BombEditor, BombsPage } from "./workspace-bombs";
 import { useSession } from "./use-session";
+import { QualifiedCallsDashboard } from "./qualified-calls-dashboard";
 
-type Screen = "Brands" | "ReplyTask" | "OmniReach";
+type Screen = "Dashboard" | "Brands" | "ReplyTask" | "OmniReach";
 const nav: { label: Screen; path: string; icon: typeof Users; cap: string; badge?: boolean }[] = [
+  { label: "Dashboard", path: "/dashboard", icon: LayoutDashboard, cap: "dashboard" },
   { label: "Brands", path: "/customers", icon: Users, cap: "customers" },
   { label: "ReplyTask", path: "/tasks", icon: ClipboardCheck, cap: "tasks", badge: true },
   { label: "OmniReach", path: "/omnireach", icon: Bomb, cap: "bombs" },
 ];
 const roleHome: Record<Role, string> = {
-  Admin: "/tasks",
+  Admin: "/dashboard",
   "AccountManager": "/customers",
-  Caller: "/tasks",
+  Caller: "/dashboard",
 };
 const isOmniReachPath = (path: string) => /^\/(omnireach|bombs)(\/|$)/i.test(path);
-const routeScreen = (path: string): Screen => path.startsWith("/customers") ? "Brands" : isOmniReachPath(path) ? "OmniReach" : "ReplyTask";
+const routeScreen = (path: string): Screen => path.startsWith("/dashboard") ? "Dashboard" : path.startsWith("/customers") ? "Brands" : isOmniReachPath(path) ? "OmniReach" : "ReplyTask";
 const accountInitials = (name?: string | null, email?: string | null) => {
   const source = name?.trim() || email?.split("@")[0] || "?";
   const parts = source.split(/[\s._-]+/).filter(Boolean);
@@ -133,7 +135,7 @@ export default function OutreachWorkspace({ children }: { children?: ReactNode }
       if (!can("customers")) router.replace(roleHome[state.currentRole]);
       return;
     }
-    const capability = screen === "Brands" ? "customers" : screen === "ReplyTask" ? "tasks" : "bombs";
+    const capability = screen === "Dashboard" ? "dashboard" : screen === "Brands" ? "customers" : screen === "ReplyTask" ? "tasks" : "bombs";
     if (!can(capability)) router.replace(roleHome[state.currentRole]);
   }, [sessionLoading, user, pathname, screen, state.currentRole, can, router]);
 
@@ -146,7 +148,7 @@ export default function OutreachWorkspace({ children }: { children?: ReactNode }
         name: "navigate_outreach_workspace",
         title: "Navigate workspace",
         description: "Open a primary Super FollowUP workspace.",
-        inputSchema: { type: "object", properties: { path: { type: "string", enum: ["/customers", "/tasks", "/omnireach"] } }, required: ["path"], additionalProperties: false },
+        inputSchema: { type: "object", properties: { path: { type: "string", enum: ["/dashboard", "/customers", "/tasks", "/omnireach"] } }, required: ["path"], additionalProperties: false },
         annotations: { readOnlyHint: true, untrustedContentHint: false },
         execute(input: unknown) {
           const path = (input as { path?: string }).path;
@@ -220,6 +222,8 @@ export default function OutreachWorkspace({ children }: { children?: ReactNode }
                             ? "data-[active=true]:bg-blue-500"
                             : item.label === "ReplyTask"
                               ? "data-[active=true]:bg-violet-500"
+                              : item.label === "Dashboard"
+                                ? "data-[active=true]:bg-emerald-500"
                               : "data-[active=true]:bg-amber-500"
                         } data-[active=true]:text-white`}
                       >
@@ -320,22 +324,25 @@ export function WorkspaceRouteContent() {
   const section = parts[0] || "tasks";
   const brandDetailId = section === "customers" ? parts[1] : undefined;
   const sampleRoute = section === "customers" && parts[2]?.toLowerCase() === "sample";
+  const dashboardRoute = section === "dashboard";
   const omniReachRoute = /^(omnireach|bombs)$/i.test(section);
   const taskRoute =
     section === "tasks" ||
     section === "inbox" ||
     section === "call-tasks" ||
-    (section !== "customers" && !omniReachRoute);
+    (!dashboardRoute && section !== "customers" && !omniReachRoute);
   const bombDetailId = omniReachRoute ? parts[1] : undefined;
   const activeRoot =
-    section === "customers" && !brandDetailId
+    dashboardRoute
+      ? "dashboard"
+      : section === "customers" && !brandDetailId
       ? "brands"
       : taskRoute
         ? "tasks"
         : omniReachRoute && !bombDetailId
           ? "omnireach"
           : undefined;
-  const [mountedRoots, setMountedRoots] = useState<Array<"brands" | "tasks" | "omnireach">>(
+  const [mountedRoots, setMountedRoots] = useState<Array<"dashboard" | "brands" | "tasks" | "omnireach">>(
     () => (activeRoot ? [activeRoot] : []),
   );
   const [mountedSampleBrandIds, setMountedSampleBrandIds] = useState<string[]>([]);
@@ -349,6 +356,11 @@ export function WorkspaceRouteContent() {
 
   return (
     <>
+      {mountedRoots.includes("dashboard") ? (
+        <div hidden={activeRoot !== "dashboard"}>
+          <QualifiedCallsDashboard />
+        </div>
+      ) : null}
       {mountedRoots.includes("brands") ? (
         <div hidden={activeRoot !== "brands"}>
           <BrandsPage active={activeRoot === "brands"} />

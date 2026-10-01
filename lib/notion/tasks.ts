@@ -1173,6 +1173,29 @@ export async function listFollowupTasksForViewer(
   return sortTasks(scopeTestBrandTasks(mapped, options));
 }
 
+/**
+ * Current Qualified Phone tasks for the role-aware dashboard. This deliberately
+ * reads the task's current review state, rather than historical review rounds.
+ */
+export async function listCurrentQualifiedPhoneTasks(
+  options: TestBrandScope = {},
+) {
+  let pages: NotionPage[] = [];
+  try {
+    pages = await queryTaskPages(
+      taskListFilter({
+        channel: "Phone",
+        callReviewStatus: "Qualified",
+        statusScope: "all",
+      }),
+    );
+  } catch {
+    pages = [];
+  }
+  const scoped = await scopeTestBrandTaskPages(pages, options);
+  return mapTaskPages(scoped);
+}
+
 export type TaskListHydrate = "full" | "caller-list";
 
 async function takeCallerBrandTaskPages(
