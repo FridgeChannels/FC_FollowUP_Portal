@@ -3,6 +3,7 @@ import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { updateFollowupTask } from "@/lib/notion/followup-writes";
 import {
   buildCallerTaskDetailPayload,
+  buildDashboardTaskDetailPayload,
   buildTaskDetailPayload,
 } from "@/lib/notion/task-detail";
 import { retrieveFollowupTask } from "@/lib/notion/tasks";
@@ -12,13 +13,19 @@ import { recordQuoDialAttempt } from "@/lib/quo/dial-attempts";
 
 type Params = { params: Promise<{ id: string }> };
 
-function litePayloadForViewer(viewer: { role: string }, request: Request) {
+function requestOptionsForViewer(viewer: { role: string }, request: Request) {
   if (viewer.role === "Caller") return true;
   const url = new URL(request.url);
   return url.searchParams.get("lite") === "1";
 }
 
-async function taskPayload(id: string, lite: boolean) {
+async function taskPayload(
+  id: string,
+  lite: boolean,
+  useDashboardCache = false,
+  selectedCallId?: string | null,
+) {
+  if (useDashboardCache) return buildDashboardTaskDetailPayload(id, selectedCallId);
   return lite ? buildCallerTaskDetailPayload(id) : buildTaskDetailPayload(id);
 }
 
@@ -29,8 +36,10 @@ export async function GET(request: Request, { params }: Params) {
       return Response.json({ error: "Sign in required" }, { status: 401 });
     }
     const { id } = await params;
-    const lite = litePayloadForViewer(viewer, request);
-    const payload = await taskPayload(id, lite);
+    const lite = requestOptionsForViewer(viewer, request);
+    const url = new URL(request.url);
+    const useDashboardCache = url.searchParams.get("source") === "dashboard";
+    const payload = await taskPayload(id, lite, useDashboardCache, url.searchParams.get("callId"));
     if (!canViewTask(viewer, payload.task)) {
       return Response.json({ error: "You do not have access to this task" }, { status: 403 });
     }
@@ -77,7 +86,7 @@ export async function PATCH(request: Request, { params }: Params) {
         ? new Date().toISOString()
         : undefined,
     });
-    return Response.json(await taskPayload(id, litePayloadForViewer(viewer, request)));
+    return Response.json(await taskPayload(id, requestOptionsForViewer(viewer, request)));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
     const status = message.includes("404") ? 404 : 500;
@@ -120,7 +129,7 @@ export async function POST(request: Request, { params }: Params) {
         status: "In Progress",
       });
     }
-    return Response.json(await taskPayload(id, litePayloadForViewer(viewer, request)));
+    return Response.json(await taskPayload(id, requestOptionsForViewer(viewer, request)));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
     const status = message.includes("404") ? 404 : 500;

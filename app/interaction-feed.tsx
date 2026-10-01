@@ -184,6 +184,7 @@ export function InteractionFeed({
   onPersistCallReview,
   loading = false,
   activeTaskId,
+  highlightedCallId,
   headerContactName,
   onSelectTask,
   onCallOpening,
@@ -230,6 +231,7 @@ export function InteractionFeed({
   onPersistCallReview?: (taskId: string, status: CallReviewStatus, reviewReason?: string, reviewNote?: string) => Promise<void>;
   loading?: boolean;
   activeTaskId?: string | null;
+  highlightedCallId?: string | null;
   headerContactName?: string;
   onSelectTask?: (taskId: string) => void;
   onCallOpening?: (info: QuoDialOpening) => void;
@@ -396,6 +398,7 @@ export function InteractionFeed({
         quoRefreshingCallId={quoRefreshingCallId}
         showDial={!!callerPhoneOnly}
         activeTaskId={activeTaskId}
+        highlightedCallId={highlightedCallId}
         headerContactName={headerContactName}
         onSelectTask={onSelectTask}
         onCallOpening={onCallOpening}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { CheckCircle2, ChevronDown, ChevronRight, Phone, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { callReviewsFromTasks, type CallReviewStatus } from "@/lib/call-review-metadata";
@@ -283,6 +283,7 @@ export function PhoneTaskBoard({
   contacts,
   timeline,
   activeTaskId,
+  highlightedCallId,
   scriptsLoading = false,
   headerContactName,
   showChannelTab = true,
@@ -303,6 +304,7 @@ export function PhoneTaskBoard({
   contacts: Contact[];
   timeline: Interaction[];
   activeTaskId?: string | null;
+  highlightedCallId?: string | null;
   scriptsLoading?: boolean;
   headerContactName?: string;
   showChannelTab?: boolean;
@@ -336,6 +338,14 @@ export function PhoneTaskBoard({
     [tasks],
   );
 
+  useEffect(() => {
+    if (!highlightedCallId) return;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(`call-${highlightedCallId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [highlightedCallId, timeline]);
+
   const handleReview = async (taskId: string, status: CallReviewStatus, reviewReason?: string, reviewNote?: string) => {
     if (!onPersistCallReview) {
       toast.error("Call review requires a Follow-up Task backed by Notion");
@@ -355,7 +365,7 @@ export function PhoneTaskBoard({
   const body = <div className="space-y-4 p-5">
     {tasks.length ? tasks.map((item) => {
       const taskContact = contacts.find((entry) => entry.id === item.contactId) || contacts[0];
-      const active = !!activeTaskId && item.id === activeTaskId;
+      const active = !!activeTaskId && sameNotionId(item.id, activeTaskId);
       const script = callScriptFromConversations(timeline, item.id);
       const scriptLoading = scriptsLoading && !script;
       const review = reviews[item.id];
@@ -372,6 +382,7 @@ export function PhoneTaskBoard({
         task={item}
         contact={taskContact}
         active={active}
+        highlightedCallId={active ? highlightedCallId : undefined}
         script={script}
         scriptLoading={!!scriptLoading}
         reviewStatus={review?.status}
@@ -434,6 +445,7 @@ function CallResultList({
   selectable = false,
   selectedCallId,
   onSelectCall,
+  highlightedCallId,
 }: {
   items: Interaction[];
   emptyLabel: string;
@@ -442,6 +454,7 @@ function CallResultList({
   selectable?: boolean;
   selectedCallId?: string;
   onSelectCall?: (callId: string) => void;
+  highlightedCallId?: string | null;
 }) {
   if (!items.length) {
     return <p className="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-5 text-sm text-slate-500">{emptyLabel}</p>;
@@ -449,7 +462,8 @@ function CallResultList({
   const cards = items.map((item) => {
     const callId = item.quo?.callId;
     const selected = selectable && !!callId && selectedCallId === callId;
-    const card = <article className={`rounded-xl border bg-white p-4 ${selectable && selected ? "border-amber-400 ring-2 ring-amber-200" : "border-slate-200"} ${selectable && callId ? "cursor-pointer" : ""}`}>
+    const highlighted = !!callId && highlightedCallId === callId;
+    const card = <article id={highlighted ? `call-${callId}` : undefined} className={`rounded-xl border bg-white p-4 ${highlighted ? "border-blue-400 ring-2 ring-blue-100" : selectable && selected ? "border-amber-400 ring-2 ring-amber-200" : "border-slate-200"} ${selectable && callId ? "cursor-pointer" : ""}`}>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           {selectable ? <RadioGroupItem value={callId || item.id} disabled={!callId} /> : null}
@@ -521,6 +535,7 @@ function ReviewRoundCard({
   selectableCalls = false,
   selectedCallId,
   onSelectCall,
+  highlightedCallId,
   children,
 }: {
   round: ReviewRoundDisplay;
@@ -533,6 +548,7 @@ function ReviewRoundCard({
   selectableCalls?: boolean;
   selectedCallId?: string;
   onSelectCall?: (callId: string) => void;
+  highlightedCallId?: string | null;
   children?: ReactNode;
 }) {
   const inProgress = round.status === "In Progress";
@@ -568,6 +584,7 @@ function ReviewRoundCard({
             selectable={selectableCalls}
             selectedCallId={selectedCallId}
             onSelectCall={onSelectCall}
+            highlightedCallId={highlightedCallId}
           />
         </div>
       ) : null}
@@ -593,6 +610,7 @@ function PhoneTaskBlock({
   onReview,
   onRefreshQuo,
   quoRefreshingCallId,
+  highlightedCallId,
   callerReviewTaskId,
   callerReviewHasConnectedCall,
   callerReviewCanSubmit,
@@ -614,6 +632,7 @@ function PhoneTaskBlock({
   onReview: (status: CallReviewStatus, reviewReason?: string, reviewNote?: string) => void;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
+  highlightedCallId?: string | null;
   callerReviewTaskId?: string | null;
   callerReviewHasConnectedCall: boolean;
   callerReviewCanSubmit: boolean;
@@ -712,6 +731,7 @@ function PhoneTaskBlock({
         selectableCalls={pickingCall}
         selectedCallId={selectedCallId}
         onSelectCall={setSelectedCallId}
+        highlightedCallId={highlightedCallId}
       >
         {pickingCall ? (
           <div className="space-y-3">
@@ -788,6 +808,7 @@ function PhoneTaskBlock({
               emptyLabel="No Quo call was linked to this round."
               onRefreshQuo={onRefreshQuo}
               quoRefreshingCallId={quoRefreshingCallId}
+              highlightedCallId={highlightedCallId}
             />
           ))}
         </div> : null}

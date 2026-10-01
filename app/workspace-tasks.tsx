@@ -185,7 +185,7 @@ function dedupeCallerTasksByBrand(tasks: UnifiedTask[]): UnifiedTask[] {
   return result;
 }
 
-export function TasksPage({ selectedId }: { selectedId?: string }) {
+export function TasksPage({ selectedId, selectedCallId, returnToDashboard = false }: { selectedId?: string; selectedCallId?: string; returnToDashboard?: boolean }) {
   const { state } = useWorkspace();
   const router = useRouter();
   const manager = state.currentRole === "Admin";
@@ -217,7 +217,7 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
   }, [state.currentRole]);
 
   useEffect(() => {
-    if (!manager) {
+    if (selectedId || !manager) {
       setOwnerOptions([]);
       return;
     }
@@ -242,7 +242,7 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
     return () => {
       cancelled = true;
     };
-  }, [manager]);
+  }, [manager, selectedId]);
 
   const taskListQuery = useMemo(() => {
     const params = new URLSearchParams();
@@ -258,6 +258,13 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
   }, [manager, assignee, status, isCaller, dueFrom, dueTo]);
 
   useEffect(() => {
+    if (selectedId) {
+      setRemoteTasks([]);
+      setRemoteLoading(false);
+      setNextCursor(null);
+      setHasMore(false);
+      return;
+    }
     let cancelled = false;
     setRemoteLoading(true);
     setNextCursor(null);
@@ -294,7 +301,7 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
       })
       .finally(() => { if (!cancelled) setRemoteLoading(false); });
     return () => { cancelled = true; };
-  }, [taskListQuery]);
+  }, [taskListQuery, selectedId]);
 
   const loadMoreTasks = () => {
     if (!nextCursor || loadingMore || remoteLoading) return;
@@ -368,7 +375,7 @@ export function TasksPage({ selectedId }: { selectedId?: string }) {
 
   if (selectedId) {
     if (!selectedTask) return <div className="grid min-h-[60vh] place-items-center text-sm text-slate-500">Loading task…</div>;
-    return <TaskDetail task={selectedTask}/>;
+    return <TaskDetail key={selectedTask.id} task={selectedTask} selectedCallId={selectedCallId} returnToDashboard={returnToDashboard}/>;
   }
 
   return <div className="mx-auto max-w-[1540px]">
@@ -562,7 +569,7 @@ function shouldPollCallTask(input: {
   return true;
 }
 
-function TaskDetail({ task }: { task: UnifiedTask }) {
+function TaskDetail({ task, selectedCallId, returnToDashboard = false }: { task: UnifiedTask; selectedCallId?: string; returnToDashboard?: boolean }) {
   const { state, can, resolveInbox, assignBrand, reassignCall } = useWorkspace();
   const { user } = useSession();
   const router = useRouter();
@@ -580,6 +587,8 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
     () => (task.remote ? shellFromTask(task) : null),
   );
   const [detailHydrated, setDetailHydrated] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [detailRequest, setDetailRequest] = useState(0);
   const applyTaskPayload = (payload: { task?: BrandTask; activities?: BrandActivity[]; brand?: BrandDetail | null; cps?: CurrentCpOption[] }) => {
     if (!payload.task) return;
     const item = payload.task;
@@ -657,11 +666,6 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
     setDetailHydrated(true);
   };
   useEffect(() => {
-    setLiveTask(task);
-    autoRefreshedQuoCallId.current = null;
-    if (task.remote && !detailHydrated) setRemote(shellFromTask(task));
-  }, [task, detailHydrated]);
-  useEffect(() => {
     if (!task.remote) {
       setRemote(null);
       setDetailHydrated(true);
@@ -669,22 +673,37 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
     }
     setRemote(shellFromTask(task));
     setDetailHydrated(false);
+    setDetailError(null);
     let cancelled = false;
-    fetch(`/api/tasks/${task.id}`)
-      .then(async response => {
+    let retryTimer: number | undefined;
+    const loadDetail = async (attempt = 0) => {
+      try {
+        const query = new URLSearchParams();
+        if (returnToDashboard) query.set("source", "dashboard");
+        if (selectedCallId) query.set("callId", selectedCallId);
+        const suffix = query.size ? `?${query.toString()}` : "";
+        const response = await fetch(`/api/tasks/${task.id}${suffix}`);
         const payload = await response.json() as { task?: BrandTask; activities?: BrandActivity[]; brand?: BrandDetail; cps?: CurrentCpOption[]; error?: string };
         if (!response.ok) throw new Error(payload.error || "Task not found");
-        return payload;
-      })
-      .then(payload => { if (!cancelled) applyTaskPayload(payload); })
-      .catch(() => {
+        if (!cancelled) applyTaskPayload(payload);
+      } catch (error) {
         if (cancelled) return;
+        if (attempt === 0) {
+          retryTimer = window.setTimeout(() => { void loadDetail(1); }, 600);
+          return;
+        }
         setDetailHydrated(true);
-      });
-    return () => { cancelled = true; };
-  }, [task.id, task.remote]);
+        setDetailError(error instanceof Error ? error.message : "Unable to load the latest task details.");
+      }
+    };
+    void loadDetail();
+    return () => {
+      cancelled = true;
+      if (retryTimer) window.clearTimeout(retryTimer);
+    };
+  }, [task.id, task.remote, selectedCallId, returnToDashboard, detailRequest]);
   useEffect(() => {
-    if (!task.remote || !can("assignOwner")) return;
+    if (!task.remote || !can("assignOwner") || returnToDashboard) return;
     let cancelled = false;
     fetch("/api/owners")
       .then(async response => {
@@ -695,7 +714,7 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
       .then(items => { if (!cancelled) setOwners(items); })
       .catch(() => { if (!cancelled) setOwners([]); });
     return () => { cancelled = true; };
-  }, [task.remote, task.id]);
+  }, [task.remote, task.id, returnToDashboard, can]);
   useEffect(() => {
     if (!task.remote || task.type !== "Call") return;
     let cancelled = false;
@@ -779,6 +798,14 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
     }, 2500);
     return () => window.clearTimeout(timer);
   }, [task.remote, liveTask.callReviewStatus, remote?.timeline]);
+  if (task.remote && !detailHydrated) {
+    return <div className="mx-auto max-w-[1540px]">
+      <button onClick={() => router.push(returnToDashboard ? "/dashboard" : "/tasks")} className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900"><ArrowLeft className="size-4"/>{returnToDashboard ? "Dashboard" : "ReplyTask"}</button>
+      <main className="grid min-h-[55vh] place-items-center bg-white px-6 text-center">
+        <div className="flex flex-col items-center gap-3 text-sm text-slate-500"><Spinner className="size-5"/><p>Loading the selected task and call record…</p></div>
+      </main>
+    </div>;
+  }
   if (!customer || !contact) return <main className="grid place-items-center bg-slate-50 text-sm text-slate-500">Brand context unavailable.</main>;
   const humanAssignees = state.users.filter(user => user.role === "AccountManager" || user.role === "Admin");
   const callers = state.users.filter(user => user.role === "Caller");
@@ -904,7 +931,8 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
   ) as Partial<Record<CPCode, string>>;
 
   return <div className="mx-auto max-w-[1540px]">
-    <button onClick={() => router.push("/tasks")} className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900"><ArrowLeft className="size-4"/>ReplyTask</button>
+    <button onClick={() => router.push(returnToDashboard ? "/dashboard" : "/tasks")} className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900"><ArrowLeft className="size-4"/>{returnToDashboard ? "Dashboard" : "ReplyTask"}</button>
+    {detailError ? <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900"><span>Latest task details could not load. Showing the task link while it reconnects.</span><Button size="sm" variant="outline" onClick={() => setDetailRequest((value) => value + 1)}>Try again</Button></div> : null}
     <main className="min-w-0 overflow-hidden rounded-2xl bg-white">
     <header className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 bg-white px-5 py-4 lg:px-7">
       <div><div className="flex flex-wrap items-center gap-2"><Badge variant="outline">{reviewedTask.type}</Badge>{isDue(reviewedTask, state.simulatedDate) ? <Status value="Due"/> : <Badge variant="secondary">{reviewedTask.status}</Badge>}<CallReviewBadge review={taskReview}/><span className="text-xs text-slate-400">{dateOnly(reviewedTask.dueAt)}</span></div><h2 className="mt-2 text-xl font-bold">{customer.name}</h2><p className="mt-1 text-xs text-slate-500">{contact.name} · {contact.role} · {customer.cp} · {customer.status}{callerPhoneOnly && <> · Account Manager: {remote?.ownerName || state.users.find(user => user.id === task.assigneeId)?.name || "Unassigned"}</>}</p></div>
@@ -928,8 +956,9 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
               loading={!detailHydrated}
               scriptsLoading={callScriptLoading}
               activeTaskId={liveTask.id}
+              highlightedCallId={selectedCallId}
               headerContactName={contact.name}
-              onSelectTask={(taskId) => router.push(`/tasks/${encodeURIComponent(taskId)}`)}
+              onSelectTask={(taskId) => router.push(`/tasks/${encodeURIComponent(taskId)}${returnToDashboard ? "?from=dashboard" : ""}`)}
               onCallOpening={onCallOpening}
               callerReviewTaskId={liveTask.id}
               callerReviewHasConnectedCall={hasConnectedCall}
@@ -956,6 +985,8 @@ function TaskDetail({ task }: { task: UnifiedTask }) {
                 tasks={reviewTasks}
                 maxHeight="max-h-[640px]"
                 initialChannel={liveTask.type === "Call" ? "Phone" : undefined}
+                activeTaskId={liveTask.id}
+                highlightedCallId={selectedCallId}
                 canReviewCalls={canReviewCalls}
                 onPersistCallReview={task.remote ? persistCallReview : undefined}
                 onRefreshQuo={task.remote ? refreshQuo : undefined}

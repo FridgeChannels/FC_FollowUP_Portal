@@ -366,6 +366,7 @@ async function attachConversationCp(items: BrandActivity[]): Promise<BrandActivi
 async function findConversationsByText(
   property: "Message ID" | "Thread ID",
   value?: string | null,
+  options: { includeCheckpoint?: boolean } = {},
 ) {
   const text = value?.trim();
   if (!text) return [];
@@ -373,7 +374,10 @@ async function findConversationsByText(
     property,
     rich_text: { equals: text },
   });
-  return attachConversationCp(pages.map((page) => mapConversation(page))).then(sortConversations);
+  const activities = pages.map((page) => mapConversation(page));
+  return options.includeCheckpoint === false
+    ? sortConversations(activities)
+    : attachConversationCp(activities).then(sortConversations);
 }
 
 export function findConversationsByMessageId(messageId?: string | null) {
@@ -384,6 +388,9 @@ export function findConversationsByThreadId(threadId?: string | null) {
   return findConversationsByText("Thread ID", threadId);
 }
 
-export function findQuoCallConversation(callId: string) {
-  return findConversationsByMessageId(`QUO_CALL:${callId}`);
+export function findQuoCallConversation(
+  callId: string,
+  options: { includeCheckpoint?: boolean } = {},
+) {
+  return findConversationsByText("Message ID", `QUO_CALL:${callId}`, options);
 }

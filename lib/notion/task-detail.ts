@@ -1,12 +1,12 @@
-import type { BrandActivity, BrandDetail, BrandTask, CurrentCpOption } from "../brand-list";
+import type { BrandActivity, BrandContact, BrandDetail, BrandTask, CurrentCpOption } from "../brand-list";
 import { brandInitials, listApplicableCps } from "../brand-list";
 import { retrievePage } from "./client";
 import { listFollowupContacts, retrieveFollowupContact } from "./contacts";
-import { listConversationsByIds, listFollowupConversations } from "./conversations";
+import { findQuoCallConversation, listConversationsByIds, listFollowupConversations } from "./conversations";
 import { listCheckpoints } from "./cps";
 import { mapFollowupClientDetail, mapFollowupClientPage } from "./followup-clients";
 import { annotateTasksWithReplyInbox } from "./reply-inbox";
-import { listFollowupTasks, retrieveFollowupTask, type TaskResolveHints } from "./tasks";
+import { getWarmDashboardTask, listFollowupTasks, retrieveFollowupTask, type TaskResolveHints } from "./tasks";
 import { updateFollowupTask } from "./followup-writes";
 import {
   encodeCallReviewHistory,
@@ -92,6 +92,30 @@ export type TaskDetailPayload = {
   cps: CurrentCpOption[];
 };
 
+function contactShellFromTask(task: BrandTask): BrandContact[] {
+  if (!task.contactId) return [];
+  const phone = task.contactPhone || null;
+  return [{
+    id: task.contactId,
+    name: task.contactName || "Contact",
+    role: "Other",
+    title: null,
+    contactRole: null,
+    email: null,
+    phone,
+    directPhone: null,
+    officePhone: null,
+    linkedin: null,
+    emailValid: false,
+    phoneValid: !!phone,
+    followupStatus: null,
+    followupMode: null,
+    contactOrder: null,
+    notes: null,
+    lastInteractionAt: null,
+  }];
+}
+
 function brandShellFromTask(
   task: BrandTask,
   contacts: BrandDetail["contacts"],
@@ -135,8 +159,8 @@ function brandShellFromTask(
 }
 
 /** Full AM/Admin payload — brand detail + all contact conversations. */
-export async function buildTaskDetailPayload(id: string): Promise<TaskDetailPayload> {
-  const task = await retrieveFollowupTask(id);
+export async function buildTaskDetailPayload(id: string, useDashboardCache = false): Promise<TaskDetailPayload> {
+  const task = useDashboardCache ? getWarmDashboardTask(id) || await retrieveFollowupTask(id) : await retrieveFollowupTask(id);
   const [byIds, byContact, brand, cps] = await Promise.all([
     listConversationsByIds(task.conversationIds),
     task.contactId ? listFollowupConversations([task.contactId]) : Promise.resolve([]),
@@ -157,11 +181,44 @@ export async function buildTaskDetailPayload(id: string): Promise<TaskDetailPayl
 }
 
 /**
+ * Dashboard is a call-review surface. It only needs the selected Phone task and
+ * its phone history, not the whole brand's contacts, messages, meetings, and
+ * tasks. Keeping that broad query out of this path makes opening a KPI row fast.
+ */
+export async function buildDashboardTaskDetailPayload(
+  id: string,
+  selectedCallId?: string | null,
+): Promise<TaskDetailPayload> {
+  const task = getWarmDashboardTask(id) || await retrieveFollowupTask(id);
+  // The dashboard already identifies the exact call. Querying it directly avoids
+  // downloading the contact's full message history before the detail can render.
+  const selectedCall = selectedCallId
+    ? await findQuoCallConversation(selectedCallId, { includeCheckpoint: false })
+    : [];
+  const activities = selectedCall.some(
+    (item) => item.channel === "Phone" && (item.taskId === task.id || task.conversationIds.includes(item.id)),
+  )
+    ? selectedCall.filter((item) => item.channel === "Phone")
+    : task.contactId
+      ? (await listFollowupConversations([task.contactId])).filter((item) => item.channel === "Phone")
+      : await listConversationsByIds(task.conversationIds);
+  const [annotated] = annotateTasksWithReplyInbox([task], activities);
+  const hydrated = await hydrateTaskReviewRounds(annotated || task, activities);
+  const contacts = contactShellFromTask(hydrated);
+  return {
+    task: hydrated,
+    activities,
+    brand: brandShellFromTask(hydrated, contacts, [hydrated]),
+    cps: listApplicableCps(),
+  };
+}
+
+/**
  * Caller / lite payload: brand-scoped Phone work.
  * Loads all Phone tasks/contacts on the Follow-up Client; skips non-Phone meta.
  */
-export async function buildCallerTaskDetailPayload(id: string): Promise<TaskDetailPayload> {
-  const task = await retrieveFollowupTask(id);
+export async function buildCallerTaskDetailPayload(id: string, useDashboardCache = false): Promise<TaskDetailPayload> {
+  const task = useDashboardCache ? getWarmDashboardTask(id) || await retrieveFollowupTask(id) : await retrieveFollowupTask(id);
   const contactId = task.contactId;
   const brandId = task.brandId;
 

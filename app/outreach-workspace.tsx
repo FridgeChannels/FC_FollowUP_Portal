@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Bomb, ChevronDown, ClipboardCheck, LayoutDashboard, LogOut, RefreshCw,
   Users, Zap,
@@ -72,7 +72,9 @@ export default function OutreachWorkspace({ children }: { children?: ReactNode }
   }, [user, state.currentRole, setRole]);
 
   useEffect(() => {
-    if (sessionLoading || !user || !can("tasks")) return;
+    // A task detail loads its own Notion data. Avoid competing with that request
+    // merely to refresh the sidebar count.
+    if (sessionLoading || !user || !can("tasks") || /^\/tasks\/[^/]+/.test(pathname)) return;
     let cancelled = false;
     fetch("/api/tasks/summary")
       .then(async (response) => {
@@ -87,10 +89,12 @@ export default function OutreachWorkspace({ children }: { children?: ReactNode }
         if (!cancelled) setTaskCount(0);
       });
     return () => { cancelled = true; };
-  }, [sessionLoading, user?.email, user?.role, can]);
+  }, [sessionLoading, user?.email, user?.role, can, pathname]);
 
   useEffect(() => {
-    if (sessionLoading || !user || !can("customers")) return;
+    // Brand summary is also a Notion-wide query. Keep it off the critical path
+    // when a task detail is loading its selected call.
+    if (sessionLoading || !user || !can("customers") || /^\/tasks\/[^/]+/.test(pathname)) return;
     let cancelled = false;
     fetch("/api/brands/summary")
       .then(async (response) => {
@@ -110,7 +114,7 @@ export default function OutreachWorkspace({ children }: { children?: ReactNode }
     return () => {
       cancelled = true;
     };
-  }, [sessionLoading, user?.email, user?.role, can]);
+  }, [sessionLoading, user?.email, user?.role, can, pathname]);
 
   useEffect(() => {
     if (sessionLoading || !user) return;
@@ -320,6 +324,7 @@ export default function OutreachWorkspace({ children }: { children?: ReactNode }
 
 export function WorkspaceRouteContent() {
   const path = usePathname();
+  const searchParams = useSearchParams();
   const parts = path.split("/").filter(Boolean);
   const section = parts[0] || "tasks";
   const brandDetailId = section === "customers" ? parts[1] : undefined;
@@ -379,7 +384,11 @@ export function WorkspaceRouteContent() {
 
       {mountedRoots.includes("tasks") ? (
         <div hidden={!taskRoute}>
-          <TasksPage selectedId={taskRoute ? parts[1] : undefined} />
+          <TasksPage
+            selectedId={taskRoute ? parts[1] : undefined}
+            selectedCallId={taskRoute ? searchParams.get("callId") || undefined : undefined}
+            returnToDashboard={taskRoute && searchParams.get("from") === "dashboard"}
+          />
         </div>
       ) : null}
 

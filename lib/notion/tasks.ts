@@ -29,6 +29,31 @@ import {
 } from "./caller-list-cursor";
 
 const CONTACT_TASK_KEYS = ["Follow-up Tasks", "Tasks"];
+const DASHBOARD_TASK_CACHE_MS = 30_000;
+const dashboardTaskCache = new Map<string, { expiresAt: number; task: BrandTask }>();
+
+function taskCacheKey(id: string) {
+  return id.replace(/-/g, "").toLowerCase();
+}
+
+function cacheDashboardTasks(tasks: BrandTask[]) {
+  const expiresAt = Date.now() + DASHBOARD_TASK_CACHE_MS;
+  for (const task of tasks) {
+    dashboardTaskCache.set(taskCacheKey(task.id), { expiresAt, task });
+  }
+}
+
+/** Reuses task metadata that was just loaded for the Qualified dashboard. */
+export function getWarmDashboardTask(id: string) {
+  const key = taskCacheKey(id);
+  const cached = dashboardTaskCache.get(key);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) {
+    dashboardTaskCache.delete(key);
+    return null;
+  }
+  return cached.task;
+}
 
 function callerListStubFromPage(
   page: NotionPage,
@@ -1193,7 +1218,9 @@ export async function listCurrentQualifiedPhoneTasks(
     pages = [];
   }
   const scoped = await scopeTestBrandTaskPages(pages, options);
-  return mapTaskPages(scoped);
+  const tasks = await mapTaskPages(scoped);
+  cacheDashboardTasks(tasks);
+  return tasks;
 }
 
 export type TaskListHydrate = "full" | "caller-list";
