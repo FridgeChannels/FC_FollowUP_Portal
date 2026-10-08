@@ -43,6 +43,7 @@ declare namespace Cloudflare {
     SAMPLE_SYNC_LIMIT_PER_SN?: string;
     SAMPLE_NOTIFY_DEDUPE_MINUTES?: string;
     SAMPLE_PAGE_SYNC_STALE_MINUTES?: string; // default 360; set 0 to disable page-triggered sync
+    SAMPLE_TAP_BASE_URL?: string; // Sample tap notice origin; empty → magnet.url
     QUO_API_KEY?: string;
     QUO_FROM_NUMBER?: string;
     DEV_CALL_PHONE?: string;

@@ -13,9 +13,11 @@ services:
       HOST: "0.0.0.0"
       # SKIP_UNAVAILABLE_CHANNELS / DEV_CALL_PHONE come from env_file (.env) only.
     volumes:
-      # Persist local Miniflare / Wrangler state under the project directory.
+      # Optional local runtime dirs (logs / disposable state).
       - ./.wrangler/state:/app/.wrangler/state
       - ./.sites-runtime:/app/.sites-runtime
+    # Cap RSS so a leak cannot starve the host (Node prod server, not workerd).
+    mem_limit: 2g
     restart: unless-stopped
     healthcheck:
       test:

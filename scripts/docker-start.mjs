@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /**
- * Container entrypoint for the Vinext/Wrangler local preview.
- * Writes Cloudflare `.dev.vars` from process env, then starts wrangler.
+ * Container entrypoint for the Vinext Node production server.
+ * Compose injects secrets via env_file → process.env; a small loader shim
+ * exposes them as `cloudflare:workers` `env` for the built Worker bundle.
  */
 import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -16,10 +17,6 @@ await import("./sites-env.mjs");
 const PORT = process.env.PORT || "8787";
 const HOST = process.env.HOST || "0.0.0.0";
 
-// Only these keys are copied into Wrangler `.dev.vars` and bound on
-// `cloudflare:workers` `env`. Container `process.env` (from compose env_file)
-// is NOT visible inside the Worker isolate — missing keys here look "unset"
-// even when Docker has the same .env as local vinext (which loads .env directly).
 const WORKER_ENV_KEYS = [
   "NOTION_API_KEY",
   "NOTION_FOLLOWUP_CLIENT_DB_ID",
@@ -62,6 +59,7 @@ const WORKER_ENV_KEYS = [
   "SAMPLE_SYNC_LIMIT_PER_SN",
   "SAMPLE_NOTIFY_DEDUPE_MINUTES",
   "SAMPLE_PAGE_SYNC_STALE_MINUTES",
+  "SAMPLE_TAP_BASE_URL",
   "QUO_API_KEY",
   "QUO_FROM_NUMBER",
   "DEV_CALL_PHONE",
@@ -91,48 +89,38 @@ const WORKER_ENV_KEYS = [
   "DTC_DASHBOARD_KEY",
 ];
 
-function escapeDevVar(value) {
-  // .dev.vars is dotenv-like; quote values that need it.
-  if (/[\s#"']/.test(value) || value === "") {
-    return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
-  }
-  return value;
-}
-
-const lines = [];
-const presentKeys = [];
-for (const key of WORKER_ENV_KEYS) {
+const presentKeys = WORKER_ENV_KEYS.filter((key) => {
   const value = process.env[key];
-  if (value == null || value === "") continue;
-  lines.push(`${key}=${escapeDevVar(value)}`);
-  presentKeys.push(key);
+  return value != null && value !== "";
+});
+
+const rscEntry = path.join(projectRoot, "dist", "server", "index.js");
+if (!existsSync(rscEntry)) {
+  console.error(
+    "[docker-start] Missing dist/server/index.js — run `npm run build` before docker compose build.",
+  );
+  process.exit(1);
 }
 
-mkdirSync(path.join(projectRoot, ".wrangler", "state"), { recursive: true });
-
-const wranglerBin = path.join(
+const vinextCli = path.join(
   projectRoot,
   "node_modules",
-  "wrangler",
-  "bin",
-  "wrangler.js",
+  "vinext",
+  "dist",
+  "cli.js",
 );
-// Wrangler loads `.dev.vars` from the *config file directory*, not cwd:
-//   getVarsForDev → resolve(dirname(configPath), ".dev.vars")
-const wranglerConfig = path.join(projectRoot, "dist", "server", "wrangler.json");
-const configDir = path.dirname(wranglerConfig);
-const devVarsPath = path.join(configDir, ".dev.vars");
-
-mkdirSync(configDir, { recursive: true });
-writeFileSync(devVarsPath, `${lines.join("\n")}\n`, {
-  encoding: "utf8",
-  mode: 0o600,
-});
+if (!existsSync(vinextCli)) {
+  console.error(
+    "[docker-start] Missing vinext — Docker image must install the vinext package.",
+  );
+  process.exit(1);
+}
 
 const hasSupabase = presentKeys.includes("SUPABASE_SERVICE_ROLE_KEY");
 console.log(
-  `[docker-start] Wrote ${presentKeys.length} secrets → ${path.relative(projectRoot, devVarsPath)}` +
-    ` (SUPABASE_SERVICE_ROLE_KEY=${hasSupabase ? "yes" : "NO"})`,
+  `[docker-start] Starting vinext production server on ${HOST}:${PORT}` +
+    ` (${presentKeys.length} worker env keys present;` +
+    ` SUPABASE_SERVICE_ROLE_KEY=${hasSupabase ? "yes" : "NO"})`,
 );
 if (!hasSupabase) {
   console.warn(
@@ -145,19 +133,14 @@ const child = spawn(
   [
     "--import",
     "./scripts/sites-env.mjs",
-    wranglerBin,
-    "dev",
-    "--config",
-    wranglerConfig,
-    "--local",
-    "--persist-to",
-    ".wrangler/state",
-    "--ip",
-    HOST,
-    "--port",
+    "--import",
+    "./scripts/register-cloudflare-workers-shim.mjs",
+    vinextCli,
+    "start",
+    "-p",
     String(PORT),
-    "--inspector-port",
-    "0",
+    "-H",
+    HOST,
   ],
   {
     cwd: projectRoot,

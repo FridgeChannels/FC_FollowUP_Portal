@@ -1,7 +1,8 @@
-# Runtime image for Vinext / Cloudflare Worker local preview.
+# Runtime image for Vinext Node production server.
 # Heavy `npm run build` runs on the host or CI — this image only packages
-# prebuilt `dist/` plus wrangler to serve it.
-# Secrets are injected at runtime via .dev.vars (see scripts/docker-start.mjs).
+# prebuilt `dist/` plus vinext to serve it.
+# Secrets are injected at runtime via compose env_file → process.env
+# (see scripts/docker-start.mjs + cloudflare-workers shim).
 #
 # Usage:
 #   npm run build   # reads SKIP_UNAVAILABLE_CHANNELS / DEV_CALL_PHONE from .env
@@ -24,12 +25,12 @@ RUN apt-get update \
   && useradd --system --uid 1001 --gid portal --create-home portal \
   && mkdir -p /app/.wrangler/state /app/.sites-runtime
 
-# Pin wrangler to the same version as package.json, without installing the
-# full app dependency tree (vite/vinext/etc. are build-only).
+# Pin vinext to the same version as package.json. The built Worker bundle is
+# self-contained aside from `cloudflare:workers` (shimmed at start).
 COPY package.json ./
-RUN WRANGLER_VERSION="$(node -p "require('./package.json').devDependencies.wrangler")" \
+RUN VINEXT_VERSION="$(node -p "require('./package.json').devDependencies.vinext")" \
   && printf '%s\n' '{"name":"fc-followup-portal-runtime","private":true,"type":"module"}' > package.json \
-  && npm install "wrangler@${WRANGLER_VERSION}" --omit=dev --no-audit --no-fund \
+  && npm install "vinext@${VINEXT_VERSION}" --omit=dev --no-audit --no-fund \
   && npm cache clean --force
 
 COPY dist ./dist

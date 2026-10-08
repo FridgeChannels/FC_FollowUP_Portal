@@ -9,7 +9,39 @@ import {
   pathnameForSn,
   sampleTypeToExperience,
 } from "./paths.ts";
+import { sampleNotifyUrl } from "./notify-url.ts";
 import { parseNfcCardSns, pickSelectedSn } from "./sns.ts";
+
+describe("sampleNotifyUrl", () => {
+  it("prefers SAMPLE_TAP_BASE_URL and keeps /p/{SN}", () => {
+    assert.equal(
+      sampleNotifyUrl({
+        sn: "DQSABK7YBR",
+        envBaseUrl: "https://tap.example.com/",
+        databaseUrl: "https://tap.fridgechannels.com/p/DQSABK7YBR",
+      }),
+      "https://tap.example.com/p/DQSABK7YBR",
+    );
+  });
+
+  it("uses the database url when env is empty", () => {
+    assert.equal(
+      sampleNotifyUrl({
+        sn: "DQSABK7YBR",
+        envBaseUrl: "",
+        databaseUrl: "https://db.example/p/DQSABK7YBR",
+      }),
+      "https://db.example/p/DQSABK7YBR",
+    );
+  });
+
+  it("falls back to the historical tap host when both are empty", () => {
+    assert.equal(
+      sampleNotifyUrl({ sn: "DQSABK7YBR" }),
+      "https://tap.fridgechannels.com/p/DQSABK7YBR",
+    );
+  });
+});
 
 describe("pathnameForSn", () => {
   it("builds /p/{SN} path", () => {

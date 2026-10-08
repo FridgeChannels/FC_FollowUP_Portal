@@ -92,6 +92,8 @@ export default defineConfig(async ({ mode }) => {
     process.env.DTC_DASHBOARD_URL || loadedEnv.DTC_DASHBOARD_URL;
   const dtcDashboardKey =
     process.env.DTC_DASHBOARD_KEY || loadedEnv.DTC_DASHBOARD_KEY;
+  const sampleTapBaseUrl =
+    process.env.SAMPLE_TAP_BASE_URL || loadedEnv.SAMPLE_TAP_BASE_URL;
   const rawDevAllowedHosts =
     process.env.DEV_ALLOWED_HOSTS || loadedEnv.DEV_ALLOWED_HOSTS || "";
   // `true` / `*` / `all` disables Vite host checks (needed for reverse-proxy domains).
@@ -179,6 +181,7 @@ export default defineConfig(async ({ mode }) => {
         : {}),
       ...(dtcDashboardUrl ? { DTC_DASHBOARD_URL: dtcDashboardUrl } : {}),
       ...(dtcDashboardKey ? { DTC_DASHBOARD_KEY: dtcDashboardKey } : {}),
+      ...(sampleTapBaseUrl ? { SAMPLE_TAP_BASE_URL: sampleTapBaseUrl } : {}),
     },
     d1_databases: d1
       ? [

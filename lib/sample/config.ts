@@ -5,7 +5,8 @@ type SampleEnvName =
   | "SAMPLE_SYNC_MAX_SNS_PER_RUN"
   | "SAMPLE_SYNC_LIMIT_PER_SN"
   | "SAMPLE_NOTIFY_DEDUPE_MINUTES"
-  | "SAMPLE_PAGE_SYNC_STALE_MINUTES";
+  | "SAMPLE_PAGE_SYNC_STALE_MINUTES"
+  | "SAMPLE_TAP_BASE_URL";
 
 function raw(name: SampleEnvName): string | undefined {
   const fromCf = (env as Record<string, string | undefined>)[name];
@@ -49,4 +50,9 @@ export function getSamplePageSyncStaleMinutes() {
 
 export function isSamplePageSyncEnabled() {
   return getSamplePageSyncStaleMinutes() > 0;
+}
+
+/** Origin for Sample tap notice URLs, e.g. https://tap.example.com. Empty → use magnet.url. */
+export function getSampleTapBaseUrl() {
+  return (raw("SAMPLE_TAP_BASE_URL") || "").replace(/\/+$/, "");
 }

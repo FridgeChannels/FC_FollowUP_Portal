@@ -38,6 +38,7 @@
     "simulate:replies:phone": "node scripts/simulate-channel-replies.mjs --channel Phone",
     "simulate:quo": "node scripts/simulate-quo-call.mjs",
     "simulate:quo:concurrency": "node scripts/simulate-quo-concurrency.mjs",
+    "magnet-colors:dry-run": "node scripts/swap-magnet-brand-colors.mjs",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {

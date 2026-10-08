@@ -45,5 +45,6 @@ next-env.d.ts
 /outputs/
 /work/
 /.data/
+/logs/
 
 *.code-workspace
