@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, Bomb, ChevronRight, CircleAlert, CircleCheck, CirclePause, ContactRound, ExternalLink, FileText, History, Loader2, MessageSquareText, MoreHorizontal, PanelRightClose, Plus, Search, Send, StickyNote } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "./workspace-store";
-import { cacheBrandItem, getCachedBrand } from "@/lib/brand-list-cache";
+import { cacheBrandItem, getCachedBrand, requestBrandListPageRefresh } from "@/lib/brand-list-cache";
 import { currentCpOption, FOLLOW_UP_STATUSES, HANDLING_MODES, keyPersonNotionUrl, listCurrentCps, type BrandActivity, type BrandAiMeetingLink, type BrandContact, type BrandDetail, type BrandMeetingNote, type BrandTask, type CurrentCpOption } from "@/lib/brand-list";
 import type { BombDetail, BombListItem } from "@/lib/bomb-list";
 import { ActionStatus, BombInstance, Channel, Contact, CPCode, Customer, dateOnly, Interaction, ScheduledAction, WorkspaceState, compareInteractionSort, interactionCpCode, uid } from "@/lib/outreach-domain";
@@ -646,6 +646,12 @@ export function BrandDetail({customerId}:{customerId:string}){
     ? requestedReturnTo
     : "/customers";
   const backPath=can("customers")?brandListReturnTo:"/tasks";
+  const returnToList=()=>{
+    if(can("customers")){
+      requestBrandListPageRefresh();
+    }
+    router.replace(backPath);
+  };
   const [launch,setLaunch]=useState(false); const [reply,setReply]=useState(false); const [cp,setCP]=useState(false); const [contact,setContact]=useState(false); const [ownerDraft,setOwnerDraft]=useState<string>();
   const [detailsTab,setDetailsTab]=useState<BrandDetailsTab|null>(null);
   const [attentionTarget,setAttentionTarget]=useState<{cp:CPCode;channel:Channel}|null>(null);
@@ -867,7 +873,7 @@ export function BrandDetail({customerId}:{customerId:string}){
   const visible=!!c&&(local?(manager||c.ownerId===state.currentUserId):!!remote);
   usePageMetadata(brandDetailMetadata(visible&&c?{name:c.name,cp:notionBacked&&remote?remote.currentCp:c.cp,status:c.status,source:c.source}:null));
   if(remoteLoading&&!c)return <div className="grid min-h-[60vh] place-items-center gap-2 text-sm text-slate-500"><Spinner className="size-5 text-slate-400"/>Loading brand…</div>;
-  if(!visible||!c)return <div className="grid min-h-[60vh] place-items-center"><div className="text-center"><CircleAlert className="mx-auto mb-3 size-8 text-slate-300"/><h1 className="font-bold">Brand not found</h1><Button variant="link" onClick={()=>router.replace(backPath)}>{can("customers")?"Back to Brands":"Back to tasks"}</Button></div></div>;
+  if(!visible||!c)return <div className="grid min-h-[60vh] place-items-center"><div className="text-center"><CircleAlert className="mx-auto mb-3 size-8 text-slate-300"/><h1 className="font-bold">Brand not found</h1><Button variant="link" onClick={returnToList}>{can("customers")?"Back to Brands":"Back to tasks"}</Button></div></div>;
   const ownerChoices=notionBacked
     ? (remote?.ownerId&&!owners.some(item=>item.id===remote.ownerId)
       ? [{id:remote.ownerId,name:remote.ownerName||"Current owner"},...owners]
@@ -996,7 +1002,7 @@ export function BrandDetail({customerId}:{customerId:string}){
   return <div className="w-full min-w-0 lg:flex lg:h-[calc(100vh-4rem)] lg:flex-col">
     <div className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white lg:min-h-0 lg:flex-1">
     <header className="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-white px-4 py-3">
-      <Button type="button" variant="ghost" size="icon" aria-label={can("customers")?"Back to Brands":"Back to ReplyTask"} onClick={()=>router.replace(backPath)}><ArrowLeft className="size-4"/></Button>
+      <Button type="button" variant="ghost" size="icon" aria-label={can("customers")?"Back to Brands":"Back to ReplyTask"} onClick={returnToList}><ArrowLeft className="size-4"/></Button>
       <Avatar className="size-9"><AvatarFallback className="bg-violet-100 text-xs font-bold text-violet-700">{c.initials}</AvatarFallback></Avatar>
       <div className="flex min-w-0 flex-1 items-center gap-2"><h1 className="min-w-0 truncate text-lg font-semibold text-slate-950">{c.name}</h1>{notionBacked&&remote?.followupExhibition&&(originMeeting?<a href={originMeeting.url} target="_blank" rel="noreferrer" className="hidden shrink-0 rounded-full bg-violet-100 px-2 py-1 text-xs font-medium text-violet-800 hover:bg-violet-200 lg:inline-flex">{remote.followupExhibition}<ExternalLink className="ml-1 size-3"/></a>:<span className="hidden shrink-0 rounded-full bg-violet-100 px-2 py-1 text-xs font-medium text-violet-800 lg:inline-flex">{remote.followupExhibition}</span>)}
         <Button type="button" size="sm" variant="outline" className="min-w-0 max-w-[22rem] shrink" disabled={!brandReady||!can("changeCP")} onClick={()=>setCP(true)} aria-label={`Current ${currentCpDetails.name}: ${currentCpDetails.fullName}. Change CP`}>

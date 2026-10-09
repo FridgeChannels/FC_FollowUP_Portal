@@ -2,9 +2,11 @@ import type { BrandListItem } from "./brand-list";
 
 const STORAGE_KEY = "fc-followup-brands-v1";
 const PAGE_STORAGE_KEY = "fc-followup-brand-list-page-v1";
+const PAGE_REFRESH_REQUEST_KEY = "fc-followup-brand-list-refresh-request-v1";
 
 let memory: BrandListItem[] = [];
 let memoryPage: BrandListPageCache | null = null;
+let pageRefreshRequested = false;
 
 export type BrandListPageCache = {
   key: string;
@@ -96,4 +98,36 @@ export function clearBrandListPageCache() {
   } catch {
     /* ignore unavailable storage */
   }
+}
+
+/**
+ * Makes the next Brands view validate its cached rows against the server.
+ * The cached page remains available so returning from a detail view is instant.
+ */
+export function requestBrandListPageRefresh() {
+  pageRefreshRequested = true;
+  if (typeof sessionStorage !== "undefined") {
+    try {
+      sessionStorage.setItem(PAGE_REFRESH_REQUEST_KEY, "1");
+    } catch {
+      /* ignore unavailable storage */
+    }
+  }
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("fc-brand-list-refresh"));
+  }
+}
+
+export function consumeBrandListPageRefreshRequest() {
+  let requested = pageRefreshRequested;
+  pageRefreshRequested = false;
+  if (typeof sessionStorage !== "undefined") {
+    try {
+      requested ||= sessionStorage.getItem(PAGE_REFRESH_REQUEST_KEY) === "1";
+      sessionStorage.removeItem(PAGE_REFRESH_REQUEST_KEY);
+    } catch {
+      /* use in-memory state */
+    }
+  }
+  return requested;
 }

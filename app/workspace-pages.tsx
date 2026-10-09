@@ -26,6 +26,7 @@ import {
   cacheBrandItem,
   cacheBrandListPage,
   clearBrandListPageCache,
+  consumeBrandListPageRefreshRequest,
   getCachedBrandListPage,
 } from "@/lib/brand-list-cache";
 import {
@@ -818,8 +819,15 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
       pageCursorMap.current = { 1: null };
       setListReloadToken((value) => value + 1);
     };
+    const onBrandListRefresh = () => {
+      setListEpoch((value) => value + 1);
+    };
     window.addEventListener("fc-portal-caches-cleared", onCachesCleared);
-    return () => window.removeEventListener("fc-portal-caches-cleared", onCachesCleared);
+    window.addEventListener("fc-brand-list-refresh", onBrandListRefresh);
+    return () => {
+      window.removeEventListener("fc-portal-caches-cleared", onCachesCleared);
+      window.removeEventListener("fc-brand-list-refresh", onBrandListRefresh);
+    };
   }, []);
 
   const brandsFilterKey = useMemo(() => {
@@ -841,9 +849,11 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
   useEffect(() => {
     let cancelled = false;
     const controller = new AbortController();
+    const forceRefresh = consumeBrandListPageRefreshRequest();
     const cachedPage = getCachedBrandListPage(brandListPageCacheKey);
     const cacheIsFresh =
       Boolean(cachedPage) &&
+      !forceRefresh &&
       Date.now() - (cachedPage?.cachedAt || 0) < BRAND_LIST_PAGE_CACHE_TTL_MS;
     if (cachedPage) {
       setBrands(cachedPage.brands);
