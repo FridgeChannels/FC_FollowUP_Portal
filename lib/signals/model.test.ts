@@ -4,6 +4,7 @@ import {
   aggregateBrand,
   effectiveFollowup,
   filterQueue,
+  filterWorkspaceQueue,
   safeSourceUrl,
   summarize,
   type SignalEvent,
@@ -58,6 +59,30 @@ test("viewing clears unread but does not complete review", () => {
       .length,
     1,
   );
+});
+test("workspace pending queue includes older unreviewed brands and history excludes them", () => {
+  const old = aggregateBrand({ ...input, events: [event("old", "sample", "2026-09-01T00:00:00Z")] });
+  const handled = aggregateBrand({ ...input, id: "handled", events: [event("done")], review: { eventIds: ["done"], status: "Handled" } });
+  assert.deepEqual(filterWorkspaceQueue([old, handled], "review", "all", now).map((b) => b.id), ["a"]);
+  assert.deepEqual(filterWorkspaceQueue([old, handled], "history", "all", now).map((b) => b.id), ["handled"]);
+  assert.deepEqual(filterWorkspaceQueue([old, handled], "today", "all", now).map((b) => b.id), ["handled"]);
+});
+test("workspace priority uses pending signals rather than already reviewed ones", () => {
+  const previouslyImportant = aggregateBrand({
+    ...input,
+    events: [
+      { ...event("reviewed"), highPriority: true },
+      event("pending", "email", "2026-10-09T10:00:00Z"),
+    ],
+    review: { eventIds: ["reviewed"], status: "Reviewed" },
+  });
+  const newImportant = aggregateBrand({
+    ...input,
+    id: "new",
+    events: [{ ...event("new", "linkedin", "2026-10-09T09:00:00Z"), highPriority: true }],
+  });
+  assert.deepEqual(previouslyImportant.reviewedEventIds, ["reviewed"]);
+  assert.deepEqual(filterWorkspaceQueue([previouslyImportant, newImportant], "review", "all", now).map((brand) => brand.id), ["new", "a"]);
 });
 test("review snapshot retains late-arriving and same-time events", () => {
   const reviewed = aggregateBrand({

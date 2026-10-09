@@ -1,4 +1,4 @@
-import { CALL_REVIEW_CALLER_EMAIL, shouldStopOmniReachOnReviewSubmit, type CallReviewStatus } from "../call-review-metadata";
+import { CALL_REVIEW_CALLER_EMAIL, shouldStopOmniReachOnReviewSubmit, type CallReviewResolution, type CallReviewStatus } from "../call-review-metadata";
 import { findOwnerByAccount } from "./owners";
 import { retrieveFollowupTask } from "./tasks";
 import {
@@ -134,6 +134,7 @@ export async function applyCallReview(input: {
   reviewerName?: string | null;
   reviewReason?: string | null;
   reviewNote?: string | null;
+  resolution?: CallReviewResolution;
 }) {
   const task = await retrieveFollowupTask(input.taskId);
   if (task.channel !== "Phone") {
@@ -152,6 +153,7 @@ export async function applyCallReview(input: {
   const now = new Date().toISOString();
   const reviewReason = input.reviewReason?.trim() || "";
   const reviewNote = input.reviewNote?.trim() || "";
+  const resolution = input.resolution || "Recall";
   const allCallIds = await callIdsForTask(task);
   const history = withInheritedCallIds(historyFromTask(task), allCallIds);
   const currentRound = history.at(-1)?.status === "Awaiting Review"
@@ -170,6 +172,7 @@ export async function applyCallReview(input: {
     reviewerEmail: input.reviewerEmail?.trim() || undefined,
     reason: reviewReason || undefined,
     note: reviewNote || undefined,
+    resolution: input.status === "Unqualified" ? resolution : undefined,
     callIds: currentRound.callIds.length
       ? currentRound.callIds
       : unusedCallIds(
@@ -183,8 +186,8 @@ export async function applyCallReview(input: {
   ];
   const historyText = encodeCallReviewHistory(nextHistory);
 
-  if (input.status === "Unqualified" && !reviewReason) {
-    throw new CallReviewError("An unqualified reason is required before recalling the task", 400);
+  if (input.status === "Unqualified" && !reviewNote) {
+    throw new CallReviewError("A note is required before completing the Unqualified review", 400);
   }
 
   if (input.status === "Qualified") {
@@ -198,27 +201,46 @@ export async function applyCallReview(input: {
       notes: humanNotes(task.notes, `AccountManager ${reviewer} marked round ${reviewedRound.round} Qualified.`),
     });
   } else {
-    const caller = await findOwnerByAccount(CALL_REVIEW_CALLER_EMAIL);
-    if (!caller) {
-      throw new CallReviewError(
-        `Caller Owner not found for ${CALL_REVIEW_CALLER_EMAIL}; cannot recall`,
-        422,
-      );
+    if (resolution === "Recall") {
+      const caller = await findOwnerByAccount(CALL_REVIEW_CALLER_EMAIL);
+      if (!caller) {
+        throw new CallReviewError(
+          `Caller Owner not found for ${CALL_REVIEW_CALLER_EMAIL}; cannot recall`,
+          422,
+        );
+      }
+      await updateFollowupTask(task.id, {
+        callReviewStatus: "Unqualified",
+        status: "Pending",
+        endedAt: null,
+        ownerId: caller.id,
+        priority: "P0",
+        callReviewReason: reviewReason || reviewNote,
+        callQualifiedAt: null,
+        callReviewHistory: historyText,
+        notes: humanNotes(
+          task.notes,
+          `AccountManager ${reviewer} marked round ${reviewedRound.round} Unqualified and recalled the task to ${caller.name}.`,
+        ),
+      });
+    } else {
+      await updateFollowupTask(task.id, {
+        callReviewStatus: "Unqualified",
+        status: "Cancelled",
+        endedAt: now,
+        priority: null,
+        callReviewReason: reviewReason || reviewNote,
+        callQualifiedAt: null,
+        callReviewHistory: historyText,
+        notes: humanNotes(
+          task.notes,
+          `AccountManager ${reviewer} marked round ${reviewedRound.round} Unqualified and stopped the task.`,
+        ),
+      });
+      await cancelUnsentBombSiblingTasks(task, {
+        note: "Account Manager marked the Phone task Unqualified and stopped the remaining follow-up tasks.",
+      });
     }
-    await updateFollowupTask(task.id, {
-      callReviewStatus: "Unqualified",
-      status: "Pending",
-      endedAt: null,
-      ownerId: caller.id,
-      priority: "P0",
-      callReviewReason: reviewReason,
-      callQualifiedAt: null,
-      callReviewHistory: historyText,
-      notes: humanNotes(
-        task.notes,
-        `AccountManager ${reviewer} marked round ${reviewedRound.round} Unqualified and recalled the task to ${caller.name}.`,
-      ),
-    });
   }
 
   // A reviewed call has been handled by the Account Manager. Clear the

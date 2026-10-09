@@ -10,13 +10,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   ArrowUpRight,
-  CheckCheck,
-  Clock3,
-  createLucideIcon,
-  Mail,
-  MailOpen,
-  Radio,
-  RefreshCw,
   SmartphoneNfc,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -38,17 +31,19 @@ import {
 } from "@/components/ui/select";
 import {
   effectiveFollowup,
-  filterQueue,
+  filterWorkspaceQueue,
   summarize,
   safeSourceUrl,
   type SignalBrand,
+  type SignalEvent,
+  type SignalQueueView,
   type SignalType,
 } from "@/lib/signals/model";
 import type { BrandActivity, BrandDetail as BrandData } from "@/lib/brand-list";
 import { channelReachable } from "@/lib/channel-availability";
 import type { MediaAttachment } from "@/lib/media-attachments";
 import type { DeliveryMode } from "./send-timing-toggle";
-import type { Channel } from "@/lib/outreach-domain";
+import type { Channel, Contact } from "@/lib/outreach-domain";
 import { formatScheduledDateTime } from "@/lib/display-time";
 import { dialPhoneOptions } from "@/lib/dial-phones";
 import {
@@ -56,46 +51,35 @@ import {
   toCustomerContacts,
   toInteractions,
 } from "./workspace-customer";
-import { ActivityTimeline, InteractionFeed } from "./interaction-feed";
-import { CallWithQuoButton } from "./phone-task-board";
 import { usePageMetadata } from "./use-page-metadata";
 import { useSignals } from "./signals-store";
-const Linkedin = createLucideIcon("Linkedin", [
-  [
-    "path",
-    {
-      d: "M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-4 0v7h-4v-7a6 6 0 0 1 6-6z",
-      key: "a",
-    },
-  ],
-  ["rect", { x: "2", y: "9", width: "4", height: "12", key: "b" }],
-  ["circle", { cx: "4", cy: "4", r: "2", key: "c" }],
-]);
+import { ChannelIcon } from "./channel-icon";
 const types = {
   sample: {
     label: "Sample Tap",
-    icon: SmartphoneNfc,
-    style:
-      "text-[#7C3AED] bg-violet-50 dark:bg-violet-950 dark:text-violet-300",
+    style: "text-[#7C3AED] dark:text-violet-300",
   },
   email: {
     label: "Email Open",
-    icon: MailOpen,
-    style: "text-[#B45309] bg-amber-50 dark:bg-amber-950 dark:text-amber-300",
+    style: "text-[#B45309] dark:text-amber-300",
   },
   linkedin: {
     label: "LinkedIn",
-    icon: Linkedin,
-    style: "text-[#0A66C2] bg-blue-50 dark:bg-blue-950 dark:text-blue-300",
+    style: "text-[#0A66C2] dark:text-blue-300",
   },
 };
 function SignalLabel({ type }: { type: SignalType }) {
-  const { label, icon: Icon, style } = types[type];
+  const { label, style } = types[type];
+  const icon = type === "email"
+    ? <ChannelIcon channel="Email" className="size-3.5" alt="" />
+    : type === "linkedin"
+      ? <ChannelIcon channel="LinkedIn" className="size-3.5" alt="" />
+      : <SmartphoneNfc className="size-3.5" />;
   return (
     <span
-      className={`inline-flex h-6 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium ${style}`}
+      className={`inline-flex items-center gap-1 text-[11px] font-medium ${style}`}
     >
-      <Icon className="size-3.5" />
+      {icon}
       {label}
     </span>
   );
@@ -107,6 +91,28 @@ function date(value?: string) {
         Intl.DateTimeFormat().resolvedOptions().timeZone,
       ) || value
     : "—";
+}
+function relativeTime(value: string, now: Date) {
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return "—";
+  const minutes = Math.max(0, Math.floor((now.getTime() - timestamp) / 60000));
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  if (minutes < 24 * 60) return `${Math.floor(minutes / 60)}h ago`;
+  if (minutes < 48 * 60) return "Yesterday";
+  if (minutes < 7 * 24 * 60) return `${Math.floor(minutes / (24 * 60))}d ago`;
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(new Date(value));
+}
+function groupedSignals(events: SignalEvent[]) {
+  const groups = new Map<string, SignalEvent[]>();
+  for (const event of [...new Map(events.map((item) => [item.id, item])).values()]) {
+    const key = event.type === "sample" ? `sample:${event.sampleId || event.id}`
+      : event.type === "email" ? `email:${event.conversationId || event.messageId || event.id}`
+      : `linkedin:${event.id}`;
+    groups.set(key, [...(groups.get(key) || []), event]);
+  }
+  return [...groups].map(([key, items]) => ({ key, events: items.sort((a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt)) }))
+    .sort((a, b) => Date.parse(b.events[0].occurredAt) - Date.parse(a.events[0].occurredAt));
 }
 const desktopQuery = "(min-width: 1024px)";
 function subscribeDesktop(callback: () => void) {
@@ -128,75 +134,61 @@ export function SignalsPage() {
   const router = useRouter();
   const params = useSearchParams();
   const requested = params.get("brand");
-  const [status, setStatus] = useState<"review" | "all">("review");
-  const [time, setTime] = useState<"today" | "week">("week");
+  const showingMock =
+    process.env.NODE_ENV !== "production" && params.get("mock") === "1";
+  const [view, setView] = useState<SignalQueueView>("review");
   const [type, setType] = useState<SignalType | "all">("all");
   const [selected, setSelected] = useState<string | null>(requested);
+  const [deepLinkActive, setDeepLinkActive] = useState(Boolean(requested));
   const [mobileDetail, setMobileDetail] = useState(Boolean(requested));
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 60000);
+    return () => clearInterval(timer);
+  }, []);
   const queue = useMemo(
-    () => filterQueue(data?.brands || [], { status, time, type }),
-    [data, status, time, type],
+    () => filterWorkspaceQueue(data?.brands || [], view, type, now),
+    [data, view, type, now],
   );
-  const summary = summarize(data?.brands || []);
+  const summary = summarize(data?.brands || [], now);
   const [lastRequested, setLastRequested] = useState(requested);
   if (lastRequested !== requested) {
     setLastRequested(requested);
     if (requested) {
       setSelected(requested);
       setMobileDetail(true);
+      setDeepLinkActive(true);
     }
   }
   const selectedBrand = data?.brands.find((b) => b.id === selected);
   // A notification deep link can open a brand outside the current filters.
   const current =
     selectedBrand &&
-    (requested === selected || queue.some((b) => b.id === selected))
+    ((deepLinkActive && requested === selected) || queue.some((b) => b.id === selected))
       ? selectedBrand
       : queue[0];
   const onComplete = () => {
-    const index = queue.findIndex((b) => b.id === current?.id);
-    const next = queue[index + 1] || queue.find((b) => b.id !== current?.id);
+    const next = filterWorkspaceQueue(data?.brands || [], "review", "all", now)
+      .find((b) => b.id !== current?.id);
+    setView("review");
+    setType("all");
+    setDeepLinkActive(false);
     setSelected(next?.id || null);
     setMobileDetail(Boolean(next));
     if (requested) router.replace("/signals", { scroll: false });
-    void refresh();
+    if (!showingMock) void refresh();
   };
   return (
-    <main className="mx-auto max-w-[1440px] px-4 py-7 text-foreground sm:px-8">
-      <header>
+    <div className="mx-auto max-w-[1480px] text-foreground">
+      <header className="mb-6">
         <div className="flex items-center gap-2">
           <SidebarTrigger className="md:hidden" />
-          <h1 className="text-2xl font-semibold tracking-tight">Signals</h1>
+          <h1 className="text-2xl font-bold tracking-[-.035em] text-slate-950 sm:text-[28px]">Signals</h1>
         </div>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Today: {summary.today} brands updated{" "}
-          <span className="px-1.5">·</span> This week: {summary.week}{" "}
-          <span className="px-1.5">·</span> Needs review: {summary.needsReview}
-        </p>
+        <p className="mt-1 text-sm text-muted-foreground">{summary.needsReview} brands need review</p>
       </header>
-      <div className="my-7 flex flex-wrap items-center gap-2">
-        <Select
-          value={status}
-          onValueChange={(v) => setStatus(v as typeof status)}
-        >
-          <SelectTrigger aria-label="Signal status" className="w-[150px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="review">Needs Review</SelectItem>
-            <SelectItem value="all">All</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={time} onValueChange={(v) => setTime(v as typeof time)}>
-          <SelectTrigger aria-label="Signal time" className="w-[130px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="today">Today</SelectItem>
-            <SelectItem value="week">This Week</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={type} onValueChange={(v) => setType(v as typeof type)}>
+      <div className="my-5 flex flex-wrap items-center gap-2">
+        <Select value={type} onValueChange={(v) => { setType(v as typeof type); setDeepLinkActive(false); }}>
           <SelectTrigger aria-label="Signal type" className="w-[150px]">
             <SelectValue />
           </SelectTrigger>
@@ -209,18 +201,25 @@ export function SignalsPage() {
             ))}
           </SelectContent>
         </Select>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Refresh signals"
-          onClick={() => void refresh()}
-        >
-          <RefreshCw className="size-4" />
-        </Button>
+        <Button variant="ghost" size="sm" aria-pressed={view === "history"} className={view === "history" ? "font-semibold text-foreground" : "text-muted-foreground"} onClick={() => { setView(view === "history" ? "review" : "history"); setMobileDetail(false); setDeepLinkActive(false); }}>History</Button>
+        {process.env.NODE_ENV !== "production" ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => router.replace(showingMock ? "/signals" : "/signals?mock=1")}
+          >
+            {showingMock ? "Exit mock preview" : "Mock preview"}
+          </Button>
+        ) : null}
       </div>
+      {showingMock ? (
+        <p className="-mt-3 mb-6 text-xs text-muted-foreground">
+          Mock preview · local actions only
+        </p>
+      ) : null}
       {error ? (
         <div role="alert" className="mb-6 text-sm text-muted-foreground">
-          Signals could not be refreshed. {error}{" "}
+          Unable to refresh signals.{" "}
           <Button variant="link" onClick={() => void refresh()}>
             Retry
           </Button>
@@ -238,87 +237,55 @@ export function SignalsPage() {
             aria-label="Brand queue"
             className={mobileDetail && current ? "hidden lg:block" : ""}
           >
-            <div className="mb-3 flex items-center justify-between text-xs text-muted-foreground">
-              <span>
-                {queue.length} {queue.length === 1 ? "brand" : "brands"}
-              </span>
-              <span>Priority, then latest</span>
+            <div className="mb-3">
+              <h2 className="text-sm font-semibold">Brand Queue</h2>
             </div>
             {queue.length ? (
               <div className="space-y-1">
-                {queue.map((brand) => (
-                  <button
-                    key={brand.id}
-                    onClick={() => {
-                      setSelected(brand.id);
-                      setMobileDetail(true);
-                    }}
-                    aria-current={current?.id === brand.id ? "true" : undefined}
-                    className={`w-full rounded-lg px-3 py-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${current?.id === brand.id ? "bg-muted" : "hover:bg-muted/60"}`}
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="truncate text-sm font-semibold">
-                        {brand.name}
-                      </span>
-                      {brand.unread ? (
-                        <span
-                          className="size-2 shrink-0 rounded-full bg-foreground"
-                          aria-label="Unread"
-                        />
-                      ) : null}
-                    </div>
-                    <div className="my-2 flex flex-wrap gap-1.5">
-                      {[...new Set(brand.events.map((e) => e.type))].map(
-                        (type) => (
-                          <SignalLabel key={type} type={type} />
-                        ),
-                      )}
-                    </div>
-                    <p className="truncate text-xs text-muted-foreground">
-                      {brand.events[0].summary}
-                    </p>
-                    <div className="mt-2 flex justify-between gap-2 text-[11px] text-muted-foreground">
-                      <time dateTime={brand.events[0].occurredAt}>
-                        {date(brand.events[0].occurredAt)}
+                {queue.map((brand) => {
+                  const visibleEvents = type === "all" ? brand.events : brand.events.filter((event) => event.type === type);
+                  const latest = (view === "review"
+                    ? visibleEvents.find((event) => !brand.reviewedEventIds?.includes(event.id))
+                    : undefined) || visibleEvents[0];
+                  const isSelected = current?.id === brand.id;
+                  const isUnread = brand.unread;
+                  return (
+                    <button
+                      key={brand.id}
+                      onClick={() => {
+                        setSelected(brand.id);
+                        setMobileDetail(true);
+                        setDeepLinkActive(false);
+                      }}
+                      aria-current={isSelected ? "true" : undefined}
+                      className={`w-full rounded-md px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${isSelected ? "bg-slate-200/85 shadow-sm" : isUnread ? "bg-slate-100/90 shadow-sm hover:bg-slate-200/75" : "bg-transparent hover:bg-slate-100/60"}`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className={`truncate text-sm ${isUnread || isSelected ? "font-semibold text-foreground" : "font-medium text-slate-500"}`}>{brand.name}</span>
+                        {isUnread ? <span className="size-2 shrink-0 rounded-full bg-rose-500 shadow-[0_0_0_3px_rgba(244,63,94,0.14)]" aria-label="Unread" /> : null}
+                      </div>
+                      <div className={`mt-1 flex flex-wrap gap-x-2 gap-y-0.5 ${isUnread || isSelected ? "" : "opacity-60"}`}>
+                        {[...new Set(visibleEvents.map((event) => event.type))].map((signalType) => (
+                          <SignalLabel key={signalType} type={signalType} />
+                        ))}
+                      </div>
+                      <p className={`mt-1 line-clamp-2 text-xs ${isUnread || isSelected ? "text-slate-600" : "text-slate-400"}`}>{latest.summary}</p>
+                      <time dateTime={latest.occurredAt} title={date(latest.occurredAt)} className={`mt-1 block text-[11px] ${isUnread || isSelected ? "text-slate-500" : "text-slate-400"}`}>
+                        {relativeTime(latest.occurredAt, now)}
                       </time>
-                      <span>{brand.status}</span>
-                    </div>
-                  </button>
-                ))}
+                    </button>
+                  );
+                })}
               </div>
             ) : (
-              <div className="py-14 text-center">
-                <Radio className="mx-auto mb-4 size-6 text-muted-foreground" />
-                <p className="text-sm font-medium">
-                  {data?.brands.length
-                    ? "No brands match these filters"
-                    : "No signals yet"}
-                </p>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  {data?.brands.length
-                    ? "Change the status, time or signal type."
-                    : "Customer updates will appear here when received."}
-                </p>
-              </div>
+              <p className="py-12 text-center text-sm text-muted-foreground">{data?.brands.length ? "No brands match this view" : "No signals yet"}</p>
             )}
-            {data ? (
-              <div className="mt-8 space-y-2 text-xs text-muted-foreground">
-                {Object.entries(types).map(([key, t]) => (
-                  <div
-                    className="flex items-center justify-between gap-3"
-                    key={key}
-                  >
-                    <span>{t.label}</span>
-                    <span>{data.sources[key as SignalType]}</span>
-                  </div>
-                ))}
-              </div>
-            ) : null}
           </section>
           <section
             aria-label="Brand review"
             className={!mobileDetail ? "hidden min-w-0 lg:block" : "min-w-0"}
           >
+            <h2 className="mb-3 text-sm font-semibold">Brand Review</h2>
             {current ? (
               <>
                 <Button
@@ -334,6 +301,8 @@ export function SignalsPage() {
                     key={current.id}
                     brand={current}
                     onComplete={onComplete}
+                    mock={showingMock}
+                    now={now}
                   />
                 ) : null}
               </>
@@ -345,7 +314,7 @@ export function SignalsPage() {
           </section>
         </div>
       )}
-    </main>
+    </div>
   );
 }
 type ActivityPage = {
@@ -353,17 +322,22 @@ type ActivityPage = {
   nextCursor?: string | null;
   hasMore?: boolean;
 };
-async function readJson<T>(url: string): Promise<T> {
+async function readJson<T>(url: string, message: string): Promise<T> {
   const response = await fetch(url);
-  const payload = (await response.json()) as T & { error?: string };
-  if (!response.ok)
-    throw new Error(payload.error || "Unable to load brand context");
-  return payload;
+  if (!response.ok) throw new Error(message);
+  try { return (await response.json()) as T; }
+  catch { throw new Error(message); }
+}
+function loadBrand(id: string) {
+  return readJson<{brand: BrandData}>(`/api/brands/${encodeURIComponent(id)}`, "Unable to load brand details");
+}
+function loadActivities(id: string) {
+  return readJson<ActivityPage>(`/api/brands/${encodeURIComponent(id)}/activities?limit=50`, "Unable to load communication history");
 }
 async function loadContext(id: string) {
   const [payload, activity] = await Promise.all([
-    readJson<{ brand: BrandData }>(`/api/brands/${id}`),
-    readJson<ActivityPage>(`/api/brands/${id}/activities?limit=50`),
+    loadBrand(id),
+    loadActivities(id),
   ]);
   return {
     brand: { ...payload.brand, activities: activity.activities },
@@ -373,23 +347,32 @@ async function loadContext(id: string) {
 function BrandReview({
   brand,
   onComplete,
+  mock,
+  now,
 }: {
   brand: SignalBrand;
   onComplete: () => void;
+  mock: boolean;
+  now: Date;
 }) {
   const { data, refresh, settle } = useSignals();
-  const readOnly = data?.readOnly !== false;
+  const readOnly = !mock && data?.readOnly !== false;
   const [detail, setDetail] = useState<BrandData | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [activities, setActivities] = useState<BrandActivity[]>([]);
+  const [brandError, setBrandError] = useState(false);
+  const [communicationError, setCommunicationError] = useState(false);
+  const [contextLoading, setContextLoading] = useState(true);
+  const [communicationLoading, setCommunicationLoading] = useState(true);
+  const [reloadVersion, setReloadVersion] = useState(0);
   const [composer, setComposer] = useState<Channel | null>(null);
   const [later, setLater] = useState(false);
   const [taskId, setTaskId] = useState("");
-  const [history, setHistory] = useState(false);
-  const [tapHistory, setTapHistory] = useState(false);
+  const [historyExpanded, setHistoryExpanded] = useState(false);
+  const [signalsExpanded, setSignalsExpanded] = useState(false);
+  const [expandedSignalKeys, setExpandedSignalKeys] = useState<Set<string>>(() => new Set());
   const [saving, setSaving] = useState(false);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [now] = useState(() => Date.now());
   const [readError, setReadError] = useState<string | null>(null);
   const readSnapshot = useRef("");
   const watchedMessage = useRef<string | null>(null);
@@ -401,23 +384,34 @@ function BrandReview({
     .join("|");
   useEffect(() => {
     let cancelled = false;
-    loadContext(brand.id)
-      .then((context) => {
-        if (!cancelled) {
-          setDetail(context.brand);
-          setCursor(context.cursor);
-        }
-      })
-      .catch((e) => {
-        if (!cancelled) setError(e.message);
-      });
+    const activityRequest = mock ? Promise.resolve<ActivityPage>({ activities: [] }) : loadActivities(brand.id);
+    void Promise.allSettled([loadBrand(brand.id), activityRequest]).then(([brandResult, activityResult]) => {
+      if (cancelled) return;
+      if (brandResult.status === "fulfilled") {
+        setDetail(brandResult.value.brand);
+        setBrandError(false);
+      } else {
+        setDetail(null);
+        setBrandError(true);
+      }
+      setContextLoading(false);
+      setActivities(activityResult.status === "fulfilled" ? activityResult.value.activities : []);
+      setCommunicationError(activityResult.status === "rejected");
+      setCommunicationLoading(false);
+      setCursor(activityResult.status === "fulfilled" && activityResult.value.hasMore ? activityResult.value.nextCursor || null : null);
+    });
     return () => {
       cancelled = true;
     };
-  }, [brand.id]);
+  }, [brand.id, reloadVersion]);
   useEffect(() => {
-    if (readOnly || !brand.unread || readSnapshot.current === snapshot) return;
+    if (!brand.unread || readSnapshot.current === snapshot) return;
     readSnapshot.current = snapshot;
+    if (mock) {
+      settle(brand.id, brand.events.map((e) => e.id));
+      return;
+    }
+    if (readOnly) return;
     let cancelled = false;
     fetch(`/api/signals/${brand.id}`, {
       method: "PATCH",
@@ -428,10 +422,7 @@ function BrandReview({
       }),
     })
       .then(async (r) => {
-        if (!r.ok) {
-          const p = (await r.json()) as { brand: BrandData; error?: string };
-          throw new Error(p.error || "Unable to mark signals read");
-        }
+        if (!r.ok) throw new Error("Unable to update read status");
         if (!cancelled) {
           setReadError(null);
           settle(
@@ -457,12 +448,30 @@ function BrandReview({
     refresh,
     settle,
     readOnly,
+    mock,
   ]);
   async function complete(
     action: "review" | "later" | "handled",
     linkedTask?: string,
     activityId?: string,
   ) {
+    if (mock) {
+      settle(
+        brand.id,
+        brand.events.map((event) => event.id),
+        action === "later" ? "Later" : action === "handled" ? "Handled" : "Reviewed",
+        linkedTask,
+      );
+      toast.success(
+        action === "later"
+          ? "Mock follow-up task linked"
+          : action === "handled"
+            ? "Mock follow-up completed"
+            : "Mock signal marked reviewed",
+      );
+      onComplete();
+      return true;
+    }
     if (readOnly) return false;
     setSaving(true);
     try {
@@ -476,12 +485,7 @@ function BrandReview({
           activityId,
         }),
       });
-      const p = (await response.json()) as {
-        error?: string;
-        taskId?: string;
-        conversationId?: string;
-      };
-      if (!response.ok) throw new Error(p.error || "Unable to save review");
+      if (!response.ok) throw new Error("Unable to save review");
       settle(
         brand.id,
         brand.events.map((e) => e.id),
@@ -512,6 +516,7 @@ function BrandReview({
     let cancelled = false;
     const timer = setInterval(async () => {
       if (
+        mock ||
         document.visibilityState !== "visible" ||
         (!watchedMessage.current && callStarted.current === null) ||
         completing.current
@@ -522,6 +527,9 @@ function BrandReview({
         const fresh = context.brand;
         if (cancelled) return;
         setDetail(fresh);
+        setActivities(fresh.activities);
+        setCommunicationError(false);
+        setCursor(context.cursor);
         const after = Math.max(
           ...brand.events.map((e) => Date.parse(e.detectedAt)),
         );
@@ -563,8 +571,36 @@ function BrandReview({
     taskId?: string,
     threadId?: string,
   ) {
-    if (readOnly)
-      throw new Error("Signals is in read-only preview. Sending is disabled.");
+    if (mock) {
+      const sentAt = new Date().toISOString();
+      const mockMessageId = `mock-message-${Date.now()}`;
+      setActivities((current) => [{
+        id: mockMessageId,
+        brandId: brand.id,
+        contactId,
+        taskId: taskId || null,
+        channel,
+        direction: "Outbound",
+        status: "Sent",
+        subject: object || null,
+        cc: cc || null,
+        content,
+        sender: "You",
+        notes: null,
+        callResult: null,
+        sourceUrl: null,
+        threadId: threadId || null,
+        messageId: mockMessageId,
+        cpId: null,
+        cpAtInteraction: null,
+        createdAt: sentAt,
+        recordedAt: sentAt,
+      }, ...current]);
+      toast.success("Mock message sent");
+      if (later) await complete("later", "mock-follow-up-task");
+      return;
+    }
+    if (readOnly) throw new Error("Signals is read-only.");
     const response = await fetch(`/api/brands/${brand.id}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -586,13 +622,15 @@ function BrandReview({
       taskId?: string;
       conversationId?: string;
     };
-    if (!response.ok) throw new Error(p.error || "Unable to send");
+    if (!response.ok) throw new Error("Unable to send message");
     try {
       const context = await loadContext(brand.id);
       setDetail(context.brand);
+      setActivities(context.brand.activities);
       setCursor(context.cursor);
+      setCommunicationError(false);
     } catch {
-      setError("Message saved; communication history could not be refreshed.");
+      setCommunicationError(true);
     }
     if (later && p.taskId) await complete("later", p.taskId);
     else {
@@ -601,235 +639,111 @@ function BrandReview({
     }
   }
   const contacts = detail ? toCustomerContacts(detail.contacts) : [];
-  const email = detail?.ownerId
-    ? contacts.find((c) => c.email && c.emailValid)
+  const previewContact: Contact = {
+    id: "mock-test-atlas-contact",
+    name: "Test KeyPerson Atlas",
+    role: "Owner",
+    title: "Owner",
+    email: "atlas@example.com",
+    phone: "+1 555 010 2026",
+    linkedin: "test-fridgechannel-atlas",
+    preferredChannel: "Email",
+    emailValid: true,
+    phoneValid: true,
+  };
+  const actionContacts = mock && !contacts.some((contact) => contact.email && contact.emailValid)
+    ? [...contacts, previewContact]
+    : contacts;
+  const email = (detail?.ownerId || mock)
+    ? actionContacts.find((c) => c.email && c.emailValid)
     : undefined;
-  const phone = contacts.find((c) => dialPhoneOptions(c).length);
-  const linkedin = contacts.find((c) => c.linkedin);
-  const taps = brand.events.filter((e) => e.type === "sample");
-  const interactions = detail
-    ? toInteractions(brand.id, detail.activities, {}, detail.tasks).sort(
+  const phone = actionContacts.find((c) => dialPhoneOptions(c).length);
+  const linkedin = actionContacts.find((c) => c.linkedin);
+  const allSignalGroups = groupedSignals(brand.events);
+  const currentSignalGroups = brand.needsReview
+    ? groupedSignals(brand.events.filter((event) => !brand.reviewedEventIds?.includes(event.id)))
+    : allSignalGroups;
+  const visibleSignalGroups = signalsExpanded ? allSignalGroups : currentSignalGroups.slice(0, 3);
+  const hasMoreSignals = allSignalGroups.reduce((total, group) => total + group.events.length, 0) >
+    currentSignalGroups.slice(0, 3).reduce((total, group) => total + group.events.length, 0);
+  const interactions = toInteractions(brand.id, activities, {}, detail?.tasks || []).sort(
         (a, b) =>
           Date.parse(b.recordedAt || b.createdAt) -
           Date.parse(a.recordedAt || a.createdAt),
-      )
-    : [];
-  const scheduledTasks =
+      );
+  const liveScheduledTasks =
     detail?.tasks.filter(
       (t) =>
         t.scheduledAt &&
-        Date.parse(t.scheduledAt) > now &&
+        Date.parse(t.scheduledAt) > now.getTime() &&
         !["Completed", "Cancelled", "Failed"].includes(t.status || ""),
     ) || [];
+  const scheduledTasks = liveScheduledTasks.length || !mock
+    ? liveScheduledTasks
+    : [{ id: "mock-follow-up-task", channel: "Email", scheduledAt: new Date(now.getTime() + 86_400_000).toISOString(), status: "Scheduled" }];
   const composeContacts = composer
-    ? contacts
+    ? actionContacts
         .filter((c) => channelReachable(c, composer))
         .map((c) => ({ ...c, preferredChannel: composer }))
-    : contacts;
+    : actionContacts;
+  const retryContext = () => {
+    setContextLoading(true);
+    setCommunicationLoading(true);
+    setBrandError(false);
+    setCommunicationError(false);
+    setReloadVersion((value) => value + 1);
+  };
+  const loadMoreActivities = () => {
+    if (!cursor) return;
+    setLoadingMore(true);
+    void readJson<ActivityPage>(
+      `/api/brands/${encodeURIComponent(brand.id)}/activities?limit=50&cursor=${encodeURIComponent(cursor)}`,
+      "Unable to load communication history",
+    ).then((page) => {
+      setActivities((current) => [...new Map([...current, ...page.activities].map((activity) => [activity.id, activity])).values()]);
+      setCursor(page.hasMore ? page.nextCursor || null : null);
+    }).catch(() => setCommunicationError(true)).finally(() => setLoadingMore(false));
+  };
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <header>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-xl font-semibold tracking-tight">
               {brand.name}
             </h2>
-            <p className="mt-2 text-xs text-muted-foreground">
-              {brand.ownerName || "Unassigned"}{" "}
-              {detail?.contacts[0] ? `· ${detail.contacts[0].name}` : ""} ·{" "}
-              {detail?.currentCp || brand.currentCp}
-            </p>
+            <p className="mt-1 text-xs text-muted-foreground">{detail?.contacts[0]?.name ? `${detail.contacts[0].name} · ` : ""}{detail?.currentCp || brand.currentCp}</p>
           </div>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={readOnly || saving || !brand.needsReview}
-            onClick={() => void complete("review")}
-          >
-            <CheckCheck className="mr-1.5 size-4" />
-            Mark Reviewed
-          </Button>
+          <a href={`/customers/${encodeURIComponent(brand.id)}?returnTo=${encodeURIComponent(mock ? "/signals?mock=1" : "/signals")}&signal=${encodeURIComponent(brand.events[0]?.id||"")}${mock ? "&mock=1" : ""}`} className="inline-flex items-center gap-1.5 rounded-md bg-violet-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2">Take Action Now <ArrowUpRight className="size-4" /></a>
         </div>
-        <a
-          href={`/customers/${encodeURIComponent(brand.id)}`}
-          className="mt-3 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-        >
-          Open Full Brand Detail
-          <ArrowUpRight className="size-3.5" />
-        </a>
-        {readOnly ? (
-          <p className="mt-2 text-xs text-muted-foreground">
-            Read-only preview · review updates and sending are disabled.
-          </p>
-        ) : null}
-        {readError ? (
-          <p role="alert" className="mt-2 text-xs text-muted-foreground">
-            {readError}
-          </p>
-        ) : null}
+        {readError ? <p role="alert" className="mt-2 text-xs text-muted-foreground">Unable to update read status</p> : null}
       </header>
       <section>
-        <h3 className="mb-4 text-sm font-semibold">Quick Actions</h3>
-        {!detail ? (
-          <p className="text-xs text-muted-foreground">
-            {error || "Loading available channels…"}
-          </p>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {email ? (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setComposer("Email")}
-              >
-                <Mail className="mr-1.5 size-4" />
-                Email
-              </Button>
-            ) : null}
-            {phone && !readOnly ? (
-              <CallWithQuoButton
-                options={dialPhoneOptions(phone)}
-                state="open"
-                onCallOpening={() => {
-                  callStarted.current = Date.now();
-                }}
-              />
-            ) : null}
-            {linkedin ? (
-              <Button asChild variant="outline" size="sm">
-                <a
-                  href={safeSourceUrl(
-                    linkedin.linkedin?.startsWith("http")
-                      ? linkedin.linkedin
-                      : `https://www.linkedin.com/in/${encodeURIComponent(linkedin.linkedin || "")}`,
-                  )}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  <Linkedin className="mr-1.5 size-4" />
-                  LinkedIn
-                </a>
-              </Button>
-            ) : null}
-            <Button
-              disabled={readOnly}
-              variant="outline"
-              size="sm"
-              onClick={() => setLater(true)}
-            >
-              <Clock3 className="mr-1.5 size-4" />
-              Follow up later
-            </Button>
-          </div>
-        )}
-      </section>
-      <section>
-        <h3 className="mb-4 text-sm font-semibold">Recent Signals</h3>
-        {taps.length ? (
-          <div className="mb-5 text-xs text-muted-foreground">
-            Latest tap: {date(taps[0].occurredAt)} · {taps.length} total taps{" "}
-            <button
-              className="ml-2 font-medium text-foreground hover:underline"
-              onClick={() => setTapHistory((v) => !v)}
-              aria-expanded={tapHistory}
-            >
-              {tapHistory ? "Hide" : "Tap History"}
-            </button>
-            {tapHistory ? (
-              <ul className="mt-3 space-y-2">
-                {taps.map((e) => (
-                  <li key={e.id}>
-                    {date(e.occurredAt)} · {e.sampleId} · {e.evidence}
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </div>
-        ) : null}
-        <div className="space-y-5">
-          {brand.events.map((event) => (
-            <article key={event.id}>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <SignalLabel type={event.type} />
-                  {event.highPriority ? (
-                    <span className="text-xs text-red-700 dark:text-red-300">
-                      High Priority
-                    </span>
-                  ) : null}
-                </div>
-                <time
-                  className="text-[11px] text-muted-foreground"
-                  dateTime={event.occurredAt}
-                >
-                  {date(event.occurredAt)}
-                </time>
+        <div className="mb-3 flex items-center justify-between"><h3 className="text-sm font-semibold">New Signals</h3>{hasMoreSignals ? <button type="button" className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setSignalsExpanded(!signalsExpanded)} aria-expanded={signalsExpanded}>{signalsExpanded ? "Show less" : "View all"}</button> : null}</div>
+        {visibleSignalGroups.length ? <div className="space-y-3">
+          {visibleSignalGroups.map(({key, events}) => {
+            const latest = events[0];
+            const expanded = expandedSignalKeys.has(key);
+            const title = latest.type === "sample" ? `Sample ${latest.sampleId || ""} visited ${events.length} time${events.length === 1 ? "" : "s"}`
+              : latest.type === "email" ? `${latest.subject && latest.subject !== "Subject unavailable" ? latest.subject : "Email"} · ${events.length} open${events.length === 1 ? "" : "s"} detected`
+              : latest.summary;
+            const source = safeSourceUrl(latest.sourceUrl);
+            return <article key={key} className="min-w-0 py-1">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1"><SignalLabel type={latest.type}/></div>
+              <p className={`mt-1 text-sm font-medium ${expanded ? "" : "line-clamp-2"}`} title={title}>{title}</p>
+              <div className="mt-1 flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground">
+                <span>{latest.type === "sample" ? "Last activity" : latest.type === "email" ? "Last detected" : "Published"} · {relativeTime(latest.type === "email" ? latest.detectedAt : latest.type === "linkedin" ? latest.publishedAt || latest.occurredAt : latest.occurredAt, now)}</span>
+                {source ? <a href={source} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 hover:text-foreground">View source <ArrowUpRight className="size-3"/></a> : !mock && latest.type === "linkedin" ? <span>Source unavailable</span> : null}
+                {(events.length > 1 || latest.evidence || latest.type === "linkedin") ? <button type="button" className="hover:text-foreground" onClick={() => setExpandedSignalKeys((old) => { const next = new Set(old); if (next.has(key)) next.delete(key); else next.add(key); return next; })} aria-expanded={expanded}>{expanded ? "Hide details" : latest.type === "sample" ? "Visit history" : "Details"}</button> : null}
               </div>
-              <p className="mt-2 text-sm">{event.summary}</p>
-              {event.subject ? (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Subject: {event.subject}
-                </p>
-              ) : null}
-              {event.type === "email" ? (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Open detected {date(event.detectedAt)}. Tracking pixels can be
-                  triggered by privacy tools or automated scans; this does not
-                  confirm reading.
-                </p>
-              ) : null}
-              {event.type === "linkedin" ? (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Published {date(event.publishedAt)} · Monitored{" "}
-                  {date(event.detectedAt)}
-                </p>
-              ) : null}
-              {event.evidence ? (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {event.evidence}
-                </p>
-              ) : null}
-              {event.sourceUrl ? (
-                <a
-                  href={event.sourceUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-1 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-                >
-                  Source evidence
-                  <ArrowUpRight className="size-3" />
-                </a>
-              ) : null}
-            </article>
-          ))}
-        </div>
-      </section>
-      <section>
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-sm font-semibold">Communication History</h3>
-          {interactions.length ? (
-            <Button variant="ghost" size="sm" onClick={() => setHistory(true)}>
-              View all
-            </Button>
-          ) : null}
-        </div>
-        {detail ? (
-          interactions.length ? (
-            <ActivityTimeline
-              items={interactions.slice(0, 5)}
-              formatTime={date}
-              onOpen={() => setHistory(true)}
-            />
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              No communication recorded.
-            </p>
-          )
-        ) : (
-          <p className="text-xs text-muted-foreground">
-            {error || "Loading communication history…"}
-          </p>
-        )}
+              {expanded ? <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                {latest.type === "linkedin" ? <p>Published {date(latest.publishedAt)} · Detected {date(latest.detectedAt)}</p> : null}
+                {latest.type === "email" ? <p>Open detection does not confirm the recipient read the email.</p> : null}
+                {events.map((event) => <p key={event.id}><time dateTime={event.occurredAt}>{date(event.occurredAt)}</time>{event.evidence ? ` · ${event.evidence}` : ""}</p>)}
+              </div> : null}
+            </article>;
+          })}
+        </div> : <p className="text-sm text-muted-foreground">No signals yet</p>}
       </section>
       {detail && composer ? (
         <ReplyDialog
@@ -883,80 +797,6 @@ function BrandReview({
           {email ? (
             <Button variant="outline" onClick={() => setComposer("Email")}>
               Schedule email
-            </Button>
-          ) : null}
-        </DialogContent>
-      </Dialog>
-      <Dialog open={history} onOpenChange={setHistory}>
-        <DialogContent className="signals-overlay max-h-[85vh] overflow-auto sm:max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>Communication History · {brand.name}</DialogTitle>
-          </DialogHeader>
-          {detail ? (
-            <InteractionFeed
-              customerId={brand.id}
-              interactions={interactions}
-              contacts={contacts}
-              tasks={detail.tasks}
-              showAllChannels
-              onSend={(
-                contactId,
-                channel,
-                content,
-                taskId,
-                threadId,
-                subject,
-                deliveryMode,
-                scheduledAt,
-                attachments,
-                cc,
-              ) =>
-                sendMessage(
-                  contactId,
-                  channel,
-                  content,
-                  subject,
-                  deliveryMode,
-                  scheduledAt,
-                  attachments,
-                  cc,
-                  taskId,
-                  threadId,
-                )
-              }
-            />
-          ) : null}
-          {cursor ? (
-            <Button
-              variant="ghost"
-              disabled={loadingMore}
-              onClick={() => {
-                setLoadingMore(true);
-                void readJson<ActivityPage>(
-                  `/api/brands/${brand.id}/activities?limit=50&cursor=${encodeURIComponent(cursor)}`,
-                )
-                  .then((page) => {
-                    setDetail((current) =>
-                      current
-                        ? {
-                            ...current,
-                            activities: [
-                              ...new Map(
-                                [...current.activities, ...page.activities].map(
-                                  (a) => [a.id, a],
-                                ),
-                              ).values(),
-                            ],
-                          }
-                        : current,
-                    );
-                    setCursor(page.hasMore ? page.nextCursor || null : null);
-                  })
-                  .catch((e) => toast.error(e.message))
-                  .finally(() => setLoadingMore(false));
-              }}
-            >
-              Load more history
             </Button>
           ) : null}
         </DialogContent>

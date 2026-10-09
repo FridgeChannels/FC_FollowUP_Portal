@@ -19,23 +19,23 @@
 }
 
 :root {
-  --background: #f7f8fc;
+  --background: #f3f4f6;
   --foreground: #111827;
-  --card: #ffffff;
+  --card: rgba(255, 255, 255, 0.56);
   --card-foreground: #171717;
-  --popover: #ffffff;
+  --popover: rgba(255, 255, 255, 0.78);
   --popover-foreground: #171717;
   --primary: #5146e5;
   --primary-foreground: #fafafa;
-  --secondary: #eef1f7;
+  --secondary: #f3f4f6;
   --secondary-foreground: #171717;
-  --muted: #eef1f7;
+  --muted: #f3f4f6;
   --muted-foreground: #667085;
   --accent: #eef2ff;
   --accent-foreground: #171717;
   --destructive: #e7000b;
-  --border: #e3e7ef;
-  --input: #d7dce6;
+  --border: rgba(255, 255, 255, 0.68);
+  --input: rgba(255, 255, 255, 0.62);
   --ring: #818cf8;
   --chart-1: #f54900;
   --chart-2: #009689;
@@ -131,7 +131,11 @@
 }
 
 body {
-  background: var(--background);
+  background:
+    radial-gradient(1100px 680px at 8% -12%, rgba(148, 163, 184, 0.14), transparent 65%),
+    radial-gradient(920px 640px at 100% 8%, rgba(203, 213, 225, 0.20), transparent 62%),
+    linear-gradient(135deg, #fafafa 0%, #eef0f2 48%, #f8f9fa 100%);
+  background-attachment: fixed;
   color: var(--foreground);
   font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   min-height: 100vh;
@@ -139,6 +143,81 @@ body {
 
 * { scrollbar-width: thin; scrollbar-color: #c7ccd6 transparent; }
 button, a, input, textarea { outline-offset: 2px; }
+
+/* Translucent glass surface: keeps the existing layout and spacing while
+   giving shared panels, controls, and navigation a soft layered finish. */
+body .bg-white { background-color: rgba(255, 255, 255, 0.56); }
+body .bg-slate-50 { background-color: rgba(248, 250, 252, 0.42); }
+body .bg-slate-100 { background-color: rgba(241, 245, 249, 0.48); }
+body .bg-background { background-color: rgba(255, 255, 255, 0.18); }
+body [class*="bg-[#f7f8fc]"] { background-color: transparent; }
+body :is(.rounded-xl, .rounded-lg, .rounded-md)[class*="border"] {
+  background-color: rgba(255, 255, 255, 0.42);
+  border-color: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 14px 34px rgba(55, 72, 104, 0.09), inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  -webkit-backdrop-filter: blur(18px) saturate(125%);
+  backdrop-filter: blur(18px) saturate(125%);
+}
+body [data-slot="button"][data-variant="outline"],
+body [data-slot="select-trigger"],
+body [data-slot="input"],
+body textarea {
+  background-color: rgba(255, 255, 255, 0.34);
+  border-color: rgba(255, 255, 255, 0.74);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72), 0 5px 16px rgba(55, 72, 104, 0.06);
+  -webkit-backdrop-filter: blur(14px) saturate(125%);
+  backdrop-filter: blur(14px) saturate(125%);
+}
+body [data-slot="button"][data-variant="secondary"] { background-color: rgba(255, 255, 255, 0.48); }
+body [data-slot="button"][data-variant="ghost"]:hover { background-color: rgba(255, 255, 255, 0.38); }
+body [data-sidebar="sidebar"] {
+  --sidebar: rgba(245, 246, 248, 0.70);
+  --sidebar-foreground: #27303a;
+  --sidebar-primary: #4f46e5;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: rgba(148, 163, 184, 0.18);
+  --sidebar-accent-foreground: #27303a;
+  --sidebar-border: rgba(148, 163, 184, 0.30);
+  --sidebar-ring: #818cf8;
+  background: linear-gradient(180deg, rgba(250, 250, 250, 0.76), rgba(229, 231, 235, 0.64));
+  border-color: rgba(148, 163, 184, 0.30);
+  box-shadow: inset -1px 0 rgba(255, 255, 255, 0.68), 10px 0 30px rgba(71, 85, 105, 0.07);
+  -webkit-backdrop-filter: blur(24px) saturate(120%);
+  backdrop-filter: blur(24px) saturate(120%);
+}
+/* Keep the light glass sidebar readable at a glance. The semantic sidebar
+   tokens are also reinforced here because several navigation items use
+   opacity modifiers in their utility classes. */
+body [data-sidebar="sidebar"] [data-sidebar="header"],
+body [data-sidebar="sidebar"] [data-sidebar="content"],
+body [data-sidebar="sidebar"] [data-sidebar="footer"] {
+  color: #27303a;
+}
+body [data-sidebar="sidebar"] [data-sidebar="group-label"] {
+  color: #4b5563;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+body [data-sidebar="sidebar"] [data-sidebar="menu-button"],
+body [data-sidebar="sidebar"] [data-sidebar="menu-sub-button"] {
+  color: #334155;
+  font-weight: 600;
+}
+body [data-sidebar="sidebar"] [data-sidebar="menu-button"] > svg,
+body [data-sidebar="sidebar"] [data-sidebar="menu-sub-button"] > svg {
+  color: #475569;
+  opacity: 1;
+}
+body [data-sidebar="sidebar"] [data-sidebar="menu-button"]:hover,
+body [data-sidebar="sidebar"] [data-sidebar="menu-button"][data-active="true"],
+body [data-sidebar="sidebar"] [data-sidebar="menu-sub-button"][data-active="true"] {
+  color: #2738a7;
+}
+body [data-sidebar="sidebar"] [data-sidebar="menu-button"][data-active="true"] > svg,
+body [data-sidebar="sidebar"] [data-sidebar="menu-sub-button"][data-active="true"] > svg {
+  color: #4338ca;
+}
+body [data-sidebar="inset"] { background: transparent; }
 
 /* Semantic UI tokens: use color to explain state, never as decoration. */
 .ui-surface { background: var(--card); border-color: var(--border); }

@@ -18,9 +18,12 @@ export async function POST(request: Request, { params }: Params) {
     }
 
     const { id } = await params;
-    const body = (await request.json()) as { status?: CallReviewStatus; reviewReason?: string; reviewNote?: string };
+    const body = (await request.json()) as { status?: CallReviewStatus; reviewReason?: string; reviewNote?: string; resolution?: "Recall" | "Stop task" };
     if (body.status !== "Qualified" && body.status !== "Unqualified") {
       return Response.json({ error: "status must be Qualified or Unqualified" }, { status: 400 });
+    }
+    if (body.status === "Unqualified" && body.resolution !== undefined && body.resolution !== "Recall" && body.resolution !== "Stop task") {
+      return Response.json({ error: "resolution must be Recall or Stop task" }, { status: 400 });
     }
 
     const task = await retrieveFollowupTask(id);
@@ -39,6 +42,7 @@ export async function POST(request: Request, { params }: Params) {
       reviewerName: viewer.name,
       reviewReason: body.reviewReason,
       reviewNote: body.reviewNote,
+      resolution: body.resolution,
     });
     return Response.json({ task: updated });
   } catch (error) {

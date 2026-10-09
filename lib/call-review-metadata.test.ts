@@ -6,7 +6,7 @@ import {
   type CallReviewMetadata,
 } from "./call-review-metadata.ts";
 
-const review = (status: CallReviewMetadata["status"]): CallReviewMetadata => ({
+const review = (status: CallReviewMetadata["status"], resolution?: CallReviewMetadata["resolution"]): CallReviewMetadata => ({
   interactionId: "interaction-1",
   taskId: "task-1",
   status,
@@ -14,6 +14,7 @@ const review = (status: CallReviewMetadata["status"]): CallReviewMetadata => ({
   reviewedBy: "peter@fridgeteam.com",
   assignedCaller: "beril@fridgechannels.com",
   recallRequested: status === "Unqualified",
+  resolution,
 });
 
 describe("Call review task status", () => {
@@ -23,6 +24,10 @@ describe("Call review task status", () => {
 
   it("reopens an unqualified task", () => {
     assert.equal(taskStatusForCallReview("Completed", review("Unqualified")), "Pending");
+  });
+
+  it("keeps a stopped unqualified task closed", () => {
+    assert.equal(taskStatusForCallReview("Cancelled", review("Unqualified", "Stop task")), "Cancelled");
   });
 });
 

@@ -8,8 +8,9 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
+import { mockSignals } from "@/lib/signals/mock";
 import type { SignalsPayload, SignalReview } from "@/lib/signals/model";
 import type { SessionUser } from "@/lib/auth-session";
 import { useSession } from "./use-session";
@@ -24,11 +25,19 @@ const Context = createContext<{
     taskId?: string,
   ) => void;
 } | null>(null);
+function isMockPreviewPath(pathname: string | null, searchParams: URLSearchParams) {
+  return process.env.NODE_ENV !== "production" &&
+    searchParams.get("mock") === "1" &&
+    (pathname === "/signals" || /^\/customers\/[^/]+(?:\/sample)?$/.test(pathname || ""));
+}
 export function SignalsProvider({ children }: { children: ReactNode }) {
   const { user, loading } = useSession();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const preview = isMockPreviewPath(pathname, searchParams);
   return (
     <SessionSignalsProvider
-      key={`${user?.email || "anonymous"}:${user?.role || ""}`}
+      key={`${user?.email || "anonymous"}:${user?.role || ""}:${preview ? "mock" : "live"}`}
       user={user}
       loading={loading}
     >
@@ -46,11 +55,21 @@ function SessionSignalsProvider({
   loading: boolean;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const mock = isMockPreviewPath(pathname, searchParams);
   const [data, setData] = useState<SignalsPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const previous = useRef<SignalsPayload | null>(null);
   const busy = useRef(false);
   const refresh = useCallback(async () => {
+    if (mock) {
+      const payload = mockSignals();
+      previous.current = payload;
+      setData(payload);
+      setError(null);
+      return;
+    }
     if (busy.current || loading || !user || user.role === "Caller") return;
     busy.current = true;
     try {
@@ -58,8 +77,12 @@ function SessionSignalsProvider({
       const payload = (await response.json()) as SignalsPayload & {
         error?: string;
       };
-      if (!response.ok)
-        throw new Error(payload.error || "Unable to load signals");
+      // Ignore a live response that began before the user switched to mock data.
+      if (
+        isMockPreviewPath(window.location.pathname, new URLSearchParams(window.location.search)) !== mock
+      )
+        return;
+      if (!response.ok) throw new Error("Unable to load signals");
       if (previous.current) {
         const ids = new Set(
           previous.current.brands.flatMap((b) => b.events.map((e) => e.id)),
@@ -100,14 +123,16 @@ function SessionSignalsProvider({
       previous.current = payload;
       setData(payload);
       setError(null);
-    } catch (error) {
-      setError(
-        error instanceof Error ? error.message : "Unable to load signals",
-      );
+    } catch {
+      if (
+        isMockPreviewPath(window.location.pathname, new URLSearchParams(window.location.search)) !== mock
+      )
+        return;
+      setError("Unable to load signals");
     } finally {
       busy.current = false;
     }
-  }, [loading, user, router]);
+  }, [loading, mock, user, router]);
   useEffect(() => {
     const initial = setTimeout(() => void refresh(), 0);
     const timer = setInterval(() => {
@@ -138,7 +163,8 @@ function SessionSignalsProvider({
                   ? brand
                   : {
                       ...brand,
-                      unread: brand.events.some((event) => !ids.has(event.id)),
+                      readEventIds: [...new Set([...(brand.readEventIds||[]), ...eventIds])],
+                      unread: brand.events.some((event) => !ids.has(event.id) && !brand.readEventIds?.includes(event.id)),
                       ...(status
                         ? {
                             status: brand.events.some(

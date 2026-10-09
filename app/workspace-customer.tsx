@@ -3,11 +3,11 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, Bomb, ChevronRight, CircleAlert, CircleCheck, CirclePause, ContactRound, ExternalLink, FileText, History, Loader2, MessageSquareText, MoreHorizontal, PanelRightClose, Plus, Search, Send, StickyNote } from "lucide-react";
+import { ArrowLeft, Bomb, ChevronRight, CircleAlert, CircleCheck, CirclePause, ContactRound, ExternalLink, FileText, History, Loader2, MessageSquareText, MoreHorizontal, PanelRightClose, Plus, Search, Send, StickyNote, UserCheck } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "./workspace-store";
 import { cacheBrandItem, getCachedBrand, requestBrandListPageRefresh } from "@/lib/brand-list-cache";
-import { currentCpOption, FOLLOW_UP_STATUSES, HANDLING_MODES, keyPersonNotionUrl, listCurrentCps, type BrandActivity, type BrandAiMeetingLink, type BrandContact, type BrandDetail, type BrandMeetingNote, type BrandTask, type CurrentCpOption } from "@/lib/brand-list";
+import { currentCpOption, FOLLOW_UP_STATUSES, keyPersonNotionUrl, listCurrentCps, type BrandActivity, type BrandAiMeetingLink, type BrandContact, type BrandDetail, type BrandMeetingNote, type BrandTask, type CurrentCpOption } from "@/lib/brand-list";
 import type { BombDetail, BombListItem } from "@/lib/bomb-list";
 import { ActionStatus, BombInstance, Channel, Contact, CPCode, Customer, dateOnly, Interaction, ScheduledAction, WorkspaceState, compareInteractionSort, interactionCpCode, uid } from "@/lib/outreach-domain";
 import { brandDetailMetadata } from "@/lib/page-metadata";
@@ -38,10 +38,20 @@ import { buildInteractionCpFallbacks, resolveInteractionDisplayCp } from "@/lib/
 import { channelAvailable } from "@/lib/channel-availability";
 import { CHANNEL_TYPES, resolveChannelType, type ChannelType } from "@/lib/sample-product";
 import { cn } from "@/lib/utils";
+import { useSignals } from "./signals-store";
+import { BrandProfileFields, ImportantSignalsPanel, LinkedInUpdates, SignalHistoryPanel } from "./brand-detail-signals";
+import type { MagnetBrandParam } from "@/lib/sample/magnet";
+import type { SignalEvent } from "@/lib/signals/model";
+import { emailSignalMatchesInteraction } from "@/lib/signals/match";
+import { MOCK_PETER_SIGNAL_BRAND_ID } from "@/lib/signals/mock";
+import { withoutBrandAssignmentRecords } from "@/lib/brand-assignment";
 
 const show=(r:{ok:boolean;message:string})=>r.ok?toast.success(r.message):toast.error(r.message);
 const hasCjk=(value?:string|null)=>/[\u4e00-\u9fff]/.test(value||"");
-const displayNote=(value?:string|null)=>value&&!hasCjk(value)?value:undefined;
+const displayNote=(value?:string|null)=>{
+  const visible = withoutBrandAssignmentRecords(value);
+  return visible&&!hasCjk(visible)?visible:undefined;
+};
 export const ACTIVE_OMNIREACH_BLOCK_REASON =
   "This Brand already has an active OmniReach. Stop it before launching another.";
 
@@ -590,6 +600,7 @@ export function toInteractions(
         ? "Automated"
         : undefined,
     threadId: item.threadId || undefined,
+    messageId: item.messageId || undefined,
     taskId: item.taskId || undefined,
     replyStatus: item.replyStatus || undefined,
     cp: resolveInteractionDisplayCp(cp, item, fallbacks),
@@ -635,31 +646,43 @@ export function toCustomerContacts(contacts: BrandContact[]): Contact[] {
 }
 
 const ACTIVITY_PAGE_SIZE = 50;
-type BrandDetailsTab = "details" | "contacts" | "notes" | "plan";
+type BrandDetailsTab = "details" | "contacts" | "notes" | "plan" | "signalHistory";
 
 export function BrandDetail({customerId}:{customerId:string}){
   const {state,can,assignBrand,cancelBomb}=useWorkspace();
+  const {data:signalsData,settle:settleSignals}=useSignals();
   const router=useRouter();
   const searchParams=useSearchParams();
+  const requestedSignalId=searchParams.get("signal");
+  const requestedWorkReply=searchParams.get("workReply");
+  const requestedWorkTask=searchParams.get("workTask");
+  const requestedNewAssignment=searchParams.get("newAssignment")==="1";
+  const mockDetailPreview=process.env.NODE_ENV!=="production"&&searchParams.get("mock")==="1"&&customerId===MOCK_PETER_SIGNAL_BRAND_ID;
   const requestedReturnTo=searchParams.get("returnTo");
-  const brandListReturnTo=requestedReturnTo==="/customers"||requestedReturnTo?.startsWith("/customers?")
+  const brandListReturnTo=requestedReturnTo==="/customers"||requestedReturnTo?.startsWith("/customers?")||requestedReturnTo==="/signals"||requestedReturnTo?.startsWith("/signals?")
     ? requestedReturnTo
     : "/customers";
   const backPath=can("customers")?brandListReturnTo:"/tasks";
+  const backLabel=backPath.startsWith("/signals")?"Back to Signals":can("customers")?"Back to Brands":"Back to tasks";
   const returnToList=()=>{
-    if(can("customers")){
+    if(can("customers")&&backPath.startsWith("/customers")){
       requestBrandListPageRefresh();
     }
     router.replace(backPath);
   };
   const [launch,setLaunch]=useState(false); const [reply,setReply]=useState(false); const [cp,setCP]=useState(false); const [contact,setContact]=useState(false); const [ownerDraft,setOwnerDraft]=useState<string>();
-  const [detailsTab,setDetailsTab]=useState<BrandDetailsTab|null>(null);
+  const [detailsTab,setDetailsTab]=useState<BrandDetailsTab|null>(requestedSignalId||requestedNewAssignment?"details":null);
+  const [sampleProfiles,setSampleProfiles]=useState<Array<{sn:string;profile:MagnetBrandParam|null}>>([]);
   const [attentionTarget,setAttentionTarget]=useState<{cp:CPCode;channel:Channel}|null>(null);
   const [creatingMeeting,setCreatingMeeting]=useState(false);
   const [meetingHistory,setMeetingHistory]=useState(false);
   const [followUpAction,setFollowUpAction]=useState<"Paused"|"Completed"|null>(null);
   const [followUpNote,setFollowUpNote]=useState("");
   const [followUpAt,setFollowUpAt]=useState("");
+  const [focusedEmailInteractionId,setFocusedEmailInteractionId]=useState<string|null>(null);
+  const [focusedWorkInteractionId,setFocusedWorkInteractionId]=useState<string|null>(null);
+  const [currentTimeMs,setCurrentTimeMs]=useState(()=>Date.now());
+  useEffect(()=>{const timer=window.setInterval(()=>setCurrentTimeMs(Date.now()),60_000);return ()=>window.clearInterval(timer);},[]);
   const cached=getCachedBrand(customerId);
   const [remote,setRemote]=useState<BrandDetail|null>(cached?{
     ...cached,
@@ -693,6 +716,8 @@ export function BrandDetail({customerId}:{customerId:string}){
   const [quoRefreshingCallId,setQuoRefreshingCallId]=useState<string|null>(null);
   useEffect(()=>{
     setOwnerDraft(undefined);
+    setFocusedEmailInteractionId(null);
+    setFocusedWorkInteractionId(null);
     const next=getCachedBrand(customerId);
     setRemote(next?{
       ...next,
@@ -718,10 +743,70 @@ export function BrandDetail({customerId}:{customerId:string}){
     setActivitiesReady(false);
     setActivitiesCursor(null);
     setActivitiesHasMore(false);
+    setSampleProfiles([]);
   },[customerId]);
+  useEffect(()=>{
+    if(!remote?.id||detailsTab!=="details")return;
+    let cancelled=false;
+    fetch(`/api/brands/${encodeURIComponent(customerId)}/sample/profile`,{cache:"no-store"})
+      .then(async response=>{
+        if(!response.ok)throw new Error("Unable to load sample profiles");
+        return response.json() as Promise<{profiles:Array<{sn:string;profile:MagnetBrandParam|null}>}>;
+      })
+      .then(payload=>{if(!cancelled)setSampleProfiles(payload.profiles||[]);})
+      .catch(()=>{if(!cancelled)setSampleProfiles([]);});
+    return ()=>{cancelled=true;};
+  },[customerId,remote?.id,detailsTab]);
+  const brandSignals=signalsData?.brands.find(brand=>brand.id===customerId);
+  const signalReadIds=brandSignals?.readEventIds??(brandSignals?.unread?[]:brandSignals?.events.map(event=>event.id)||[]);
+  const emailSignals=(brandSignals?.events||[]).filter(event=>event.type==="email");
+  const requestedSignal=brandSignals?.events.find(event=>event.id===requestedSignalId);
+  const requestedSignalType=requestedSignal?.type;
+  const requestedSignalContactId=requestedSignal?.contactId;
+  const requestedContactTargetId=remote?.contacts.find(contact=>contact.id===requestedSignalContactId||contact.keyPersonId===requestedSignalContactId)?.id||requestedSignalContactId;
+  useEffect(()=>{
+    if(!requestedSignalType)return;
+    setDetailsTab(requestedSignalType==="email"?null:requestedSignalContactId?"contacts":"details");
+    const target=requestedSignalContactId&&requestedSignalType==="linkedin"?`contact-linkedin-${requestedContactTargetId}`:requestedSignalType?"brand-important-signals":"brand-conversations";
+    requestAnimationFrame(()=>document.getElementById(target)?.scrollIntoView({block:"center",behavior:"smooth"}));
+  },[requestedSignalId,requestedSignalType,requestedSignalContactId,requestedContactTargetId]);
+  const readSignalEvents=(eventIds:string[])=>{
+    if(!brandSignals||!eventIds.length)return;
+    const snapshot=[...new Set([...(brandSignals.readEventIds||[]),...eventIds])];
+    if(process.env.NODE_ENV!=="production"&&searchParams.get("mock")==="1"){
+      settleSignals(customerId,snapshot);
+      return;
+    }
+    if(signalsData?.readOnly)return;
+    void fetch(`/api/signals/${encodeURIComponent(customerId)}`,{
+      method:"PATCH",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({action:"read",eventIds:snapshot}),
+    }).then(response=>{if(response.ok)settleSignals(customerId,snapshot);}).catch(()=>{});
+  };
   const isAdmin=state.currentRole==="Admin";
   const manager=isAdmin||state.currentRole==="AccountManager";
-  const local=state.customers.find(x=>x.id===customerId);
+  const mockCustomer:Customer|undefined=mockDetailPreview?{
+    id:customerId,
+    name:"Test FridgeChannel Peter",
+    initials:"TP",
+    cp:"CP2",
+    status:"Waiting for Reply",
+    source:"Signal mock preview",
+    ownerId:state.currentUserId,
+    contacts:[{
+      id:"mock-test-peter-contact",
+      name:"Peter Test",
+      role:"Owner",
+      title:"Founder",
+      email:"peter@testfridgechannel.example",
+      preferredChannel:"Email",
+      emailValid:true,
+      phoneValid:false,
+    }],
+    createdAt:"2026-10-09T00:00:00.000Z",
+    updatedAt:"2026-10-09T00:00:00.000Z",
+  }:undefined;
+  const local=state.customers.find(x=>x.id===customerId)||mockCustomer;
   const applyRemote=(brand:BrandDetail|null,cps:CurrentCpOption[]=[])=>{
     if(!brand){setRemote(null);setRemoteCps([]);return;}
     cacheBrandItem(brand);
@@ -736,7 +821,9 @@ export function BrandDetail({customerId}:{customerId:string}){
   };
   const applyActivitiesPage=(payload:{activities?:BrandActivity[];nextCursor?:string|null;hasMore?:boolean},mode:"replace"|"append")=>{
     const items=payload.activities||[];
-    const hasMore=Boolean(payload.hasMore&&payload.nextCursor&&items.length>=ACTIVITY_PAGE_SIZE);
+    // The button is driven solely by the API's next-page cursor. A partial
+    // first page has no second page, so it never exposes Load more activity.
+    const hasMore=Boolean(payload.hasMore&&payload.nextCursor);
     setActivitiesCursor(hasMore?(payload.nextCursor||null):null);
     setActivitiesHasMore(hasMore);
     setRemote((prev)=>{
@@ -843,6 +930,29 @@ export function BrandDetail({customerId}:{customerId:string}){
     return ()=>{cancelled=true};
   },[customerId,local,remote?.id]);
   useEffect(()=>{
+    if(!brandReady||!activitiesReady||focusedWorkInteractionId||(!requestedWorkReply&&!requestedWorkTask))return;
+    const controller=new AbortController();
+    const query=new URLSearchParams(requestedWorkReply?{replyId:requestedWorkReply}:{taskId:requestedWorkTask!});
+    fetch(`/api/brands/${encodeURIComponent(customerId)}/work-target?${query}`,{signal:controller.signal,cache:"no-store"})
+      .then(async response=>{
+        const payload=await response.json() as {activity?:BrandActivity;task?:BrandTask;error?:string};
+        if(!response.ok||!payload.activity)throw new Error(payload.error||"Work item unavailable");
+        return payload;
+      })
+      .then(({activity,task})=>{
+        if(controller.signal.aborted)return;
+        setRemote(previous=>previous&&activity?{
+          ...previous,
+          activities:previous.activities.some(item=>item.id===activity.id)?previous.activities:[...previous.activities,activity],
+          tasks:task&&!previous.tasks.some(item=>item.id===task.id)?[...previous.tasks,task]:previous.tasks,
+        }:previous);
+        if(activity)setFocusedWorkInteractionId(activity.id);
+        requestAnimationFrame(()=>document.getElementById("brand-conversations")?.scrollIntoView({block:"start",behavior:"smooth"}));
+      })
+      .catch(error=>{if(!controller.signal.aborted)toast.error(error instanceof Error?error.message:"Work item unavailable");});
+    return ()=>controller.abort();
+  },[customerId,requestedWorkReply,requestedWorkTask,brandReady,activitiesReady,focusedWorkInteractionId]);
+  useEffect(()=>{
     if(local||!can("assignOwner"))return;
     let cancelled=false;
     fetch("/api/owners")
@@ -873,7 +983,7 @@ export function BrandDetail({customerId}:{customerId:string}){
   const visible=!!c&&(local?(manager||c.ownerId===state.currentUserId):!!remote);
   usePageMetadata(brandDetailMetadata(visible&&c?{name:c.name,cp:notionBacked&&remote?remote.currentCp:c.cp,status:c.status,source:c.source}:null));
   if(remoteLoading&&!c)return <div className="grid min-h-[60vh] place-items-center gap-2 text-sm text-slate-500"><Spinner className="size-5 text-slate-400"/>Loading brand…</div>;
-  if(!visible||!c)return <div className="grid min-h-[60vh] place-items-center"><div className="text-center"><CircleAlert className="mx-auto mb-3 size-8 text-slate-300"/><h1 className="font-bold">Brand not found</h1><Button variant="link" onClick={returnToList}>{can("customers")?"Back to Brands":"Back to tasks"}</Button></div></div>;
+  if(!visible||!c)return <div className="grid min-h-[60vh] place-items-center"><div className="text-center"><CircleAlert className="mx-auto mb-3 size-8 text-slate-300"/><h1 className="font-bold">Brand not found</h1><Button variant="link" onClick={returnToList}>{backLabel}</Button></div></div>;
   const ownerChoices=notionBacked
     ? (remote?.ownerId&&!owners.some(item=>item.id===remote.ownerId)
       ? [{id:remote.ownerId,name:remote.ownerName||"Current owner"},...owners]
@@ -892,6 +1002,13 @@ export function BrandDetail({customerId}:{customerId:string}){
     setSaving(true);
     try{await patchBrand({ownerId:next==="unassigned"?null:next});toast.success("Owner assigned");}
     catch(error){toast.error(error instanceof Error?error.message:"Assign failed");}
+    finally{setSaving(false);}
+  };
+  const markAssignmentReviewed=async ()=>{
+    if(!notionBacked||saving)return;
+    setSaving(true);
+    try{await patchBrand({assignmentHandled:true});toast.success("New assignment cleared");}
+    catch(error){toast.error(error instanceof Error?error.message:"Unable to review assignment");}
     finally{setSaving(false);}
   };
   const updateFollowUpStatus=async (next:"Paused"|"Completed",note:string,followUpAt?:string)=>{
@@ -931,7 +1048,34 @@ export function BrandDetail({customerId}:{customerId:string}){
   const originMeeting=remote?.meetingNotes?.[0];
   const bombPlan=notionBacked?toBombPlan(c.id,remote?.tasks||[],remote?.activities||[]):undefined;
   const hasActiveOmniReach=notionBacked?brandHasActiveOmniReach(remote?.tasks||[]):!!(c.activeBombId||c.status==="Bomb Running");
-  const interactions=(notionBacked?toInteractions(c.id,remote?.activities||[],bombPlan?.activityInstanceIds,remote?.tasks||[],bombPlan?.bombInstances||[]):state.interactions.filter(i=>i.customerId===c.id).map(i=>({...i,cp:i.cp||c.cp}))).sort((a,b)=>compareInteractionSort(b,a));
+  const mockEmailInteraction:Interaction|undefined=mockDetailPreview&&emailSignals.length?{
+    id:emailSignals[0].conversationId||"mock-test-peter-email-thread",
+    customerId:c.id,
+    contactId:"mock-test-peter-contact",
+    type:"Message",
+    channel:"Email",
+    direction:"Outbound",
+    title:emailSignals[0].subject||"Quick check on the FridgeChannel sample",
+    content:"Hi Peter, just checking whether you had a chance to review the FridgeChannel sample. I would be glad to answer any questions.",
+    createdAt:emailSignals[0].occurredAt,
+    recordedAt:emailSignals[0].occurredAt,
+    creationMethod:"Manual",
+    threadId:emailSignals[0].conversationId,
+    messageId:emailSignals[0].messageId,
+    cp:"CP2",
+    taskStatus:"Sent",
+  }:undefined;
+  const interactions=(notionBacked?toInteractions(c.id,remote?.activities||[],bombPlan?.activityInstanceIds,remote?.tasks||[],bombPlan?.bombInstances||[]):mockEmailInteraction?[mockEmailInteraction]:state.interactions.filter(i=>i.customerId===c.id).map(i=>({...i,cp:i.cp||c.cp}))).sort((a,b)=>compareInteractionSort(b,a));
+  const requestedEmail=requestedSignal?.type==="email"?interactions.find(item=>emailSignalMatchesInteraction(requestedSignal,item)):undefined;
+  const focusedEmail=(focusedEmailInteractionId?interactions.find(item=>item.id===focusedEmailInteractionId):undefined)||requestedEmail;
+  const focusedWork=focusedWorkInteractionId?interactions.find(item=>item.id===focusedWorkInteractionId):undefined;
+  const openEmailSignal=(event:SignalEvent)=>{
+    const target=interactions.find(item=>emailSignalMatchesInteraction(event,item));
+    if(!target)return;
+    setFocusedEmailInteractionId(target.id);
+    setDetailsTab(null);
+    requestAnimationFrame(()=>document.getElementById("brand-conversations")?.scrollIntoView({block:"start",behavior:"smooth"}));
+  };
   const partnershipContext=c.partnershipContext;
   const summary=notionBacked
     ? currentCpOption(remote?.currentCp).definition
@@ -970,24 +1114,16 @@ export function BrandDetail({customerId}:{customerId:string}){
   };
   const markReplyRead = async (activityId: string) => {
     if (!notionBacked) return;
-    const response = await fetch(`/api/brands/${c.id}/activities/${activityId}`, {
-      method: "PATCH",
+    const response = await fetch(`/api/brands/${c.id}/mark-reply-handled`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId: activityId }),
     });
     const payload = (await response.json()) as { error?: string };
     if (!response.ok) throw new Error(payload.error || "Unable to mark reply as read");
-    setRemote((previous) => previous
-      ? {
-          ...previous,
-          activities: previous.activities.map((item) =>
-            item.id === activityId ? { ...item, replyStatus: "Replied" } : item,
-          ),
-        }
-      : previous);
-    await fetchActivitiesPage(null, "replace");
+    await Promise.all([refreshRemote(), fetchActivitiesPage(null, "replace")]);
   };
   const needsReplyCount=interactions.filter(item=>item.direction==="Inbound"&&item.replyStatus==="Needs Reply").length;
   const callReviewCount=(remote?.tasks||[]).filter(task=>task.channel==="Phone"&&task.callReviewStatus==="Awaiting Review").length;
-  const overdueCount=(remote?.activities||[]).filter(item=>item.direction==="Inbound"&&item.replyStatus==="Needs Reply"&&item.replyDueAt&&Date.parse(item.replyDueAt)<Date.now()).length;
+  const overdueCount=(remote?.activities||[]).filter(item=>item.direction==="Inbound"&&item.replyStatus==="Needs Reply"&&item.replyDueAt&&Date.parse(item.replyDueAt)<currentTimeMs).length;
   const focusAttention=(item?:Interaction,channel:Channel="Email")=>{
     setAttentionTarget({cp:item?.cp||currentCp,channel:item?.channel||channel});
     document.getElementById("brand-conversations")?.scrollIntoView({block:"start",behavior:"smooth"});
@@ -998,11 +1134,12 @@ export function BrandDetail({customerId}:{customerId:string}){
     {id:"details" as const,label:"Brand details",icon:FileText},
     {id:"contacts" as const,label:"Contacts",icon:ContactRound},
     {id:"notes" as const,label:"Notes",icon:StickyNote},
+    {id:"signalHistory" as const,label:"Signal History",icon:History},
   ];
   return <div className="w-full min-w-0 lg:flex lg:h-[calc(100vh-4rem)] lg:flex-col">
     <div className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white lg:min-h-0 lg:flex-1">
     <header className="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-white px-4 py-3">
-      <Button type="button" variant="ghost" size="icon" aria-label={can("customers")?"Back to Brands":"Back to ReplyTask"} onClick={returnToList}><ArrowLeft className="size-4"/></Button>
+      <Button type="button" variant="ghost" size="icon" aria-label={backLabel} onClick={returnToList}><ArrowLeft className="size-4"/></Button>
       <Avatar className="size-9"><AvatarFallback className="bg-violet-100 text-xs font-bold text-violet-700">{c.initials}</AvatarFallback></Avatar>
       <div className="flex min-w-0 flex-1 items-center gap-2"><h1 className="min-w-0 truncate text-lg font-semibold text-slate-950">{c.name}</h1>{notionBacked&&remote?.followupExhibition&&(originMeeting?<a href={originMeeting.url} target="_blank" rel="noreferrer" className="hidden shrink-0 rounded-full bg-violet-100 px-2 py-1 text-xs font-medium text-violet-800 hover:bg-violet-200 lg:inline-flex">{remote.followupExhibition}<ExternalLink className="ml-1 size-3"/></a>:<span className="hidden shrink-0 rounded-full bg-violet-100 px-2 py-1 text-xs font-medium text-violet-800 lg:inline-flex">{remote.followupExhibition}</span>)}
         <Button type="button" size="sm" variant="outline" className="min-w-0 max-w-[22rem] shrink" disabled={!brandReady||!can("changeCP")} onClick={()=>setCP(true)} aria-label={`Current ${currentCpDetails.name}: ${currentCpDetails.fullName}. Change CP`}>
@@ -1012,8 +1149,8 @@ export function BrandDetail({customerId}:{customerId:string}){
       <div className="ml-auto flex items-center gap-1">
         {can("reply")&&<TooltipProvider><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-9" aria-label="New message" disabled={!brandReady||(notionBacked&&!c.contacts.length)} onClick={()=>setReply(true)}><Send className="size-4"/></Button></TooltipTrigger><TooltipContent>New message</TooltipContent></Tooltip></TooltipProvider>}
         {can("launch")&&<LaunchOmniReachButton iconOnly className="size-9" disabled={!brandReady||hasActiveOmniReach} disabledReason={!brandReady?"Loading brand…":ACTIVE_OMNIREACH_BLOCK_REASON} onClick={()=>setLaunch(true)}/>}
-        {notionBacked&&<TooltipProvider><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-9" aria-label="Follow up Meeting" onClick={()=>setMeetingHistory(true)}><History className="size-4"/></Button></TooltipTrigger><TooltipContent>Follow up Meeting</TooltipContent></Tooltip></TooltipProvider>}
-        {notionBacked&&can("editBrand")&&<DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="size-9" aria-label="More follow-up actions" title="More follow-up actions" disabled={saving}><MoreHorizontal className="size-4"/></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem disabled={!brandReady||creatingMeeting} onSelect={()=>void createMeeting()}><Plus className="mr-2 size-4"/>Create meeting</DropdownMenuItem><DropdownMenuItem disabled={saving||remote?.status==="Paused"||remote?.status==="Completed"} onSelect={()=>openFollowUpAction("Paused")}><CirclePause className="mr-2 size-4"/>Pause FollowUp</DropdownMenuItem><DropdownMenuItem disabled={saving||remote?.status==="Completed"} onSelect={()=>openFollowUpAction("Completed")}><CircleCheck className="mr-2 size-4"/>Complete FollowUp</DropdownMenuItem></DropdownMenuContent></DropdownMenu>}
+        {(notionBacked||mockDetailPreview)&&<TooltipProvider><Tooltip><TooltipTrigger asChild><span><Button variant="ghost" size="icon" className="size-9" aria-label="Follow up Meeting" disabled={!notionBacked} onClick={()=>setMeetingHistory(true)}><History className="size-4"/></Button></span></TooltipTrigger><TooltipContent>{notionBacked?"Follow up Meeting":"Unavailable in mock preview"}</TooltipContent></Tooltip></TooltipProvider>}
+        {(notionBacked||mockDetailPreview)&&can("editBrand")&&(notionBacked?<DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="size-9" aria-label="More follow-up actions" title="More follow-up actions" disabled={saving}><MoreHorizontal className="size-4"/></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem disabled={!brandReady||creatingMeeting} onSelect={()=>void createMeeting()}><Plus className="mr-2 size-4"/>Create meeting</DropdownMenuItem><DropdownMenuItem disabled={saving||remote?.status==="Paused"||remote?.status==="Completed"} onSelect={()=>openFollowUpAction("Paused")}><CirclePause className="mr-2 size-4"/>Pause FollowUp</DropdownMenuItem><DropdownMenuItem disabled={saving||remote?.status==="Completed"} onSelect={()=>openFollowUpAction("Completed")}><CircleCheck className="mr-2 size-4"/>Complete FollowUp</DropdownMenuItem></DropdownMenuContent></DropdownMenu>:<TooltipProvider><Tooltip><TooltipTrigger asChild><span><Button variant="ghost" size="icon" className="size-9" aria-label="More follow-up actions" disabled><MoreHorizontal className="size-4"/></Button></span></TooltipTrigger><TooltipContent>Unavailable in mock preview</TooltipContent></Tooltip></TooltipProvider>)}
       </div>
     </header>
     {(needsReplyCount>0||callReviewCount>0||overdueCount>0)&&<div role="status" className="flex flex-wrap items-center gap-2 border-b border-rose-200 bg-rose-50 px-4 py-2.5 text-xs font-semibold text-rose-800">
@@ -1032,38 +1169,37 @@ export function BrandDetail({customerId}:{customerId:string}){
       <div className={detailsTab==="details"?"min-w-0":"hidden"}>
         <div className="min-w-0">
           <h3 className="text-base font-semibold tracking-tight">{c.name}</h3>
-          <section className="mt-4 border-l-2 border-violet-500 bg-violet-50/60 px-3 py-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-violet-700">Relationship origin</p>
-            <div className="mt-2 flex flex-wrap items-center gap-3"><BrandMeetingNoteLink notes={notionBacked?remote?.meetingNotes||[]:null} fallback={summary} customerId={c.id} sampleType={remote?.channelType||formatIcpGroupLabel(remote?.icpGroup)} showSample={false}/></div>
-          </section>
-          <section className="mt-4 pb-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Brand profile</p>
+          {(notionBacked?(!!remote?.meetingNotes.length||!!remote?.followupExhibition):!!c.source)&&<section className="mt-4">
+            <p className="text-xs font-semibold text-slate-500">Relationship origin</p>
+            <div className="mt-2 flex flex-wrap items-center gap-3">{notionBacked&&remote?.meetingNotes.length?<BrandMeetingNoteLink notes={remote.meetingNotes} fallback="" customerId={c.id} sampleType={remote?.channelType||formatIcpGroupLabel(remote?.icpGroup)} showSample={false}/>:<p className="text-sm font-medium text-slate-700">{notionBacked?remote?.followupExhibition:c.source}</p>}</div>
+          </section>}
+          <section className="border-t border-slate-100 py-4">
+            <p className="text-xs font-semibold text-slate-500">Brand profile</p>
             <div className="mt-2 flex flex-wrap gap-2">
               {state.currentRole!=="AccountManager"&&(notionBacked&&remote?.status?(can("editBrand")?<BadgeSelect value={remote.status} options={FOLLOW_UP_STATUSES} disabled={saving||!brandReady} onChange={value=>{if(value==="Paused"||value==="Completed"){openFollowUpAction(value);return;}void patchBrand({status:value}).then(()=>toast.success("Status updated")).catch(error=>toast.error(error instanceof Error?error.message:"Update failed"));}}/>:<Status value={remote.status}/>):(c.status?<Status value={c.status}/>:null))}
               {notionBacked && can("editBrand") ? (
-                <BadgeSelect value={remote?.handlingMode || ""} options={HANDLING_MODES} disabled={saving || !brandReady} onChange={(value) => { void patchBrand({ handlingMode: value }).then(() => toast.success("Handling Mode updated")).catch((error) => toast.error(error instanceof Error ? error.message : "Update failed")); }} />
-              ) : notionBacked && remote?.handlingMode ? <Status value={remote.handlingMode} /> : null}
-              {notionBacked && can("editBrand") ? (
                 <ChannelTypeSelect value={(remote?.channelType || "DTC") as ChannelType} disabled={saving || !brandReady} onChange={async (value) => { try { await patchBrand({ channelType: value }); toast.success("Channel Type updated"); } catch (error) { toast.error(error instanceof Error ? error.message : "Update failed"); throw error; } }} />
               ) : notionBacked && remote?.channelType ? <Status value={remote.channelType} /> : null}
-              {notionBacked&&<BrandMeetingNoteLink notes={remote?.meetingNotes||[]} fallback={summary} customerId={c.id} sampleType={remote?.channelType||formatIcpGroupLabel(remote?.icpGroup)} showMeetingNote={false} compactSample/>}
               {notionBacked && !brandReady ? <span className="inline-flex items-center gap-1 text-xs font-medium text-slate-400"><Spinner className="size-3" />Loading details…</span> : null}
             </div>
+            {notionBacked&&<BrandProfileFields profiles={sampleProfiles} channelType={remote?.channelType||formatIcpGroupLabel(remote?.icpGroup)} amazon={remote?.amazonSampleProduct}/>}
+            {notionBacked&&<a href={`/customers/${encodeURIComponent(c.id)}/sample${searchParams.get("mock")==="1"?"?mock=1":""}`} className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-violet-700 hover:underline">Edit sample profile <ChevronRight className="size-3"/></a>}
           </section>
           <section className="border-t border-slate-100 py-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Brand summary</p>
+            <p className="text-xs font-semibold text-slate-500">Brand summary</p>
             {brandReady ? <>
               <p className="mt-2 text-sm leading-6 text-slate-600">{summary}</p>
               {notionBacked && displayNote(remote?.notes) && <p className="mt-2 text-sm leading-6 text-slate-600">{displayNote(remote?.notes)}</p>}
             </> : <p className="mt-2 text-sm text-slate-400">Loading brand details…</p>}
           </section>
           <section className="border-t border-slate-100 py-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Follow-up details</p>
+            <p className="text-xs font-semibold text-slate-500">Follow-up details</p>
             <dl className="mt-2 space-y-2 text-sm">
               <div className="flex items-start justify-between gap-3"><dt className="shrink-0 text-slate-500">Account Manager</dt><dd className="text-right text-slate-700">{remote?.ownerName || state.users.find((user) => user.id === c.ownerId)?.name || "Unassigned"}</dd></div>
               {!notionBacked && <div className="flex items-start justify-between gap-3"><dt className="shrink-0 text-slate-500">Source</dt><dd className="text-right text-slate-700">{c.source}</dd></div>}
             </dl>
             {can("assignOwner") && <div className="mt-3 flex flex-wrap items-center gap-2"><Select value={ownerDraft ?? c.ownerId ?? "unassigned"} onValueChange={setOwnerDraft} disabled={!brandReady}><SelectTrigger size="sm" className="w-44"><SelectValue placeholder="Select owner" /></SelectTrigger><SelectContent><SelectItem value="unassigned">Unassigned</SelectItem>{ownerChoices.map((user) => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}</SelectContent></Select><Button size="sm" disabled={saving || !brandReady || (ownerDraft ?? c.ownerId ?? "unassigned") === (c.ownerId || "unassigned")} onClick={() => void handleAssign()}>Assign</Button></div>}
+            {notionBacked && state.currentRole === "AccountManager" && remote?.ownerId === state.currentUserId && remote.ownerAssignedAt && !remote.ownerAssignmentHandledAt && <Button variant="outline" size="sm" className="mt-3" disabled={saving || !brandReady} onClick={() => void markAssignmentReviewed()}><UserCheck className="mr-2 size-4" />Mark assignment reviewed</Button>}
           </section>
         </div>
       </div>
@@ -1077,27 +1213,33 @@ export function BrandDetail({customerId}:{customerId:string}){
         onContactsChange={notionBacked?(contacts)=>{
           setRemote(prev=>prev?{...prev,contacts}:prev);
         }:undefined}
+        linkedinEvents={(brandSignals?.events||[]).filter(event=>event.type==="linkedin"&&!!event.contactId)}
+        signalReadIds={signalReadIds}
+        onReadSignals={readSignalEvents}
       /></div>
       <div className={detailsTab==="notes"?"space-y-3":"hidden"}>
         <BrandNote key={c.id} customerId={c.id} variant="panel" disabled={notionBacked&&!brandReady} value={notionBacked?remote?.humanNotes??"":undefined} onSave={notionBacked?async (next)=>{await patchBrand({humanNotes:next});}:undefined}/>
         {notionBacked&&displayNote(remote?.notes)&&<p className="text-sm leading-6 text-slate-600">{displayNote(remote?.notes)}</p>}
         {partnershipContext&&<div className="rounded-xl bg-emerald-50 p-4"><h3 className="font-semibold text-emerald-950">{partnershipContext.headline}</h3><p className="mt-2 text-sm text-emerald-900">{partnershipContext.summary}</p>{partnershipContext.signals.map(signal=><p key={signal} className="mt-2 text-xs text-emerald-800">{signal}</p>)}<p className="mt-3 text-[11px] text-emerald-700">Updated {dateOnly(partnershipContext.updatedAt)}</p></div>}
       </div>
+      <div className={detailsTab==="signalHistory"?"min-w-0":"hidden"}>
+        <SignalHistoryPanel events={brandSignals?.events||[]} readIds={signalReadIds}/>
+      </div>
       </section>}
     </aside>
-    <section id="brand-conversations" aria-label="Brand communication" className="order-1 flex min-w-0 flex-col overflow-hidden bg-white lg:min-h-0"><div className="flex items-center justify-between border-b border-slate-100 px-5 py-3"><h2 className="flex items-center gap-2 font-semibold"><MessageSquareText className="size-4 text-violet-600"/>Conversations</h2><span className="text-xs text-slate-500">{interactions.length} activities</span></div><div className="min-h-[50vh] max-h-[calc(100vh-290px)] min-w-0 overflow-y-auto lg:min-h-0 lg:max-h-none lg:flex-1">
-    <InteractionFeed key={`${c.id}-${currentCp}-${attentionTarget?.cp||""}-${attentionTarget?.channel||""}`} customerId={c.id} currentCp={currentCp} initialCp={attentionTarget?.cp} initialChannel={attentionTarget?.channel} showAllChannels showCpSelector={false} cpGoals={notionBacked?toCpGoals(remoteCps):undefined} interactions={interactions} contacts={c.contacts} bombInstances={bombPlan?.bombInstances} actions={bombPlan?.actions} loading={activityLoading} canReviewCalls={notionBacked&&can("reply")} tasks={remote?.tasks||[]} onMarkReplyRead={notionBacked&&can("reply")?markReplyRead:undefined} onRefreshQuo={notionBacked?refreshQuoForBrand:undefined} quoRefreshingCallId={quoRefreshingCallId} onPersistCallReview={notionBacked?async (taskId,status,reviewReason,reviewNote)=>{
-    const response=await fetch(`/api/tasks/${taskId}/call-review`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status,reviewReason,reviewNote})});
+    <div className="order-1 flex min-w-0 flex-col overflow-hidden bg-white lg:min-h-0"><ImportantSignalsPanel events={brandSignals?.events || []} readIds={signalReadIds} onRead={readSignalEvents} onOpenEmailSignal={openEmailSignal}/><section id="brand-conversations" aria-label="Brand communication" className="flex min-w-0 flex-col overflow-hidden lg:min-h-0 lg:flex-1"><div className="flex items-center justify-between border-b border-slate-100 px-5 py-3"><h2 className="flex items-center gap-2 font-semibold"><MessageSquareText className="size-4 text-violet-600"/>Conversations</h2><span className="text-xs text-slate-500">{interactions.length} activities</span></div><div className="min-h-[50vh] max-h-[calc(100vh-290px)] min-w-0 overflow-y-auto lg:min-h-0 lg:max-h-none lg:flex-1">
+    <InteractionFeed key={`${c.id}-${currentCp}-${attentionTarget?.cp||""}-${attentionTarget?.channel||""}-${focusedWork?.id||focusedEmail?.id||""}`} customerId={c.id} currentCp={currentCp} initialCp={focusedWork?.cp||focusedEmail?.cp||attentionTarget?.cp} initialChannel={focusedWork?.channel||(focusedEmail?"Email":attentionTarget?.channel)} focusedInteractionId={focusedWork?.id||focusedEmail?.id} showAllChannels showCpSelector={false} cpGoals={notionBacked?toCpGoals(remoteCps):undefined} interactions={interactions} contacts={c.contacts} bombInstances={bombPlan?.bombInstances} actions={bombPlan?.actions} loading={activityLoading} canReviewCalls={notionBacked&&can("reply")} tasks={remote?.tasks||[]} onMarkReplyRead={notionBacked&&can("reply")?markReplyRead:undefined} onRefreshQuo={notionBacked?refreshQuoForBrand:undefined} quoRefreshingCallId={quoRefreshingCallId} onPersistCallReview={notionBacked?async (taskId,status,reviewReason,reviewNote,resolution)=>{
+    const response=await fetch(`/api/tasks/${taskId}/call-review`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status,reviewReason,reviewNote,resolution})});
     const payload=await response.json() as {error?:string};
     if(!response.ok)throw new Error(payload.error||"Unable to save call review");
     await refreshBrandAndActivities();
   }:undefined} onCancelBomb={async instance=>{if(!notionBacked){const result=cancelBomb(c.id,instance.id);if(!result.ok)throw new Error(result.message);toast.success(result.message);return;}const response=await fetch(`/api/brands/${c.id}/bombs/${instance.templateId}/cancel`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId:instance.targetContactId,omniReachRunId:instance.id.startsWith("run:")?instance.id.slice(4):undefined})});const payload=await response.json() as {cancelledTaskIds?:string[];error?:string};if(!response.ok)throw new Error(payload.error||"Unable to stop OmniReach");const cancelled=new Set(payload.cancelledTaskIds||[]);if(cancelled.size){setRemote(prev=>prev?{...prev,tasks:prev.tasks.map(task=>cancelled.has(task.id)?{...task,status:"Cancelled"}:task),handlingMode:prev.handlingMode==="Human"?prev.handlingMode:"Human"}:prev);}toast.success(`${payload.cancelledTaskIds?.length||0} remaining task${payload.cancelledTaskIds?.length===1?"":"s"} cancelled`);void Promise.all([refreshRemote(),fetchActivitiesPage(null,"replace")]);}} onCancelPending={notionBacked&&can("reply")?async taskId=>{const response=await fetch(`/api/tasks/${taskId}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({status:"Cancelled"})});const payload=await response.json() as {error?:string};if(!response.ok)throw new Error(payload.error||"Unable to cancel");setRemote(prev=>prev?{...prev,tasks:prev.tasks.map(task=>task.id===taskId?{...task,status:"Cancelled"}:task)}:prev);toast.success("Pending message cancelled");void Promise.all([refreshRemote(),fetchActivitiesPage(null,"replace")]);}:undefined} onSend={notionBacked?sendBrandMessage:undefined}/>
-  {notionBacked&&activitiesHasMore&&activitiesCursor&&(remote?.activities.length||0)>=ACTIVITY_PAGE_SIZE?<div className="border-t border-slate-100 p-3"><Button variant="outline" size="sm" className="w-full" disabled={activitiesLoadingMore||activitiesLoading} onClick={loadMoreActivities}>{activitiesLoadingMore?<span className="inline-flex items-center gap-2"><Spinner className="size-3.5"/>Loading…</span>:"Load more activity"}</Button></div>:null}
+  {notionBacked&&activitiesHasMore&&activitiesCursor?<div className="border-t border-slate-100 p-3"><Button variant="outline" size="sm" className="w-full" disabled={activitiesLoadingMore||activitiesLoading} onClick={loadMoreActivities}>{activitiesLoadingMore?<span className="inline-flex items-center gap-2"><Spinner className="size-3.5"/>Loading…</span>:"Load more activity"}</Button></div>:null}
   </div>
   </section></div></div>
   <LaunchBombDialog customerId={c.id} open={launch} onOpenChange={setLaunch} contacts={notionBacked?c.contacts:undefined} currentCp={notionBacked&&remote?remote.currentCp:undefined} companyName={c.name} productDescription={notionBacked?remote?.productDescription:undefined} matchedCategory={notionBacked?remote?.matchedCategory:undefined} followupExhibition={notionBacked?remote?.followupExhibition:undefined} previewOnly={notionBacked} hasActiveOmniReach={hasActiveOmniReach} onLaunched={notionBacked?()=>{void refreshBrandAndActivities()}:undefined}/><ReplyDialog customerId={c.id} open={reply} onOpenChange={setReply} contacts={notionBacked?c.contacts:undefined} onSend={notionBacked?async (contactId,channel,content,object,deliveryMode,scheduledAt,attachments,cc)=>{
     await sendBrandMessage(contactId, channel, content, undefined, undefined, object, deliveryMode, scheduledAt, attachments, cc);
-  }:undefined}/><ChangeCPDialog customerId={c.id} open={cp} onOpenChange={setCP} currentCp={notionBacked&&remote?remote.currentCp:undefined} cps={notionBacked?remoteCps:undefined} onSave={notionBacked?async (currentCpId,evidence,note)=>{await patchBrand({currentCpId,evidence,note});}:undefined}/><ContactDialog customerId={c.id} open={contact} onOpenChange={setContact} notionBacked={notionBacked} onCreated={notionBacked?async ()=>{await refreshRemote();}:undefined}/>{notionBacked?<MeetingHistoryDialog open={meetingHistory} onOpenChange={setMeetingHistory} links={remote?.aiMeetingLinks||[]}/>:null}<Dialog open={followUpAction!==null} onOpenChange={open=>{if(!open){setFollowUpAction(null);setFollowUpNote("");setFollowUpAt("");}}}><DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle>{followUpAction==="Paused"?"Pause FollowUp":"Complete FollowUp"}</DialogTitle><DialogDescription>Record the customer’s explicit reply and the reason for this outcome. This note is required.</DialogDescription></DialogHeader><Textarea value={followUpNote} onChange={event=>setFollowUpNote(event.target.value)} placeholder={followUpAction==="Paused"?"For example: The customer asked us to reconnect after their budget review in January.":"For example: The customer confirmed they do not wish to continue."} className="min-h-32" autoFocus/>{followUpAction==="Paused"&&<div className="space-y-2"><label htmlFor="next-follow-up-at" className="text-sm font-medium text-slate-700">Next contact date <span className="font-normal text-slate-500">(optional)</span></label><Input id="next-follow-up-at" type="datetime-local" value={followUpAt} onChange={event=>setFollowUpAt(event.target.value)}/><p className="text-xs text-slate-500">On this date, Admin receives a reminder to review and assign the follow-up.</p></div>}<DialogFooter><Button variant="outline" onClick={()=>{setFollowUpAction(null);setFollowUpNote("");setFollowUpAt("");}}>Cancel</Button><Button disabled={saving||!followUpNote.trim()||!followUpAction} onClick={()=>{if(!followUpAction)return;void (async ()=>{const saved=await updateFollowUpStatus(followUpAction,followUpNote.trim(),followUpAt);if(saved){setFollowUpAction(null);setFollowUpNote("");setFollowUpAt("");}})();}}>{followUpAction==="Paused"?"Pause FollowUp":"Complete FollowUp"}</Button></DialogFooter></DialogContent></Dialog></div>;
+  }:undefined}/><ChangeCPDialog customerId={c.id} open={cp} onOpenChange={setCP} currentCp={notionBacked&&remote?remote.currentCp:undefined} cps={notionBacked?remoteCps:undefined} onSave={notionBacked?async (currentCpId,evidence,note)=>{await patchBrand({currentCpId,evidence,note});}:undefined}/><ContactDialog customerId={c.id} open={contact} onOpenChange={setContact} notionBacked={notionBacked} onCreated={notionBacked?async ()=>{await refreshRemote();}:undefined}/>{notionBacked?<MeetingHistoryDialog open={meetingHistory} onOpenChange={setMeetingHistory} links={remote?.aiMeetingLinks||[]}/>:null}<Dialog open={followUpAction!==null} onOpenChange={open=>{if(!open){setFollowUpAction(null);setFollowUpNote("");setFollowUpAt("");}}}><DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle>{followUpAction==="Paused"?"Pause FollowUp":"Complete FollowUp"}</DialogTitle><DialogDescription>Record the customer’s explicit reply and the reason for this outcome. This note is required.</DialogDescription></DialogHeader><Textarea value={followUpNote} onChange={event=>setFollowUpNote(event.target.value)} placeholder={followUpAction==="Paused"?"For example: The customer asked us to reconnect after their budget review in January.":"For example: The customer confirmed they do not wish to continue."} className="min-h-32" autoFocus/>{followUpAction==="Paused"&&<div className="space-y-2"><label htmlFor="next-follow-up-at" className="text-sm font-medium text-slate-700">Next contact date <span className="font-normal text-slate-500">(optional)</span></label><Input id="next-follow-up-at" type="datetime-local" value={followUpAt} onChange={event=>setFollowUpAt(event.target.value)}/><p className="text-xs text-slate-500">On this date, Admin receives a reminder to review and assign the follow-up.</p></div>}<DialogFooter><Button variant="outline" onClick={()=>{setFollowUpAction(null);setFollowUpNote("");setFollowUpAt("");}}>Cancel</Button><Button disabled={saving||!followUpNote.trim()||!followUpAction} onClick={()=>{if(!followUpAction)return;void (async ()=>{const saved=await updateFollowUpStatus(followUpAction,followUpNote.trim(),followUpAt);if(saved){setFollowUpAction(null);setFollowUpNote("");setFollowUpAt("");}})();}}>{followUpAction==="Paused"?"Pause FollowUp":"Complete FollowUp"}</Button></DialogFooter></DialogContent></Dialog></div></div>;
 }
 
 type DetailContact = {
@@ -1191,6 +1333,9 @@ function BrandContactList({
   onAdd,
   loading,
   onContactsChange,
+  linkedinEvents=[],
+  signalReadIds=[],
+  onReadSignals=()=>{},
 }: {
   brandId: string;
   contacts: DetailContact[];
@@ -1199,6 +1344,9 @@ function BrandContactList({
   onAdd: () => void;
   loading?: boolean;
   onContactsChange?: (contacts: BrandContact[]) => void;
+  linkedinEvents?: SignalEvent[];
+  signalReadIds?: string[];
+  onReadSignals?: (ids: string[]) => void;
 }) {
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [enrichingId, setEnrichingId] = useState<string | null>(null);
@@ -1468,6 +1616,7 @@ function BrandContactList({
                 {previewNote && (
                   <p className="mt-1 pl-5 text-[11px] text-emerald-700">{previewNote}</p>
                 )}
+                <LinkedInUpdates events={linkedinEvents.filter(event=>event.contactId===contact.id||event.contactId===contact.keyPersonId)} readIds={signalReadIds} onRead={onReadSignals} id={`contact-linkedin-${contact.id}`}/>
                 {expanded && (
                   <div className="mt-2 grid gap-1.5">
                     {contact.title && <div className="text-xs text-slate-500">{contact.title}</div>}

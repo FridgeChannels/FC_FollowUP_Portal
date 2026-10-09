@@ -184,6 +184,10 @@ export type BrandListItem = {
   ownerId: string | null;
   ownerName: string | null;
   ownerEmail: string | null;
+  /** Most recent assignment to the current Account Manager. */
+  ownerAssignedAt?: string | null;
+  /** The current assignment has been explicitly reviewed by its Account Manager. */
+  ownerAssignmentHandledAt?: string | null;
   followupExhibition?: string | null;
   /** Follow-up ClientDB `Human Notes` — Portal Add Note content. */
   humanNotes?: string | null;

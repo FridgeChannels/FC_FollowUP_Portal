@@ -109,10 +109,10 @@ function fromNotionTask(task: BrandTask): UnifiedTask {
 
 const show = (result: { ok: boolean; message: string }) => result.ok ? toast.success(result.message) : toast.error(result.message);
 const isDone = (task: UnifiedTask) => isClosedTaskStatus(task.status);
-type CallReviewView = Pick<CallReviewMetadata, "status" | "recallRequested"> & { taskId?: string | null };
-const reviewFromNotion = (task: { id: string; callReviewStatus?: CallReviewStatus | null }): CallReviewView | undefined =>
+type CallReviewView = Pick<CallReviewMetadata, "status" | "recallRequested" | "resolution"> & { taskId?: string | null };
+const reviewFromNotion = (task: { id: string; callReviewStatus?: CallReviewStatus | null; callReviewHistory?: CallReviewRound[] }): CallReviewView | undefined =>
   task.callReviewStatus
-    ? { taskId: task.id, status: task.callReviewStatus, recallRequested: task.callReviewStatus === "Unqualified" }
+    ? { taskId: task.id, status: task.callReviewStatus, resolution: [...(task.callReviewHistory || [])].reverse().find((round) => round.status !== "Archived")?.resolution, recallRequested: task.callReviewStatus === "Unqualified" && [...(task.callReviewHistory || [])].reverse().find((round) => round.status !== "Archived")?.resolution !== "Stop task" }
     : undefined;
 const taskWithCallReview = (task: UnifiedTask, review?: CallReviewView) => review ? { ...task, status: taskStatusForCallReview(task.status, review) } : task;
 const CallReviewBadge = ({ review }: { review?: CallReviewView }) => {
@@ -383,17 +383,17 @@ export function TasksPage({ selectedId, selectedCallId, returnToDashboard = fals
       <h1 className="text-2xl font-bold tracking-tight">ReplyTask</h1>
     </div>
 
-    <div className="mb-4 flex flex-col gap-3 rounded-2xl bg-white p-3 lg:flex-row lg:items-center">
-      <div className="relative min-w-56 flex-1 lg:max-w-sm"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400"/><Input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search brand or task…" className="pl-9"/></div>
-      {state.currentRole !== "Caller" && <Select value={type} onValueChange={value => setType(value as TaskType | "All")}><SelectTrigger className="w-full lg:w-40"><SelectValue/></SelectTrigger><SelectContent>{["All", "Call", "Reply"].map(value => <SelectItem key={value} value={value}>{value === "All" ? "All types" : value}</SelectItem>)}</SelectContent></Select>}
-      {manager && <Select value={assignee} onValueChange={setAssignee}><SelectTrigger className="w-full lg:w-44"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">All AccountManagers</SelectItem><SelectItem value="unassigned">Unassigned</SelectItem>{ownerOptions.map(user => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}</SelectContent></Select>}
-      {isCaller && <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto">
+    <div className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-2 py-1">
+      <div className="relative w-44 shrink-0"><Search className="absolute left-0 top-1/2 size-3.5 -translate-y-1/2 text-slate-400"/><Input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search brand or task…" className="h-8 rounded-none border-0 bg-transparent px-0 pl-6 text-xs shadow-none focus-visible:ring-2"/></div>
+      {state.currentRole !== "Caller" && <Select value={type} onValueChange={value => setType(value as TaskType | "All")}><SelectTrigger className="h-8 w-auto border-0 bg-transparent px-0 text-xs shadow-none hover:bg-transparent focus-visible:ring-2"><SelectValue/></SelectTrigger><SelectContent>{["All", "Call", "Reply"].map(value => <SelectItem key={value} value={value}>{value === "All" ? "All types" : value}</SelectItem>)}</SelectContent></Select>}
+      {manager && <Select value={assignee} onValueChange={setAssignee}><SelectTrigger className="h-8 w-auto border-0 bg-transparent px-0 text-xs shadow-none hover:bg-transparent focus-visible:ring-2"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">All AccountManagers</SelectItem><SelectItem value="unassigned">Unassigned</SelectItem>{ownerOptions.map(user => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}</SelectContent></Select>}
+      {isCaller && <div className="flex items-center gap-3">
         <Popover>
           <PopoverTrigger asChild>
             <Button
               type="button"
               variant="outline"
-              className={`w-full justify-start font-normal lg:w-[16.5rem] ${hasDueDateFilter ? "" : "text-muted-foreground"}`}
+              className={`h-8 w-auto justify-start border-0 bg-transparent px-0 text-xs font-normal shadow-none hover:bg-transparent focus-visible:ring-2 ${hasDueDateFilter ? "" : "text-muted-foreground"}`}
             >
               <CalendarClock className="size-4 text-slate-400"/>
               {dueDateRangeLabel(dueFrom, dueTo)}
@@ -429,7 +429,7 @@ export function TasksPage({ selectedId, selectedCallId, returnToDashboard = fals
           </Button>
         ) : null}
       </div>}
-      <Select value={status} onValueChange={value => setStatus(value as typeof status)}><SelectTrigger className="w-full lg:w-36"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="Open">Open</SelectItem><SelectItem value="Completed">Completed</SelectItem><SelectItem value="All">All statuses</SelectItem></SelectContent></Select>
+      <Select value={status} onValueChange={value => setStatus(value as typeof status)}><SelectTrigger className="h-8 w-auto border-0 bg-transparent px-0 text-xs shadow-none hover:bg-transparent focus-visible:ring-2"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="Open">Open</SelectItem><SelectItem value="Completed">Completed</SelectItem><SelectItem value="All">All statuses</SelectItem></SelectContent></Select>
     </div>
 
     <div className="overflow-hidden rounded-2xl bg-white">
@@ -824,7 +824,7 @@ function TaskDetail({ task, selectedCallId, returnToDashboard = false }: { task:
   ).current;
   const hasConnectedCall = currentRoundCalls.some((item) => item.callResult === "Connected");
   const awaitingAccountManagerReview = liveTask.callReviewStatus === "Awaiting Review";
-  const recalledByAccountManager = liveTask.callReviewStatus === "Unqualified";
+  const recalledByAccountManager = liveTask.callReviewStatus === "Unqualified" && !isDone(liveTask.status);
   const canSubmitCallerReview = callerPhoneOnly
     && !!task.remote
     && liveTask.type === "Call"

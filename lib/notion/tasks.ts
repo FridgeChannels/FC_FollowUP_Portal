@@ -1083,7 +1083,7 @@ export async function listFollowupTasks(
 export type FollowupTaskSignal = Pick<
   BrandTask,
   "id" | "brandId" | "contactId" | "channel" | "status" | "callReviewStatus"
->;
+> & { createdAt: string | null };
 
 /** Property-only task rows used by the Brands list interaction summary. */
 export async function listFollowupTaskSignalsByBrands(
@@ -1110,6 +1110,7 @@ export async function listFollowupTaskSignalsByBrands(
       callReviewStatus: asCallReviewStatus(
         propertyText(properties["Call Review Status"]),
       ),
+      createdAt: page.created_time || null,
     };
   });
 }

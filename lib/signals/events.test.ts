@@ -15,12 +15,16 @@ test("email provider stable ID survives delivery retries", () => {
     body: JSON.stringify({
       subject: "Hello",
       contactId: "c",
+      conversationId: "conversation-1",
+      messageId: "provider-message-1",
       occurredAt: base.created_at,
     }),
   });
   assert.equal(event?.id, "email.opened:provider-event-1");
   assert.equal(event?.subject, "Hello");
   assert.equal(event?.contactId, "c");
+  assert.equal(event?.conversationId, "conversation-1");
+  assert.equal(event?.messageId, "provider-message-1");
 });
 test("LinkedIn only admits relevant sourced dated changes", () => {
   const linked = { ...base, type: "linkedin.updated" };

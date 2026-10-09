@@ -4,6 +4,9 @@ export type SignalEvent = {
   brandId: string;
   contactId?: string;
   sampleId?: string;
+  conversationId?: string;
+  messageId?: string;
+  threadId?: string;
   type: SignalType;
   summary: string;
   occurredAt: string;
@@ -25,6 +28,8 @@ export type SignalBrand = {
   ownerName: string | null;
   currentCp: string;
   events: SignalEvent[];
+  readEventIds?: string[];
+  reviewedEventIds?: string[];
   unread: boolean;
   needsReview: boolean;
   status: "Needs Review" | SignalReview["status"];
@@ -61,6 +66,8 @@ export function aggregateBrand(input: {
     ownerName: input.ownerName,
     currentCp: input.currentCp,
     events,
+    readEventIds: [...read],
+    reviewedEventIds: [...reviewed],
     unread: events.some((event) => !read.has(event.id)),
     needsReview,
     status: needsReview ? "Needs Review" : input.review?.status || "Reviewed",
@@ -101,6 +108,40 @@ export function filterQueue(
           Number(a.needsReview && a.events.some((e) => e.highPriority)) ||
         Date.parse(b.events[0].occurredAt) - Date.parse(a.events[0].occurredAt),
     );
+}
+export type SignalQueueView = "review" | "today" | "week" | "history";
+/** Workspace views keep the pending queue independent of event date. */
+export function filterWorkspaceQueue(
+  brands: SignalBrand[],
+  view: SignalQueueView,
+  type: SignalType | "all",
+  now = new Date(),
+) {
+  const start = view === "today" || view === "week" ? periodStart(view, now) : 0;
+  return brands
+    .filter((brand) =>
+      (view !== "review" || brand.needsReview) &&
+      (view !== "history" || !brand.needsReview) &&
+      brand.events.some((event) =>
+        (type === "all" || event.type === type) &&
+        (view !== "today" && view !== "week" ||
+          Date.parse(event.occurredAt) >= start && Date.parse(event.occurredAt) <= now.getTime()),
+      ),
+    )
+    .sort((a, b) => {
+      const matching = (brand: SignalBrand) => {
+        const byType = type === "all" ? brand.events : brand.events.filter((event) => event.type === type);
+        const pending = brand.needsReview
+          ? byType.filter((event) => !brand.reviewedEventIds?.includes(event.id))
+          : [];
+        return view === "review" && pending.length ? pending : byType;
+      };
+      const aEvents = matching(a);
+      const bEvents = matching(b);
+      return Number(b.needsReview && bEvents.some((event) => event.highPriority)) -
+        Number(a.needsReview && aEvents.some((event) => event.highPriority)) ||
+        Date.parse(bEvents[0].occurredAt) - Date.parse(aEvents[0].occurredAt);
+    });
 }
 export function summarize(brands: SignalBrand[], now = new Date()) {
   const updated = (period: "today" | "week") =>

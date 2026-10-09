@@ -51,7 +51,7 @@ export type Interaction = {
   cc?: string;
   /** Notion page created_time; preferred for feed ordering/display. */
   recordedAt?: string;
-  creationMethod?: "Automated" | "Manual"; threadId?: string; taskId?: string; replyStatus?: "Needs Reply" | "Replied";
+  creationMethod?: "Automated" | "Manual"; threadId?: string; messageId?: string; taskId?: string; replyStatus?: "Needs Reply" | "Replied";
   taskStatus?: string; scheduledAt?: string; callResult?: string;
   quo?: QuoCallData | null;
   attachments?: import("./media-attachments").MediaAttachment[];

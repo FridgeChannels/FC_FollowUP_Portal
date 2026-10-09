@@ -7,6 +7,7 @@ import { listCheckpoints, resolveCheckpoint } from "@/lib/notion/cps";
 import { mapFollowupClientDetail, mapFollowupClientPage } from "@/lib/notion/followup-clients";
 import { updateFollowupClient } from "@/lib/notion/followup-writes";
 import { encodeFollowUpReminder } from "@/lib/followup-reminder";
+import { encodeBrandAssignment } from "@/lib/brand-assignment";
 import type { AmazonSampleProduct, ChannelType } from "@/lib/sample-product";
 
 type Params = { params: Promise<{ id: string }> };
@@ -67,6 +68,7 @@ export async function PATCH(request: Request, { params }: Params) {
       humanNotes?: string | null;
       channelType?: ChannelType;
       amazonSampleProduct?: AmazonSampleProduct;
+      assignmentHandled?: boolean;
     };
     const page = await retrievePage(id);
     const brand = await mapFollowupClientPage(page);
@@ -75,6 +77,9 @@ export async function PATCH(request: Request, { params }: Params) {
     }
     if (body.ownerId !== undefined && !canAssignBrandOwner(viewer)) {
       return Response.json({ error: "Only Admin can assign Owner" }, { status: 403 });
+    }
+    if (body.assignmentHandled && viewer.ownerId !== brand.ownerId) {
+      return Response.json({ error: "Only the assigned Account Manager can review this assignment" }, { status: 403 });
     }
     if ((body.status === "Paused" || body.status === "Completed") && !body.note?.trim()) {
       return Response.json({ error: "A note is required when pausing or completing FollowUp" }, { status: 400 });
@@ -109,6 +114,22 @@ export async function PATCH(request: Request, { params }: Params) {
     }
     if (body.handlingMode && body.handlingMode !== brand.handlingMode) {
       extras.push(`跟进方式更新为 ${body.handlingMode}。`);
+    }
+    if (body.ownerId !== undefined && body.ownerId !== brand.ownerId) {
+      extras.push(encodeBrandAssignment({
+        ownerId: body.ownerId?.trim() || null,
+        assignedAt: new Date().toISOString(),
+      }));
+    }
+    if (body.assignmentHandled) {
+      if (!brand.ownerAssignedAt || !brand.ownerId) {
+        return Response.json({ error: "No active assignment to review" }, { status: 400 });
+      }
+      extras.push(encodeBrandAssignment({
+        ownerId: brand.ownerId,
+        assignedAt: brand.ownerAssignedAt,
+        handledAt: new Date().toISOString(),
+      }));
     }
     const notes = extras.length
       ? [propertyText(page.properties?.Notes) || null, ...extras].filter(Boolean).join("\n")

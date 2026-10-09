@@ -6,6 +6,9 @@ export const BRAND_LIST_SORTS = [
   "nameDesc",
   "lastNewest",
   "lastOldest",
+  "lastInboundNewest",
+  "lastOutboundNewest",
+  "ownerAssignedNewest",
   "replyDue",
 ] as const;
 
@@ -50,6 +53,26 @@ export function compareBrandListItems(
       a.name.localeCompare(b.name)
     );
   }
+  if (sort === "lastInboundNewest") {
+    return (
+      timeValue(b.lastReplyAt) - timeValue(a.lastReplyAt) ||
+      a.name.localeCompare(b.name)
+    );
+  }
+  // Outbound recency is resolved from ConversationDB in the all-brands listing.
+  // Other scoped views fall back to the latest interaction.
+  if (sort === "lastOutboundNewest") {
+    return (
+      timeValue(b.lastInteractionAt) - timeValue(a.lastInteractionAt) ||
+      a.name.localeCompare(b.name)
+    );
+  }
+  if (sort === "ownerAssignedNewest") {
+    return (
+      timeValue(b.ownerAssignedAt) - timeValue(a.ownerAssignedAt) ||
+      a.name.localeCompare(b.name)
+    );
+  }
   if (sort === "replyDue") {
     const replyRank = (item: BrandListItem) => (item.needsReply ? 1 : 0);
     const aDue = itemDue(a);
@@ -85,7 +108,11 @@ export function isNotionTitleSort(sort: BrandListSort) {
 
 /** Last-interaction sorts page a cached ClientDB scope (not the default hot path). */
 export function isLastInteractionSort(sort: BrandListSort) {
-  return sort === "lastNewest" || sort === "lastOldest";
+  return sort === "lastNewest"
+    || sort === "lastOldest"
+    || sort === "lastInboundNewest"
+    || sort === "lastOutboundNewest"
+    || sort === "ownerAssignedNewest";
 }
 
 export type BrandListCursor =

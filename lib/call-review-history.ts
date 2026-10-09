@@ -1,4 +1,4 @@
-import type { CallReviewStatus } from "./call-review-metadata";
+import type { CallReviewResolution, CallReviewStatus } from "./call-review-metadata";
 
 export type CallReviewRoundStatus = CallReviewStatus | "Archived";
 
@@ -15,6 +15,7 @@ export type CallReviewRound = {
   callerNote?: string;
   reason?: string;
   note?: string;
+  resolution?: CallReviewResolution;
   callIds: string[];
 };
 
@@ -52,6 +53,7 @@ function normalizeRound(value: unknown): CallReviewRound | null {
     callerNote: item.callerNote || undefined,
     reason: item.reason || undefined,
     note: item.note || undefined,
+    resolution: item.resolution === "Recall" || item.resolution === "Stop task" ? item.resolution : undefined,
     callIds: Array.isArray(item.callIds)
       ? item.callIds.filter((callId): callId is string => typeof callId === "string" && !!callId.trim())
       : [],
@@ -263,6 +265,7 @@ export type ReviewRoundDisplay = {
   callerNote?: string;
   reason?: string;
   note?: string;
+  resolution?: CallReviewResolution;
   callIds: string[];
 };
 
@@ -278,6 +281,7 @@ function toDisplay(item: CallReviewRound, isCurrent: boolean, recalled = false):
     callerNote: item.callerNote,
     reason: item.reason,
     note: item.note,
+    resolution: item.resolution,
     callIds: item.callIds,
   };
 }
@@ -300,7 +304,7 @@ export function reviewRoundsForTask(history: CallReviewRound[]): {
     };
   }
 
-  if (last.status === "Unqualified") {
+  if (last.status === "Unqualified" && last.resolution !== "Stop task") {
     return {
       current: {
         round: last.round + 1,

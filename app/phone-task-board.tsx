@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { CheckCircle2, ChevronDown, ChevronRight, Phone, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
-import { callReviewsFromTasks, type CallReviewStatus } from "@/lib/call-review-metadata";
+import { callReviewsFromTasks, type CallReviewResolution, type CallReviewStatus } from "@/lib/call-review-metadata";
 import {
   partitionRoundCalls,
   reviewRoundsForTask,
@@ -25,6 +25,7 @@ import { QuoCallPanel } from "./quo-call-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -193,14 +194,14 @@ export function CallWithQuoButton({
   );
 }
 
-function ReviewBadge({ status }: { status?: CallReviewStatus | null | "In Progress" | "Archived" }) {
+function ReviewBadge({ status, resolution }: { status?: CallReviewStatus | null | "In Progress" | "Archived"; resolution?: CallReviewResolution | null }) {
   if (!status || status === "In Progress" || status === "Archived") return null;
   const className =
     status === "Qualified" ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-100"
     : status === "Unqualified" ? "bg-rose-100 text-rose-800 hover:bg-rose-100"
     : "bg-amber-100 text-amber-900 hover:bg-amber-100";
   const label = status === "Unqualified"
-    ? "Unqualified · Recall needed"
+    ? resolution === "Stop task" ? "Unqualified · Task stopped" : "Unqualified · Recall needed"
     : status === "Awaiting Review"
       ? "Awaiting review"
       : status;
@@ -278,6 +279,73 @@ export function UnqualifiedRecallForm({
   </div>;
 }
 
+export function UnqualifiedReviewDialog({
+  open,
+  onOpenChange,
+  note,
+  onNote,
+  resolution,
+  onResolution,
+  onConfirm,
+  confirming = false,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  note: string;
+  onNote: (value: string) => void;
+  resolution: CallReviewResolution;
+  onResolution: (value: CallReviewResolution) => void;
+  onConfirm: (resolution: CallReviewResolution, note: string) => void;
+  confirming?: boolean;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Unqualified</DialogTitle>
+          <DialogDescription>Record why this task is unqualified, then choose whether Caller should retry it.</DialogDescription>
+        </DialogHeader>
+        <RadioGroup value={resolution} onValueChange={(value) => onResolution(value as CallReviewResolution)} className="grid gap-2">
+          <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 p-3 transition hover:bg-slate-50">
+            <RadioGroupItem value="Recall" className="mt-0.5" />
+            <span>
+              <span className="block text-sm font-medium text-slate-900">Recall</span>
+              <span className="block text-xs text-slate-500">Assign this task back to Caller.</span>
+            </span>
+          </label>
+          <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 p-3 transition hover:bg-slate-50">
+            <RadioGroupItem value="Stop task" className="mt-0.5" />
+            <span>
+              <span className="block text-sm font-medium text-slate-900">Stop task</span>
+              <span className="block text-xs text-slate-500">End the task without sending it back to Caller.</span>
+            </span>
+          </label>
+        </RadioGroup>
+        <div className="space-y-1.5">
+          <label className="text-xs font-semibold text-slate-700">Note <span className="font-normal text-slate-400">(required)</span></label>
+          <Textarea
+            value={note}
+            onChange={(event) => onNote(event.target.value)}
+            className="min-h-24 resize-none"
+            placeholder="Record the customer’s reply and why this task is unqualified."
+            disabled={confirming}
+          />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" disabled={confirming} onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button
+            className="bg-rose-600 text-white hover:bg-rose-700"
+            disabled={confirming || !note.trim()}
+            onClick={() => onConfirm(resolution, note.trim())}
+          >
+            {confirming ? "Saving…" : resolution === "Recall" ? "Recall task" : "Stop task"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function PhoneTaskBoard({
   phoneTasks,
   contacts,
@@ -309,7 +377,7 @@ export function PhoneTaskBoard({
   headerContactName?: string;
   showChannelTab?: boolean;
   canReviewCalls?: boolean;
-  onPersistCallReview?: (taskId: string, status: CallReviewStatus, reviewReason?: string, reviewNote?: string) => Promise<void>;
+  onPersistCallReview?: (taskId: string, status: CallReviewStatus, reviewReason?: string, reviewNote?: string, resolution?: CallReviewResolution) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
   onSelectTask?: (taskId: string) => void;
@@ -346,15 +414,15 @@ export function PhoneTaskBoard({
     return () => window.cancelAnimationFrame(frame);
   }, [highlightedCallId, timeline]);
 
-  const handleReview = async (taskId: string, status: CallReviewStatus, reviewReason?: string, reviewNote?: string) => {
+  const handleReview = async (taskId: string, status: CallReviewStatus, reviewReason?: string, reviewNote?: string, resolution?: CallReviewResolution) => {
     if (!onPersistCallReview) {
       toast.error("Call review requires a Follow-up Task backed by Notion");
       return;
     }
     setReviewingTaskId(taskId);
     try {
-      await onPersistCallReview(taskId, status, reviewReason, reviewNote);
-      toast.success(status === "Qualified" ? "Call marked as qualified" : "Call marked as unqualified and reopened for Beril");
+      await onPersistCallReview(taskId, status, reviewReason, reviewNote, resolution);
+      toast.success(status === "Qualified" ? "Call marked as qualified" : resolution === "Stop task" ? "Call marked as unqualified and task stopped" : "Call marked as unqualified and recalled for Beril");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to save call review");
     } finally {
@@ -386,6 +454,7 @@ export function PhoneTaskBoard({
         script={script}
         scriptLoading={!!scriptLoading}
         reviewStatus={review?.status}
+        reviewResolution={review?.resolution}
         quoResults={quoResults}
         showDial={showDial}
         canReviewCalls={canReviewCalls}
@@ -398,7 +467,7 @@ export function PhoneTaskBoard({
         onSubmitCallerReview={onSubmitCallerReview}
         submittingCallerReview={submittingCallerReview}
         onFocusTask={active || !onSelectTask ? undefined : () => onSelectTask(item.id)}
-        onReview={(status, reviewReason, reviewNote) => void handleReview(item.id, status, reviewReason, reviewNote)}
+        onReview={(status, reviewReason, reviewNote, resolution) => void handleReview(item.id, status, reviewReason, reviewNote, resolution)}
         onCallOpening={(phone) => {
           if (item.remote === false) return;
           if (onCallOpening) {
@@ -501,7 +570,7 @@ function ReviewDecision({ round }: { round: ReviewRoundDisplay }) {
   return <div className="space-y-3">
     {round.recalled || round.status === "Unqualified" ? (
       <div className="rounded-xl border border-rose-100 bg-rose-50/80 px-4 py-3">
-        <p className="text-xs font-semibold text-rose-800">AccountManager marked this task Unqualified</p>
+        <p className="text-xs font-semibold text-rose-800">AccountManager marked this task Unqualified{round.resolution === "Stop task" ? " and stopped it" : " and recalled it for Caller"}</p>
         {round.reason ? <div className="mt-3">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-rose-700">Reason</div>
           <p className="mt-1 text-sm leading-6 text-rose-950">{round.reason}</p>
@@ -561,7 +630,7 @@ function ReviewRoundCard({
           <span className="text-xs font-semibold tracking-wide text-slate-700">
             {round.status === "Archived" ? "Earlier calls" : `Round ${round.round}`}
           </span>
-          <ReviewBadge status={round.status}/>
+          <ReviewBadge status={round.status} resolution={round.resolution}/>
           {round.reviewedAt ? <span className="text-[11px] text-slate-400">{formatReviewDay(round.reviewedAt)}</span> : null}
         </div>
       </div>
@@ -601,6 +670,7 @@ function PhoneTaskBlock({
   script,
   scriptLoading,
   reviewStatus,
+  reviewResolution,
   quoResults,
   showDial,
   canReviewCalls,
@@ -623,13 +693,14 @@ function PhoneTaskBlock({
   script: PhoneBoardScript | null | undefined;
   scriptLoading: boolean;
   reviewStatus?: CallReviewStatus;
+  reviewResolution?: CallReviewResolution | null;
   quoResults: Interaction[];
   showDial: boolean;
   canReviewCalls: boolean;
   reviewing: boolean;
   onCallOpening: (phone: string) => void;
   onFocusTask?: () => void;
-  onReview: (status: CallReviewStatus, reviewReason?: string, reviewNote?: string) => void;
+  onReview: (status: CallReviewStatus, reviewReason?: string, reviewNote?: string, resolution?: CallReviewResolution) => void;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
   highlightedCallId?: string | null;
@@ -643,6 +714,7 @@ function PhoneTaskBlock({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [recallOpen, setRecallOpen] = useState(false);
   const [recallReason, setRecallReason] = useState("");
+  const [recallResolution, setRecallResolution] = useState<CallReviewResolution>("Recall");
   const [selectingCall, setSelectingCall] = useState(false);
   const [selectedCallId, setSelectedCallId] = useState("");
   const [callerNote, setCallerNote] = useState("");
@@ -685,7 +757,7 @@ function PhoneTaskBlock({
           {active ? <Badge className="bg-violet-600 text-[10px] text-white hover:bg-violet-600">Current</Badge> : null}
           <PhoneTaskStatusBadge status={task.status}/>
           {task.dueAt ? <span className="text-[11px] text-slate-400">{formatEasternDateTime(task.dueAt)}</span> : null}
-          <ReviewBadge status={reviewStatus}/>
+          <ReviewBadge status={reviewStatus} resolution={reviewResolution}/>
         </div>
         <h3 className={`mt-1 text-base font-bold ${active ? "text-blue-950" : "text-slate-900"}`}>
           {onFocusTask ? <button type="button" className="text-left hover:underline" onClick={onFocusTask}>{task.title || "Call this Contact"}</button> : (task.title || "Call this Contact")}
@@ -763,23 +835,27 @@ function PhoneTaskBlock({
         ) : canSubmitThisRound ? (
           <Button size="sm" className="bg-amber-500 text-white hover:bg-amber-600" onClick={() => { setSelectingCall(true); setSelectedCallId(""); setCallerNote(""); }}>Submit as qualified communication</Button>
         ) : null}
-        {showReviewActions ? recallOpen ? (
-          <UnqualifiedRecallForm
-            reason={recallReason}
-            onReason={setRecallReason}
-            confirming={reviewing}
-            onCancel={() => { setRecallOpen(false); setRecallReason(""); }}
-            onConfirm={() => onReview("Unqualified", recallReason.trim())}
-          />
-        ) : (
+        {showReviewActions ? (
+          <>
           <div className="flex flex-wrap gap-2">
             <Button size="sm" className="bg-emerald-600 text-white hover:bg-emerald-700" disabled={reviewing} onClick={() => onReview("Qualified")}>
               <CheckCircle2 className="mr-1.5 size-3.5"/>{reviewing ? "Saving…" : "Mark as Qualified"}
             </Button>
-            <Button size="sm" className="bg-rose-600 text-white hover:bg-rose-700" disabled={reviewing} onClick={() => setRecallOpen(true)}>
-              <RotateCcw className="mr-1.5 size-3.5"/>Unqualified & Recall
+            <Button size="sm" className="bg-rose-600 text-white hover:bg-rose-700" disabled={reviewing} onClick={() => { setRecallReason(""); setRecallResolution("Recall"); setRecallOpen(true); }}>
+              <RotateCcw className="mr-1.5 size-3.5"/>Unqualified
             </Button>
           </div>
+          <UnqualifiedReviewDialog
+            open={recallOpen}
+            onOpenChange={(open) => { setRecallOpen(open); if (!open) { setRecallReason(""); setRecallResolution("Recall"); } }}
+            note={recallReason}
+            onNote={setRecallReason}
+            resolution={recallResolution}
+            onResolution={setRecallResolution}
+            confirming={reviewing}
+            onConfirm={(resolution, note) => { onReview("Unqualified", note, note, resolution); setRecallOpen(false); setRecallReason(""); }}
+          />
+          </>
         ) : null}
       </ReviewRoundCard>
     </div>

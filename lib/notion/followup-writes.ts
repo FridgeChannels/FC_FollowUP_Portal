@@ -24,6 +24,7 @@ import type {
 import { CHANNELS as SCHEDULE_CHANNELS } from "../scheduling-engine/types";
 import { notionScheduledAtProperty } from "./scheduled-at";
 import { invalidateBrandReplySignalCache } from "./brand-reply-signal-cache";
+import { encodeBrandAssignment } from "../brand-assignment";
 import { invalidateExhibitionOptionsCache } from "./exhibition-options-cache";
 import { listChannelCapacityConfig } from "./capacity";
 import { chooseConversationThreadId } from "./conversation-thread";
@@ -342,8 +343,11 @@ export async function createFollowupClient(input: CreateFollowupClientInput) {
   if (exhibitionId) {
     properties["Follow-up Exhibition"] = { relation: [{ id: exhibitionId }] };
   }
-  if (input.notes?.trim()) {
-    properties.Notes = { rich_text: richText(input.notes.trim()) };
+  const assignmentRecord = ownerId
+    ? encodeBrandAssignment({ ownerId, assignedAt: new Date().toISOString() })
+    : null;
+  if (input.notes?.trim() || assignmentRecord) {
+    properties.Notes = { rich_text: richText([input.notes?.trim(), assignmentRecord].filter(Boolean).join("\n")) };
   }
 
   const page = await createPage(getFollowupClientDbId(), properties);

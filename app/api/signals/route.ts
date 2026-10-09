@@ -4,6 +4,7 @@ import { runWithNotionLimit } from "@/lib/notion/rate-limit";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { aggregateSignals, loadSignalEvents } from "@/lib/signals/data";
 import { signalsWritesEnabled } from "@/lib/signals/config";
+import { mockSignals } from "@/lib/signals/mock";
 import { signalBrands } from "@/lib/signals/brands";
 import { summarize, type SignalsPayload } from "@/lib/signals/model";
 
@@ -17,6 +18,11 @@ async function getSignals(request: Request) {
         { error: "Signals is available to Account Managers and Admins" },
         { status: 403 },
       );
+    const url = new URL(request.url);
+    if (process.env.NODE_ENV !== "production" && url.searchParams.get("mock") === "1")
+      return Response.json(mockSignals(), {
+        headers: { "Cache-Control": "no-store" },
+      });
     if (!isSupabaseConfigured())
       return Response.json({
         readOnly: true,

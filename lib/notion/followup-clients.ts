@@ -28,8 +28,9 @@ import {
   type NotionPage,
 } from "./client";
 import { parseNfcCardSns } from "../sample/sns";
+import { latestBrandAssignment } from "../brand-assignment";
 import { listFollowupContacts } from "./contacts";
-import { listFollowupConversations } from "./conversations";
+import { listFollowupConversations, listFollowupConversationsByBrands } from "./conversations";
 import {
   attachBrandReplySignals,
   listBrandQualificationSignals,
@@ -175,6 +176,7 @@ export async function mapFollowupClientPage(
   const followupTitle = titleFromProperties(properties);
   const clientId = firstRelationId(properties.Client);
   const ownerId = firstRelationId(properties.Owner);
+  const assignment = latestBrandAssignment(propertyText(properties.Notes));
   const currentCpId = firstRelationId(properties["Current CP"]);
   const [clientName, owner, currentCpTitle] = await Promise.all([
     followupTitle ? Promise.resolve("") : resolveRelatedTitle(clientId, titleCache),
@@ -200,6 +202,8 @@ export async function mapFollowupClientPage(
     ownerId: owner?.id || ownerId || null,
     ownerName: owner?.name || null,
     ownerEmail: owner?.account || null,
+    ownerAssignedAt: assignment?.ownerId === ownerId ? assignment.assignedAt : null,
+    ownerAssignmentHandledAt: assignment?.ownerId === ownerId ? assignment.handledAt || null : null,
     // Exhibition names are resolved on the brand detail page. Resolving the
     // relation for every list row would turn a single list request into many
     // extra Notion requests and make the Brands page slow to open.
@@ -304,6 +308,9 @@ export async function countFollowupClientsForViewer(
   for (let page = 0; page < 10_000; page += 1) {
     const result = await listFollowupClientsForViewerPage({
       ...input,
+      // Count is independent of sort. Keep it on the hot path rather than
+      // rebuilding a directional ordering for every pagination page.
+      sort: "priority",
       cursor,
       pageSize: DEFAULT_BRAND_PAGE_SIZE,
     });
@@ -344,7 +351,7 @@ function matchesHandlingModeFilter(
   return !mode || brand.handlingMode === mode;
 }
 
-async function listReplyBrandMetadata(
+export async function listReplyBrandMetadata(
   entries: Array<[string, BrandReplySignal]>,
   input: {
     ownerPageId?: string | null;
@@ -465,7 +472,7 @@ async function listFilteredReplyBrands(
   return result;
 }
 
-async function listScopedClientBrandMetadata(
+export async function listScopedClientBrandMetadata(
   input: ListFollowupClientsPageInput,
 ) {
   let currentCpPageId: string | undefined;
@@ -1110,7 +1117,7 @@ async function listFollowupClientsByNotionTitlePage(
 async function listFollowupClientsByLastInteractionPage(
   input: ListFollowupClientsPageInput,
   pageSize: number,
-  sort: "lastNewest" | "lastOldest",
+  sort: "lastNewest" | "lastOldest" | "lastInboundNewest" | "lastOutboundNewest" | "ownerAssignedNewest",
 ): Promise<ListFollowupClientsPageResult> {
   const startedAt = Date.now();
   const [metadata, replySignals] = await Promise.all([
@@ -1127,15 +1134,43 @@ async function listFollowupClientsByLastInteractionPage(
     if (cp !== "all" && brand.currentCp !== cp) return false;
     return true;
   });
-  const orderedBrands = sortBrandListItemsBy(
-    matching.map((item) => item.brand),
-    sort,
-  );
-  const byKey = new Map(matching.map((item) => [pageKey(item.brand.id), item]));
-  const orderedRows = orderedBrands.flatMap((brand) => {
-    const row = byKey.get(pageKey(brand.id));
-    return row ? [row] : [];
-  });
+  let orderedRows: typeof matching;
+  if (sort === "lastInboundNewest") {
+    orderedRows = [...matching].sort((a, b) =>
+      (b.brand.lastReplyAt || "").localeCompare(a.brand.lastReplyAt || "")
+      || a.brand.name.localeCompare(b.brand.name),
+    );
+  } else if (sort === "lastOutboundNewest") {
+    const activities = await listFollowupConversationsByBrands(
+      matching.map((item) => item.page.id),
+    );
+    const direction = "Outbound";
+    const mostRecentByBrand = new Map<string, string>();
+    for (const activity of activities) {
+      if (!activity.brandId || activity.direction !== direction) continue;
+      const occurredAt = activity.scheduledAt || activity.recordedAt || activity.createdAt || "";
+      if (!occurredAt) continue;
+      const key = pageKey(activity.brandId);
+      if (occurredAt > (mostRecentByBrand.get(key) || "")) {
+        mostRecentByBrand.set(key, occurredAt);
+      }
+    }
+    orderedRows = [...matching].sort((a, b) => {
+      const aAt = mostRecentByBrand.get(pageKey(a.page.id)) || "";
+      const bAt = mostRecentByBrand.get(pageKey(b.page.id)) || "";
+      return bAt.localeCompare(aAt) || a.brand.name.localeCompare(b.brand.name);
+    });
+  } else {
+    const orderedBrands = sortBrandListItemsBy(
+      matching.map((item) => item.brand),
+      sort,
+    );
+    const byKey = new Map(matching.map((item) => [pageKey(item.brand.id), item]));
+    orderedRows = orderedBrands.flatMap((brand) => {
+      const row = byKey.get(pageKey(brand.id));
+      return row ? [row] : [];
+    });
+  }
   logBrandListPhase(input.traceId, "last-interaction-sort", startedAt, {
     scopeCount: metadata.length,
     matchedCount: orderedRows.length,

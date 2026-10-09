@@ -1,16 +1,16 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Bomb, CheckCheck, CheckCircle2, ChevronLeft, Reply, RotateCcw, UserRound } from "lucide-react";
+import { Bomb, CheckCheck, CheckCircle2, ChevronLeft, MailOpen, Reply, RotateCcw, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import type { CallReviewRound } from "@/lib/call-review-history";
-import { callReviewsFromTasks, type CallReviewStatus } from "@/lib/call-review-metadata";
+import { callReviewsFromTasks, type CallReviewResolution, type CallReviewStatus } from "@/lib/call-review-metadata";
 import { getDisplayTimeZone } from "@/lib/display-time";
 import { BombInstance, Channel, Contact, CPCode, CP_CODES, Interaction, ScheduledAction, compareInteractionSort, interactionSortAt, interactionSortMs } from "@/lib/outreach-domain";
 import { BombExecutionPlan, formatEasternDateTime } from "./bomb-plan";
 import { BrandReplyBox, ThreadSendBox, inboundNeedsComposer } from "./brand-reply-box";
 import { ChannelIcon } from "./channel-icon";
-import { PhoneTaskBoard, UnqualifiedRecallForm, type QuoDialOpening } from "./phone-task-board";
+import { PhoneTaskBoard, UnqualifiedReviewDialog, type QuoDialOpening } from "./phone-task-board";
 import { QuoCallPanel } from "./quo-call-panel";
 import { useWorkspace } from "./workspace-store";
 import { MessageMediaPreview, MessageMediaThumbnails } from "./message-media";
@@ -22,8 +22,21 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/spinner";
+import { useSignals } from "./signals-store";
+import { EmailOpenActivity } from "./brand-detail-signals";
+import type { SignalEvent, SignalsPayload } from "@/lib/signals/model";
+import { emailSignalMatchesInteraction } from "@/lib/signals/match";
 
 const CHANNELS: Channel[] = ["Email", "LinkedIn", "SMS", "WhatsApp", "Phone"];
+
+function emailEventsFor(item: Interaction, data: SignalsPayload | null): SignalEvent[] {
+  return (data?.brands.find(brand=>brand.id===item.customerId)?.events||[]).filter(event=>emailSignalMatchesInteraction(event,item));
+}
+function emailOpenSummary(events: SignalEvent[]) {
+  if(!events.length)return null;
+  const latest=events.reduce((a,b)=>Date.parse(a.detectedAt)>Date.parse(b.detectedAt)?a:b);
+  return <span className="inline-flex items-center gap-1 text-[#B45309]"><MailOpen className="size-3"/>Open detected · Last detected {inboxActivityTime(latest.detectedAt)}</span>;
+}
 
 const contactPoint = (contact: Contact, channel?: Channel) => {
   if (channel === "Email") return contact.email;
@@ -45,11 +58,9 @@ function threadKey(item: Interaction) {
   return item.threadId || [item.contactId || "", item.channel || "", item.taskId || item.id].join(":");
 }
 
-function sourceLabel(item: Interaction, bombInstances: BombInstance[]): string | null {
-  if (item.direction === "Inbound") return null;
-  if (item.creationMethod === "Manual") return "Human";
-  if (item.bombInstanceId || item.creationMethod === "Automated") return bombInstances.find(instance => instance.id === item.bombInstanceId)?.templateName || "OmniReach";
-  return null;
+function sourceLabel(item: Interaction): string {
+  if (item.bombInstanceId || item.creationMethod === "Automated") return "OmniReach";
+  return "Human";
 }
 
 /** Email subject from title; skip placeholders and content that already embeds Subject. */
@@ -189,6 +200,7 @@ export function InteractionFeed({
   showAllChannels = false,
   showCpSelector = true,
   initialCp,
+  focusedInteractionId,
   callerPhoneOnly,
   channelHeader,
   channelHeaderCp,
@@ -226,6 +238,7 @@ export function InteractionFeed({
   showAllChannels?: boolean;
   showCpSelector?: boolean;
   initialCp?: CPCode;
+  focusedInteractionId?: string;
   callerPhoneOnly?: boolean;
   channelHeader?: ReactNode;
   channelHeaderCp?: CPCode;
@@ -245,7 +258,7 @@ export function InteractionFeed({
     callReviewHistory?: CallReviewRound[];
     remote?: boolean;
   }>;
-  onPersistCallReview?: (taskId: string, status: CallReviewStatus, reviewReason?: string, reviewNote?: string) => Promise<void>;
+  onPersistCallReview?: (taskId: string, status: CallReviewStatus, reviewReason?: string, reviewNote?: string, resolution?: CallReviewResolution) => Promise<void>;
   loading?: boolean;
   activeTaskId?: string | null;
   highlightedCallId?: string | null;
@@ -267,7 +280,7 @@ export function InteractionFeed({
     if (!taskId) return undefined;
     return notionReviews[taskId];
   };
-  const handleReviewCall = async (_interactionId: string, taskId: string | undefined, status: CallReviewStatus, reviewReason?: string, reviewNote?: string) => {
+  const handleReviewCall = async (_interactionId: string, taskId: string | undefined, status: CallReviewStatus, reviewReason?: string, reviewNote?: string, resolution?: CallReviewResolution) => {
     if (!taskId) {
       toast.error("This call is not linked to a Follow-up Task");
       return;
@@ -278,8 +291,8 @@ export function InteractionFeed({
     }
     setReviewingTaskId(taskId);
     try {
-      await onPersistCallReview(taskId, status, reviewReason, reviewNote);
-      toast.success(status === "Qualified" ? "Call marked as qualified" : "Call marked as unqualified and reopened for Beril");
+      await onPersistCallReview(taskId, status, reviewReason, reviewNote, resolution);
+      toast.success(status === "Qualified" ? "Call marked as qualified" : resolution === "Stop task" ? "Call marked as unqualified and task stopped" : "Call marked as unqualified and recalled for Beril");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to save call review");
     } finally {
@@ -431,7 +444,6 @@ export function InteractionFeed({
       messages={channelMessages}
       contacts={contacts}
       channel={activeChannel}
-      bombInstances={planState.bombInstances}
       onSend={onSend}
      
       onCancelPending={onCancelPending}
@@ -442,6 +454,7 @@ export function InteractionFeed({
       reviewingTaskId={reviewingTaskId}
       onReviewCall={handleReviewCall}
       onMarkReplyRead={onMarkReplyRead}
+      focusedInteractionId={focusedInteractionId}
     />
     )}
 
@@ -488,7 +501,6 @@ function ChannelTranscript({
   messages,
   contacts,
   channel,
-  bombInstances,
   onSend,
   onCancelPending,
   onRefreshQuo,
@@ -498,11 +510,11 @@ function ChannelTranscript({
   reviewingTaskId,
   onReviewCall,
   onMarkReplyRead,
+  focusedInteractionId,
 }: {
   messages: Interaction[];
   contacts: Contact[];
   channel: Channel | "All";
-  bombInstances: BombInstance[];
   onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, scheduledAt?: string, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string) => Promise<void>;
   onCancelPending?: (taskId: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
@@ -510,10 +522,18 @@ function ChannelTranscript({
   resolveReview: (taskId?: string | null) => { status: CallReviewStatus; recallRequested?: boolean } | undefined;
   canReviewCalls: boolean;
   reviewingTaskId: string | null;
-  onReviewCall: (interactionId: string, taskId: string | undefined, status: CallReviewStatus, reviewReason?: string, reviewNote?: string) => void | Promise<void>;
+  onReviewCall: (interactionId: string, taskId: string | undefined, status: CallReviewStatus, reviewReason?: string, reviewNote?: string, resolution?: CallReviewResolution) => void | Promise<void>;
   onMarkReplyRead?: (interactionId: string) => Promise<void>;
+  focusedInteractionId?: string;
 }) {
   const [selectedThread, setSelectedThread] = useState<{ channel: Channel; key: string; interactionId?: string } | null>(null);
+  const focused=messages.find(item=>item.id===focusedInteractionId);
+  const focusedKey=focused?threadKey(focused):null;
+  useEffect(()=>{
+    if(!focusedInteractionId||!focused?.channel||!focusedKey)return;
+    const timer=setTimeout(()=>setSelectedThread({channel:focused.channel!,key:focusedKey,interactionId:focused.id}),0);
+    return ()=>clearTimeout(timer);
+  },[focusedInteractionId,focused?.id,focused?.channel,focusedKey]);
   const contactGroups = groupByContact(messages, contacts);
   const threads = groupByThread(messages);
   const activeThread = selectedThread && (channel === "All" || selectedThread.channel === channel)
@@ -530,7 +550,6 @@ function ChannelTranscript({
           channel={selectedThread.channel}
           focusedInteractionId={selectedThread.interactionId}
           replyPool={messages}
-          bombInstances={bombInstances}
           onBack={() => setSelectedThread(null)}
           onSend={onSend}
           onCancelPending={onCancelPending}
@@ -564,30 +583,38 @@ function ChannelTranscript({
     ) : (
       <div className="divide-y">
         {contactGroups.map(group => (
-          <ContactThreads key={group.contact?.id || "unknown"} group={group} replyPool={messages} channel={channel} bombInstances={bombInstances} onSend={onSend} onCancelPending={onCancelPending} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId} resolveReview={resolveReview} canReviewCalls={canReviewCalls} reviewingTaskId={reviewingTaskId} onReviewCall={onReviewCall} onMarkReplyRead={onMarkReplyRead}/>
+          <ContactThreads key={group.contact?.id || "unknown"} group={group} replyPool={messages} channel={channel} onSend={onSend} onCancelPending={onCancelPending} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId} resolveReview={resolveReview} canReviewCalls={canReviewCalls} reviewingTaskId={reviewingTaskId} onReviewCall={onReviewCall} onMarkReplyRead={onMarkReplyRead}/>
         ))}
       </div>
     )}
   </div>;
 }
 
-export function ActivityTimeline({ items, onOpen, formatTime = formatEasternDateTime }: { items: Interaction[]; onOpen: (item: Interaction) => void; formatTime?: (value: string) => string }) {
-  return <ol className="relative space-y-1 before:absolute before:bottom-3 before:left-[11px] before:top-3 before:w-px before:bg-slate-200">
+export function ActivityTimeline({ items, onOpen, formatTime = formatEasternDateTime, showEmailOpens = true }: { items: Interaction[]; onOpen?: (item: Interaction) => void; formatTime?: (value: string) => string; showEmailOpens?: boolean }) {
+  const {data:signalData}=useSignals();
+  return <ol className="relative space-y-1 before:pointer-events-none before:absolute before:bottom-3 before:left-[11px] before:top-3 before:z-0 before:w-px before:bg-slate-300/80">
     {items.map((item) => {
       const channel = item.channel || "Email";
       const occurredAt = interactionSortAt(item);
       const direction = item.direction === "Inbound" ? "Reply" : item.direction === "Outbound" ? "Sent" : "Activity";
-      return <li key={item.id} className="relative min-w-0">
-        <button type="button" onClick={() => onOpen(item)} className="relative block w-full min-w-0 rounded-lg py-2 pl-8 pr-2 text-left transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500" aria-label={`Open ${channel} activity: ${activityTimelineSummary(item)}${occurredAt ? ` · ${formatTime(occurredAt)}` : ""}`}>
-        <span className="absolute left-0 top-4 grid size-6 place-items-center rounded-full bg-slate-100 text-slate-600 ring-4 ring-white">
+      const source = sourceLabel(item);
+      const content = <>
+        <span className="absolute left-0 top-4 z-10 grid size-6 place-items-center rounded-full border border-slate-200/80 bg-white/90 text-muted-foreground ring-4 ring-white/80">
           <ChannelIcon channel={channel} className="size-3.5" alt="" />
         </span>
         <div className="flex min-w-0 items-baseline justify-between gap-3">
-          <p className="min-w-0 truncate text-sm font-medium text-slate-900">{activityTimelineSummary(item)}</p>
-          {occurredAt ? <time dateTime={occurredAt} className="shrink-0 font-mono text-[11px] text-slate-500">{formatTime(occurredAt)}</time> : null}
+          <div className="flex min-w-0 items-center gap-2">
+            <p className="min-w-0 truncate text-sm font-medium text-foreground">{activityTimelineSummary(item)}</p>
+            {source ? <SourceBadge source={source} /> : null}
+          </div>
+          {occurredAt ? <time dateTime={occurredAt} title={new Date(occurredAt).toLocaleString()} className="shrink-0 text-[11px] text-muted-foreground">{formatTime(occurredAt)}</time> : null}
         </div>
-        <p className="mt-0.5 text-xs text-slate-500">{channel} · {direction}</p>
-        </button>
+        <p className="mt-0.5 text-xs text-muted-foreground">{channel} · {direction}</p>
+        {showEmailOpens&&emailEventsFor(item,signalData).length?<p className="mt-0.5 text-xs">{emailOpenSummary(emailEventsFor(item,signalData))}</p>:null}
+      </>;
+      return <li key={item.id} className="relative min-w-0">
+        {onOpen ? <button type="button" onClick={() => onOpen(item)} className="relative block w-full min-w-0 rounded-lg py-2 pl-8 pr-2 text-left transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500" aria-label={`Open ${channel} activity: ${activityTimelineSummary(item)}${occurredAt ? ` · ${formatTime(occurredAt)}` : ""}`}>{content}</button>
+          : <div className="relative block w-full min-w-0 py-2 pl-8 pr-2 text-left">{content}</div>}
       </li>;
     })}
   </ol>;
@@ -681,6 +708,7 @@ function ConversationInbox({
   channel: Channel;
   onOpen: (thread: Interaction[]) => void;
 }) {
+  const {data:signalData}=useSignals();
   const visibleThreads = threads.slice(0, 50);
   return (
     <section aria-label={`${channel} conversations`} className="w-full min-w-0">
@@ -695,6 +723,7 @@ function ConversationInbox({
           const sender = contact?.name || "Contact not linked";
           const preview = messagePreviewText(latest);
           const latestSummary = inboxActivitySummary(latest);
+          const opens=thread.flatMap(item=>emailEventsFor(item,signalData));
           return (
             <button
               key={threadKey(thread[0]!)}
@@ -714,6 +743,7 @@ function ConversationInbox({
                 </div>
                 <div className={`mt-1 truncate text-sm ${needsReply ? "font-semibold text-slate-900" : "text-slate-700"}`}>{inboxSubject(thread, channel)}</div>
                 <p className="mt-1 truncate text-sm text-slate-500">{preview}</p>
+                {opens.length?<p className="mt-1 text-xs">{emailOpenSummary(opens)}</p>:null}
               </div>
             </button>
           );
@@ -729,7 +759,6 @@ function ConversationDetail({
   contacts,
   channel,
   replyPool,
-  bombInstances,
   onBack,
   onSend,
   onCancelPending,
@@ -747,7 +776,6 @@ function ConversationDetail({
   contacts: Contact[];
   channel: Channel;
   replyPool: Interaction[];
-  bombInstances: BombInstance[];
   onBack: () => void;
   onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, scheduledAt?: string, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string) => Promise<void>;
   onCancelPending?: (taskId: string) => Promise<void>;
@@ -756,7 +784,7 @@ function ConversationDetail({
   resolveReview: (taskId?: string | null) => { status: CallReviewStatus; recallRequested?: boolean } | undefined;
   canReviewCalls: boolean;
   reviewingTaskId: string | null;
-  onReviewCall: (interactionId: string, taskId: string | undefined, status: CallReviewStatus, reviewReason?: string, reviewNote?: string) => void | Promise<void>;
+  onReviewCall: (interactionId: string, taskId: string | undefined, status: CallReviewStatus, reviewReason?: string, reviewNote?: string, resolution?: CallReviewResolution) => void | Promise<void>;
   onMarkReplyRead?: (interactionId: string) => Promise<void>;
   focusedInteractionId?: string;
 }) {
@@ -774,7 +802,7 @@ function ConversationDetail({
         {contact ? <p className="mt-1 truncate text-sm text-slate-500">{contact.name}{endpoint ? ` · ${endpoint}` : ""}</p> : null}
       </div>
       <div className="px-5 pb-5">
-        <ThreadMessages thread={thread} replyPool={replyPool} contact={contact} contacts={contacts} channel={channel} endpoint={endpoint} bombInstances={bombInstances} collapseOlder expandAll={expandAll} focusedInteractionId={focusedInteractionId} onSend={onSend} onCancelPending={onCancelPending} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId} resolveReview={resolveReview} canReviewCalls={canReviewCalls} reviewingTaskId={reviewingTaskId} onReviewCall={onReviewCall} onMarkReplyRead={onMarkReplyRead} />
+        <ThreadMessages thread={thread} replyPool={replyPool} contact={contact} contacts={contacts} channel={channel} endpoint={endpoint} collapseOlder expandAll={expandAll} focusedInteractionId={focusedInteractionId} onSend={onSend} onCancelPending={onCancelPending} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId} resolveReview={resolveReview} canReviewCalls={canReviewCalls} reviewingTaskId={reviewingTaskId} onReviewCall={onReviewCall} onMarkReplyRead={onMarkReplyRead} />
       </div>
       {channel === "Email" ? (
         <ThreadSendBox
@@ -795,7 +823,6 @@ function ContactThreads({
   group,
   replyPool,
   channel,
-  bombInstances,
   onSend,
   onCancelPending,
   onRefreshQuo,
@@ -809,7 +836,6 @@ function ContactThreads({
   group: { contact?: Contact; messages: Interaction[] };
   replyPool: Interaction[];
   channel: Channel;
-  bombInstances: BombInstance[];
   onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, scheduledAt?: string, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string) => Promise<void>;
   onCancelPending?: (taskId: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
@@ -817,7 +843,7 @@ function ContactThreads({
   resolveReview: (taskId?: string | null) => { status: CallReviewStatus; recallRequested?: boolean } | undefined;
   canReviewCalls: boolean;
   reviewingTaskId: string | null;
-  onReviewCall: (interactionId: string, taskId: string | undefined, status: CallReviewStatus, reviewReason?: string, reviewNote?: string) => void | Promise<void>;
+  onReviewCall: (interactionId: string, taskId: string | undefined, status: CallReviewStatus, reviewReason?: string, reviewNote?: string, resolution?: CallReviewResolution) => void | Promise<void>;
   onMarkReplyRead?: (interactionId: string) => Promise<void>;
 }) {
   const endpoint = group.contact ? contactPoint(group.contact, channel) : undefined;
@@ -838,7 +864,7 @@ function ContactThreads({
     </div>
     <div className="space-y-6">
       {threads.map(thread => (
-        <ThreadMessages key={threadKey(thread[0])} thread={thread} replyPool={replyPool} contact={group.contact} channel={channel} endpoint={endpoint} bombInstances={bombInstances} onSend={onSend} onCancelPending={onCancelPending} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId} resolveReview={resolveReview} canReviewCalls={canReviewCalls} reviewingTaskId={reviewingTaskId} onReviewCall={onReviewCall} onMarkReplyRead={onMarkReplyRead}/>
+        <ThreadMessages key={threadKey(thread[0])} thread={thread} replyPool={replyPool} contact={group.contact} channel={channel} endpoint={endpoint} onSend={onSend} onCancelPending={onCancelPending} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId} resolveReview={resolveReview} canReviewCalls={canReviewCalls} reviewingTaskId={reviewingTaskId} onReviewCall={onReviewCall} onMarkReplyRead={onMarkReplyRead}/>
       ))}
     </div>
   </section>;
@@ -851,7 +877,6 @@ function ThreadMessages({
   contacts,
   channel,
   endpoint,
-  bombInstances,
   onSend,
   onCancelPending,
   onRefreshQuo,
@@ -872,7 +897,6 @@ function ThreadMessages({
   contacts?: Contact[];
   channel?: Channel;
   endpoint?: string;
-  bombInstances: BombInstance[];
   onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, scheduledAt?: string, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string) => Promise<void>;
   onCancelPending?: (taskId: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
@@ -880,15 +904,17 @@ function ThreadMessages({
   resolveReview: (taskId?: string | null) => { status: CallReviewStatus; recallRequested?: boolean } | undefined;
   canReviewCalls: boolean;
   reviewingTaskId: string | null;
-  onReviewCall: (interactionId: string, taskId: string | undefined, status: CallReviewStatus, reviewReason?: string, reviewNote?: string) => void | Promise<void>;
+  onReviewCall: (interactionId: string, taskId: string | undefined, status: CallReviewStatus, reviewReason?: string, reviewNote?: string, resolution?: CallReviewResolution) => void | Promise<void>;
   onMarkReplyRead?: (interactionId: string) => Promise<void>;
   collapseOlder?: boolean;
   expandAll?: boolean;
   showChannelLabel?: boolean;
   focusedInteractionId?: string;
 }) {
+  const {data:signalData,settle:settleSignals}=useSignals();
   const [recallTaskId, setRecallTaskId] = useState<string | null>(null);
   const [recallReason, setRecallReason] = useState("");
+  const [recallResolution, setRecallResolution] = useState<CallReviewResolution>("Recall");
   const [expandedMessageIds, setExpandedMessageIds] = useState<Set<string>>(() => new Set());
   const [collapsedLatestIds, setCollapsedLatestIds] = useState<Set<string>>(() => new Set());
   const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null);
@@ -901,9 +927,19 @@ function ThreadMessages({
   const latestId = focusedInteractionId || thread.at(-1)?.id;
   return <div className="space-y-3">
     {[...thread].reverse().map(item => {
+      const signalBrand=signalData?.brands.find(brand=>brand.id===item.customerId);
+      const emailOpens=emailEventsFor(item,signalData);
+      const readEmailOpens=(ids:string[])=>{
+        if(!signalBrand||signalData?.readOnly||!ids.length)return;
+        const snapshot=[...new Set([...(signalBrand.readEventIds||[]),...ids])];
+        void fetch(`/api/signals/${encodeURIComponent(item.customerId)}`,{
+          method:"PATCH",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({action:"read",eventIds:snapshot}),
+        }).then(response=>{if(response.ok)settleSignals(item.customerId,snapshot);}).catch(()=>{});
+      };
       const itemChannel = channel || item.channel || "Email";
       const inbound = item.direction === "Inbound";
-      const source = sourceLabel(item, bombInstances);
+      const source = sourceLabel(item);
       const phoneCall = itemChannel === "Phone";
       const itemContact = (item.contactId && contacts?.find((person) => person.id === item.contactId)) || contact;
       const itemEndpoint = itemContact ? contactPoint(itemContact, itemChannel) : endpoint;
@@ -950,6 +986,7 @@ function ThreadMessages({
       const expanded = !collapseOlder || expandAll || expandedMessageIds.has(item.id) || (initiallyExpanded && !collapsedLatestIds.has(item.id));
       const toggleExpanded = () => {
         if (!collapseOlder || expandAll) return;
+        if(!expanded&&emailOpens.length)readEmailOpens(emailOpens.map(event=>event.id));
         if (initiallyExpanded) {
           setCollapsedLatestIds((previous) => {
             const next = new Set(previous);
@@ -978,7 +1015,8 @@ function ThreadMessages({
           </div>
           {occurredAt ? <time dateTime={occurredAt} className="font-mono text-[11px] text-slate-500">{formatEasternDateTime(occurredAt)}</time> : null}
         </button>
-        {!expanded ? <><p className="mt-2 truncate text-sm text-slate-500">{messagePreviewText(item)}</p>{timing ? <div className="mt-2 flex min-w-0 items-center gap-2 text-xs text-slate-500"><SendStatusBadge status={timing.label} />{scheduledAt ? <span className="truncate">{scheduledAt}</span> : null}</div> : null}{cancelPendingButton}</> : <>
+        <EmailOpenActivity events={emailOpens} readIds={signalBrand?.readEventIds||[]} expanded={expanded} onRead={readEmailOpens}/>
+        {!expanded ? <>{emailSubject?<p className="mt-2 truncate text-sm font-medium text-slate-800">{emailSubject}</p>:null}<p className="mt-1 truncate text-sm text-slate-500">{messagePreviewText(item)}</p>{timing ? <div className="mt-2 flex min-w-0 items-center gap-2 text-xs text-slate-500"><SendStatusBadge status={timing.label} />{scheduledAt ? <span className="truncate">{scheduledAt}</span> : null}</div> : null}{cancelPendingButton}</> : <>
         {timing && (
           <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-slate-500">
             <SendStatusBadge status={timing.label} />
@@ -1059,7 +1097,26 @@ function ThreadMessages({
             </Button>
           </div>
         ) : null}
-        {phoneCall && item.quo && canReviewCalls && callReview?.status === "Awaiting Review" ? recallTaskId === (item.taskId || item.id) ? <div className="mt-4"><UnqualifiedRecallForm reason={recallReason} onReason={setRecallReason} confirming={reviewingTaskId===item.taskId} onCancel={() => { setRecallTaskId(null); setRecallReason(""); }} onConfirm={() => { void Promise.resolve(onReviewCall(item.id, item.taskId, "Unqualified", recallReason.trim())).then(() => { setRecallTaskId(null); setRecallReason(""); }); }}/></div> : <div className="mt-4 flex flex-wrap gap-2"><Button size="sm" className="bg-emerald-600 text-white hover:bg-emerald-700" disabled={reviewingTaskId===item.taskId} onClick={() => void onReviewCall(item.id, item.taskId, "Qualified")}><CheckCircle2 className="mr-1.5 size-3.5"/>{reviewingTaskId===item.taskId?"Saving…":"Mark as Qualified"}</Button><Button size="sm" className="bg-rose-600 text-white hover:bg-rose-700" disabled={reviewingTaskId===item.taskId} onClick={() => { setRecallTaskId(item.taskId || item.id); setRecallReason(""); }}><RotateCcw className="mr-1.5 size-3.5"/>Unqualified & Recall</Button></div> : null}
+        {phoneCall && item.quo && canReviewCalls && callReview?.status === "Awaiting Review" ? (
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button size="sm" className="bg-emerald-600 text-white hover:bg-emerald-700" disabled={reviewingTaskId===item.taskId} onClick={() => void onReviewCall(item.id, item.taskId, "Qualified")}>
+              <CheckCircle2 className="mr-1.5 size-3.5"/>{reviewingTaskId===item.taskId ? "Saving…" : "Mark as Qualified"}
+            </Button>
+            <Button size="sm" className="bg-rose-600 text-white hover:bg-rose-700" disabled={reviewingTaskId===item.taskId} onClick={() => { setRecallTaskId(item.taskId || item.id); setRecallReason(""); setRecallResolution("Recall"); }}>
+              <RotateCcw className="mr-1.5 size-3.5"/>Unqualified
+            </Button>
+            <UnqualifiedReviewDialog
+              open={recallTaskId === (item.taskId || item.id)}
+              onOpenChange={(open) => { setRecallTaskId(open ? (item.taskId || item.id) : null); if (!open) { setRecallReason(""); setRecallResolution("Recall"); } }}
+              note={recallReason}
+              onNote={setRecallReason}
+              resolution={recallResolution}
+              onResolution={setRecallResolution}
+              confirming={reviewingTaskId===item.taskId}
+              onConfirm={(resolution, note) => { void Promise.resolve(onReviewCall(item.id, item.taskId, "Unqualified", note, note, resolution)).then(() => { setRecallTaskId(null); setRecallReason(""); setRecallResolution("Recall"); }); }}
+            />
+          </div>
+        ) : null}
         </>}
         {/* Keep Needs Reply composer visible even when older bubbles are collapsed
             (e.g. a newer OmniReach Pending message became the thread "latest"). */}

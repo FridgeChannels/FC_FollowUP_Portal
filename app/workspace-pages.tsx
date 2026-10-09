@@ -5,12 +5,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Activity,
+  ArrowDownLeft,
   ArrowDownUp,
   ArrowRight,
+  ArrowUpRight,
   BarChart3,
   CalendarClock,
   CheckCircle2,
-  ChevronLeft,
   ChevronRight,
   CircleAlert,
   MessageCircle,
@@ -19,6 +20,7 @@ import {
   RotateCcw,
   Search,
   Upload,
+  UserPlus,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "./workspace-store";
@@ -37,6 +39,7 @@ import {
 import { Contact, dateOnly } from "@/lib/outreach-domain";
 import { brandListMetadata } from "@/lib/page-metadata";
 import { DEFAULT_BRAND_PAGE_SIZE } from "@/lib/notion/owner-filter";
+import { compareBrandListItems } from "@/lib/notion/brand-list-order";
 import { usePageMetadata } from "./use-page-metadata";
 import { formatEasternDateTime } from "./bomb-plan";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -59,6 +62,15 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
+import {
+  GlassPagination,
+  GlassPaginationContent,
+  GlassPaginationEllipsis,
+  GlassPaginationItem,
+  GlassPaginationLink,
+  GlassPaginationNext,
+  GlassPaginationPrevious,
+} from "@/components/ui/glass-pagination";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -78,7 +90,8 @@ import {
 } from "@/components/ui/table";
 import { BrandContactsEditor, emptyContactDraft, validContactDrafts, type ContactDraft } from "./brand-contacts-editor";
 import { BrandNote } from "./brand-note";
-import type { BrandActionOverview } from "@/lib/notion/brand-action-overview";
+import { WORK_REPLY_CHANNELS, type BrandWorkPayload } from "@/lib/brand-work";
+import { ChannelIcon } from "./channel-icon";
 
 const cx = (...v: (string | false | undefined | null)[]) =>
   v.filter(Boolean).join(" ");
@@ -465,6 +478,9 @@ function HandlingMode({ value }: { value: BrandListItem["handlingMode"] }) {
 }
 
 type BrandListFilters = {
+  view: "myWork" | "all";
+  workQ: string;
+  action: "all" | "assignments" | "replies" | "callReview";
   q: string;
   status: string;
   cp: string;
@@ -483,7 +499,13 @@ type ExhibitionOption = { id: string; name: string };
 const BRAND_SEARCH_DEBOUNCE_MS = 800;
 const BRAND_LIST_PAGINATION_STORAGE_KEY = "followup.brand-list-pagination.v1";
 const BRAND_LIST_PAGE_CACHE_TTL_MS = 30_000;
-const BRAND_LIST_VISIBLE_SORTS = new Set(["nameAsc", "nameDesc"]);
+const BRAND_LIST_VISIBLE_SORTS = new Set([
+  "ownerAssignedNewest",
+  "lastInboundNewest",
+  "lastOutboundNewest",
+  "nameAsc",
+  "nameDesc",
+]);
 
 type BrandListPagination = {
   cursor: string | null;
@@ -491,8 +513,19 @@ type BrandListPagination = {
   page: number;
 };
 
-function brandListFiltersFromSearch(search: URLSearchParams): BrandListFilters {
+function brandListFiltersFromSearch(
+  search: URLSearchParams,
+  defaultView: BrandListFilters["view"] = "myWork",
+): BrandListFilters {
+  const requestedView = search.get("view");
+  const legacyReplyState = search.get("replyState");
+  const requestedAction = search.get("action");
   return {
+    view: requestedView === "all" || requestedView === "myWork"
+      ? requestedView
+      : defaultView,
+    workQ: search.get("workQ") ?? "",
+    action: requestedAction === "assignments" || requestedAction === "replies" || requestedAction === "callReview" ? requestedAction : requestedView === "replies" || requestedView === "callReview" ? requestedView : legacyReplyState === "needsReply" ? "replies" : legacyReplyState === "qualification" ? "callReview" : "all",
     q: search.get("q") ?? "",
     status: search.get("status") ?? "all",
     cp: search.get("cp") ?? "all",
@@ -500,7 +533,7 @@ function brandListFiltersFromSearch(search: URLSearchParams): BrandListFilters {
     replyState: search.get("replyState") ?? "all",
     handlingMode: search.get("handlingMode") ?? "all",
     exhibitionId: search.get("exhibitionId") ?? "all",
-    sort: BRAND_LIST_VISIBLE_SORTS.has(search.get("sort") ?? "") ? search.get("sort")! : "nameAsc",
+    sort: BRAND_LIST_VISIBLE_SORTS.has(search.get("sort") ?? "") ? search.get("sort")! : "ownerAssignedNewest",
     replyFrom: search.get("replyFrom") ?? "",
     replyTo: search.get("replyTo") ?? "",
   };
@@ -511,6 +544,9 @@ function brandListPath(
   pagination?: Pick<BrandListPagination, "cursor" | "page">,
 ) {
   const params = new URLSearchParams();
+  params.set("view", filters.view);
+  if (filters.workQ.trim()) params.set("workQ", filters.workQ);
+  if (filters.action !== "all") params.set("action", filters.action);
   if (filters.q.trim()) params.set("q", filters.q);
   if (filters.cp !== "all") params.set("cp", filters.cp);
   if (filters.status !== "all") params.set("status", filters.status);
@@ -518,7 +554,8 @@ function brandListPath(
   if (filters.replyState !== "all") params.set("replyState", filters.replyState);
   if (filters.handlingMode !== "all") params.set("handlingMode", filters.handlingMode);
   if (filters.exhibitionId !== "all") params.set("exhibitionId", filters.exhibitionId);
-  if (filters.sort !== "nameAsc") params.set("sort", filters.sort);
+  // Keep the default explicit so the API does not fall back to its legacy priority order.
+  params.set("sort", filters.sort);
   if (filters.replyFrom) params.set("replyFrom", filters.replyFrom);
   if (filters.replyTo) params.set("replyTo", filters.replyTo);
   if (pagination?.cursor) params.set("cursor", pagination.cursor);
@@ -556,6 +593,8 @@ function mergeBrandListItem(current: BrandListItem, next: BrandListItem): BrandL
     ownerId: next.ownerId,
     ownerName: next.ownerName,
     ownerEmail: next.ownerEmail,
+    ownerAssignedAt: next.ownerAssignedAt,
+    ownerAssignmentHandledAt: next.ownerAssignmentHandledAt,
     followupExhibition: next.followupExhibition ?? current.followupExhibition,
     humanNotes: next.humanNotes ?? current.humanNotes,
     status: next.status,
@@ -596,10 +635,12 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const isAdmin = state.currentRole === "Admin";
+  const showStatusColumn = state.currentRole !== "AccountManager";
   const canReviewQualification = state.currentRole !== "Caller";
   const [filters, setFilters] = useState<BrandListFilters>(() =>
-    brandListFiltersFromSearch(searchParams),
+    brandListFiltersFromSearch(searchParams, isAdmin ? "all" : "myWork"),
   );
+  const workView = state.currentRole === "Caller" ? "all" : filters.view;
   const { q: query, status, cp, owner, replyState, handlingMode, exhibitionId, sort, replyFrom, replyTo } = filters;
   const [exhibitionOptions, setExhibitionOptions] = useState<ExhibitionOption[]>([]);
   const [exhibitionOptionsLoading, setExhibitionOptionsLoading] = useState(false);
@@ -625,31 +666,28 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
   const [searchComposing, setSearchComposing] = useState(false);
   const [addBrandOpen, setAddBrandOpen] = useState(false);
   const [listEpoch, setListEpoch] = useState(0);
-  const [overview, setOverview] = useState<BrandActionOverview | null>(null);
-  const [overviewLoading, setOverviewLoading] = useState(true);
-  const [overviewError, setOverviewError] = useState(false);
-  const [overviewReloadToken, setOverviewReloadToken] = useState(0);
+  const [workReloadToken, setWorkReloadToken] = useState(0);
+  const [work, setWork] = useState<BrandWorkPayload | null>(null);
+  const [workLoading, setWorkLoading] = useState(true);
+  const [workError, setWorkError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!active) return;
+    if (!active || state.currentRole === "Caller") return;
     const controller = new AbortController();
-    setOverviewLoading(true);
-    setOverviewError(false);
-    setOverview(null);
-    fetch("/api/brands/summary?overview=1", { signal: controller.signal, cache: "no-store" })
+    setWorkLoading(true);
+    setWorkError(null);
+    setWork(null);
+    fetch("/api/brands/work", { signal: controller.signal, cache: "no-store" })
       .then(async (response) => {
-        const payload = await response.json() as BrandActionOverview;
-        if (!response.ok || ![payload.needsReplyBrandCount, payload.overdueBrandCount, payload.callReviewBrandCount]
-          .every((count) => Number.isInteger(count) && count >= 0)) {
-          throw new Error("Unable to load action overview");
-        }
+        const payload = await response.json() as BrandWorkPayload & { error?: string };
+        if (!response.ok) throw new Error(payload.error || "Unable to load work");
         return payload;
       })
-      .then((payload) => { if (!controller.signal.aborted) setOverview(payload); })
-      .catch(() => { if (!controller.signal.aborted) setOverviewError(true); })
-      .finally(() => { if (!controller.signal.aborted) setOverviewLoading(false); });
+      .then((payload) => { if (!controller.signal.aborted) setWork(payload); })
+      .catch((error: unknown) => { if (!controller.signal.aborted) setWorkError(error instanceof Error ? error.message : "Unable to load work"); })
+      .finally(() => { if (!controller.signal.aborted) setWorkLoading(false); });
     return () => controller.abort();
-  }, [active, state.currentUserId, state.currentRole, listEpoch, listReloadToken, overviewReloadToken]);
+  }, [active, state.currentUserId, state.currentRole, listEpoch, listReloadToken, workReloadToken]);
   const paginationStorageKey = brandListPaginationStorageKey(filters, state.currentUserId);
   const initialPaginationStorageKey = useRef(paginationStorageKey);
 
@@ -702,6 +740,12 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
     setBrands((prev) =>
       prev.map((item) => (item.id === brand.id ? mergeBrandListItem(item, brand) : item)),
     );
+    setWork((prev) => prev ? {
+      ...prev,
+      brands: prev.brands.map((row) => row.brand.id === brand.id
+        ? { ...row, brand: mergeBrandListItem(row.brand, brand) }
+        : row),
+    } : prev);
   };
   const setListParam = (key: keyof BrandListFilters, value: string) => {
     setFilters((prev) => {
@@ -716,8 +760,11 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
     setHasMore(false);
     pageCursorMap.current = { 1: null };
   };
-  const resetListFilters = (nextReplyState = "all", nextSort = "nameAsc") => {
+  const resetListFilters = (nextReplyState = "all", nextSort = "ownerAssignedNewest") => {
     const next: BrandListFilters = {
+      view: filters.view,
+      workQ: filters.workQ,
+      action: filters.action,
       q: "",
       status: "all",
       cp: "all",
@@ -740,16 +787,33 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
     pageCursorMap.current = { 1: null };
   };
   const clearAllListFilters = () => resetListFilters();
+  const setWorkView = (view: BrandListFilters["view"]) => {
+    setFilters((previous) => {
+      const next = { ...previous, view };
+      window.history.replaceState(window.history.state, "", brandListPath(next, view === "all" ? { cursor, page: pageNumber } : undefined));
+      return next;
+    });
+  };
+  const setWorkFilter = (patch: Partial<BrandListFilters>) => {
+    setFilters((previous) => {
+      const next = { ...previous, ...patch };
+      window.history.replaceState(window.history.state, "", brandListPath(next));
+      return next;
+    });
+  };
   useEffect(() => {
     const onPopState = () => {
-      setFilters(brandListFiltersFromSearch(new URLSearchParams(window.location.search)));
+      setFilters(brandListFiltersFromSearch(
+        new URLSearchParams(window.location.search),
+        isAdmin ? "all" : "myWork",
+      ));
       setCursor(new URLSearchParams(window.location.search).get("cursor"));
       setCursorStack([]);
       setPageNumber(pageFromSearch(new URLSearchParams(window.location.search)));
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, []);
+  }, [isAdmin]);
   useEffect(() => {
     if (!isAdmin) {
       setOwnerOptions([]);
@@ -847,6 +911,7 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
   const brandListPageCacheKey = `${state.currentUserId}:${state.currentRole}:${brandsFilterKey}:${cursor || ""}:${listReloadToken}`;
 
   useEffect(() => {
+    if (workView !== "all") return;
     let cancelled = false;
     const controller = new AbortController();
     const forceRefresh = consumeBrandListPageRefreshRequest();
@@ -971,10 +1036,10 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
       cancelled = true;
       controller.abort();
     };
-  }, [brandListPageCacheKey, brandsFilterKey, cursor, listEpoch]);
+  }, [brandListPageCacheKey, brandsFilterKey, cursor, listEpoch, workView]);
 
   useEffect(() => {
-    if (!active) return;
+    if (!active || workView !== "all") return;
     const controller = new AbortController();
     setTotalCount(null);
     const params = new URLSearchParams(brandsFilterKey);
@@ -995,7 +1060,7 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
         if (!controller.signal.aborted) setTotalCount(null);
       });
     return () => controller.abort();
-  }, [active, brandsFilterKey, listEpoch, state.currentRole, state.currentUserId]);
+  }, [active, brandsFilterKey, listEpoch, state.currentRole, state.currentUserId, workView]);
 
   const goNextPage = () => {
     if (!nextCursor || !hasMore || loading) return;
@@ -1052,12 +1117,60 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
     setPageNumber(requestedPage);
     window.history.replaceState(window.history.state, "", brandListPath(filters, { cursor: targetCursor ?? null, page: requestedPage }));
   };
+  const totalPages = totalCount ? Math.max(1, Math.ceil(totalCount / DEFAULT_BRAND_PAGE_SIZE)) : null;
+  const paginationItems = totalPages
+    ? (() => {
+        if (totalPages <= 7) return Array.from({ length: totalPages }, (_, index) => index + 1) as Array<number | "ellipsis">;
+        const pages = [...new Set([1, pageNumber - 1, pageNumber, pageNumber + 1, totalPages])]
+          .filter((page) => page >= 1 && page <= totalPages)
+          .sort((a, b) => a - b);
+        return pages.flatMap((page, index) => index && page - pages[index - 1] > 1 ? ["ellipsis" as const, page] : [page]);
+      })()
+    : [pageNumber];
 
-  // Sort / replyState / handlingMode / exhibitionId are applied server-side (global).
-  const filtered = brands;
+  // The work view uses the same row data and table as All Brands.
+  const selectedExhibitionName = exhibitionId === "all"
+    ? null
+    : exhibitionOptions.find((item) => item.id === exhibitionId)?.name ?? null;
+  const workSearch = (query || filters.workQ).trim().toLowerCase();
+  const workRows = (work?.brands || [])
+    .filter((row) => filters.action === "all"
+      || filters.action === "assignments" && !!row.newAssignment
+      || filters.action === "replies" && WORK_REPLY_CHANNELS.some((channel) => !!row.channels[channel])
+      || filters.action === "callReview" && !!row.callReview)
+    .filter((row) => !workSearch || row.brand.name.toLowerCase().includes(workSearch))
+    .filter((row) => cp === "all" || row.brand.currentCp === cp)
+    .filter((row) => handlingMode === "all" || row.brand.handlingMode === handlingMode)
+    .filter((row) => !selectedExhibitionName || row.brand.followupExhibition === selectedExhibitionName)
+    .filter((row) => !isAdmin || status === "all" || row.brand.status === status)
+    .filter((row) => !isAdmin || owner === "all" || owner === "unassigned" && !row.brand.ownerId || row.brand.ownerId === owner)
+    .sort((a, b) => compareBrandListItems(a.brand, b.brand, sort as Parameters<typeof compareBrandListItems>[2]));
+  const workByBrandId = new Map((work?.brands || []).map((row) => [row.brand.id, row]));
+  const filtered = workView === "all" ? brands : workRows.map((row) => row.brand);
   const currentListPath = brandListPath(filters, { cursor, page: pageNumber });
-  const brandDetailPath = (brandId: string) =>
-    `/customers/${encodeURIComponent(brandId)}?returnTo=${encodeURIComponent(currentListPath)}`;
+  const brandDetailPath = (brandId: string, target?: { replyId?: string; taskId?: string; assignment?: boolean }) => {
+    const params = new URLSearchParams({ returnTo: currentListPath });
+    if (target?.replyId) params.set("workReply", target.replyId);
+    if (target?.taskId) params.set("workTask", target.taskId);
+    if (target?.assignment) params.set("newAssignment", "1");
+    return `/customers/${encodeURIComponent(brandId)}?${params}`;
+  };
+  const listScrollKey = `brands-list-scroll:${state.currentUserId}:${workView}`;
+  const openBrand = (brandId: string, target?: { replyId?: string; taskId?: string; assignment?: boolean }) => {
+    try { window.sessionStorage.setItem(listScrollKey, String(window.scrollY)); } catch { /* Navigation still works. */ }
+    router.push(brandDetailPath(brandId, target));
+  };
+  useEffect(() => {
+    if (workView === "all" ? loading : workLoading || !work) return;
+    let y = 0;
+    try {
+      y = Number(window.sessionStorage.getItem(listScrollKey) || 0);
+      window.sessionStorage.removeItem(listScrollKey);
+    } catch { return; }
+    if (!y) return;
+    const frame = requestAnimationFrame(() => window.scrollTo(0, y));
+    return () => cancelAnimationFrame(frame);
+  }, [workView, workLoading, work, loading, listScrollKey]);
   const owners = useMemo(() => {
     if (ownerOptions.length) return ownerOptions;
     const seen = new Map<string, string>();
@@ -1100,7 +1213,7 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
       else toast.error("Update failed");
       if (ok) {
         setSelected([]);
-        setOverviewReloadToken((value) => value + 1);
+        setWorkReloadToken((value) => value + 1);
       }
     } finally {
       setBusy(false);
@@ -1136,13 +1249,17 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
     }),
     active,
   );
-  const brandsBusy = loading || refreshing;
+  const brandsBusy = workView === "all" ? loading || refreshing : workLoading;
+  const visibleError = workView === "all" ? error : workError;
   return (
     <div className="mx-auto max-w-[1480px]">
-      <PageHeader
-        eyebrow={`${loading ? "Loading" : refreshing ? "Updating" : `${brands.length} on this page`}`}
-        title="Brands"
-      >
+      <PageHeader title="Brands">
+        {state.currentRole !== "Caller" && <nav aria-label="Brand views" className="inline-flex max-w-full gap-1 overflow-x-auto rounded-lg bg-slate-100 p-1">
+          {([
+            { view: "myWork", label: "Needs Action", count: work?.counts.myWork },
+            { view: "all", label: "All Brands", count: undefined },
+          ] as const).map((tab) => <button key={tab.view} type="button" aria-pressed={workView === tab.view} onClick={() => setWorkView(tab.view)} className={cx("shrink-0 rounded-md px-3 py-1.5 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500", workView === tab.view ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900")}>{tab.label}{tab.count !== undefined ? ` (${tab.count})` : tab.view !== "all" && workLoading ? " (…)" : ""}</button>)}
+        </nav>}
         <div className="flex w-full items-center justify-end gap-3 sm:w-auto">
           {can("importBrands") && (
             <Button className="shrink-0 bg-slate-950 text-white hover:bg-slate-800" onClick={() => setAddBrandOpen(true)}>
@@ -1152,40 +1269,6 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
           )}
         </div>
       </PageHeader>
-      <section aria-label="Action Overview" className="mb-6" aria-busy={overviewLoading}>
-        <div className="grid grid-cols-2 gap-2 sm:gap-4">
-          {([
-            { label: "Need Reply", value: "needsReply", count: overview?.needsReplyBrandCount },
-            { label: "Call Review", value: "qualification", count: overview?.callReviewBrandCount },
-          ] as const).map((card) => {
-            const selected = replyState === card.value;
-            return (
-              <button
-                key={card.value}
-                type="button"
-                aria-pressed={selected}
-                aria-label={`${card.label}${card.count !== undefined ? `: ${card.count} brands` : ""}`}
-                onClick={() => resetListFilters(selected ? "all" : card.value, sort)}
-                className={cx(
-                  "min-w-0 rounded-2xl p-3 text-left transition-colors sm:p-5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                  selected ? "bg-primary/10 text-primary ring-1 ring-inset ring-primary" : "bg-card text-foreground hover:bg-accent",
-                )}
-              >
-                <span className={cx("block text-xs font-medium sm:text-sm", !selected && "text-muted-foreground")}>{card.label}</span>
-                <span className="mt-3 block text-3xl font-semibold tabular-nums sm:text-4xl">
-                  {overviewLoading ? <><Spinner className="size-6" /><span className="sr-only">Loading</span></> : card.count ?? "—"}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-        {overviewError && (
-          <div role="alert" className="mt-3 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-            <span>Unable to load action counts.</span>
-            <Button type="button" variant="ghost" size="sm" onClick={() => setOverviewReloadToken((value) => value + 1)}>Try again</Button>
-          </div>
-        )}
-      </section>
       <AddBrandDialog
         open={addBrandOpen}
         onOpenChange={setAddBrandOpen}
@@ -1226,8 +1309,9 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
         </div>
       )}
       <div className="overflow-hidden rounded-2xl bg-white">
-        <div className="px-4 pt-4">
-          <div className="relative w-full sm:w-[26rem]">
+        {workView === "all" ? <>
+        <div className="flex flex-wrap gap-3 p-4">
+          <div className="relative w-full sm:w-40">
             <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
             <Input
               value={query}
@@ -1244,10 +1328,8 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
               className="h-10 pl-9"
             />
           </div>
-        </div>
-        <div className="flex flex-wrap gap-3 p-4">
           <Select value={cp} onValueChange={(value) => setListParam("cp", value)}>
-            <SelectTrigger className="w-full sm:w-32">
+            <SelectTrigger className="w-full sm:w-28">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -1291,7 +1373,7 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
             </Select>
           )}
           <Select value={handlingMode} onValueChange={(value) => setListParam("handlingMode", value)}>
-            <SelectTrigger className="w-full sm:w-40">
+            <SelectTrigger className="w-full sm:w-36">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -1305,7 +1387,7 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
             onValueChange={(value) => setListParam("exhibitionId", value)}
             disabled={exhibitionOptionsLoading}
           >
-            <SelectTrigger className="w-full sm:w-48">
+            <SelectTrigger className="w-full sm:w-40">
               <SelectValue placeholder={exhibitionOptionsLoading ? "Loading exhibitions…" : "All exhibitions"} />
             </SelectTrigger>
             <SelectContent>
@@ -1319,12 +1401,15 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
             <SelectTrigger
               aria-label="Sort brands"
               title="Sort brands"
-              className="size-9 justify-center px-0 sm:size-9 [&>svg:last-child]:hidden"
+              className="w-full sm:w-56"
             >
               <ArrowDownUp className="size-4" />
-              <SelectValue className="sr-only" />
+              <SelectValue />
             </SelectTrigger>
             <SelectContent className="w-auto min-w-52">
+              <SelectItem value="ownerAssignedNewest">Assigned: newest first</SelectItem>
+              <SelectItem value="lastInboundNewest">Last inbound: newest first</SelectItem>
+              <SelectItem value="lastOutboundNewest">Last outbound: newest first</SelectItem>
               <SelectItem value="nameAsc">Brand name A–Z</SelectItem>
               <SelectItem value="nameDesc">Brand name Z–A</SelectItem>
             </SelectContent>
@@ -1334,35 +1419,114 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
               type="button"
               variant="ghost"
               size="sm"
-              className="text-slate-500 hover:text-slate-900"
+              aria-label="Clear all filters"
+              title="Clear all"
+              className="group h-9 w-9 overflow-hidden px-0 text-slate-500 transition-[width,color] duration-200 hover:w-24 hover:text-slate-900"
               onClick={clearAllListFilters}
             >
-              <RotateCcw className="mr-1.5 size-3.5" />
-              Clear all
+              <RotateCcw className="size-3.5 shrink-0" />
+              <span className="max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-[max-width,opacity] duration-200 group-hover:ml-1.5 group-hover:max-w-16 group-hover:opacity-100">Clear all</span>
             </Button>
           </div>
         </div>
-        {error ? (
+        </> : <>
+        <div className="flex flex-wrap gap-3 p-4">
+          <div className="relative w-full sm:w-40">
+            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+            <Input
+              value={query || filters.workQ}
+              onChange={(event) => setWorkFilter({ q: event.target.value, workQ: "" })}
+              placeholder="Search brand…"
+              aria-label="Search brands needing action"
+              className="h-10 pl-9"
+            />
+          </div>
+          <Select value={filters.action} onValueChange={(value) => setWorkFilter({ action: value as BrandListFilters["action"] })}>
+            <SelectTrigger aria-label="Action type" className="w-full sm:w-44"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Actions</SelectItem>
+              <SelectItem value="assignments">New Assignments</SelectItem>
+              <SelectItem value="replies">Replies</SelectItem>
+              <SelectItem value="callReview">Call Review</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={cp} onValueChange={(value) => setWorkFilter({ cp: value })}>
+            <SelectTrigger className="w-full sm:w-28"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All CPs</SelectItem>
+              {cps.map((item) => <SelectItem key={item.id} value={item.name}>{item.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={handlingMode} onValueChange={(value) => setWorkFilter({ handlingMode: value })}>
+            <SelectTrigger className="w-full sm:w-36"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All handling modes</SelectItem>
+              <SelectItem value="Automated">Automated</SelectItem>
+              <SelectItem value="Human">Human</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={exhibitionId} onValueChange={(value) => setWorkFilter({ exhibitionId: value })} disabled={exhibitionOptionsLoading}>
+            <SelectTrigger className="w-full sm:w-40"><SelectValue placeholder={exhibitionOptionsLoading ? "Loading exhibitions…" : "All exhibitions"} /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All exhibitions</SelectItem>
+              {exhibitionOptions.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={sort} onValueChange={(value) => setWorkFilter({ sort: value })}>
+            <SelectTrigger aria-label="Sort brands needing action" title="Sort brands" className="w-full sm:w-56">
+              <ArrowDownUp className="size-4" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="w-auto min-w-52">
+              <SelectItem value="ownerAssignedNewest">Assigned: newest first</SelectItem>
+              <SelectItem value="lastInboundNewest">Last inbound: newest first</SelectItem>
+              <SelectItem value="lastOutboundNewest">Last outbound: newest first</SelectItem>
+              <SelectItem value="nameAsc">Brand name A–Z</SelectItem>
+              <SelectItem value="nameDesc">Brand name Z–A</SelectItem>
+            </SelectContent>
+          </Select>
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              aria-label="Clear action filters"
+              title="Clear all"
+              className="group h-9 w-9 overflow-hidden px-0 text-slate-500 transition-[width,color] duration-200 hover:w-24 hover:text-slate-900"
+              onClick={() => setWorkFilter({ action: "all", workQ: "", q: "", cp: "all", handlingMode: "all", exhibitionId: "all", sort: "ownerAssignedNewest" })}
+            >
+              <RotateCcw className="size-3.5 shrink-0" />
+              <span className="max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-[max-width,opacity] duration-200 group-hover:ml-1.5 group-hover:max-w-16 group-hover:opacity-100">Clear all</span>
+            </Button>
+          </div>
+        </div>
+        </>}
+        {workView === "all" && workError && <div role="alert" className="flex flex-wrap items-center gap-2 px-5 pb-3 text-sm text-rose-700">
+          <span>Action Required unavailable: {workError}</span>
+          <Button variant="ghost" size="sm" onClick={() => setWorkReloadToken((value) => value + 1)}>Retry</Button>
+        </div>}
+        {visibleError ? (
           <Empty className="py-20">
             <EmptyHeader>
               <EmptyMedia variant="icon">
                 <CircleAlert />
               </EmptyMedia>
-              <EmptyTitle>Unable to load brands</EmptyTitle>
-              <EmptyDescription>{error}</EmptyDescription>
+              <EmptyTitle>Unable to load {workView === "all" ? "brands" : "actions"}</EmptyTitle>
+              <EmptyDescription>{visibleError}</EmptyDescription>
             </EmptyHeader>
+            <Button variant="outline" size="sm" onClick={() => workView === "all" ? setListReloadToken((value) => value + 1) : setWorkReloadToken((value) => value + 1)}>Retry</Button>
           </Empty>
         ) : brandsBusy && !filtered.length ? (
           <div className="flex items-center justify-center gap-2 px-5 py-16 text-sm text-slate-500">
             <Spinner className="size-4" />
-            Loading brands…
+            Loading {workView === "all" ? "brands" : "actions"}…
           </div>
         ) : filtered.length ? (
           <div className="overflow-x-auto">
             {brandsBusy ? (
               <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50/80 px-5 py-2.5 text-xs font-medium text-slate-500">
                 <Spinner className="size-3.5" />
-                {loading ? "Loading brands…" : "Updating brands…"}
+                {workView !== "all" ? "Updating actions…" : loading ? "Loading brands…" : "Updating brands…"}
               </div>
             ) : null}
             <Table>
@@ -1386,25 +1550,28 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
                     </TableHead>
                   )}
                   <TableHead className={isAdmin ? "min-w-56" : "min-w-56 pl-5"}>Brand</TableHead>
+                  <TableHead className="min-w-56">Action Required</TableHead>
                   <TableHead>CP</TableHead>
-                  <TableHead>Status</TableHead>
+                  {showStatusColumn && <TableHead>Status</TableHead>}
                   <TableHead>Handling Mode</TableHead>
                   <TableHead className="min-w-40">Human Note</TableHead>
-                  <TableHead>Last interaction</TableHead>
-                  <TableHead className="whitespace-nowrap">Days since last interaction</TableHead>
-                  <TableHead className="whitespace-nowrap pr-5">Days since last reply</TableHead>
+                  {workView === "all" && <TableHead>Last interaction</TableHead>}
+                  <TableHead className="w-32 whitespace-nowrap" title="Days since last interaction">Last touch (days)</TableHead>
+                  <TableHead className="w-32 whitespace-nowrap pr-5" title="Days since last reply">Last reply (days)</TableHead>
                   {isAdmin && <TableHead>AccountManager</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filtered.map((c) => {
+                  const pendingWork = workByBrandId.get(c.id);
                   const needsQualification = canReviewQualification && Boolean(c.needsQualification);
-                  const needsAttention = Boolean(c.needsReply) || needsQualification;
+                  const hasNewAssignment = Boolean(pendingWork?.newAssignment);
+                  const needsAttention = Boolean(c.needsReply) || needsQualification || hasNewAssignment;
                   return (
                     <TableRow
                       key={c.id}
                       className={`cursor-pointer hover:bg-violet-50/30 ${needsAttention ? "bg-rose-50/40" : ""}`}
-                      onClick={() => router.push(brandDetailPath(c.id))}
+                      onClick={() => openBrand(c.id)}
                     >
                       {isAdmin && (
                         <TableCell className="pl-5" onClick={(e) => e.stopPropagation()}>
@@ -1432,12 +1599,16 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
                               {needsAttention ? (
                                 <span
                                   className="size-2 shrink-0 rounded-full bg-rose-500"
-                                  aria-label={needsQualification ? "Call needs qualification" : "Reply needed"}
+                              aria-label={hasNewAssignment ? "New assignment" : needsQualification ? "Call needs qualification" : "Reply needed"}
                                 />
                               ) : null}
                               <span className="truncate">{c.name}</span>
                             </div>
-                            {needsQualification ? (
+                            {hasNewAssignment ? (
+                              <div className="mt-0.5 truncate text-xs font-medium text-blue-700">
+                                New assignment
+                              </div>
+                            ) : needsQualification ? (
                               <div className="mt-0.5 truncate text-xs font-medium text-rose-700">
                                 Call needs qualification{c.qualificationTaskCount && c.qualificationTaskCount > 1 ? ` · ${c.qualificationTaskCount} tasks` : ""}
                               </div>
@@ -1452,12 +1623,28 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
                           </div>
                         </div>
                       </TableCell>
+                      <TableCell onClick={(event) => event.stopPropagation()}>
+                        {state.currentRole !== "Caller" && workLoading ? <span className="text-xs text-slate-500">Loading…</span> : workError ? <span className="text-xs text-rose-700">Unavailable</span> : pendingWork ? <div className="flex flex-wrap items-center gap-1.5">
+                          {pendingWork.newAssignment && <button type="button" className="inline-flex min-h-9 items-center gap-1 rounded-md bg-blue-50 px-2 text-xs font-semibold text-blue-700 hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" onClick={() => openBrand(c.id, { assignment: true })}>
+                            <UserPlus className="size-3.5 shrink-0" />New Assignment
+                          </button>}
+                          {WORK_REPLY_CHANNELS.map((channel) => {
+                            const pending = pendingWork.channels[channel];
+                            return pending ? <button key={channel} type="button" className="inline-flex min-h-9 items-center gap-1 rounded-md bg-violet-50 px-2 text-xs font-semibold text-violet-800 hover:bg-violet-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500" onClick={() => openBrand(c.id, { replyId: pending.target.id })}>
+                              <ChannelIcon channel={channel} className="size-3.5 shrink-0" alt="" />{channel} {pending.count}
+                            </button> : null;
+                          })}
+                          {pendingWork.callReview && <button type="button" className="inline-flex min-h-9 items-center gap-1 rounded-md bg-amber-50 px-2 text-xs font-semibold text-amber-800 hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500" onClick={() => openBrand(c.id, { taskId: pendingWork.callReview!.target.id })}>
+                            <PhoneCall className="size-3.5 shrink-0" />Call Review {pendingWork.callReview.count}
+                          </button>}
+                        </div> : <span className="text-xs text-slate-400">—</span>}
+                      </TableCell>
                       <TableCell>
                         <CP value={c.currentCp} />
                       </TableCell>
-                      <TableCell>
+                      {showStatusColumn && <TableCell>
                         {c.status ? <Status value={c.status} /> : <span className="text-xs text-slate-400">—</span>}
-                      </TableCell>
+                      </TableCell>}
                       <TableCell>
                         <HandlingMode value={c.handlingMode} />
                       </TableCell>
@@ -1481,11 +1668,24 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
                           }
                         />
                       </TableCell>
-                      <TableCell className="max-w-60 text-xs text-slate-500">
+                      {workView === "all" && <TableCell className="max-w-60 text-xs text-slate-500">
                         {c.lastInteractionAt ? (
                           <div className="min-w-44">
-                            <div className="truncate font-semibold text-slate-700" title={lastInteractionLabel(c)}>
-                              {lastInteractionLabel(c)}
+                            <div className="flex min-w-0 items-center gap-1.5">
+                              <span className="truncate font-semibold text-slate-700" title={lastInteractionLabel(c)}>
+                                {lastInteractionLabel(c)}
+                              </span>
+                              <span className={cx(
+                                "inline-flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
+                                c.lastInteractionDirection === "Inbound"
+                                  ? "bg-emerald-50 text-emerald-700"
+                                  : c.lastInteractionDirection === "Outbound"
+                                    ? "bg-blue-50 text-blue-700"
+                                    : "bg-slate-100 text-slate-600",
+                              )}>
+                                {c.lastInteractionDirection === "Inbound" ? <ArrowDownLeft className="size-3" aria-hidden="true" /> : c.lastInteractionDirection === "Outbound" ? <ArrowUpRight className="size-3" aria-hidden="true" /> : null}
+                                {c.lastInteractionDirection || "Unknown"}
+                              </span>
                             </div>
                             <time dateTime={c.lastInteractionAt} className="mt-0.5 block truncate font-mono text-[11px] text-slate-500">
                               {formatEasternDateTime(c.lastInteractionAt)}
@@ -1494,7 +1694,7 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
                         ) : (
                           "No interaction"
                         )}
-                      </TableCell>
+                      </TableCell>}
                       <TableCell className="text-xs tabular-nums text-slate-600">
                         {daysSince(c.lastInteractionAt)}
                       </TableCell>
@@ -1518,64 +1718,31 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
               <EmptyMedia variant="icon">
                 <Search />
               </EmptyMedia>
-              <EmptyTitle>No brands match</EmptyTitle>
-              <EmptyDescription>
-                Try changing your search or filters.
-              </EmptyDescription>
+              <EmptyTitle>{workView !== "all" && !work?.brands.length ? "All caught up" : "No brands match"}</EmptyTitle>
+              {(workView === "all" || work?.brands.length) && <EmptyDescription>Try changing your search or filters.</EmptyDescription>}
             </EmptyHeader>
           </Empty>
         )}
-        <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 text-xs text-slate-500">
-          <span>
+        {workView === "all" && <div id="brand-pagination" className="relative flex min-h-14 items-center justify-center px-5 py-3 text-xs text-slate-500">
+          <span className="absolute left-5 hidden sm:block">
             {brands.length === 0
               ? "No records"
               : `Showing ${brands.length} of ${totalCount ?? "…"} brands`}
           </span>
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={brandsBusy || cursorStack.length === 0}
-              onClick={goPrevPage}
-            >
-              <ChevronLeft className="size-4" />
-              Previous
-            </Button>
-            <span className="min-w-20 text-center font-medium text-slate-600">
-              Page
-              <Input
-                aria-label="Go to page"
-                type="number"
-                min={1}
-                max={totalCount ? Math.max(1, Math.ceil(totalCount / DEFAULT_BRAND_PAGE_SIZE)) : undefined}
-                defaultValue={pageNumber}
-                key={pageNumber}
-                className="mx-1 inline-flex h-7 w-14 px-1 text-center text-xs"
-                onKeyDown={(event) => {
-                  if (event.key !== "Enter") return;
-                  const value = Number.parseInt(event.currentTarget.value, 10);
-                  void goToPage(value);
-                }}
-                onBlur={(event) => {
-                  const value = Number.parseInt(event.currentTarget.value, 10);
-                  if (Number.isInteger(value) && value !== pageNumber) void goToPage(value);
-                }}
-              />
-              {totalCount ? ` / ${Math.max(1, Math.ceil(totalCount / DEFAULT_BRAND_PAGE_SIZE))}` : ""}
-            </span>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={brandsBusy || !hasMore}
-              onClick={goNextPage}
-            >
-              Next
-              <ChevronRight className="size-4" />
-            </Button>
-          </div>
-        </div>
+          <GlassPagination className="w-auto">
+            <GlassPaginationContent>
+              <GlassPaginationItem>
+                <GlassPaginationPrevious href="#brand-pagination" aria-disabled={brandsBusy || cursorStack.length === 0} onClick={(event) => { event.preventDefault(); if (!brandsBusy && cursorStack.length) goPrevPage(); }} />
+              </GlassPaginationItem>
+              {paginationItems.map((item, index) => item === "ellipsis" ? <GlassPaginationItem key={`ellipsis-${index}`}><GlassPaginationEllipsis /></GlassPaginationItem> : <GlassPaginationItem key={item}>
+                <GlassPaginationLink href="#brand-pagination" isActive={item === pageNumber} onClick={(event) => { event.preventDefault(); if (item !== pageNumber) void goToPage(item); }}>{item}</GlassPaginationLink>
+              </GlassPaginationItem>)}
+              <GlassPaginationItem>
+                <GlassPaginationNext href="#brand-pagination" aria-disabled={brandsBusy || !hasMore} onClick={(event) => { event.preventDefault(); if (!brandsBusy && hasMore) goNextPage(); }} />
+              </GlassPaginationItem>
+            </GlassPaginationContent>
+          </GlassPagination>
+        </div>}
       </div>
     </div>
   );

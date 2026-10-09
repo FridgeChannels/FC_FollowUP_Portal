@@ -124,7 +124,7 @@ export async function POST(request: Request, { params }: Params) {
       contactName: task.contactName,
       channel: task.channel,
     });
-    if (task.status === "Pending" || task.callReviewStatus === "Unqualified") {
+    if (task.status !== "Cancelled" && task.status !== "Canceled" && (task.status === "Pending" || task.callReviewStatus === "Unqualified")) {
       await updateFollowupTask(task.id, {
         status: "In Progress",
       });

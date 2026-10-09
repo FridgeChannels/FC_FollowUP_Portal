@@ -190,7 +190,7 @@ export function BombsPage() {
           </SelectContent>
         </Select>
         {can("editBomb") && (
-          <Button onClick={() => setCreate(true)}>
+          <Button className="text-black hover:text-black" onClick={() => setCreate(true)}>
             <Plus className="mr-2 size-4" />
             New OmniReach
           </Button>

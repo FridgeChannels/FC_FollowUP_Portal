@@ -1,4 +1,5 @@
 import { lastReplyAtFromActivities, type BrandActivity, type BrandListItem } from "../brand-list";
+import { isAutomaticReply } from "../brand-work";
 import {
   firstRelationId,
   propertyDate,
@@ -126,6 +127,7 @@ async function loadBrandReplySignals(clientPages: NotionPage[]) {
   const signals = new Map<string, BrandReplySignal>();
 
   for (const page of pages) {
+    if (isAutomaticReply(propertyText(page.properties?.Subject), propertyText(page.properties?.Sender))) continue;
     const contactId = firstRelationId(page.properties?.["Follow-up Contact"]);
     const brandId =
       firstRelationId(page.properties?.["Follow-up Client"]) ||

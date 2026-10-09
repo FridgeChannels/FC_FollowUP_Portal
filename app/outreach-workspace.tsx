@@ -4,7 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Bomb, ChevronDown, ClipboardCheck, LayoutDashboard, LogOut, RefreshCw,
-  Users, Zap, Radio,
+  Users, Radio,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Role } from "@/lib/outreach-domain";
@@ -39,7 +39,7 @@ const nav: { label: Screen; path: string; icon: typeof Users; cap: string; badge
 ];
 const roleHome: Record<Role, string> = {
   Admin: "/dashboard",
-  "AccountManager": "/customers",
+  "AccountManager": "/customers?view=myWork",
   Caller: "/dashboard",
 };
 const isOmniReachPath = (path: string) => /^\/(omnireach|bombs)(\/|$)/i.test(path);
@@ -59,6 +59,7 @@ function WorkspaceShell({ children }: { children?: ReactNode }) {
   const { data: signalsData } = useSignals();
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { state, hydrated, can, setRole } = useWorkspace();
   const { user, loading: sessionLoading, signOut } = useSession();
   const screen = routeScreen(pathname);
@@ -140,7 +141,7 @@ function WorkspaceShell({ children }: { children?: ReactNode }) {
       return;
     }
     if (pathname.startsWith("/inbox") || pathname.startsWith("/call-tasks")) {
-      router.replace(state.currentRole === "AccountManager" ? "/customers" : pathname.replace(/^\/(inbox|call-tasks)/, "/tasks"));
+      router.replace(state.currentRole === "AccountManager" ? "/customers?view=myWork" : pathname.replace(/^\/(inbox|call-tasks)/, "/tasks"));
       return;
     }
     if (/^\/bombs(\/|$)/i.test(pathname)) {
@@ -199,16 +200,16 @@ function WorkspaceShell({ children }: { children?: ReactNode }) {
   return (
     <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen}>
       <Sidebar collapsible="icon" className="border-r-0">
-        <SidebarHeader className="border-b border-white/8 px-3 py-4 group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:px-0">
+        <SidebarHeader className="border-b border-slate-300/45 px-3 py-4 group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:px-0">
           <button
             onClick={() => router.push(roleHome[state.currentRole])}
             className="flex items-center gap-3 px-1 text-left"
           >
-            <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-violet-500 text-white shadow-[0_8px_24px_rgb(113_106_255/35%)]">
-              <Zap className="size-4 fill-current" />
+            <span className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-[6px] bg-white/35 shadow-[0_8px_24px_rgb(55_125_225/22%)]">
+              <img src="/brand-icon.png" alt="Super FollowUP" className="size-8 object-contain" />
             </span>
             <span className="min-w-0 group-data-[collapsible=icon]:hidden">
-              <span className="block truncate text-sm font-bold text-white">Super FollowUP</span>
+              <span className="block truncate text-sm font-bold text-slate-900">Super FollowUP</span>
             </span>
           </button>
         </SidebarHeader>
@@ -224,7 +225,7 @@ function WorkspaceShell({ children }: { children?: ReactNode }) {
                   // ReplyTask badge: open reply/phone tasks.
                   const count =
                     item.label === "Signals"
-                      ? signalsData?.brands.filter(brand=>brand.unread).length || 0
+                      ? (process.env.NODE_ENV !== "production" && pathname === "/signals" && searchParams.get("mock") === "1" ? 0 : signalsData?.brands.filter(brand => brand.needsReview).length || 0)
                       : item.label === "Brands"
                       ? brandReplyCount
                       : item.badge
@@ -254,8 +255,8 @@ function WorkspaceShell({ children }: { children?: ReactNode }) {
                           <span
                             className={`ml-auto rounded-md px-1.5 py-0.5 text-[10px] group-data-[collapsible=icon]:hidden ${
                               item.label === "Brands"
-                                ? "bg-rose-500/20 text-rose-200"
-                                : "bg-amber-400/20 text-amber-200"
+                                ? "bg-rose-500/15 text-rose-800"
+                                : "bg-amber-400/20 text-amber-800"
                             }`}
                           >
                             {count}
@@ -269,20 +270,20 @@ function WorkspaceShell({ children }: { children?: ReactNode }) {
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>
-        <SidebarFooter className="border-t border-white/8 p-3 group-data-[collapsible=icon]:p-0">
+        <SidebarFooter className="border-t border-slate-300/45 p-3 group-data-[collapsible=icon]:p-0">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button className="mt-2 flex w-full items-center gap-3 rounded-xl bg-white/[.04] p-2 text-left">
+              <button className="mt-2 flex w-full items-center gap-3 rounded-xl bg-white/35 p-2 text-left shadow-[inset_0_1px_0_rgb(255_255_255/70%)]">
                 <Avatar className="size-8">
                   <AvatarFallback className="bg-violet-200 text-xs font-bold text-violet-800">
                     {accountInitials(user.name, user.email)}
                   </AvatarFallback>
                 </Avatar>
                 <span className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
-                  <span className="block truncate text-xs font-semibold text-white">{displayName}</span>
-                  <span className="block truncate text-[10px] text-slate-400">{user.role}</span>
+                  <span className="block truncate text-xs font-semibold text-slate-900">{displayName}</span>
+                  <span className="block truncate text-[10px] text-slate-600">{user.role}</span>
                 </span>
-                <ChevronDown className="size-3 text-slate-500 group-data-[collapsible=icon]:hidden" />
+                <ChevronDown className="size-3 text-slate-600 group-data-[collapsible=icon]:hidden" />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent side="right" align="end" className="w-64">
