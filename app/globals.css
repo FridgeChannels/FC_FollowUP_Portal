@@ -148,3 +148,28 @@ button, a, input, textarea { outline-offset: 2px; }
 .ui-cp-1 { border-color: #ddd6fe; background: #f5f3ff; color: #6d28d9; }
 .ui-cp-2 { border-color: #bfdbfe; background: #eff6ff; color: #1d4ed8; }
 .ui-cp-3 { border-color: #a7f3d0; background: #ecfdf5; color: #047857; }
+
+/* Signals uses a scoped dark palette without changing the existing CRM screens. */
+@media (prefers-color-scheme: dark) {
+  [data-signals-workspace], .signals-overlay {
+    --background: #15161a;
+    --foreground: #f1f2f4;
+    --muted: #26282e;
+    --muted-foreground: #aeb4c0;
+    --accent: #30323a;
+    --accent-foreground: #f1f2f4;
+    --border: #41444d;
+    --input: #41444d;
+    --card: #1c1e24;
+    --card-foreground: #f1f2f4;
+    --popover: #1c1e24;
+    --popover-foreground: #f1f2f4;
+    --secondary: #26282e;
+    --secondary-foreground: #f1f2f4;
+    background-color: var(--background);
+    color: var(--foreground);
+  }
+  :is([data-signals-workspace], .signals-overlay) :is(.text-slate-900, .text-slate-950, .text-slate-800, .text-slate-700) { color: var(--foreground); }
+  :is([data-signals-workspace], .signals-overlay) :is(.text-slate-500, .text-slate-600, .text-slate-400) { color: var(--muted-foreground); }
+  :is([data-signals-workspace], .signals-overlay) :is(.bg-slate-50, .bg-slate-100, .bg-white) { background-color: var(--muted); }
+}

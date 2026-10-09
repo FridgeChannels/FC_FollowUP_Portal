@@ -77,6 +77,7 @@ import {
 } from "@/components/ui/table";
 import { BrandContactsEditor, emptyContactDraft, validContactDrafts, type ContactDraft } from "./brand-contacts-editor";
 import { BrandNote } from "./brand-note";
+import type { BrandActionOverview } from "@/lib/notion/brand-action-overview";
 
 const cx = (...v: (string | false | undefined | null)[]) =>
   v.filter(Boolean).join(" ");
@@ -481,6 +482,7 @@ type ExhibitionOption = { id: string; name: string };
 const BRAND_SEARCH_DEBOUNCE_MS = 800;
 const BRAND_LIST_PAGINATION_STORAGE_KEY = "followup.brand-list-pagination.v1";
 const BRAND_LIST_PAGE_CACHE_TTL_MS = 30_000;
+const BRAND_LIST_VISIBLE_SORTS = new Set(["nameAsc", "nameDesc"]);
 
 type BrandListPagination = {
   cursor: string | null;
@@ -497,7 +499,7 @@ function brandListFiltersFromSearch(search: URLSearchParams): BrandListFilters {
     replyState: search.get("replyState") ?? "all",
     handlingMode: search.get("handlingMode") ?? "all",
     exhibitionId: search.get("exhibitionId") ?? "all",
-    sort: search.get("sort") ?? "priority",
+    sort: BRAND_LIST_VISIBLE_SORTS.has(search.get("sort") ?? "") ? search.get("sort")! : "nameAsc",
     replyFrom: search.get("replyFrom") ?? "",
     replyTo: search.get("replyTo") ?? "",
   };
@@ -515,7 +517,7 @@ function brandListPath(
   if (filters.replyState !== "all") params.set("replyState", filters.replyState);
   if (filters.handlingMode !== "all") params.set("handlingMode", filters.handlingMode);
   if (filters.exhibitionId !== "all") params.set("exhibitionId", filters.exhibitionId);
-  if (filters.sort !== "priority") params.set("sort", filters.sort);
+  if (filters.sort !== "nameAsc") params.set("sort", filters.sort);
   if (filters.replyFrom) params.set("replyFrom", filters.replyFrom);
   if (filters.replyTo) params.set("replyTo", filters.replyTo);
   if (pagination?.cursor) params.set("cursor", pagination.cursor);
@@ -609,6 +611,8 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
   const [paginationRestored, setPaginationRestored] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
+  const [totalCount, setTotalCount] = useState<number | null>(null);
+  const pageCursorMap = useRef<Record<number, string | null>>({ 1: null });
   const [ownerOptions, setOwnerOptions] = useState<Array<{ id: string; name: string }>>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -620,6 +624,31 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
   const [searchComposing, setSearchComposing] = useState(false);
   const [addBrandOpen, setAddBrandOpen] = useState(false);
   const [listEpoch, setListEpoch] = useState(0);
+  const [overview, setOverview] = useState<BrandActionOverview | null>(null);
+  const [overviewLoading, setOverviewLoading] = useState(true);
+  const [overviewError, setOverviewError] = useState(false);
+  const [overviewReloadToken, setOverviewReloadToken] = useState(0);
+
+  useEffect(() => {
+    if (!active) return;
+    const controller = new AbortController();
+    setOverviewLoading(true);
+    setOverviewError(false);
+    setOverview(null);
+    fetch("/api/brands/summary?overview=1", { signal: controller.signal, cache: "no-store" })
+      .then(async (response) => {
+        const payload = await response.json() as BrandActionOverview;
+        if (!response.ok || ![payload.needsReplyBrandCount, payload.overdueBrandCount, payload.callReviewBrandCount]
+          .every((count) => Number.isInteger(count) && count >= 0)) {
+          throw new Error("Unable to load action overview");
+        }
+        return payload;
+      })
+      .then((payload) => { if (!controller.signal.aborted) setOverview(payload); })
+      .catch(() => { if (!controller.signal.aborted) setOverviewError(true); })
+      .finally(() => { if (!controller.signal.aborted) setOverviewLoading(false); });
+    return () => controller.abort();
+  }, [active, state.currentUserId, state.currentRole, listEpoch, listReloadToken, overviewReloadToken]);
   const paginationStorageKey = brandListPaginationStorageKey(filters, state.currentUserId);
   const initialPaginationStorageKey = useRef(paginationStorageKey);
 
@@ -684,17 +713,18 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
     setPageNumber(1);
     setNextCursor(null);
     setHasMore(false);
+    pageCursorMap.current = { 1: null };
   };
-  const clearAllListFilters = () => {
+  const resetListFilters = (nextReplyState = "all", nextSort = "nameAsc") => {
     const next: BrandListFilters = {
       q: "",
       status: "all",
       cp: "all",
       owner: "all",
-      replyState: "all",
+      replyState: nextReplyState,
       handlingMode: "all",
       exhibitionId: "all",
-      sort: "priority",
+      sort: nextSort,
       replyFrom: "",
       replyTo: "",
     };
@@ -706,7 +736,9 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
     setPageNumber(1);
     setNextCursor(null);
     setHasMore(false);
+    pageCursorMap.current = { 1: null };
   };
+  const clearAllListFilters = () => resetListFilters();
   useEffect(() => {
     const onPopState = () => {
       setFilters(brandListFiltersFromSearch(new URLSearchParams(window.location.search)));
@@ -783,6 +815,7 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
       setPageNumber(1);
       setNextCursor(null);
       setHasMore(false);
+      pageCursorMap.current = { 1: null };
       setListReloadToken((value) => value + 1);
     };
     window.addEventListener("fc-portal-caches-cleared", onCachesCleared);
@@ -798,7 +831,7 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
     if (replyState !== "all") params.set("replyState", replyState);
     if (handlingMode !== "all") params.set("handlingMode", handlingMode);
     if (exhibitionId !== "all") params.set("exhibitionId", exhibitionId);
-    if (sort !== "priority") params.set("sort", sort);
+    if (sort !== "nameAsc") params.set("sort", sort);
     if (replyFrom) params.set("replyFrom", replyFrom);
     if (replyTo) params.set("replyTo", replyTo);
     return params.toString();
@@ -850,6 +883,7 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
         setBrands(items);
         setNextCursor(resolvedNextCursor);
         setHasMore(resolvedHasMore);
+        if (resolvedNextCursor) pageCursorMap.current[pageNumber + 1] = resolvedNextCursor;
         cacheBrandListPage({
           key: brandListPageCacheKey,
           brands: items,
@@ -929,6 +963,30 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
     };
   }, [brandListPageCacheKey, brandsFilterKey, cursor, listEpoch]);
 
+  useEffect(() => {
+    if (!active) return;
+    const controller = new AbortController();
+    setTotalCount(null);
+    const params = new URLSearchParams(brandsFilterKey);
+    params.set("count", "1");
+    fetch(`/api/brands?${params.toString()}`, { signal: controller.signal, cache: "no-store" })
+      .then(async (response) => {
+        const payload = (await response.json()) as { totalCount?: number };
+        const count = payload.totalCount;
+        if (!response.ok || typeof count !== "number" || !Number.isInteger(count) || count < 0) {
+          throw new Error("Unable to load total brand count");
+        }
+        return count;
+      })
+      .then((count) => {
+        if (!controller.signal.aborted) setTotalCount(count);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setTotalCount(null);
+      });
+    return () => controller.abort();
+  }, [active, brandsFilterKey, listEpoch, state.currentRole, state.currentUserId]);
+
   const goNextPage = () => {
     if (!nextCursor || !hasMore || loading) return;
     const nextStack = [...cursorStack, cursor];
@@ -936,6 +994,7 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
     setCursorStack(nextStack);
     setCursor(nextCursor);
     setPageNumber(nextPage);
+    pageCursorMap.current[nextPage] = nextCursor;
     window.history.replaceState(
       window.history.state,
       "",
@@ -955,6 +1014,33 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
       "",
       brandListPath(filters, { cursor: prev, page: prevPage }),
     );
+  };
+
+  const goToPage = async (requestedPage: number) => {
+    const totalPages = totalCount ? Math.max(1, Math.ceil(totalCount / DEFAULT_BRAND_PAGE_SIZE)) : null;
+    if (!totalPages || !Number.isInteger(requestedPage) || requestedPage < 1 || requestedPage > totalPages || requestedPage === pageNumber || loading) return;
+    let targetCursor = pageCursorMap.current[requestedPage];
+    if (targetCursor === undefined) {
+      let knownPage = pageNumber;
+      let knownCursor = cursor;
+      while (knownPage < requestedPage) {
+        const params = new URLSearchParams(brandsFilterKey);
+        params.set("limit", String(DEFAULT_BRAND_PAGE_SIZE));
+        if (knownCursor) params.set("cursor", knownCursor);
+        const response = await fetch(`/api/brands?${params.toString()}`);
+        const payload = (await response.json()) as { nextCursor?: string | null; hasMore?: boolean };
+        if (!response.ok || !payload.nextCursor || !payload.hasMore) return;
+        knownPage += 1;
+        knownCursor = payload.nextCursor;
+        pageCursorMap.current[knownPage] = knownCursor;
+      }
+      targetCursor = knownCursor;
+    }
+    const nextStack = Array.from({ length: Math.max(0, requestedPage - 1) }, (_, index) => pageCursorMap.current[index + 1] ?? null);
+    setCursorStack(nextStack);
+    setCursor(targetCursor ?? null);
+    setPageNumber(requestedPage);
+    window.history.replaceState(window.history.state, "", brandListPath(filters, { cursor: targetCursor ?? null, page: requestedPage }));
   };
 
   // Sort / replyState / handlingMode / exhibitionId are applied server-side (global).
@@ -1002,7 +1088,10 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
       if (ok && !failed) toast.success(successMessage);
       else if (ok) toast.success(`${ok} updated, ${failed} failed`);
       else toast.error("Update failed");
-      if (ok) setSelected([]);
+      if (ok) {
+        setSelected([]);
+        setOverviewReloadToken((value) => value + 1);
+      }
     } finally {
       setBusy(false);
     }
@@ -1045,23 +1134,6 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
         title="Brands"
       >
         <div className="flex w-full items-center justify-end gap-3 sm:w-auto">
-          <div className="relative w-full sm:w-[26rem]">
-            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
-            <Input
-              value={query}
-              onChange={(e) => setListParam("q", e.target.value)}
-              onCompositionStart={() => setSearchComposing(true)}
-              onCompositionEnd={() => setSearchComposing(false)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !searchComposing) {
-                  setDebouncedQuery(query);
-                }
-              }}
-              placeholder="Search brand…"
-              aria-label="Search brands"
-              className="h-10 pl-9"
-            />
-          </div>
           {can("importBrands") && (
             <Button className="shrink-0 bg-slate-950 text-white hover:bg-slate-800" onClick={() => setAddBrandOpen(true)}>
               <Plus className="mr-2 size-4" />
@@ -1070,6 +1142,40 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
           )}
         </div>
       </PageHeader>
+      <section aria-label="Action Overview" className="mb-6" aria-busy={overviewLoading}>
+        <div className="grid grid-cols-2 gap-2 sm:gap-4">
+          {([
+            { label: "Need Reply", value: "needsReply", count: overview?.needsReplyBrandCount },
+            { label: "Call Review", value: "qualification", count: overview?.callReviewBrandCount },
+          ] as const).map((card) => {
+            const selected = replyState === card.value;
+            return (
+              <button
+                key={card.value}
+                type="button"
+                aria-pressed={selected}
+                aria-label={`${card.label}${card.count !== undefined ? `: ${card.count} brands` : ""}`}
+                onClick={() => resetListFilters(selected ? "all" : card.value, sort)}
+                className={cx(
+                  "min-w-0 rounded-2xl p-3 text-left transition-colors sm:p-5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                  selected ? "bg-primary/10 text-primary ring-1 ring-inset ring-primary" : "bg-card text-foreground hover:bg-accent",
+                )}
+              >
+                <span className={cx("block text-xs font-medium sm:text-sm", !selected && "text-muted-foreground")}>{card.label}</span>
+                <span className="mt-3 block text-3xl font-semibold tabular-nums sm:text-4xl">
+                  {overviewLoading ? <><Spinner className="size-6" /><span className="sr-only">Loading</span></> : card.count ?? "—"}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        {overviewError && (
+          <div role="alert" className="mt-3 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+            <span>Unable to load action counts.</span>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setOverviewReloadToken((value) => value + 1)}>Try again</Button>
+          </div>
+        )}
+      </section>
       <AddBrandDialog
         open={addBrandOpen}
         onOpenChange={setAddBrandOpen}
@@ -1110,7 +1216,26 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
         </div>
       )}
       <div className="overflow-hidden rounded-2xl bg-white">
-        <div className="flex flex-col gap-3 p-4 sm:flex-row">
+        <div className="px-4 pt-4">
+          <div className="relative w-full sm:w-[26rem]">
+            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+            <Input
+              value={query}
+              onChange={(e) => setListParam("q", e.target.value)}
+              onCompositionStart={() => setSearchComposing(true)}
+              onCompositionEnd={() => setSearchComposing(false)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !searchComposing) {
+                  setDebouncedQuery(query);
+                }
+              }}
+              placeholder="Search brand…"
+              aria-label="Search brands"
+              className="h-10 pl-9"
+            />
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-3 p-4">
           <Select value={cp} onValueChange={(value) => setListParam("cp", value)}>
             <SelectTrigger className="w-full sm:w-32">
               <SelectValue />
@@ -1155,19 +1280,6 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
               </SelectContent>
             </Select>
           )}
-          <Select value={replyState} onValueChange={(value) => setListParam("replyState", value)}>
-            <SelectTrigger className="w-full sm:w-44">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All reply states</SelectItem>
-              <SelectItem value="needsReply">Needs reply</SelectItem>
-              <SelectItem value="overdue">Overdue reply</SelectItem>
-              <SelectItem value="replied">Replied</SelectItem>
-              <SelectItem value="never">Never replied</SelectItem>
-              <SelectItem value="qualification">Needs qualification</SelectItem>
-            </SelectContent>
-          </Select>
           <Select value={handlingMode} onValueChange={(value) => setListParam("handlingMode", value)}>
             <SelectTrigger className="w-full sm:w-40">
               <SelectValue />
@@ -1203,12 +1315,8 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
               <SelectValue className="sr-only" />
             </SelectTrigger>
             <SelectContent className="w-auto min-w-52">
-              <SelectItem value="priority">Needs attention first</SelectItem>
               <SelectItem value="nameAsc">Brand name A–Z</SelectItem>
               <SelectItem value="nameDesc">Brand name Z–A</SelectItem>
-              <SelectItem value="lastNewest">Recent interaction</SelectItem>
-              <SelectItem value="lastOldest">Oldest interaction</SelectItem>
-              <SelectItem value="replyDue">Reply due soonest</SelectItem>
             </SelectContent>
           </Select>
           <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
@@ -1411,7 +1519,7 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
           <span>
             {brands.length === 0
               ? "No records"
-              : `Showing ${brands.length} brand${brands.length === 1 ? "" : "s"} (page size ${DEFAULT_BRAND_PAGE_SIZE})`}
+              : `Showing ${brands.length} of ${totalCount ?? "…"} brands`}
           </span>
           <div className="flex items-center gap-2">
             <Button
@@ -1425,7 +1533,26 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
               Previous
             </Button>
             <span className="min-w-20 text-center font-medium text-slate-600">
-              Page {pageNumber}
+              Page
+              <Input
+                aria-label="Go to page"
+                type="number"
+                min={1}
+                max={totalCount ? Math.max(1, Math.ceil(totalCount / DEFAULT_BRAND_PAGE_SIZE)) : undefined}
+                defaultValue={pageNumber}
+                key={pageNumber}
+                className="mx-1 inline-flex h-7 w-14 px-1 text-center text-xs"
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter") return;
+                  const value = Number.parseInt(event.currentTarget.value, 10);
+                  void goToPage(value);
+                }}
+                onBlur={(event) => {
+                  const value = Number.parseInt(event.currentTarget.value, 10);
+                  if (Number.isInteger(value) && value !== pageNumber) void goToPage(value);
+                }}
+              />
+              {totalCount ? ` / ${Math.max(1, Math.ceil(totalCount / DEFAULT_BRAND_PAGE_SIZE))}` : ""}
             </span>
             <Button
               type="button"

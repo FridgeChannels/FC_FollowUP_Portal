@@ -18,6 +18,7 @@ function display(value: string | null | undefined) {
 function eventLabel(eventType: NotificationEvent["eventType"]) {
   if (eventType === "reply.received") return "Reply";
   if (eventType === "sample.visited") return "Sample tap";
+  if (eventType === "followup.resume_due") return "Follow-up review due";
   return "Cold Inbound";
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Bomb, CheckCheck, CheckCircle2, ChevronLeft, Reply, RotateCcw, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import type { CallReviewRound } from "@/lib/call-review-history";
@@ -19,6 +19,7 @@ import { htmlToPlainText, looksLikeEmailHtml } from "@/lib/email-html";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/spinner";
 
@@ -72,6 +73,18 @@ function messagePreviewText(item: Interaction) {
     return htmlToPlainText(item.content) || (item.attachments?.length ? "Attachment" : "No message content");
   }
   return item.content.replace(/\s+/g, " ").trim();
+}
+
+function activityTimelineSummary(item: Interaction) {
+  const channel = item.channel || "Message";
+  const title = item.title?.trim();
+  const subject = emailSubjectLabel(item);
+  if (subject) return subject;
+  if (channel === "Phone" && item.callResult) return `Call · ${item.callResult}`;
+  if (title && title !== channel && title !== "Conversation") return title;
+  const preview = messagePreviewText(item);
+  if (preview !== "No message content") return preview;
+  return item.direction === "Inbound" ? `${channel} reply received` : `${channel} sent`;
 }
 
 function SourceBadge({ source }: { source: string }) {
@@ -173,6 +186,8 @@ export function InteractionFeed({
   onCancelBomb,
   onCancelPending,
   initialChannel,
+  showAllChannels = false,
+  showCpSelector = true,
   initialCp,
   callerPhoneOnly,
   channelHeader,
@@ -208,6 +223,8 @@ export function InteractionFeed({
   onCancelBomb?: (instance: BombInstance) => Promise<void>;
   onCancelPending?: (taskId: string) => Promise<void>;
   initialChannel?: Channel;
+  showAllChannels?: boolean;
+  showCpSelector?: boolean;
   initialCp?: CPCode;
   callerPhoneOnly?: boolean;
   channelHeader?: ReactNode;
@@ -272,18 +289,19 @@ export function InteractionFeed({
   const customerId = customerIdProp || interactions[0]?.customerId;
   const customer = state.customers.find(item => item.id === customerId);
   const currentCp = currentCpProp || customer?.cp || "CP1";
-  const [selectedChannel, setSelectedChannel] = useState<Channel>(callerPhoneOnly ? "Phone" : initialChannel || "Email");
+  const [selectedChannel, setSelectedChannel] = useState<Channel | "All">(callerPhoneOnly ? "Phone" : initialChannel || (showAllChannels ? "All" : "Email"));
   const [bombOpen, setBombOpen] = useState(false);
   const [cancellingBombId, setCancellingBombId] = useState<string | null>(null);
-  const visibleCps = CP_CODES.slice(0, 3);
+  const visibleCps = CP_CODES;
   const selectedInitialCp = initialCp || currentCp;
   const selectedCpIsVisible = visibleCps.includes(selectedInitialCp as (typeof visibleCps)[number]);
   const [selectedCp, setSelectedCp] = useState<CPCode>(selectedCpIsVisible ? selectedInitialCp : visibleCps[visibleCps.length - 1]);
-  // Brand may be on CP4+; the strip only goes to CP3, so treat CP3 as the current tab.
   const displayCurrentCp = visibleCps.includes(currentCp as (typeof visibleCps)[number])
     ? currentCp
-    : visibleCps[visibleCps.length - 1];
-  const currentIndex = visibleCps.indexOf(displayCurrentCp as (typeof visibleCps)[number]);
+    : visibleCps[0];
+  const currentIndex = currentCp === "Nurture"
+    ? visibleCps.length - 1
+    : visibleCps.indexOf(displayCurrentCp as (typeof visibleCps)[number]);
   const taskIdsForCp = phoneTaskIdsForCp(interactions, selectedCp, displayCurrentCp, tasks);
   if (activeTaskId) taskIdsForCp.add(activeTaskId);
   const phoneTasks = tasks
@@ -321,33 +339,31 @@ export function InteractionFeed({
   const planState = bombInstances ? { ...state, bombInstances, actions: actions ?? [], interactions: cpInteractions } : state;
   const activeChannel = callerPhoneOnly ? "Phone" : selectedChannel;
   const visibleChannels: Channel[] = callerPhoneOnly ? ["Phone"] : CHANNELS;
-  const channelMessages = cpInteractions.filter(item => isChannelMessage(item) && item.channel === activeChannel);
+  const channelMessages = cpInteractions.filter(item => isChannelMessage(item) && (activeChannel === "All" || item.channel === activeChannel));
   // Newest OmniReach launch first (startedAt = creation/launch time).
   const bombsForCp = planState.bombInstances
     .filter(item => item.customerId === customerId && item.cp === selectedCp)
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt) || b.id.localeCompare(a.id));
   const usePhoneTaskBoard = activeChannel === "Phone" && (callerPhoneOnly || phoneTasks.length > 0);
+  const cpLabel = (cp: CPCode) => {
+    const name = cpGoals?.[cp] || state.cps.find(item => item.code === cp)?.goal;
+    return name ? `${cp} · ${name}` : cp;
+  };
 
   return <div className={`w-full min-w-0 ${maxHeight ? `${maxHeight} overflow-y-auto` : ""}`}>
-    <div className="px-5 py-4">
-      <div className="grid grid-cols-3 gap-2">{visibleCps.map((cp, index) => {
-        const current = cp === displayCurrentCp;
-        const completed = index < currentIndex;
-        const selected = cp === selectedCp;
-        const selectable = index <= currentIndex;
-        const goal = cpGoals?.[cp] || state.cps.find(item => item.code === cp)?.goal;
-        return <button key={cp} type="button" disabled={!selectable} aria-pressed={selected} onClick={() => selectable && setSelectedCp(cp)} className={`min-w-0 rounded-xl px-3 py-2 text-left transition ${current ? "bg-violet-600 shadow-[0_8px_20px_rgb(124_58_237/25%)]" : selected ? "bg-violet-50 ring-1 ring-violet-200" : selectable ? "hover:bg-slate-50" : "cursor-not-allowed opacity-55"}`}>
-            <div className="flex min-w-0 items-baseline gap-2">
-              <span className={`shrink-0 text-xs font-bold ${current ? "text-white" : selected ? "text-violet-700" : completed ? "text-emerald-700" : "text-slate-400"}`}>{cp}</span>
-              {goal && <span className={`min-w-0 truncate text-xs font-semibold ${current ? "text-white" : selected ? "text-slate-950" : "text-slate-500"}`}>{goal}</span>}
-            </div>
-            <div className={`mt-0.5 truncate text-[10px] ${current ? "font-semibold text-violet-100" : "text-slate-500"}`}>{current ? "Current CP" : completed ? "Completed" : "Upcoming"}</div>
-          </button>;
-      })}</div>
-    </div>
+    {showCpSelector && <div className="flex min-w-0 items-center px-5 py-3">
+      <Select value={selectedCp} onValueChange={(value)=>setSelectedCp(value as CPCode)}>
+        <SelectTrigger size="sm" aria-label="View conversations by CP" className="w-full max-w-lg sm:w-auto sm:min-w-72"><SelectValue/></SelectTrigger>
+        <SelectContent>{visibleCps.map((cp,index)=><SelectItem key={cp} value={cp} disabled={index>currentIndex}>{cpLabel(cp)}</SelectItem>)}</SelectContent>
+      </Select>
+    </div>}
 
-    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 px-5 py-3">
+    <div className={`flex flex-wrap items-center justify-between gap-2 px-5 py-3 ${showCpSelector ? "border-t border-slate-200" : ""}`}>
       <div className="flex flex-wrap gap-1.5">
+        {showAllChannels && !callerPhoneOnly && <button type="button" aria-pressed={activeChannel === "All"} disabled={loading} onClick={() => setSelectedChannel("All")} className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${activeChannel === "All" ? "bg-violet-600 text-white" : "bg-slate-50 text-slate-600 hover:bg-slate-100"} ${loading ? "opacity-70" : ""}`}>
+          All
+          <span className={activeChannel === "All" ? "text-white/80" : "text-slate-400"}>{loading ? "…" : cpInteractions.filter(isChannelMessage).length}</span>
+        </button>}
         {visibleChannels.map(channel => {
           const channelItems = interactions.filter(item =>
             isChannelMessage(item) && item.channel === channel && belongsToCp(item, selectedCp, displayCurrentCp),
@@ -411,6 +427,7 @@ export function InteractionFeed({
       />
     ) : (
     <ChannelTranscript
+      key={`${selectedCp}-${activeChannel}`}
       messages={channelMessages}
       contacts={contacts}
       channel={activeChannel}
@@ -484,7 +501,7 @@ function ChannelTranscript({
 }: {
   messages: Interaction[];
   contacts: Contact[];
-  channel: Channel;
+  channel: Channel | "All";
   bombInstances: BombInstance[];
   onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, scheduledAt?: string, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string) => Promise<void>;
   onCancelPending?: (taskId: string) => Promise<void>;
@@ -496,25 +513,22 @@ function ChannelTranscript({
   onReviewCall: (interactionId: string, taskId: string | undefined, status: CallReviewStatus, reviewReason?: string, reviewNote?: string) => void | Promise<void>;
   onMarkReplyRead?: (interactionId: string) => Promise<void>;
 }) {
-  const [selectedThread, setSelectedThread] = useState<{ channel: Channel; key: string } | null>(null);
+  const [selectedThread, setSelectedThread] = useState<{ channel: Channel; key: string; interactionId?: string } | null>(null);
   const contactGroups = groupByContact(messages, contacts);
   const threads = groupByThread(messages);
-  const activeThread = selectedThread?.channel === channel
-    ? threads.find((thread) => threadKey(thread[0]!) === selectedThread.key)
+  const activeThread = selectedThread && (channel === "All" || selectedThread.channel === channel)
+    ? groupByThread(messages.filter((item) => item.channel === selectedThread.channel)).find((thread) => threadKey(thread[0]!) === selectedThread.key)
     : undefined;
 
-  if (channel !== "Phone") {
-    if (!threads.length) {
-      return <div className="px-5 py-10 text-center text-sm text-slate-400">No {channel} conversation recorded for this CP.</div>;
-    }
-    if (activeThread) {
+  if (activeThread && selectedThread) {
       const contact = contacts.find((item) => item.id === activeThread[0]?.contactId);
       return (
         <ConversationDetail
           thread={activeThread}
           contact={contact}
           contacts={contacts}
-          channel={channel}
+          channel={selectedThread.channel}
+          focusedInteractionId={selectedThread.interactionId}
           replyPool={messages}
           bombInstances={bombInstances}
           onBack={() => setSelectedThread(null)}
@@ -529,6 +543,17 @@ function ChannelTranscript({
           onMarkReplyRead={onMarkReplyRead}
         />
       );
+  }
+
+  if (channel === "All") {
+    return <section aria-label="All channel activity" className="w-full min-w-0 px-5 py-5">
+      {!messages.length ? <div className="py-5 text-center text-sm text-slate-400">No conversation recorded for this CP.</div> : <ActivityTimeline items={[...messages].sort((left, right) => compareInteractionSort(right, left))} onOpen={(item) => setSelectedThread({channel: item.channel!, key: threadKey(item), interactionId: item.id})} />}
+    </section>;
+  }
+
+  if (channel !== "Phone") {
+    if (!threads.length) {
+      return <div className="px-5 py-10 text-center text-sm text-slate-400">No {channel} conversation recorded for this CP.</div>;
     }
     return <ConversationInbox threads={threads} contacts={contacts} channel={channel} onOpen={(thread) => setSelectedThread({ channel, key: threadKey(thread[0]!) })} />;
   }
@@ -546,6 +571,28 @@ function ChannelTranscript({
   </div>;
 }
 
+export function ActivityTimeline({ items, onOpen, formatTime = formatEasternDateTime }: { items: Interaction[]; onOpen: (item: Interaction) => void; formatTime?: (value: string) => string }) {
+  return <ol className="relative space-y-1 before:absolute before:bottom-3 before:left-[11px] before:top-3 before:w-px before:bg-slate-200">
+    {items.map((item) => {
+      const channel = item.channel || "Email";
+      const occurredAt = interactionSortAt(item);
+      const direction = item.direction === "Inbound" ? "Reply" : item.direction === "Outbound" ? "Sent" : "Activity";
+      return <li key={item.id} className="relative min-w-0">
+        <button type="button" onClick={() => onOpen(item)} className="relative block w-full min-w-0 rounded-lg py-2 pl-8 pr-2 text-left transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500" aria-label={`Open ${channel} activity: ${activityTimelineSummary(item)}${occurredAt ? ` · ${formatTime(occurredAt)}` : ""}`}>
+        <span className="absolute left-0 top-4 grid size-6 place-items-center rounded-full bg-slate-100 text-slate-600 ring-4 ring-white">
+          <ChannelIcon channel={channel} className="size-3.5" alt="" />
+        </span>
+        <div className="flex min-w-0 items-baseline justify-between gap-3">
+          <p className="min-w-0 truncate text-sm font-medium text-slate-900">{activityTimelineSummary(item)}</p>
+          {occurredAt ? <time dateTime={occurredAt} className="shrink-0 font-mono text-[11px] text-slate-500">{formatTime(occurredAt)}</time> : null}
+        </div>
+        <p className="mt-0.5 text-xs text-slate-500">{channel} · {direction}</p>
+        </button>
+      </li>;
+    })}
+  </ol>;
+}
+
 function groupByContact(messages: Interaction[], contacts: Contact[]) {
   const ids = [...new Set(messages.map(item => item.contactId).filter((id): id is string => !!id))];
   const orphan = messages.filter(item => !item.contactId);
@@ -561,7 +608,7 @@ function groupByContact(messages: Interaction[], contacts: Contact[]) {
   });
 }
 
-function groupByThread(messages: Interaction[], order: "latest" | "oldest" = "latest") {
+function groupByThread(messages: Interaction[]) {
   const groups = new Map<string, Interaction[]>();
   for (const item of messages) {
     const key = threadKey(item);
@@ -572,25 +619,14 @@ function groupByThread(messages: Interaction[], order: "latest" | "oldest" = "la
   return [...groups.values()]
     .map(list => [...list].sort(compareInteractionSort))
     .sort((left, right) => {
-      if (order === "oldest") return compareInteractionSort(left[0]!, right[0]!);
-
-      // The inbox is driven by the final interaction. A cancelled final action is
-      // retained for auditability but always stays below active conversations.
       const leftLatest = latestThreadInteraction(left);
       const rightLatest = latestThreadInteraction(right);
-      const cancellationDelta = Number(isCancelledInteraction(leftLatest)) - Number(isCancelledInteraction(rightLatest));
-      if (cancellationDelta) return cancellationDelta;
       return compareInteractionSort(rightLatest, leftLatest);
     });
 }
 
 function latestThreadInteraction(thread: Interaction[]) {
   return thread.at(-1)!;
-}
-
-function isCancelledInteraction(item: Interaction) {
-  const status = outboundStatus(item);
-  return status === "Cancelled" || status === "Canceled";
 }
 
 function inboxSubject(thread: Interaction[], channel: Channel) {
@@ -704,6 +740,7 @@ function ConversationDetail({
   reviewingTaskId,
   onReviewCall,
   onMarkReplyRead,
+  focusedInteractionId,
 }: {
   thread: Interaction[];
   contact?: Contact;
@@ -721,6 +758,7 @@ function ConversationDetail({
   reviewingTaskId: string | null;
   onReviewCall: (interactionId: string, taskId: string | undefined, status: CallReviewStatus, reviewReason?: string, reviewNote?: string) => void | Promise<void>;
   onMarkReplyRead?: (interactionId: string) => Promise<void>;
+  focusedInteractionId?: string;
 }) {
   const [expandAll, setExpandAll] = useState(false);
   const endpoint = contact ? contactPoint(contact, channel) : undefined;
@@ -736,7 +774,7 @@ function ConversationDetail({
         {contact ? <p className="mt-1 truncate text-sm text-slate-500">{contact.name}{endpoint ? ` · ${endpoint}` : ""}</p> : null}
       </div>
       <div className="px-5 pb-5">
-        <ThreadMessages thread={thread} replyPool={replyPool} contact={contact} contacts={contacts} channel={channel} endpoint={endpoint} bombInstances={bombInstances} collapseOlder expandAll={expandAll} onSend={onSend} onCancelPending={onCancelPending} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId} resolveReview={resolveReview} canReviewCalls={canReviewCalls} reviewingTaskId={reviewingTaskId} onReviewCall={onReviewCall} onMarkReplyRead={onMarkReplyRead} />
+        <ThreadMessages thread={thread} replyPool={replyPool} contact={contact} contacts={contacts} channel={channel} endpoint={endpoint} bombInstances={bombInstances} collapseOlder expandAll={expandAll} focusedInteractionId={focusedInteractionId} onSend={onSend} onCancelPending={onCancelPending} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId} resolveReview={resolveReview} canReviewCalls={canReviewCalls} reviewingTaskId={reviewingTaskId} onReviewCall={onReviewCall} onMarkReplyRead={onMarkReplyRead} />
       </div>
       {channel === "Email" ? (
         <ThreadSendBox
@@ -783,7 +821,7 @@ function ContactThreads({
   onMarkReplyRead?: (interactionId: string) => Promise<void>;
 }) {
   const endpoint = group.contact ? contactPoint(group.contact, channel) : undefined;
-  const threads = groupByThread(group.messages, "oldest");
+  const threads = groupByThread(group.messages);
   return <section className="px-5 py-5">
     <div className="mb-4 flex items-center gap-3">
       {group.contact ? (
@@ -825,12 +863,14 @@ function ThreadMessages({
   onMarkReplyRead,
   collapseOlder = false,
   expandAll = false,
+  showChannelLabel = false,
+  focusedInteractionId,
 }: {
   thread: Interaction[];
   replyPool: Interaction[];
   contact?: Contact;
   contacts?: Contact[];
-  channel: Channel;
+  channel?: Channel;
   endpoint?: string;
   bombInstances: BombInstance[];
   onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, scheduledAt?: string, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string) => Promise<void>;
@@ -844,6 +884,8 @@ function ThreadMessages({
   onMarkReplyRead?: (interactionId: string) => Promise<void>;
   collapseOlder?: boolean;
   expandAll?: boolean;
+  showChannelLabel?: boolean;
+  focusedInteractionId?: string;
 }) {
   const [recallTaskId, setRecallTaskId] = useState<string | null>(null);
   const [recallReason, setRecallReason] = useState("");
@@ -852,14 +894,19 @@ function ThreadMessages({
   const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null);
   const [markingReadId, setMarkingReadId] = useState<string | null>(null);
   const [replyOpenIds, setReplyOpenIds] = useState<Set<string>>(() => new Set());
-  const latestId = thread.at(-1)?.id;
+  const focusedMessageRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (focusedInteractionId) focusedMessageRef.current?.scrollIntoView({block: "center", behavior: "smooth"});
+  }, [focusedInteractionId]);
+  const latestId = focusedInteractionId || thread.at(-1)?.id;
   return <div className="space-y-3">
-    {thread.map(item => {
+    {[...thread].reverse().map(item => {
+      const itemChannel = channel || item.channel || "Email";
       const inbound = item.direction === "Inbound";
       const source = sourceLabel(item, bombInstances);
-      const phoneCall = channel === "Phone";
+      const phoneCall = itemChannel === "Phone";
       const itemContact = (item.contactId && contacts?.find((person) => person.id === item.contactId)) || contact;
-      const itemEndpoint = itemContact ? contactPoint(itemContact, channel) : endpoint;
+      const itemEndpoint = itemContact ? contactPoint(itemContact, itemChannel) : endpoint;
       const who = inbound
         ? phoneCall
           ? `${itemEndpoint || itemContact?.name || "Contact"} call`
@@ -917,10 +964,11 @@ function ThreadMessages({
           return next;
         });
       };
-      return <article key={item.id} className={`flex min-w-0 ${phoneCall ? "" : inbound ? "justify-start" : "justify-end"}`}>
+      return <article key={item.id} ref={item.id === focusedInteractionId ? focusedMessageRef : undefined} data-interaction-id={item.id} className={`flex min-w-0 ${phoneCall ? "" : inbound ? "justify-start" : "justify-end"}`}>
         <div className={messageBubbleClass}>
         <button type="button" onClick={toggleExpanded} className={`flex w-full flex-wrap items-start justify-between gap-2 text-left ${collapseOlder && !expandAll ? "cursor-pointer" : "cursor-default"}`} aria-expanded={expanded}>
           <div className="min-w-0 flex flex-wrap items-center gap-2">
+            {showChannelLabel && <span className="inline-flex items-center gap-1 text-xs font-semibold text-slate-600"><ChannelIcon channel={itemChannel} className="size-3.5" alt=""/>{itemChannel}</span>}
             <div className="break-words text-xs font-semibold text-slate-900">{who}</div>
             {inbound && !phoneCall ? <Badge className="bg-rose-600 text-[10px] text-white hover:bg-rose-600">This is a reply</Badge> : <Badge variant="secondary" className="text-[10px]">{item.direction || "Outbound"}</Badge>}
             {source ? <SourceBadge source={source} /> : null}
@@ -1015,12 +1063,12 @@ function ThreadMessages({
         </>}
         {/* Keep Needs Reply composer visible even when older bubbles are collapsed
             (e.g. a newer OmniReach Pending message became the thread "latest"). */}
-        {inbound && !phoneCall && contact && (
+        {inbound && !phoneCall && itemContact && (
           <BrandReplyBox
             customerId={item.customerId}
             interaction={item}
             bombInstanceId={item.bombInstanceId}
-            contacts={[contact]}
+            contacts={[itemContact]}
             interactions={replyPool}
             taskId={item.taskId}
             onSend={onSend}

@@ -4,7 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Bomb, ChevronDown, ClipboardCheck, LayoutDashboard, LogOut, RefreshCw,
-  Users, Zap,
+  Users, Zap, Radio,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Role } from "@/lib/outreach-domain";
@@ -21,16 +21,19 @@ import { Toaster } from "@/components/ui/sonner";
 import { useWorkspace } from "./workspace-store";
 import { BrandsPage } from "./workspace-pages";
 import { BrandDetail } from "./workspace-customer";
+import { SignalsProvider, useSignals } from "./signals-store";
+import { SignalsPage } from "./workspace-signals";
 import { SampleManagementPage } from "./sample-management";
 import { TasksPage } from "./workspace-tasks";
 import { BombEditor, BombsPage } from "./workspace-bombs";
 import { useSession } from "./use-session";
 import { QualifiedCallsDashboard } from "./qualified-calls-dashboard";
 
-type Screen = "Dashboard" | "Brands" | "ReplyTask" | "OmniReach";
+type Screen = "Dashboard" | "Caller Dashboard" | "Brands" | "Signals" | "ReplyTask" | "OmniReach";
 const nav: { label: Screen; path: string; icon: typeof Users; cap: string; badge?: boolean }[] = [
   { label: "Caller Dashboard", path: "/dashboard", icon: LayoutDashboard, cap: "dashboard" },
   { label: "Brands", path: "/customers", icon: Users, cap: "customers" },
+  { label: "Signals", path: "/signals", icon: Radio, cap: "customers" },
   { label: "ReplyTask", path: "/tasks", icon: ClipboardCheck, cap: "tasks", badge: true },
   { label: "OmniReach", path: "/omnireach", icon: Bomb, cap: "bombs" },
 ];
@@ -40,7 +43,7 @@ const roleHome: Record<Role, string> = {
   Caller: "/dashboard",
 };
 const isOmniReachPath = (path: string) => /^\/(omnireach|bombs)(\/|$)/i.test(path);
-const routeScreen = (path: string): Screen => path.startsWith("/dashboard") ? "Dashboard" : path.startsWith("/customers") ? "Brands" : isOmniReachPath(path) ? "OmniReach" : "ReplyTask";
+const routeScreen = (path: string): Screen => path.startsWith("/signals") ? "Signals" : path.startsWith("/dashboard") ? "Dashboard" : path.startsWith("/customers") ? "Brands" : isOmniReachPath(path) ? "OmniReach" : "ReplyTask";
 const accountInitials = (name?: string | null, email?: string | null) => {
   const source = name?.trim() || email?.split("@")[0] || "?";
   const parts = source.split(/[\s._-]+/).filter(Boolean);
@@ -49,6 +52,11 @@ const accountInitials = (name?: string | null, email?: string | null) => {
 };
 
 export default function OutreachWorkspace({ children }: { children?: ReactNode }) {
+  return <SignalsProvider><WorkspaceShell>{children}</WorkspaceShell></SignalsProvider>;
+}
+
+function WorkspaceShell({ children }: { children?: ReactNode }) {
+  const { data: signalsData } = useSignals();
   const router = useRouter();
   const pathname = usePathname();
   const { state, hydrated, can, setRole } = useWorkspace();
@@ -57,7 +65,12 @@ export default function OutreachWorkspace({ children }: { children?: ReactNode }
   const [taskCount, setTaskCount] = useState(0);
   const [brandReplyCount, setBrandReplyCount] = useState(0);
   const [clearingCache, setClearingCache] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(() => !/^\/customers\/[^/]+/.test(pathname));
   const isAdmin = user?.role === "Admin" || state.currentRole === "Admin";
+
+  useEffect(() => {
+    setSidebarOpen(!/^\/customers\/[^/]+/.test(pathname));
+  }, [pathname]);
 
   useEffect(() => {
     if (sessionLoading) return;
@@ -139,7 +152,7 @@ export default function OutreachWorkspace({ children }: { children?: ReactNode }
       if (!can("customers")) router.replace(roleHome[state.currentRole]);
       return;
     }
-    const capability = screen === "Dashboard" ? "dashboard" : screen === "Brands" ? "customers" : screen === "ReplyTask" ? "tasks" : "bombs";
+    const capability = screen === "Dashboard" ? "dashboard" : (screen === "Brands" || screen === "Signals") ? "customers" : screen === "ReplyTask" ? "tasks" : "bombs";
     if (!can(capability)) router.replace(roleHome[state.currentRole]);
   }, [sessionLoading, user, pathname, screen, state.currentRole, can, router]);
 
@@ -152,7 +165,7 @@ export default function OutreachWorkspace({ children }: { children?: ReactNode }
         name: "navigate_outreach_workspace",
         title: "Navigate workspace",
         description: "Open a primary Super FollowUP workspace.",
-        inputSchema: { type: "object", properties: { path: { type: "string", enum: ["/dashboard", "/customers", "/tasks", "/omnireach"] } }, required: ["path"], additionalProperties: false },
+        inputSchema: { type: "object", properties: { path: { type: "string", enum: ["/dashboard", "/customers", "/signals", "/tasks", "/omnireach"] } }, required: ["path"], additionalProperties: false },
         annotations: { readOnlyHint: true, untrustedContentHint: false },
         execute(input: unknown) {
           const path = (input as { path?: string }).path;
@@ -184,9 +197,9 @@ export default function OutreachWorkspace({ children }: { children?: ReactNode }
   const displayName = user.name || user.email;
 
   return (
-    <SidebarProvider defaultOpen>
+    <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen}>
       <Sidebar collapsible="icon" className="border-r-0">
-        <SidebarHeader className="border-b border-white/8 px-3 py-4">
+        <SidebarHeader className="border-b border-white/8 px-3 py-4 group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:px-0">
           <button
             onClick={() => router.push(roleHome[state.currentRole])}
             className="flex items-center gap-3 px-1 text-left"
@@ -210,7 +223,9 @@ export default function OutreachWorkspace({ children }: { children?: ReactNode }
                   // Brands badge: full Needs Reply brand count (role-scoped).
                   // ReplyTask badge: open reply/phone tasks.
                   const count =
-                    item.label === "Brands"
+                    item.label === "Signals"
+                      ? signalsData?.brands.filter(brand=>brand.unread).length || 0
+                      : item.label === "Brands"
                       ? brandReplyCount
                       : item.badge
                         ? taskCount
@@ -222,7 +237,9 @@ export default function OutreachWorkspace({ children }: { children?: ReactNode }
                         isActive={screen === item.label}
                         onClick={() => router.push(item.path)}
                         className={`h-10 rounded-lg px-3 text-[13px] font-medium ${
-                          item.label === "Brands"
+                          item.label === "Signals"
+                            ? "data-[active=true]:bg-white/10 data-[active=true]:text-white"
+                            : item.label === "Brands"
                             ? "data-[active=true]:bg-blue-500"
                             : item.label === "ReplyTask"
                               ? "data-[active=true]:bg-violet-500"
@@ -252,7 +269,7 @@ export default function OutreachWorkspace({ children }: { children?: ReactNode }
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>
-        <SidebarFooter className="border-t border-white/8 p-3">
+        <SidebarFooter className="border-t border-white/8 p-3 group-data-[collapsible=icon]:p-0">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button className="mt-2 flex w-full items-center gap-3 rounded-xl bg-white/[.04] p-2 text-left">
@@ -314,7 +331,7 @@ export default function OutreachWorkspace({ children }: { children?: ReactNode }
         </SidebarFooter>
         <SidebarRail />
       </Sidebar>
-      <SidebarInset className="min-w-0 bg-[#f7f8fc]">
+      <SidebarInset data-signals-workspace={screen === "Signals" ? "" : undefined} className={screen === "Signals" ? "min-w-0 bg-background" : "min-w-0 bg-[#f7f8fc]"}>
         <main className="min-h-svh p-4 sm:p-6 lg:p-8">{children ?? <WorkspaceRouteContent />}</main>
       </SidebarInset>
       <Toaster richColors position="bottom-right" />
@@ -335,7 +352,7 @@ export function WorkspaceRouteContent() {
     section === "tasks" ||
     section === "inbox" ||
     section === "call-tasks" ||
-    (!dashboardRoute && section !== "customers" && !omniReachRoute);
+    (!dashboardRoute && section !== "customers" && section !== "signals" && !omniReachRoute);
   const bombDetailId = omniReachRoute ? parts[1] : undefined;
   const activeRoot =
     dashboardRoute
@@ -361,6 +378,7 @@ export function WorkspaceRouteContent() {
 
   return (
     <>
+      {section === "signals" ? <SignalsPage /> : null}
       {mountedRoots.includes("dashboard") ? (
         <div hidden={activeRoot !== "dashboard"}>
           <QualifiedCallsDashboard />

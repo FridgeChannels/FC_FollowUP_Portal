@@ -37,6 +37,7 @@ import {
   type BrandReplySignal,
 } from "./brand-reply-signals";
 import { getCachedBrandReplyMetadata } from "./brand-reply-signal-cache";
+import { countBrandActionOverview } from "./brand-action-overview";
 import {
   isNeedsReplySignalState,
   isOverdueReplyDueAt,
@@ -292,6 +293,27 @@ export type ListFollowupClientsPageResult = {
   nextCursor: string | null;
   hasMore: boolean;
 };
+
+/** Count the complete filtered result set behind the cursor-paginated list. */
+export async function countFollowupClientsForViewer(
+  input: ListFollowupClientsPageInput = {},
+) {
+  let cursor: string | null = null;
+  let total = 0;
+  const seen = new Set<string>();
+  for (let page = 0; page < 10_000; page += 1) {
+    const result = await listFollowupClientsForViewerPage({
+      ...input,
+      cursor,
+      pageSize: DEFAULT_BRAND_PAGE_SIZE,
+    });
+    total += result.brands.length;
+    if (!result.nextCursor || !result.hasMore || seen.has(result.nextCursor)) break;
+    seen.add(result.nextCursor);
+    cursor = result.nextCursor;
+  }
+  return total;
+}
 
 type FilteredReplyBrand = {
   id: string;
@@ -775,10 +797,23 @@ export async function listFollowupClientsForViewerPage(
 
 export type { NeedsReplyBrandScope } from "./owner-filter";
 
-/**
- * Full Needs Reply brand count for the Brands menu badge.
- * Dedupes by Follow-up Client (Brand) via listBrandReplySignals Map keys.
- */
+/** Full portfolio counts for the Brands action overview (independent of pagination). */
+export async function countBrandActionsForViewer(input: NeedsReplyBrandScope = {}) {
+  // Reuse the same indexes and scoped metadata as the three exclusive list filters.
+  // Let failures reach the overview so unavailable data is never displayed as zero.
+  const [replies, qualifications] = await Promise.all([
+    listBrandReplySignals([]),
+    listBrandQualificationSignals(),
+  ]);
+  const entries = new Map(replies);
+  for (const id of qualifications.keys()) {
+    if (!entries.has(id)) entries.set(id, { preview: "Awaiting call qualification", dueAt: null });
+  }
+  const metadata = entries.size ? await listReplyBrandMetadata([...entries], input) : [];
+  return countBrandActionOverview(metadata.map(({ brand }) => brand), replies, qualifications, input);
+}
+
+/** Full Needs Reply brand count for the existing Brands menu badge. */
 export async function countNeedsReplyBrandsForViewer(
   input: NeedsReplyBrandScope = {},
 ): Promise<number> {

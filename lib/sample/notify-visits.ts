@@ -30,7 +30,7 @@ export async function notifySampleVisits(input: {
   if (!input.brandId || !shouldNotifySampleVisit()) return 0;
 
   let notified = 0;
-  const deepLink = `${getPortalBaseUrl()}/customers/${encodeURIComponent(input.brandId)}/sample`;
+  const deepLink = `${getPortalBaseUrl()}/signals?brand=${encodeURIComponent(input.brandId)}`;
   const ownerName = input.ownerName || (await resolveOwnerName(input.ownerId));
   const envBaseUrl = getSampleTapBaseUrl();
   let databaseUrl = (input.sampleUrl || "").trim() || null;

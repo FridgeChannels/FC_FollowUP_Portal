@@ -1,6 +1,6 @@
 import { canAccessTestBrands, isTestOnlyViewer } from "@/lib/brand-access";
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
-import { countNeedsReplyBrandsForViewer } from "@/lib/notion/followup-clients";
+import { countBrandActionsForViewer, countNeedsReplyBrandsForViewer } from "@/lib/notion/followup-clients";
 import { runWithNotionLimit } from "@/lib/notion/rate-limit";
 
 /** Lightweight Brands menu badge — Needs Reply brands, deduped by Follow-up Client. */
@@ -19,18 +19,23 @@ async function getBrandsSummary(request: Request) {
       return Response.json({ error: "Sign in required" }, { status: 401 });
     }
     if (!viewer.isAdmin && !viewer.ownerId) {
-      return Response.json({ needsReplyBrandCount: 0 });
+      return Response.json({ needsReplyBrandCount: 0, overdueBrandCount: 0, callReviewBrandCount: 0 });
     }
 
     const countStartedAt = Date.now();
-    const needsReplyBrandCount = await countNeedsReplyBrandsForViewer({
+    const scope = {
       // Admin: all owners. AccountManager: own portfolio only.
       ownerPageId: viewer.isAdmin ? undefined : viewer.ownerId,
       includeTest: canAccessTestBrands(viewer),
       onlyTest: isTestOnlyViewer(viewer),
       // Align with Brands list visibility for non-Admin.
       excludeStatuses: viewer.isAdmin ? undefined : ["Paused", "Completed"],
-    });
+    };
+    // Keep the existing sidebar badge request lightweight.
+    if (new URL(request.url).searchParams.get("overview") === "1") {
+      return Response.json(await countBrandActionsForViewer(scope));
+    }
+    const needsReplyBrandCount = await countNeedsReplyBrandsForViewer(scope);
     console.info("[brands/summary] phase", {
       traceId,
       phase: "count",

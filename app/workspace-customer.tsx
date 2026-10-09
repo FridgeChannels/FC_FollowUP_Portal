@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, Bomb, ChevronRight, CircleAlert, ExternalLink, History, Loader2, MoreHorizontal, Plus, Search, Send } from "lucide-react";
+import { ArrowLeft, Bomb, ChevronRight, CircleAlert, CircleCheck, CirclePause, ContactRound, ExternalLink, FileText, History, Loader2, MessageSquareText, MoreHorizontal, PanelRightClose, Plus, Search, Send, StickyNote } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "./workspace-store";
 import { cacheBrandItem, getCachedBrand } from "@/lib/brand-list-cache";
@@ -50,20 +50,26 @@ function BrandMeetingNoteLink({
   fallback,
   customerId,
   sampleType,
+  showMeetingNote = true,
+  showSample = true,
+  compactSample = false,
 }: {
   notes?: BrandMeetingNote[] | null;
   fallback: string;
   customerId: string;
   sampleType: string;
+  showMeetingNote?: boolean;
+  showSample?: boolean;
+  compactSample?: boolean;
 }) {
   const router = useRouter();
   const sampleHref = `/customers/${encodeURIComponent(customerId)}/sample`;
   const note = notes?.[0];
   return (
     <>
-      {!notes ? (
+      {showMeetingNote && !notes ? (
         <p className="text-sm font-medium text-slate-700">{fallback}</p>
-      ) : note ? (
+      ) : showMeetingNote && note ? (
         <a
           href={note.url}
           target="_blank"
@@ -74,10 +80,10 @@ function BrandMeetingNoteLink({
           Exhibition Meeting
           <ExternalLink className="size-3.5 shrink-0" />
         </a>
-      ) : (
+      ) : showMeetingNote ? (
         <p className="text-sm font-medium text-slate-400">Exhibition Meeting</p>
-      )}
-      <a
+      ) : null}
+      {showSample && <a
         href={sampleHref}
         onClick={(event) => {
           if (
@@ -93,12 +99,12 @@ function BrandMeetingNoteLink({
           event.preventDefault();
           router.push(sampleHref);
         }}
-        className="inline-flex min-h-11 items-center gap-1 rounded-xl bg-violet-100 px-3 text-sm font-semibold text-violet-800 transition-colors hover:bg-violet-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600"
+        className={cn("inline-flex items-center gap-1 bg-violet-100 font-semibold text-violet-800 transition-colors hover:bg-violet-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600",compactSample?"rounded-full px-2 py-1 text-xs":"min-h-11 rounded-xl px-3 text-sm")}
         title="Open Sample details"
       >
         {sampleType}
         <ChevronRight className="size-4 shrink-0" aria-hidden="true" />
-      </a>
+      </a>}
     </>
   );
 }
@@ -162,25 +168,29 @@ export function LaunchOmniReachButton({
   disabledReason,
   className,
   onClick,
+  iconOnly = false,
 }: {
   disabled?: boolean;
   disabledReason?: string;
   className?: string;
   onClick?: () => void;
+  iconOnly?: boolean;
 }) {
   const reason = disabled ? disabledReason : undefined;
   const button = (
     <Button
-      variant="outline"
+      variant={iconOnly ? "ghost" : "outline"}
+      size={iconOnly ? "icon" : undefined}
       className={cn(className, reason && "pointer-events-none")}
       disabled={disabled}
       onClick={onClick}
+      aria-label="Launch OmniReach"
     >
-      <Bomb className="mr-2 size-4" />
-      Launch OmniReach
+      <Bomb className={cn("size-4", !iconOnly && "mr-2")} />
+      {!iconOnly && "Launch OmniReach"}
     </Button>
   );
-  if (!reason) return button;
+  if (!reason && !iconOnly) return button;
   return (
     <TooltipProvider>
       <Tooltip>
@@ -188,15 +198,17 @@ export function LaunchOmniReachButton({
           <span
             className={cn(
               "inline-flex",
-              className?.includes("justify-start") || className?.includes("w-full") ? "w-full [&>button]:w-full" : "xl:w-full xl:[&>button]:w-full",
+              className?.includes("justify-start") || className?.includes("w-full")
+                ? "w-full [&>button]:w-full"
+                : !iconOnly && "xl:w-full xl:[&>button]:w-full",
             )}
-            onClick={() => toast.message(reason)}
+            onClick={reason ? () => toast.message(reason) : undefined}
           >
             {button}
           </span>
         </TooltipTrigger>
         <TooltipContent side="top" className="max-w-xs text-left">
-          {reason}
+          {reason || "Launch OmniReach"}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -537,7 +549,7 @@ function resolveActivityCp(
   return instanceId ? bombInstances.find((entry) => entry.id === instanceId)?.cp : undefined;
 }
 
-function toInteractions(
+export function toInteractions(
   customerId: string,
   activities: BrandActivity[],
   activityInstanceIds: Record<string, string> = {},
@@ -603,7 +615,7 @@ function toCpGoals(cps: CurrentCpOption[] = listCurrentCps()) {
   ) as Partial<Record<CPCode, string>>;
 }
 
-function toCustomerContacts(contacts: BrandContact[]): Contact[] {
+export function toCustomerContacts(contacts: BrandContact[]): Contact[] {
   return contacts.map((item) => ({
     id: item.id,
     name: item.name,
@@ -623,6 +635,7 @@ function toCustomerContacts(contacts: BrandContact[]): Contact[] {
 }
 
 const ACTIVITY_PAGE_SIZE = 50;
+type BrandDetailsTab = "details" | "contacts" | "notes" | "plan";
 
 export function BrandDetail({customerId}:{customerId:string}){
   const {state,can,assignBrand,cancelBomb}=useWorkspace();
@@ -634,8 +647,13 @@ export function BrandDetail({customerId}:{customerId:string}){
     : "/customers";
   const backPath=can("customers")?brandListReturnTo:"/tasks";
   const [launch,setLaunch]=useState(false); const [reply,setReply]=useState(false); const [cp,setCP]=useState(false); const [contact,setContact]=useState(false); const [ownerDraft,setOwnerDraft]=useState<string>();
+  const [detailsTab,setDetailsTab]=useState<BrandDetailsTab|null>(null);
+  const [attentionTarget,setAttentionTarget]=useState<{cp:CPCode;channel:Channel}|null>(null);
   const [creatingMeeting,setCreatingMeeting]=useState(false);
   const [meetingHistory,setMeetingHistory]=useState(false);
+  const [followUpAction,setFollowUpAction]=useState<"Paused"|"Completed"|null>(null);
+  const [followUpNote,setFollowUpNote]=useState("");
+  const [followUpAt,setFollowUpAt]=useState("");
   const cached=getCachedBrand(customerId);
   const [remote,setRemote]=useState<BrandDetail|null>(cached?{
     ...cached,
@@ -870,13 +888,14 @@ export function BrandDetail({customerId}:{customerId:string}){
     catch(error){toast.error(error instanceof Error?error.message:"Assign failed");}
     finally{setSaving(false);}
   };
-  const updateFollowUpStatus=async (next:"Paused"|"Completed")=>{
-    if(!notionBacked)return;
+  const updateFollowUpStatus=async (next:"Paused"|"Completed",note:string,followUpAt?:string)=>{
+    if(!notionBacked)return false;
     setSaving(true);
-    try{await patchBrand({status:next});toast.success(next==="Paused"?"Follow-up paused":"Follow-up completed");}
-    catch(error){toast.error(error instanceof Error?error.message:"Status update failed");}
+    try{await patchBrand({status:next,note,followUpAt:next==="Paused"&&followUpAt?new Date(followUpAt).toISOString():undefined});toast.success(next==="Paused"?"Follow-up paused":"Follow-up completed");return true;}
+    catch(error){toast.error(error instanceof Error?error.message:"Status update failed");return false;}
     finally{setSaving(false);}
   };
+  const openFollowUpAction=(next:"Paused"|"Completed")=>{setFollowUpNote("");setFollowUpAt("");setFollowUpAction(next);};
   const createMeeting=async ()=>{
     if(!notionBacked||creatingMeeting)return;
     setCreatingMeeting(true);
@@ -902,10 +921,11 @@ export function BrandDetail({customerId}:{customerId:string}){
       .finally(()=>setActivitiesLoadingMore(false));
   };
   const currentCp=notionBacked?asCpCode(remote?.currentCp):c.cp;
+  const currentCpDetails=currentCpOption(notionBacked&&remote?remote.currentCp:c.cp);
+  const originMeeting=remote?.meetingNotes?.[0];
   const bombPlan=notionBacked?toBombPlan(c.id,remote?.tasks||[],remote?.activities||[]):undefined;
   const hasActiveOmniReach=notionBacked?brandHasActiveOmniReach(remote?.tasks||[]):!!(c.activeBombId||c.status==="Bomb Running");
   const interactions=(notionBacked?toInteractions(c.id,remote?.activities||[],bombPlan?.activityInstanceIds,remote?.tasks||[],bombPlan?.bombInstances||[]):state.interactions.filter(i=>i.customerId===c.id).map(i=>({...i,cp:i.cp||c.cp}))).sort((a,b)=>compareInteractionSort(b,a));
-  const last=interactions[0];
   const partnershipContext=c.partnershipContext;
   const summary=notionBacked
     ? currentCpOption(remote?.currentCp).definition
@@ -959,13 +979,89 @@ export function BrandDetail({customerId}:{customerId:string}){
       : previous);
     await fetchActivitiesPage(null, "replace");
   };
-  return <div className="mx-auto w-full min-w-0 max-w-[1480px]">
-    <button onClick={()=>router.replace(backPath)} className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900"><ArrowLeft className="size-4"/>{can("customers")?"Brands":"ReplyTask"}</button>
-    <section className="mb-8 grid gap-6 rounded-2xl border border-slate-200 bg-white p-5 xl:grid-cols-[minmax(0,1fr)_minmax(260px,.8fr)_176px] xl:items-start">
-      <div className="min-w-0">
-        <div className="flex items-start gap-4"><Avatar className="size-14"><AvatarFallback className="bg-violet-100 font-bold text-violet-700">{c.initials}</AvatarFallback></Avatar><div className="min-w-0"><h1 className="text-2xl font-bold tracking-tight">{c.name}</h1><div className="mt-2 flex flex-wrap gap-2">{notionBacked&&remote?.status?(can("editBrand")?<BadgeSelect value={remote.status} options={FOLLOW_UP_STATUSES} disabled={saving||!brandReady} onChange={value=>{void patchBrand({status:value}).then(()=>toast.success("Status updated")).catch(error=>toast.error(error instanceof Error?error.message:"Update failed"));}}/>:<Status value={remote.status}/>):(c.status?<Status value={c.status}/>:null)}{notionBacked&&can("editBrand")?<BadgeSelect value={remote?.handlingMode||""} options={HANDLING_MODES} disabled={saving||!brandReady} onChange={value=>{void patchBrand({handlingMode:value}).then(()=>toast.success("Handling Mode updated")).catch(error=>toast.error(error instanceof Error?error.message:"Update failed"));}}/>:notionBacked&&remote?.handlingMode?<Status value={remote.handlingMode}/>:null}{notionBacked&&can("editBrand")?<ChannelTypeSelect value={(remote?.channelType||"DTC") as ChannelType} disabled={saving||!brandReady} onChange={async value=>{try{await patchBrand({channelType:value});toast.success("Channel Type updated");}catch(error){toast.error(error instanceof Error?error.message:"Update failed");throw error;}}}/>:notionBacked&&remote?.channelType?<Status value={remote.channelType}/>:null}{notionBacked&&!brandReady?<span className="inline-flex items-center gap-1 text-xs font-medium text-slate-400"><Spinner className="size-3"/>Loading details…</span>:null}</div>{brandReady?<><div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1"><BrandMeetingNoteLink notes={notionBacked?remote?.meetingNotes||[]:null} fallback={summary} customerId={c.id} sampleType={remote?.channelType||formatIcpGroupLabel(remote?.icpGroup)}/>{notionBacked&&<Button type="button" variant="ghost" size="sm" className="h-auto px-1.5 py-0.5 text-sm font-medium text-slate-600 hover:text-slate-900" disabled={!brandReady} onClick={()=>setMeetingHistory(true)}><History className="mr-1 size-3.5"/>Follow up Meeting</Button>}{notionBacked&&can("editBrand")&&<Button type="button" variant="ghost" size="icon" className="size-7 text-slate-600 hover:text-slate-900" disabled={!brandReady||creatingMeeting} aria-label="Create Follow up Meeting" title="Create Follow up Meeting" onClick={()=>void createMeeting()}>{creatingMeeting?<Spinner className="size-3.5"/>:<Plus className="size-4"/>}</Button>}</div>{notionBacked&&displayNote(remote?.notes)&&<p className="mt-2 text-sm leading-6 text-slate-600">{displayNote(remote?.notes)}</p>}</>:<p className="mt-3 text-sm text-slate-400">Loading brand details…</p>}<div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500"><span>Latest: {remote?.lastInteractionAt?dateOnly(remote.lastInteractionAt):activityLoading?"Loading…":last?.title||"No activity"}</span>{!notionBacked&&<span>Source: {c.source}</span>}<span>AccountManager: {remote?.ownerName||state.users.find(u=>u.id===c.ownerId)?.name||"Unassigned"}</span></div>{can("assignOwner")&&<div className="mt-3 flex flex-wrap items-center gap-2"><Select value={ownerDraft??c.ownerId??"unassigned"} onValueChange={setOwnerDraft} disabled={!brandReady}><SelectTrigger size="sm" className="w-44"><SelectValue placeholder="Select owner"/></SelectTrigger><SelectContent><SelectItem value="unassigned">Unassigned</SelectItem>{ownerChoices.map(u=><SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent></Select><Button size="sm" disabled={saving||!brandReady||(ownerDraft??c.ownerId??"unassigned")===(c.ownerId||"unassigned")} onClick={()=>void handleAssign()}>Assign</Button></div>}</div></div>
+  const needsReplyCount=interactions.filter(item=>item.direction==="Inbound"&&item.replyStatus==="Needs Reply").length;
+  const callReviewCount=(remote?.tasks||[]).filter(task=>task.channel==="Phone"&&task.callReviewStatus==="Awaiting Review").length;
+  const overdueCount=(remote?.activities||[]).filter(item=>item.direction==="Inbound"&&item.replyStatus==="Needs Reply"&&item.replyDueAt&&Date.parse(item.replyDueAt)<Date.now()).length;
+  const focusAttention=(item?:Interaction,channel:Channel="Email")=>{
+    setAttentionTarget({cp:item?.cp||currentCp,channel:item?.channel||channel});
+    document.getElementById("brand-conversations")?.scrollIntoView({block:"start",behavior:"smooth"});
+  };
+  const firstNeedsReply=interactions.find(item=>item.direction==="Inbound"&&item.replyStatus==="Needs Reply");
+  const firstOverdue=interactions.find(item=>remote?.activities.some(activity=>activity.id===item.id&&activity.direction==="Inbound"&&activity.replyStatus==="Needs Reply"&&activity.replyDueAt&&Date.parse(activity.replyDueAt)<Date.now()));
+  const detailTabs=[
+    {id:"details" as const,label:"Brand details",icon:FileText},
+    {id:"contacts" as const,label:"Contacts",icon:ContactRound},
+    {id:"notes" as const,label:"Notes",icon:StickyNote},
+  ];
+  return <div className="w-full min-w-0 lg:flex lg:h-[calc(100vh-4rem)] lg:flex-col">
+    <div className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white lg:min-h-0 lg:flex-1">
+    <header className="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-white px-4 py-3">
+      <Button type="button" variant="ghost" size="icon" aria-label={can("customers")?"Back to Brands":"Back to ReplyTask"} onClick={()=>router.replace(backPath)}><ArrowLeft className="size-4"/></Button>
+      <Avatar className="size-9"><AvatarFallback className="bg-violet-100 text-xs font-bold text-violet-700">{c.initials}</AvatarFallback></Avatar>
+      <div className="flex min-w-0 flex-1 items-center gap-2"><h1 className="min-w-0 truncate text-lg font-semibold text-slate-950">{c.name}</h1>{notionBacked&&remote?.followupExhibition&&(originMeeting?<a href={originMeeting.url} target="_blank" rel="noreferrer" className="hidden shrink-0 rounded-full bg-violet-100 px-2 py-1 text-xs font-medium text-violet-800 hover:bg-violet-200 lg:inline-flex">{remote.followupExhibition}<ExternalLink className="ml-1 size-3"/></a>:<span className="hidden shrink-0 rounded-full bg-violet-100 px-2 py-1 text-xs font-medium text-violet-800 lg:inline-flex">{remote.followupExhibition}</span>)}
+        <Button type="button" size="sm" variant="outline" className="min-w-0 max-w-[22rem] shrink" disabled={!brandReady||!can("changeCP")} onClick={()=>setCP(true)} aria-label={`Current ${currentCpDetails.name}: ${currentCpDetails.fullName}. Change CP`}>
+          <span className="truncate">{currentCpDetails.name} · {currentCpDetails.fullName}</span><ChevronRight className="ml-1 size-3.5 shrink-0 rotate-90"/>
+        </Button></div>
+      {hasActiveOmniReach&&<Badge className="bg-blue-100 text-blue-700">OmniReach running</Badge>}
+      <div className="ml-auto flex items-center gap-1">
+        {can("reply")&&<TooltipProvider><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-9" aria-label="New message" disabled={!brandReady||(notionBacked&&!c.contacts.length)} onClick={()=>setReply(true)}><Send className="size-4"/></Button></TooltipTrigger><TooltipContent>New message</TooltipContent></Tooltip></TooltipProvider>}
+        {can("launch")&&<LaunchOmniReachButton iconOnly className="size-9" disabled={!brandReady||hasActiveOmniReach} disabledReason={!brandReady?"Loading brand…":ACTIVE_OMNIREACH_BLOCK_REASON} onClick={()=>setLaunch(true)}/>}
+        {notionBacked&&<TooltipProvider><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-9" aria-label="Follow up Meeting" onClick={()=>setMeetingHistory(true)}><History className="size-4"/></Button></TooltipTrigger><TooltipContent>Follow up Meeting</TooltipContent></Tooltip></TooltipProvider>}
+        {notionBacked&&can("editBrand")&&<DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="size-9" aria-label="More follow-up actions" title="More follow-up actions" disabled={saving}><MoreHorizontal className="size-4"/></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem disabled={!brandReady||creatingMeeting} onSelect={()=>void createMeeting()}><Plus className="mr-2 size-4"/>Create meeting</DropdownMenuItem><DropdownMenuItem disabled={saving||remote?.status==="Paused"||remote?.status==="Completed"} onSelect={()=>openFollowUpAction("Paused")}><CirclePause className="mr-2 size-4"/>Pause FollowUp</DropdownMenuItem><DropdownMenuItem disabled={saving||remote?.status==="Completed"} onSelect={()=>openFollowUpAction("Completed")}><CircleCheck className="mr-2 size-4"/>Complete FollowUp</DropdownMenuItem></DropdownMenuContent></DropdownMenu>}
       </div>
-      <BrandContactList
+    </header>
+    {(needsReplyCount>0||callReviewCount>0||overdueCount>0)&&<div role="status" className="flex flex-wrap items-center gap-2 border-b border-rose-200 bg-rose-50 px-4 py-2.5 text-xs font-semibold text-rose-800">
+      <CircleAlert className="size-4"/>Needs attention
+      {overdueCount>0&&<button type="button" className="rounded-full bg-rose-200 px-2 py-1 hover:bg-rose-300" onClick={()=>focusAttention(firstOverdue||firstNeedsReply)}>{overdueCount} overdue</button>}
+      {needsReplyCount>0&&<button type="button" className="rounded-full bg-white px-2 py-1 hover:bg-rose-100" onClick={()=>focusAttention(firstNeedsReply)}>{needsReplyCount} replies needed</button>}
+      {callReviewCount>0&&<button type="button" className="rounded-full bg-white px-2 py-1 hover:bg-rose-100" onClick={()=>focusAttention(undefined,"Phone")}>{callReviewCount} calls to review</button>}
+    </div>}
+    <div className="grid min-w-0 items-start lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-stretch">
+    <aside aria-label="Brand information" className="order-2 flex min-w-0 flex-col overflow-hidden border-t border-slate-200 bg-white lg:min-h-0 lg:border-l lg:border-t-0 lg:flex-row">
+      <div className="flex shrink-0 flex-row items-center gap-2 border-b border-slate-100 p-2 lg:w-12 lg:flex-col lg:border-b-0 lg:border-r lg:py-3">
+        {detailTabs.map(({id,label,icon:Icon})=><Button key={id} type="button" variant={detailsTab===id?"secondary":"ghost"} size="icon" className="size-9" aria-label={label} title={label} aria-pressed={detailsTab===id} onClick={()=>setDetailsTab(detailsTab===id?null:id)}><Icon className="size-4"/></Button>)}
+      </div>
+      {detailsTab&&<section className="min-w-0 w-full space-y-5 overflow-y-auto p-4 lg:w-[320px]">
+        <div className="flex items-center justify-between"><h2 className="font-semibold">{detailTabs.find(tab=>tab.id===detailsTab)?.label}</h2><Button type="button" variant="ghost" size="icon" aria-label="Close details" onClick={()=>setDetailsTab(null)}><PanelRightClose className="size-4"/></Button></div>
+      <div className={detailsTab==="details"?"min-w-0":"hidden"}>
+        <div className="min-w-0">
+          <h3 className="text-base font-semibold tracking-tight">{c.name}</h3>
+          <section className="mt-4 border-l-2 border-violet-500 bg-violet-50/60 px-3 py-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-violet-700">Relationship origin</p>
+            <div className="mt-2 flex flex-wrap items-center gap-3"><BrandMeetingNoteLink notes={notionBacked?remote?.meetingNotes||[]:null} fallback={summary} customerId={c.id} sampleType={remote?.channelType||formatIcpGroupLabel(remote?.icpGroup)} showSample={false}/></div>
+          </section>
+          <section className="mt-4 pb-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Brand profile</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {state.currentRole!=="AccountManager"&&(notionBacked&&remote?.status?(can("editBrand")?<BadgeSelect value={remote.status} options={FOLLOW_UP_STATUSES} disabled={saving||!brandReady} onChange={value=>{if(value==="Paused"||value==="Completed"){openFollowUpAction(value);return;}void patchBrand({status:value}).then(()=>toast.success("Status updated")).catch(error=>toast.error(error instanceof Error?error.message:"Update failed"));}}/>:<Status value={remote.status}/>):(c.status?<Status value={c.status}/>:null))}
+              {notionBacked && can("editBrand") ? (
+                <BadgeSelect value={remote?.handlingMode || ""} options={HANDLING_MODES} disabled={saving || !brandReady} onChange={(value) => { void patchBrand({ handlingMode: value }).then(() => toast.success("Handling Mode updated")).catch((error) => toast.error(error instanceof Error ? error.message : "Update failed")); }} />
+              ) : notionBacked && remote?.handlingMode ? <Status value={remote.handlingMode} /> : null}
+              {notionBacked && can("editBrand") ? (
+                <ChannelTypeSelect value={(remote?.channelType || "DTC") as ChannelType} disabled={saving || !brandReady} onChange={async (value) => { try { await patchBrand({ channelType: value }); toast.success("Channel Type updated"); } catch (error) { toast.error(error instanceof Error ? error.message : "Update failed"); throw error; } }} />
+              ) : notionBacked && remote?.channelType ? <Status value={remote.channelType} /> : null}
+              {notionBacked&&<BrandMeetingNoteLink notes={remote?.meetingNotes||[]} fallback={summary} customerId={c.id} sampleType={remote?.channelType||formatIcpGroupLabel(remote?.icpGroup)} showMeetingNote={false} compactSample/>}
+              {notionBacked && !brandReady ? <span className="inline-flex items-center gap-1 text-xs font-medium text-slate-400"><Spinner className="size-3" />Loading details…</span> : null}
+            </div>
+          </section>
+          <section className="border-t border-slate-100 py-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Brand summary</p>
+            {brandReady ? <>
+              <p className="mt-2 text-sm leading-6 text-slate-600">{summary}</p>
+              {notionBacked && displayNote(remote?.notes) && <p className="mt-2 text-sm leading-6 text-slate-600">{displayNote(remote?.notes)}</p>}
+            </> : <p className="mt-2 text-sm text-slate-400">Loading brand details…</p>}
+          </section>
+          <section className="border-t border-slate-100 py-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Follow-up details</p>
+            <dl className="mt-2 space-y-2 text-sm">
+              <div className="flex items-start justify-between gap-3"><dt className="shrink-0 text-slate-500">Account Manager</dt><dd className="text-right text-slate-700">{remote?.ownerName || state.users.find((user) => user.id === c.ownerId)?.name || "Unassigned"}</dd></div>
+              {!notionBacked && <div className="flex items-start justify-between gap-3"><dt className="shrink-0 text-slate-500">Source</dt><dd className="text-right text-slate-700">{c.source}</dd></div>}
+            </dl>
+            {can("assignOwner") && <div className="mt-3 flex flex-wrap items-center gap-2"><Select value={ownerDraft ?? c.ownerId ?? "unassigned"} onValueChange={setOwnerDraft} disabled={!brandReady}><SelectTrigger size="sm" className="w-44"><SelectValue placeholder="Select owner" /></SelectTrigger><SelectContent><SelectItem value="unassigned">Unassigned</SelectItem>{ownerChoices.map((user) => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}</SelectContent></Select><Button size="sm" disabled={saving || !brandReady || (ownerDraft ?? c.ownerId ?? "unassigned") === (c.ownerId || "unassigned")} onClick={() => void handleAssign()}>Assign</Button></div>}
+          </section>
+        </div>
+      </div>
+      <div className={detailsTab==="contacts"?"":"hidden"}><BrandContactList
         brandId={c.id}
         contacts={notionBacked&&remote?remote.contacts:c.contacts}
         loading={contactsLoading}
@@ -975,22 +1071,27 @@ export function BrandDetail({customerId}:{customerId:string}){
         onContactsChange={notionBacked?(contacts)=>{
           setRemote(prev=>prev?{...prev,contacts}:prev);
         }:undefined}
-      />
-      <div className="flex flex-wrap gap-2 xl:flex-col xl:items-stretch">{can("reply")&&<Button variant="outline" disabled={!brandReady||(notionBacked&&!c.contacts.length)} onClick={()=>setReply(true)}><Send className="mr-2 size-4"/>Send message</Button>}{can("launch")&&<LaunchOmniReachButton className="xl:w-full" disabled={!brandReady||hasActiveOmniReach} disabledReason={!brandReady?"Loading brand…":ACTIVE_OMNIREACH_BLOCK_REASON} onClick={()=>setLaunch(true)}/>}{can("changeCP")&&<Button disabled={!brandReady} onClick={()=>setCP(true)}>{currentCpOption(notionBacked&&remote?remote.currentCp:c.cp).name} · Change CP</Button>}<BrandNote key={c.id} customerId={c.id} disabled={notionBacked&&!brandReady} value={notionBacked?remote?.humanNotes??"":undefined} onSave={notionBacked?async (next)=>{await patchBrand({humanNotes:next});}:undefined} />{notionBacked&&can("editBrand")&&<DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" disabled={!brandReady} aria-label="More follow-up actions" title="More follow-up actions"><MoreHorizontal className="size-5"/></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem disabled={saving||remote?.status==="Paused"||remote?.status==="Completed"} onSelect={()=>void updateFollowUpStatus("Paused")}>Pause FollowUp</DropdownMenuItem><DropdownMenuItem disabled={saving||remote?.status==="Completed"} onSelect={()=>void updateFollowUpStatus("Completed")}>Complete FollowUp</DropdownMenuItem></DropdownMenuContent></DropdownMenu>}</div>
-    </section>
-    <div className={`grid min-w-0 gap-6 ${partnershipContext?"xl:grid-cols-[minmax(0,1fr)_340px]":""}`}><section className="min-w-0"><h2 className="mb-3 font-bold">Brand activity</h2><div className="w-full min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white">
-    <InteractionFeed key={`${c.id}-${currentCp}`} customerId={c.id} currentCp={currentCp} cpGoals={notionBacked?toCpGoals(remoteCps):undefined} interactions={interactions} contacts={c.contacts} bombInstances={bombPlan?.bombInstances} actions={bombPlan?.actions} loading={activityLoading} canReviewCalls={notionBacked&&can("reply")} tasks={remote?.tasks||[]} onMarkReplyRead={notionBacked&&can("reply")?markReplyRead:undefined} onRefreshQuo={notionBacked?refreshQuoForBrand:undefined} quoRefreshingCallId={quoRefreshingCallId} onPersistCallReview={notionBacked?async (taskId,status,reviewReason,reviewNote)=>{
+      /></div>
+      <div className={detailsTab==="notes"?"space-y-3":"hidden"}>
+        <BrandNote key={c.id} customerId={c.id} variant="panel" disabled={notionBacked&&!brandReady} value={notionBacked?remote?.humanNotes??"":undefined} onSave={notionBacked?async (next)=>{await patchBrand({humanNotes:next});}:undefined}/>
+        {notionBacked&&displayNote(remote?.notes)&&<p className="text-sm leading-6 text-slate-600">{displayNote(remote?.notes)}</p>}
+        {partnershipContext&&<div className="rounded-xl bg-emerald-50 p-4"><h3 className="font-semibold text-emerald-950">{partnershipContext.headline}</h3><p className="mt-2 text-sm text-emerald-900">{partnershipContext.summary}</p>{partnershipContext.signals.map(signal=><p key={signal} className="mt-2 text-xs text-emerald-800">{signal}</p>)}<p className="mt-3 text-[11px] text-emerald-700">Updated {dateOnly(partnershipContext.updatedAt)}</p></div>}
+      </div>
+      </section>}
+    </aside>
+    <section id="brand-conversations" aria-label="Brand communication" className="order-1 flex min-w-0 flex-col overflow-hidden bg-white lg:min-h-0"><div className="flex items-center justify-between border-b border-slate-100 px-5 py-3"><h2 className="flex items-center gap-2 font-semibold"><MessageSquareText className="size-4 text-violet-600"/>Conversations</h2><span className="text-xs text-slate-500">{interactions.length} activities</span></div><div className="min-h-[50vh] max-h-[calc(100vh-290px)] min-w-0 overflow-y-auto lg:min-h-0 lg:max-h-none lg:flex-1">
+    <InteractionFeed key={`${c.id}-${currentCp}-${attentionTarget?.cp||""}-${attentionTarget?.channel||""}`} customerId={c.id} currentCp={currentCp} initialCp={attentionTarget?.cp} initialChannel={attentionTarget?.channel} showAllChannels showCpSelector={false} cpGoals={notionBacked?toCpGoals(remoteCps):undefined} interactions={interactions} contacts={c.contacts} bombInstances={bombPlan?.bombInstances} actions={bombPlan?.actions} loading={activityLoading} canReviewCalls={notionBacked&&can("reply")} tasks={remote?.tasks||[]} onMarkReplyRead={notionBacked&&can("reply")?markReplyRead:undefined} onRefreshQuo={notionBacked?refreshQuoForBrand:undefined} quoRefreshingCallId={quoRefreshingCallId} onPersistCallReview={notionBacked?async (taskId,status,reviewReason,reviewNote)=>{
     const response=await fetch(`/api/tasks/${taskId}/call-review`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status,reviewReason,reviewNote})});
     const payload=await response.json() as {error?:string};
     if(!response.ok)throw new Error(payload.error||"Unable to save call review");
     await refreshBrandAndActivities();
   }:undefined} onCancelBomb={async instance=>{if(!notionBacked){const result=cancelBomb(c.id,instance.id);if(!result.ok)throw new Error(result.message);toast.success(result.message);return;}const response=await fetch(`/api/brands/${c.id}/bombs/${instance.templateId}/cancel`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId:instance.targetContactId,omniReachRunId:instance.id.startsWith("run:")?instance.id.slice(4):undefined})});const payload=await response.json() as {cancelledTaskIds?:string[];error?:string};if(!response.ok)throw new Error(payload.error||"Unable to stop OmniReach");const cancelled=new Set(payload.cancelledTaskIds||[]);if(cancelled.size){setRemote(prev=>prev?{...prev,tasks:prev.tasks.map(task=>cancelled.has(task.id)?{...task,status:"Cancelled"}:task),handlingMode:prev.handlingMode==="Human"?prev.handlingMode:"Human"}:prev);}toast.success(`${payload.cancelledTaskIds?.length||0} remaining task${payload.cancelledTaskIds?.length===1?"":"s"} cancelled`);void Promise.all([refreshRemote(),fetchActivitiesPage(null,"replace")]);}} onCancelPending={notionBacked&&can("reply")?async taskId=>{const response=await fetch(`/api/tasks/${taskId}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({status:"Cancelled"})});const payload=await response.json() as {error?:string};if(!response.ok)throw new Error(payload.error||"Unable to cancel");setRemote(prev=>prev?{...prev,tasks:prev.tasks.map(task=>task.id===taskId?{...task,status:"Cancelled"}:task)}:prev);toast.success("Pending message cancelled");void Promise.all([refreshRemote(),fetchActivitiesPage(null,"replace")]);}:undefined} onSend={notionBacked?sendBrandMessage:undefined}/>
   {notionBacked&&activitiesHasMore&&activitiesCursor&&(remote?.activities.length||0)>=ACTIVITY_PAGE_SIZE?<div className="border-t border-slate-100 p-3"><Button variant="outline" size="sm" className="w-full" disabled={activitiesLoadingMore||activitiesLoading} onClick={loadMoreActivities}>{activitiesLoadingMore?<span className="inline-flex items-center gap-2"><Spinner className="size-3.5"/>Loading…</span>:"Load more activity"}</Button></div>:null}
-  </div></section>
-    {(c.cp==="CP3"||partnershipContext)&&partnershipContext&&<aside><section className="rounded-2xl bg-emerald-50 p-5"><div className="text-xs font-semibold tracking-wide text-emerald-700">CP3 · Partnership context</div><h2 className="mt-2 font-bold text-emerald-950">{partnershipContext.headline}</h2><p className="mt-2 text-sm leading-6 text-emerald-900">{partnershipContext.summary}</p><div className="mt-4 space-y-2">{partnershipContext.signals.map(signal=><div key={signal} className="rounded-lg bg-white/70 px-3 py-2 text-xs leading-5 text-slate-700">{signal}</div>)}</div><div className="mt-3 text-[11px] text-emerald-700">Updated {dateOnly(partnershipContext.updatedAt)}</div></section></aside>}</div>
+  </div>
+  </section></div></div>
   <LaunchBombDialog customerId={c.id} open={launch} onOpenChange={setLaunch} contacts={notionBacked?c.contacts:undefined} currentCp={notionBacked&&remote?remote.currentCp:undefined} companyName={c.name} productDescription={notionBacked?remote?.productDescription:undefined} matchedCategory={notionBacked?remote?.matchedCategory:undefined} followupExhibition={notionBacked?remote?.followupExhibition:undefined} previewOnly={notionBacked} hasActiveOmniReach={hasActiveOmniReach} onLaunched={notionBacked?()=>{void refreshBrandAndActivities()}:undefined}/><ReplyDialog customerId={c.id} open={reply} onOpenChange={setReply} contacts={notionBacked?c.contacts:undefined} onSend={notionBacked?async (contactId,channel,content,object,deliveryMode,scheduledAt,attachments,cc)=>{
     await sendBrandMessage(contactId, channel, content, undefined, undefined, object, deliveryMode, scheduledAt, attachments, cc);
-  }:undefined}/><ChangeCPDialog customerId={c.id} open={cp} onOpenChange={setCP} currentCp={notionBacked&&remote?remote.currentCp:undefined} cps={notionBacked?remoteCps:undefined} onSave={notionBacked?async (currentCpId,evidence,note)=>{await patchBrand({currentCpId,evidence,note});}:undefined}/><ContactDialog customerId={c.id} open={contact} onOpenChange={setContact} notionBacked={notionBacked} onCreated={notionBacked?async ()=>{await refreshRemote();}:undefined}/>{notionBacked?<MeetingHistoryDialog open={meetingHistory} onOpenChange={setMeetingHistory} links={remote?.aiMeetingLinks||[]}/>:null}</div>;
+  }:undefined}/><ChangeCPDialog customerId={c.id} open={cp} onOpenChange={setCP} currentCp={notionBacked&&remote?remote.currentCp:undefined} cps={notionBacked?remoteCps:undefined} onSave={notionBacked?async (currentCpId,evidence,note)=>{await patchBrand({currentCpId,evidence,note});}:undefined}/><ContactDialog customerId={c.id} open={contact} onOpenChange={setContact} notionBacked={notionBacked} onCreated={notionBacked?async ()=>{await refreshRemote();}:undefined}/>{notionBacked?<MeetingHistoryDialog open={meetingHistory} onOpenChange={setMeetingHistory} links={remote?.aiMeetingLinks||[]}/>:null}<Dialog open={followUpAction!==null} onOpenChange={open=>{if(!open){setFollowUpAction(null);setFollowUpNote("");setFollowUpAt("");}}}><DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle>{followUpAction==="Paused"?"Pause FollowUp":"Complete FollowUp"}</DialogTitle><DialogDescription>Record the customer’s explicit reply and the reason for this outcome. This note is required.</DialogDescription></DialogHeader><Textarea value={followUpNote} onChange={event=>setFollowUpNote(event.target.value)} placeholder={followUpAction==="Paused"?"For example: The customer asked us to reconnect after their budget review in January.":"For example: The customer confirmed they do not wish to continue."} className="min-h-32" autoFocus/>{followUpAction==="Paused"&&<div className="space-y-2"><label htmlFor="next-follow-up-at" className="text-sm font-medium text-slate-700">Next contact date <span className="font-normal text-slate-500">(optional)</span></label><Input id="next-follow-up-at" type="datetime-local" value={followUpAt} onChange={event=>setFollowUpAt(event.target.value)}/><p className="text-xs text-slate-500">On this date, Admin receives a reminder to review and assign the follow-up.</p></div>}<DialogFooter><Button variant="outline" onClick={()=>{setFollowUpAction(null);setFollowUpNote("");setFollowUpAt("");}}>Cancel</Button><Button disabled={saving||!followUpNote.trim()||!followUpAction} onClick={()=>{if(!followUpAction)return;void (async ()=>{const saved=await updateFollowUpStatus(followUpAction,followUpNote.trim(),followUpAt);if(saved){setFollowUpAction(null);setFollowUpNote("");setFollowUpAt("");}})();}}>{followUpAction==="Paused"?"Pause FollowUp":"Complete FollowUp"}</Button></DialogFooter></DialogContent></Dialog></div>;
 }
 
 type DetailContact = {
@@ -1751,12 +1852,18 @@ export function ReplyDialog({
   open,
   onOpenChange,
   contacts,
+  initialChannel,
+  contentClassName,
+  readOnly = false,
   onSend,
 }: {
   customerId: string;
   open: boolean;
   onOpenChange: (v: boolean) => void;
   contacts?: Contact[];
+  initialChannel?: Channel;
+  contentClassName?: string;
+  readOnly?: boolean;
   onSend?: (
     contactId: string,
     channel: Channel,
@@ -1789,7 +1896,7 @@ export function ReplyDialog({
   useEffect(() => {
     if (!open) return;
     setContact(people[0]?.id || "");
-    setChannel(people[0]?.preferredChannel || "Email");
+    setChannel(initialChannel || people[0]?.preferredChannel || "Email");
     setObject("");
     setCc("");
     setContent("");
@@ -1896,7 +2003,7 @@ export function ReplyDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[90vh] flex-col overflow-hidden sm:max-w-lg">
+      <DialogContent className={`flex max-h-[90vh] flex-col overflow-hidden sm:max-w-lg ${contentClassName || ""}`}>
         <DialogHeader className="shrink-0">
           <DialogTitle>Send message</DialogTitle>
           <DialogDescription>
@@ -1955,7 +2062,7 @@ export function ReplyDialog({
         {emailNeedsObject ? (
           <Input value={cc} onChange={(e) => setCc(e.target.value)} placeholder="CC (comma-separated)" />
         ) : null}
-        <MessageMediaInputFrame channel={effective} media={media} disabled={saving}>
+        <MessageMediaInputFrame channel={effective} media={media} disabled={readOnly || saving}>
           {emailNeedsObject ? (
             <EmailBodyEditor
               value={content}
@@ -1980,7 +2087,7 @@ export function ReplyDialog({
             Cancel
           </Button>
           <Button
-            disabled={!canSubmit}
+            disabled={readOnly || !canSubmit}
             onClick={() => {
               void (async () => {
                 if (!contact || !effective) return;

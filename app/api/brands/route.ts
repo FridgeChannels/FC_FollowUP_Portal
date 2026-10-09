@@ -2,7 +2,10 @@ import { canAccessTestBrands, isTestOnlyViewer } from "@/lib/brand-access";
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { createBrandWithContacts } from "@/lib/notion/create-brand";
 import { listCheckpoints } from "@/lib/notion/cps";
-import { listFollowupClientsForViewerPage } from "@/lib/notion/followup-clients";
+import {
+  countFollowupClientsForViewer,
+  listFollowupClientsForViewerPage,
+} from "@/lib/notion/followup-clients";
 import { runWithNotionLimit } from "@/lib/notion/rate-limit";
 import {
   DEFAULT_BRAND_PAGE_SIZE,
@@ -23,8 +26,12 @@ async function getBrands(request: Request) {
     if (!viewer.email) {
       return Response.json({ error: "Sign in required" }, { status: 401 });
     }
+    const url = new URL(request.url);
     if (!viewer.isAdmin && !viewer.ownerId) {
       const cps = await listCheckpoints();
+      if (url.searchParams.get("count") === "1") {
+        return Response.json({ totalCount: 0 });
+      }
       return Response.json({
         brands: [],
         cps,
@@ -35,7 +42,6 @@ async function getBrands(request: Request) {
       });
     }
 
-    const url = new URL(request.url);
     const ownerParam = url.searchParams.get("owner");
     const statusParam = url.searchParams.get("status");
     const cpParam = url.searchParams.get("cp");
@@ -47,6 +53,7 @@ async function getBrands(request: Request) {
     const replyTo = url.searchParams.get("replyTo");
     const sort = url.searchParams.get("sort");
     const cursor = url.searchParams.get("cursor");
+    const countOnly = url.searchParams.get("count") === "1";
 
     const ownerPageId = ownerPageIdFromQueryParam(
       viewer.isAdmin,
@@ -56,6 +63,29 @@ async function getBrands(request: Request) {
 
     const status = viewer.isAdmin ? statusParam : "all";
     const excludeStatuses = viewer.isAdmin ? undefined : ["Paused", "Completed"];
+
+    const listInput = {
+      traceId,
+      ownerPageId,
+      includeTest: canAccessTestBrands(viewer),
+      onlyTest: isTestOnlyViewer(viewer),
+      status,
+      excludeStatuses,
+      q: qParam,
+      cp: cpParam,
+      replyState,
+      handlingMode,
+      exhibitionId,
+      replyFrom,
+      replyTo,
+      sort,
+      cursor,
+      pageSize: DEFAULT_BRAND_PAGE_SIZE,
+    };
+    if (countOnly) {
+      const totalCount = await countFollowupClientsForViewer(listInput);
+      return Response.json({ totalCount });
+    }
 
     const checkpointsStartedAt = Date.now();
     const [cps, listed] = await Promise.all([
@@ -68,24 +98,7 @@ async function getBrands(request: Request) {
         });
         return items;
       }),
-      listFollowupClientsForViewerPage({
-        traceId,
-        ownerPageId,
-        includeTest: canAccessTestBrands(viewer),
-        onlyTest: isTestOnlyViewer(viewer),
-        status,
-        excludeStatuses,
-        q: qParam,
-        cp: cpParam,
-        replyState,
-        handlingMode,
-        exhibitionId,
-        replyFrom,
-        replyTo,
-        sort,
-        cursor,
-        pageSize: DEFAULT_BRAND_PAGE_SIZE,
-      }),
+      listFollowupClientsForViewerPage(listInput),
     ]);
     console.info("[brands] request complete", {
       traceId,

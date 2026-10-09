@@ -6,6 +6,7 @@ import { attachBrandReplySignals, listBrandReplySignals } from "@/lib/notion/bra
 import { listCheckpoints, resolveCheckpoint } from "@/lib/notion/cps";
 import { mapFollowupClientDetail, mapFollowupClientPage } from "@/lib/notion/followup-clients";
 import { updateFollowupClient } from "@/lib/notion/followup-writes";
+import { encodeFollowUpReminder } from "@/lib/followup-reminder";
 import type { AmazonSampleProduct, ChannelType } from "@/lib/sample-product";
 
 type Params = { params: Promise<{ id: string }> };
@@ -62,6 +63,7 @@ export async function PATCH(request: Request, { params }: Params) {
       handlingMode?: string | null;
       evidence?: string;
       note?: string;
+      followUpAt?: string;
       humanNotes?: string | null;
       channelType?: ChannelType;
       amazonSampleProduct?: AmazonSampleProduct;
@@ -73,6 +75,12 @@ export async function PATCH(request: Request, { params }: Params) {
     }
     if (body.ownerId !== undefined && !canAssignBrandOwner(viewer)) {
       return Response.json({ error: "Only Admin can assign Owner" }, { status: 403 });
+    }
+    if ((body.status === "Paused" || body.status === "Completed") && !body.note?.trim()) {
+      return Response.json({ error: "A note is required when pausing or completing FollowUp" }, { status: 400 });
+    }
+    if (body.followUpAt && (body.status !== "Paused" || !Number.isFinite(Date.parse(body.followUpAt)))) {
+      return Response.json({ error: "Enter a valid next contact date when pausing FollowUp" }, { status: 400 });
     }
 
     const extras: string[] = [];
@@ -90,7 +98,14 @@ export async function PATCH(request: Request, { params }: Params) {
       );
     }
     if (body.status && body.status !== brand.status) {
-      extras.push(`状态更新为 ${body.status}。`);
+      extras.push(
+        [`状态更新为 ${body.status}。`, body.note?.trim() ? `备注：${body.note.trim()}` : ""]
+          .filter(Boolean)
+          .join(""),
+      );
+    }
+    if (body.status === "Paused" && body.followUpAt && body.note?.trim()) {
+      extras.push(encodeFollowUpReminder({ dueAt: body.followUpAt, note: body.note.trim(), ownerId: brand.ownerId }));
     }
     if (body.handlingMode && body.handlingMode !== brand.handlingMode) {
       extras.push(`跟进方式更新为 ${body.handlingMode}。`);
@@ -117,7 +132,7 @@ export async function PATCH(request: Request, { params }: Params) {
     return Response.json({ brand: updated, cps });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
-    const status = /^(Invalid channel type|Invalid Amazon product details|Enter a valid|Product details are too long)/.test(message)
+    const status = /^(Invalid channel type|Invalid Amazon product details|Enter a valid|Product details are too long|A note is required)/.test(message)
       ? 400
       : message.includes("404") ? 404 : 500;
     return Response.json({ error: message }, { status });

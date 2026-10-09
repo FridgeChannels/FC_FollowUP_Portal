@@ -26,6 +26,10 @@ This starter does not use `wrangler.jsonc`.
 
 On portable, `npm run dev` uses `vinext dev` with HMR, starting at port 5173. Vinext records the running server in ignored `.vinext/` state, rejects an ordinary duplicate launch, and recovers stale state after a stopped process; exactly simultaneous starts can race. Pass `--port <port>` or `--hostname <host>` after `npm run dev --` when needed; keep portable previews on loopback.
 
+### Paused follow-up reminders
+
+When pausing a brand, a user can record an optional next-contact date. Configure an authenticated scheduler to call `GET` or `POST /api/cron/followup-reminders` at least hourly with `Authorization: Bearer $FOLLOWUP_REMINDER_CRON_SECRET`. When the date arrives, the system creates one deduplicated in-app notification for an active Admin and sends the configured Slack notification. Set `NOTIFY_ON_FOLLOWUP_REMINDER=false` to suppress the Slack delivery while retaining the in-app reminder.
+
 On managed Linux, use `sites-preview start` only for requested browser QA. The project's dev script runs Vite and accepts the supervisor's `--host 0.0.0.0 --port 4173 --strictPort` arguments. The internal browser uses `http://terminal.local:4173/`; it is not a user-facing URL. The supervisor owns the preview lifecycle. The ignored local profile survives the supervisor's cleared process environment.
 
 The portable profile simulates ChatGPT sign-in only for loopback development requests. Visit `/signin-with-chatgpt?return_to=/` to sign in as `local_seedy` (`seedy@sites.test`, display name `Seedy`) and `/signout-with-chatgpt?return_to=/` to sign out. The development cookie preserves that identity across server restarts. Mock auth is disabled in the managed-linux profile and is not included in production builds; hosted authentication remains dispatch-owned.

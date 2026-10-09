@@ -3,7 +3,8 @@
 export type NotificationEventType =
   | "reply.received"
   | "inbound.received"
-  | "sample.visited";
+  | "sample.visited"
+  | "followup.resume_due";
 
 export type NotificationEvent = {
   eventType: NotificationEventType;

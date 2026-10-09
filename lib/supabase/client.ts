@@ -23,6 +23,7 @@ type QueryOptions = {
   filters?: Record<string, string>;
   order?: string;
   limit?: number;
+  offset?: number;
   prefer?: string;
 };
 
@@ -33,6 +34,7 @@ function buildUrl(table: string, options: QueryOptions = {}) {
     url.searchParams.set(key, value);
   }
   if (options.order) url.searchParams.set("order", options.order);
+  if (options.offset != null) url.searchParams.set("offset", String(options.offset));
   if (options.limit != null) url.searchParams.set("limit", String(options.limit));
   return url;
 }

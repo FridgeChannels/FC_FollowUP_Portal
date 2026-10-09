@@ -23,8 +23,8 @@ export function BrandNote({
   value?: string | null;
   onSave?: (next: string) => Promise<void>;
   disabled?: boolean;
-  /** `inline` = compact list-cell trigger (truncated preview); `button` = full Add/Edit Note button. */
-  variant?: "button" | "inline";
+  /** `inline` = compact list-cell trigger; `panel` = editor within a narrow details panel. */
+  variant?: "button" | "inline" | "panel";
 }) {
   const remote = !!onSave;
   const [open, setOpen] = useState(false);
@@ -274,14 +274,16 @@ export function BrandNote({
   }
 
   return (
-    <div className="relative w-full">
+    <div className={variant === "panel" ? "w-full" : "relative w-full"}>
       <Button type="button" variant="outline" className="w-full" disabled={disabled} onClick={() => setOpen(true)}>
         <StickyNote className="mr-2 size-4" />
         {trimmed ? "Edit Note" : "Add Note"}
       </Button>
 
       {open ? (
-        <div className="absolute right-0 top-full z-50 mt-3 flex h-80 w-80 max-w-[calc(100vw-2rem)] flex-col rounded-2xl bg-amber-100 p-4 shadow-2xl ring-1 ring-amber-200 xl:right-full xl:top-0 xl:mr-3 xl:mt-0">
+        <div className={variant === "panel"
+          ? "mt-3 flex h-80 w-full min-w-0 flex-col rounded-2xl bg-amber-100 p-4 ring-1 ring-amber-200"
+          : "absolute right-0 top-full z-50 mt-3 flex h-80 w-80 max-w-[calc(100vw-2rem)] flex-col rounded-2xl bg-amber-100 p-4 shadow-2xl ring-1 ring-amber-200 xl:right-full xl:top-0 xl:mr-3 xl:mt-0"}>
           {editor}
         </div>
       ) : null}
