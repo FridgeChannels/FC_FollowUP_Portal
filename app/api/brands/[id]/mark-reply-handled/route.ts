@@ -3,8 +3,10 @@ import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { invalidateBrandReplySignalCache } from "@/lib/notion/brand-reply-signal-cache";
 import {
   firstRelationId,
+  propertyText,
   relationIds,
   retrievePage,
+  richText,
   updatePage,
   type NotionPage,
 } from "@/lib/notion/client";
@@ -12,6 +14,7 @@ import { listFollowupContactIds } from "@/lib/notion/contacts";
 import { listConversationsByIds, listFollowupConversations } from "@/lib/notion/conversations";
 import { mapFollowupClientPage } from "@/lib/notion/followup-clients";
 import { markInboundsReplied } from "@/lib/notion/followup-writes";
+import { encodeReplyActionReminder } from "@/lib/reply-action-reminder";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -40,6 +43,8 @@ export async function POST(request: Request, { params }: Params) {
       channel?: string;
       taskId?: string | null;
       threadId?: string | null;
+      note?: string;
+      reminderAt?: string | null;
     };
 
     const page = await retrievePage(id);
@@ -48,11 +53,24 @@ export async function POST(request: Request, { params }: Params) {
       return Response.json({ error: "You do not have access to this brand" }, { status: 403 });
     }
 
+    const note = body.note?.trim() || "";
+    const reminderAt = body.reminderAt?.trim() || "";
+    if (!note) {
+      return Response.json({ error: "A note is required when marking a reply as read" }, { status: 400 });
+    }
+    if (reminderAt && !Number.isFinite(Date.parse(reminderAt))) {
+      return Response.json({ error: "Enter a valid reminder time" }, { status: 400 });
+    }
+    if (reminderAt && !brand.ownerId) {
+      return Response.json({ error: "Assign an Account Manager before scheduling a reminder" }, { status: 400 });
+    }
+
     let contactId = body.contactId?.trim() || "";
     let channel = body.channel?.trim() || "";
     let taskId = body.taskId?.trim() || null;
     let threadId = body.threadId?.trim() || null;
     const conversationId = body.conversationId?.trim() || "";
+    let conversationPage: NotionPage | null = null;
 
     if (conversationId) {
       const [conversation] = await listConversationsByIds([conversationId]);
@@ -79,6 +97,7 @@ export async function POST(request: Request, { params }: Params) {
           return Response.json({ error: "Conversation does not belong to this brand" }, { status: 400 });
         }
       }
+      conversationPage = await retrievePage(conversationId);
     }
 
     if (!contactId) {
@@ -95,8 +114,16 @@ export async function POST(request: Request, { params }: Params) {
 
     // Always clear the opened inbound row, even when thread/task matching would miss.
     if (conversationId) {
+      const existingNotes = propertyText(conversationPage?.properties?.Notes);
+      const record = [
+        `Reply marked as read: ${note}`,
+        reminderAt && brand.ownerId
+          ? encodeReplyActionReminder({ activityId: conversationId, dueAt: reminderAt, note, ownerId: brand.ownerId })
+          : "",
+      ].filter(Boolean).join("\n");
       await updatePage(conversationId, {
         "Reply Status": { select: { name: "Replied" } },
+        Notes: { rich_text: richText([existingNotes, record].filter(Boolean).join("\n")) },
       });
     }
 

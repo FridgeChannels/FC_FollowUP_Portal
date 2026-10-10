@@ -45,7 +45,7 @@ import {
   sanitizeEmailAttachments,
 } from "../email-attachments";
 import { EmailCcError, normalizeEmailCc } from "../email-cc";
-import { captionForAttachments } from "../media-attachments";
+import { captionForAttachments, channelSupportsMedia, sanitizeMediaAttachments } from "../media-attachments";
 import { isAllowedS3MediaUrl } from "../s3-media";
 
 export type LaunchStepCopy = {
@@ -300,12 +300,18 @@ export async function launchFollowupBomb(input: {
       script: incoming?.script ?? (write.channel === "Phone" ? template?.content || undefined : undefined),
     }, context);
     const body = resolved.content.trim();
+    const templateAttachments = incoming?.attachments ?? template?.attachments ?? [];
     const emailAttachments =
       channelSupportsEmailAttachments(write.channel)
-        ? sanitizeEmailAttachments(incoming?.attachments).filter((item) =>
+        ? sanitizeEmailAttachments(templateAttachments).filter((item) =>
             isAllowedS3MediaUrl(item.url),
           )
         : [];
+    const whatsappAttachments =
+      channelSupportsMedia(write.channel)
+        ? sanitizeMediaAttachments(templateAttachments).filter((item) => isAllowedS3MediaUrl(item.url))
+        : [];
+    const attachments = whatsappAttachments.length ? whatsappAttachments : emailAttachments;
     let emailCc: string | null = null;
     if (write.channel === "Email") {
       try {
@@ -317,9 +323,9 @@ export async function launchFollowupBomb(input: {
     }
     const conversationContent =
       body ||
-      (emailAttachments.length ? "" : resolved.subject.trim());
+      (attachments.length ? "" : resolved.subject.trim());
     const content =
-      conversationContent || captionForAttachments(emailAttachments);
+      conversationContent || captionForAttachments(attachments);
 
     let linkedIn: LinkedInCreateDecision | null = null;
     if (write.channel === "LinkedIn") {
@@ -352,7 +358,7 @@ export async function launchFollowupBomb(input: {
 
       let conversationId: string | undefined;
       let displayContent = content;
-      if (conversationContent || emailAttachments.length) {
+      if (conversationContent || attachments.length) {
         const page = await createOutboundConversation({
           brandId: brand.id,
           brandName,
@@ -370,14 +376,14 @@ export async function launchFollowupBomb(input: {
           existingConversations,
           scheduledAt: write.scheduledAt,
           notes: "OmniReach 方案已排班，尚未实际发送。",
-          attachments: emailAttachments,
+          attachments,
         });
         conversationId = page.id;
         await updatePage(task.id, {
           Conversations: { relation: [{ id: page.id }] },
         });
         displayContent = resolved.subject?.trim()
-          ? `Subject: ${resolved.subject.trim()}\n\n${body || captionForAttachments(emailAttachments) || content}`
+          ? `Subject: ${resolved.subject.trim()}\n\n${body || captionForAttachments(attachments) || content}`
           : content;
       }
 
@@ -414,7 +420,7 @@ export async function launchFollowupBomb(input: {
         templateId: write.templateId,
         content: displayContent,
         status: "Pending" as const,
-        attachments: emailAttachments.length ? emailAttachments : undefined,
+        attachments: attachments.length ? attachments : undefined,
       } satisfies LaunchPlanStep;
     } catch (error) {
       if (linkedIn?.countsAgainstQuota) {

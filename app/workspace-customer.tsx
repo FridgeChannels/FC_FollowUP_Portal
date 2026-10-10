@@ -1120,10 +1120,14 @@ export function BrandDetail({customerId}:{customerId:string}){
     if (!response.ok) throw new Error(payload.error || "Send failed");
     await Promise.all([refreshRemote(), fetchActivitiesPage(null, "replace")]);
   };
-  const markReplyRead = async (activityId: string) => {
+  const markReplyRead = async (activityId: string, details: { note: string; reminderAt?: string }) => {
     if (!notionBacked) return;
     const response = await fetch(`/api/brands/${c.id}/mark-reply-handled`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ conversationId: activityId }),
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+        conversationId: activityId,
+        note: details.note,
+        reminderAt: details.reminderAt ? new Date(details.reminderAt).toISOString() : undefined,
+      }),
     });
     const payload = (await response.json()) as { error?: string };
     if (!response.ok) throw new Error(payload.error || "Unable to mark reply as read");

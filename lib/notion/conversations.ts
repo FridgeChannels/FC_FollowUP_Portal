@@ -17,6 +17,7 @@ import { isRetryableNotionError } from "./rate-limit";
 import { parseQuoCallData, quoFromMessageId } from "../quo/call-payload";
 import { attachmentsFromProperty } from "../email-attachments";
 import { attachmentsFromExtendedParameters } from "../media-attachments";
+import { REPLY_ACTION_REMINDER_MARKER } from "../reply-action-reminder";
 
 const CONTACT_CONVERSATION_KEYS = ["Interactions", "Conversations", "Conversation Records"];
 
@@ -308,6 +309,15 @@ export async function listNeedsReplyConversations(
   return pages.map((page) =>
     mapConversation(page, { trimPayload: options.trimPayload !== false }),
   );
+}
+
+/** Inbound conversations with a scheduled Account Manager action reminder. */
+export async function listReplyActionReminderConversations(): Promise<BrandActivity[]> {
+  const pages = await queryDatabasePages(getFollowupConversationDbId(), {
+    property: "Notes",
+    rich_text: { contains: REPLY_ACTION_REMINDER_MARKER },
+  });
+  return pages.map((page) => mapConversation(page));
 }
 
 /** Direct brand-relation query used by the Brands list after historical backfill. */

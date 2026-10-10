@@ -40,7 +40,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { EmailBodyEditor } from "./email-body-editor";
 import { ChannelIcon } from "./channel-icon";
+import { MessageMediaInputFrame, MessageMediaPreview, MessageMediaThumbnails, useMessageMedia } from "./message-media";
 import { usePageMetadata } from "./use-page-metadata";
 
 type VariableCategory = "All" | "Company" | "Contact" | "Sender";
@@ -106,6 +108,7 @@ function draftFromBomb(
             content: phone ? "" : template.content,
             callGoal: phone ? template.name : "",
             script: phone ? template.content : "",
+            attachments: template.attachments || [],
           };
         })
       : [
@@ -118,6 +121,54 @@ function draftFromBomb(
           },
         ],
   };
+}
+
+function TemplateMessageField({
+  step,
+  onChange,
+}: {
+  step: BombStep;
+  onChange: (patch: Partial<BombStep>) => void;
+}) {
+  const media = useMessageMedia(step.channel);
+  const [storedAttachments, setStoredAttachments] = useState(step.attachments || []);
+  const [preview, setPreview] = useState<(typeof storedAttachments)[number] | null>(null);
+  const readyKey = media.readyAttachments.map((item) => item.id).join("|");
+  const storedKey = storedAttachments.map((item) => item.id).join("|");
+
+  useEffect(() => {
+    onChange({ attachments: [...storedAttachments, ...media.readyAttachments] });
+    // The attachment IDs are the stable synchronization boundary.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readyKey, storedKey]);
+
+  return (
+    <div className="space-y-2">
+      <MessageMediaInputFrame channel={step.channel} media={media}>
+        {step.channel === "Email" ? (
+          <EmailBodyEditor
+            value={step.content}
+            onChange={(value) => onChange({ content: value })}
+            placeholder="Email body"
+          />
+        ) : (
+          <TemplateVariableField
+            value={step.content}
+            onChange={(value) => onChange({ content: value })}
+            placeholder={`${step.channel} content`}
+          />
+        )}
+      </MessageMediaInputFrame>
+      {storedAttachments.length ? <>
+        <MessageMediaThumbnails
+          attachments={storedAttachments}
+          onPreview={setPreview}
+          onRemove={(id) => setStoredAttachments((items) => items.filter((item) => item.id !== id))}
+        />
+        <MessageMediaPreview item={preview} onOpenChange={(open) => { if (!open) setPreview(null); }} />
+      </> : null}
+    </div>
+  );
 }
 
 function TemplateVariableField({
@@ -313,6 +364,7 @@ export function BombEditor({ bombId }: { bombId: string }) {
             name: step.channel === "Phone" ? step.callGoal : undefined,
             subject: step.subject,
             content: step.channel === "Phone" ? step.script || "" : step.content,
+            attachments: step.attachments,
           })),
         }),
       });
@@ -379,9 +431,9 @@ export function BombEditor({ bombId }: { bombId: string }) {
     !draft.name && "Name",
     !draft.targetRole && "Target role",
     !draft.steps.length && "At least one action",
-    draft.steps.some((step) => step.channel === "Email" && (!step.subject || !step.content)) && "Email subject/body",
+    draft.steps.some((step) => step.channel === "Email" && (!step.subject || (!step.content && !step.attachments?.length))) && "Email subject/body",
     draft.steps.some((step) => step.channel === "Phone" && (!step.callGoal || !step.script)) && "Phone goal/script",
-    draft.steps.some((step) => !["Email", "Phone"].includes(step.channel) && !step.content) && "Message content",
+    draft.steps.some((step) => !["Email", "Phone"].includes(step.channel) && !step.content && !step.attachments?.length) && "Message content",
   ].filter(Boolean);
   const scenarioOptions = scenarioChoices(bomb, scenarios);
   const selectedScenario =
@@ -549,7 +601,7 @@ export function BombEditor({ bombId }: { bombId: string }) {
                       </span>
                       <Select
                         value={step.channel}
-                        onValueChange={(value) => updateStep(step.id, { channel: value as Channel })}
+                        onValueChange={(value) => updateStep(step.id, { channel: value as Channel, attachments: [] })}
                       >
                         <SelectTrigger size="sm" className="w-36">
                           <SelectValue />
@@ -608,11 +660,7 @@ export function BombEditor({ bombId }: { bombId: string }) {
                         />
                       </>
                     ) : (
-                      <TemplateVariableField
-                        value={step.content}
-                        onChange={(value) => updateStep(step.id, { content: value })}
-                        placeholder={`${step.channel} content`}
-                      />
+                      <TemplateMessageField key={`${step.id}:${step.channel}`} step={step} onChange={(patch) => updateStep(step.id, patch)} />
                     )}
                   </div>
                 </div>

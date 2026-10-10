@@ -25,7 +25,7 @@ export type Customer = {
   id: string; name: string; initials: string; cp: CPCode; status: CustomerStatus; source: string;
   ownerId?: string; contacts: Contact[]; activeBombId?: string; closedReason?: string; partnershipContext?: { headline: string; summary: string; signals: string[]; updatedAt: string }; createdAt: string; updatedAt: string;
 };
-export type BombStep = { id: string; channel: Channel; delayDays: number; subject?: string; content: string; callGoal?: string; script?: string };
+export type BombStep = { id: string; channel: Channel; delayDays: number; subject?: string; content: string; callGoal?: string; script?: string; attachments?: import("./media-attachments").MediaAttachment[] };
 export type BombCustomVariable = { id: string; key: string; label: string; defaultValue: string };
 export type Scenario = {
   id: string; name: string; cp: CPCode; description: string;

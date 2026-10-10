@@ -20,8 +20,10 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
+import { Textarea } from "@/components/ui/textarea";
 import { useSignals } from "./signals-store";
 import { EmailOpenActivity } from "./brand-detail-signals";
 import type { SignalEvent, SignalsPayload } from "@/lib/signals/model";
@@ -120,12 +122,16 @@ function outboundStatus(item: Interaction) {
   return item.taskStatus || null;
 }
 
+function outboundStatusLabel(item: Interaction) {
+  const status = outboundStatus(item);
+  return status === "Canceled" ? "Cancelled" : status;
+}
+
 function deliveryTiming(item: Interaction) {
-  const taskStatus = outboundStatus(item);
+  const taskStatus = outboundStatusLabel(item);
   if (!taskStatus) return null;
-  const label = taskStatus === "Canceled" ? "Cancelled" : taskStatus;
   const at = interactionSortAt(item) || null;
-  return { label, at };
+  return { label: taskStatus, at };
 }
 
 function scheduledAtLabel(item: Interaction) {
@@ -271,7 +277,7 @@ export function InteractionFeed({
   onSubmitCallerReview?: (callId: string, note?: string) => void | Promise<void>;
   submittingCallerReview?: boolean;
   scriptsLoading?: boolean;
-  onMarkReplyRead?: (interactionId: string) => Promise<void>;
+  onMarkReplyRead?: (interactionId: string, details: { note: string; reminderAt?: string }) => Promise<void>;
 }) {
   const { state } = useWorkspace();
   const notionReviews = callReviewsFromTasks(tasks);
@@ -530,7 +536,7 @@ function ChannelTranscript({
   canReviewCalls: boolean;
   reviewingTaskId: string | null;
   onReviewCall: (interactionId: string, taskId: string | undefined, status: CallReviewStatus, reviewReason?: string, reviewNote?: string, resolution?: CallReviewResolution) => void | Promise<void>;
-  onMarkReplyRead?: (interactionId: string) => Promise<void>;
+  onMarkReplyRead?: (interactionId: string, details: { note: string; reminderAt?: string }) => Promise<void>;
   focusedInteractionId?: string;
 }) {
   const [selectedThread, setSelectedThread] = useState<{ channel: Channel; key: string; interactionId?: string } | null>(null);
@@ -603,7 +609,11 @@ export function ActivityTimeline({ items, onOpen, formatTime = formatEasternDate
     {items.map((item) => {
       const channel = item.channel || "Email";
       const occurredAt = interactionSortAt(item);
-      const direction = item.direction === "Inbound" ? "Reply" : item.direction === "Outbound" ? "Sent" : "Activity";
+      const direction = item.direction === "Inbound"
+        ? "Reply"
+        : item.direction === "Outbound"
+          ? outboundStatusLabel(item) || "Sent"
+          : "Activity";
       const source = sourceLabel(item);
       const content = <>
         <span className="absolute left-0 top-4 z-10 grid size-6 place-items-center rounded-full border border-slate-200/80 bg-white/90 text-muted-foreground ring-4 ring-white/80">
@@ -616,7 +626,10 @@ export function ActivityTimeline({ items, onOpen, formatTime = formatEasternDate
           </div>
           {occurredAt ? <time dateTime={occurredAt} title={new Date(occurredAt).toLocaleString()} className="shrink-0 text-[11px] text-muted-foreground">{formatTime(occurredAt)}</time> : null}
         </div>
-        <p className="mt-0.5 text-xs text-muted-foreground">{channel} · {direction}</p>
+        <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <span>{channel} ·</span>
+          {item.direction === "Outbound" ? <SendStatusBadge status={direction} /> : <span>{direction}</span>}
+        </div>
         {showEmailOpens&&emailEventsFor(item,signalData).length?<p className="mt-0.5 text-xs">{emailOpenSummary(emailEventsFor(item,signalData))}</p>:null}
       </>;
       return <li key={item.id} className="relative min-w-0">
@@ -792,7 +805,7 @@ function ConversationDetail({
   canReviewCalls: boolean;
   reviewingTaskId: string | null;
   onReviewCall: (interactionId: string, taskId: string | undefined, status: CallReviewStatus, reviewReason?: string, reviewNote?: string, resolution?: CallReviewResolution) => void | Promise<void>;
-  onMarkReplyRead?: (interactionId: string) => Promise<void>;
+  onMarkReplyRead?: (interactionId: string, details: { note: string; reminderAt?: string }) => Promise<void>;
   focusedInteractionId?: string;
 }) {
   const [expandAll, setExpandAll] = useState(false);
@@ -851,7 +864,7 @@ function ContactThreads({
   canReviewCalls: boolean;
   reviewingTaskId: string | null;
   onReviewCall: (interactionId: string, taskId: string | undefined, status: CallReviewStatus, reviewReason?: string, reviewNote?: string, resolution?: CallReviewResolution) => void | Promise<void>;
-  onMarkReplyRead?: (interactionId: string) => Promise<void>;
+  onMarkReplyRead?: (interactionId: string, details: { note: string; reminderAt?: string }) => Promise<void>;
 }) {
   const endpoint = group.contact ? contactPoint(group.contact, channel) : undefined;
   const threads = groupByThread(group.messages);
@@ -912,7 +925,7 @@ function ThreadMessages({
   canReviewCalls: boolean;
   reviewingTaskId: string | null;
   onReviewCall: (interactionId: string, taskId: string | undefined, status: CallReviewStatus, reviewReason?: string, reviewNote?: string, resolution?: CallReviewResolution) => void | Promise<void>;
-  onMarkReplyRead?: (interactionId: string) => Promise<void>;
+  onMarkReplyRead?: (interactionId: string, details: { note: string; reminderAt?: string }) => Promise<void>;
   collapseOlder?: boolean;
   expandAll?: boolean;
   showChannelLabel?: boolean;
@@ -926,6 +939,9 @@ function ThreadMessages({
   const [collapsedLatestIds, setCollapsedLatestIds] = useState<Set<string>>(() => new Set());
   const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null);
   const [markingReadId, setMarkingReadId] = useState<string | null>(null);
+  const [readActionId, setReadActionId] = useState<string | null>(null);
+  const [readActionNote, setReadActionNote] = useState("");
+  const [readActionReminderAt, setReadActionReminderAt] = useState("");
   const [replyOpenIds, setReplyOpenIds] = useState<Set<string>>(() => new Set());
   const focusedMessageRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
@@ -1093,16 +1109,51 @@ function ThreadMessages({
               disabled={markingReadId === item.id}
               onClick={(event) => {
                 event.stopPropagation();
-                setMarkingReadId(item.id);
-                void onMarkReplyRead(item.id)
-                  .then(() => toast.success("Reply marked as read"))
-                  .catch((error) => toast.error(error instanceof Error ? error.message : "Unable to mark reply as read"))
-                  .finally(() => setMarkingReadId(null));
+                setReadActionId(item.id);
+                setReadActionNote("");
+                setReadActionReminderAt("");
               }}
             >
               <CheckCheck className="mr-1.5 size-3.5" />
               {markingReadId === item.id ? "Saving…" : "Mark as read"}
             </Button>
+            <Dialog open={readActionId === item.id} onOpenChange={(open) => {
+              if (!open) setReadActionId(null);
+            }}>
+              <DialogContent className="sm:max-w-lg">
+                <DialogHeader>
+                  <DialogTitle>Complete reply review</DialogTitle>
+                  <DialogDescription>Save a handling note and, if needed, set a time for the assigned Account Manager to receive an action reminder.</DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <label className="grid gap-2 text-sm font-medium text-slate-700">
+                    Note
+                    <Textarea value={readActionNote} onChange={(event) => setReadActionNote(event.target.value)} placeholder="What should the Account Manager do next?" className="min-h-28" autoFocus />
+                  </label>
+                  <label className="grid gap-2 text-sm font-medium text-slate-700">
+                    Remind assigned Account Manager <span className="font-normal text-slate-500">(optional)</span>
+                    <Input type="datetime-local" value={readActionReminderAt} onChange={(event) => setReadActionReminderAt(event.target.value)} />
+                  </label>
+                  <p className="text-xs leading-5 text-slate-500">At the chosen time, the system sends this reminder directly to the assigned Account Manager, not to Admin.</p>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setReadActionId(null)}>Cancel</Button>
+                  <Button disabled={!readActionNote.trim() || markingReadId === item.id} onClick={() => {
+                    setMarkingReadId(item.id);
+                    void onMarkReplyRead(item.id, {
+                      note: readActionNote.trim(),
+                      reminderAt: readActionReminderAt || undefined,
+                    })
+                      .then(() => {
+                        toast.success(readActionReminderAt ? "Reply completed and AM reminder scheduled" : "Reply marked as read");
+                        setReadActionId(null);
+                      })
+                      .catch((error) => toast.error(error instanceof Error ? error.message : "Unable to complete reply review"))
+                      .finally(() => setMarkingReadId(null));
+                  }}>{markingReadId === item.id ? "Saving…" : "Complete review"}</Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </div>
         ) : null}
         {phoneCall && item.quo && canReviewCalls && callReview?.status === "Awaiting Review" ? (

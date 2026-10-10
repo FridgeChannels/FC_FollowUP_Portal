@@ -20,6 +20,7 @@ export type BombTemplateItem = {
   templateType: string | null;
   subject: string | null;
   content: string;
+  attachments?: import("./media-attachments").MediaAttachment[];
   status: string | null;
 };
 
@@ -41,6 +42,7 @@ export type BombTemplateInput = {
   name?: string | null;
   subject?: string | null;
   content: string;
+  attachments?: import("./media-attachments").MediaAttachment[];
 };
 
 export type CreateBombInput = {

@@ -37,6 +37,7 @@ import {
   getFollowupScenarioDbId,
   getFollowupTemplateDbId,
 } from "./config";
+import { joinBombTemplateContent, splitBombTemplateContent } from "../bomb-template-attachments";
 
 function titleMap(pages: NotionPage[]) {
   const titles = new Map<string, string>();
@@ -48,13 +49,15 @@ function titleMap(pages: NotionPage[]) {
 
 function mapTemplate(page: NotionPage): BombTemplateItem {
   const properties = page.properties || {};
+  const stored = splitBombTemplateContent(propertyText(properties["Content Template"]));
   return {
     id: page.id,
     name: titleFromProperties(properties),
     channel: propertyText(properties.Channel) || null,
     templateType: propertyText(properties.Type) || propertyText(properties["Template Type"]) || null,
     subject: propertyText(properties["Subject Template"]) || null,
-    content: propertyText(properties["Content Template"]),
+    content: stored.content,
+    attachments: stored.attachments,
     status: propertyText(properties["Template Status"]) || null,
   };
 }
@@ -262,7 +265,7 @@ function templateProperties(bombId: string, bombName: string, input: BombTemplat
     Channel: { select: { name: channel } },
     Type: { select: { name: phone ? "Call Script" : "Message" } },
     "Subject Template": { rich_text: !phone && input.subject?.trim() ? richText(input.subject.trim()) : [] },
-    "Content Template": { rich_text: input.content.trim() ? richText(input.content.trim()) : [] },
+    "Content Template": { rich_text: richText(joinBombTemplateContent(input.content.trim(), input.attachments || [])) },
     OmniReach: { relation: [{ id: bombId }] },
   };
 }

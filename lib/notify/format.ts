@@ -19,6 +19,7 @@ function eventLabel(eventType: NotificationEvent["eventType"]) {
   if (eventType === "reply.received") return "Reply";
   if (eventType === "sample.visited") return "Sample tap";
   if (eventType === "followup.resume_due") return "Follow-up review due";
+  if (eventType === "reply.action_due") return "Account Manager action due";
   return "Cold Inbound";
 }
 

@@ -41,7 +41,6 @@ import { DEFAULT_BRAND_PAGE_SIZE } from "@/lib/notion/owner-filter";
 import { compareBrandListItems } from "@/lib/notion/brand-list-order";
 import { usePageMetadata } from "./use-page-metadata";
 import { formatEasternDateTime } from "./bomb-plan";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -1489,12 +1488,7 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
                         </TableCell>
                       )}
                       <TableCell className={isAdmin ? undefined : "pl-5"}>
-                        <div className="flex items-center gap-3">
-                          <Avatar className="size-9">
-                            <AvatarFallback className="bg-violet-100 text-xs font-bold text-violet-700">
-                              {c.initials}
-                            </AvatarFallback>
-                          </Avatar>
+                        <div className="min-w-0">
                           <div className="min-w-0">
                             <div className="flex items-center gap-2 text-sm font-semibold">
                               {needsAttention ? (

@@ -1,6 +1,8 @@
-import { firstRelationId, propertyText, queryFollowupClientPages, titleFromProperties } from "@/lib/notion/client";
+import { firstRelationId, propertyText, queryFollowupClientPages, retrievePage, titleFromProperties } from "@/lib/notion/client";
 import { queryOwnerPages } from "@/lib/notion/owners";
+import { listReplyActionReminderConversations } from "@/lib/notion/conversations";
 import { latestFollowUpReminder } from "@/lib/followup-reminder";
+import { latestReplyActionReminder } from "@/lib/reply-action-reminder";
 import { getFollowUpReminderCronSecret, portalBrandUrl } from "@/lib/notify/config";
 import { emitNotificationSafe } from "@/lib/notify/engine";
 import { insertSystemNotification } from "@/lib/sample/notifications";
@@ -15,9 +17,10 @@ function authorized(request: Request) {
 
 async function run() {
   const now = Date.now();
-  const [pages, owners] = await Promise.all([
+  const [pages, owners, replyActivities] = await Promise.all([
     queryFollowupClientPages(undefined, { status: "Paused" }),
     queryOwnerPages(),
+    listReplyActionReminderConversations(),
   ]);
   const admin = owners.find((owner) => owner.isAdmin && owner.status !== "Inactive") || null;
   let due = 0;
@@ -65,7 +68,52 @@ async function run() {
     });
     notified += 1;
   }
-  return { due, notified };
+
+  let replyDue = 0;
+  let replyNotified = 0;
+  for (const activity of replyActivities) {
+    const reminder = latestReplyActionReminder(activity.notes);
+    if (!reminder || Date.parse(reminder.dueAt) > now || !activity.brandId) continue;
+    replyDue += 1;
+    const brandPage = await retrievePage(activity.brandId).catch(() => null);
+    const brandName = brandPage ? titleFromProperties(brandPage.properties || {}) || "Untitled brand" : "Brand";
+    const ownerId = brandPage ? firstRelationId(brandPage.properties?.Owner) || reminder.ownerId : reminder.ownerId;
+    const owner = owners.find((item) => item.id === ownerId) || null;
+    const body = [
+      `Reply note: ${reminder.note}`,
+      "A follow-up action is due now.",
+    ].join("\n");
+    const dedupeKey = `reply.action_due:${activity.id}:${reminder.dueAt}`;
+    let inserted = true;
+    try {
+      inserted = Boolean(await insertSystemNotification({
+        type: "reply.action_due",
+        brandId: activity.brandId,
+        ownerId,
+        title: `Action reminder · ${brandName}`,
+        body,
+        deepLink: portalBrandUrl(activity.brandId),
+        dedupeKey,
+      }));
+    } catch (error) {
+      console.error("[followup-reminders] AM action notification failed", error);
+      inserted = false;
+    }
+    if (!inserted) continue;
+    await emitNotificationSafe({
+      eventType: "reply.action_due",
+      channel: activity.channel || "Follow-up",
+      brandId: activity.brandId,
+      brandName,
+      ownerId,
+      ownerName: owner?.name || "Account Manager",
+      contentPreview: body,
+      occurredAt: reminder.dueAt,
+      portalUrl: portalBrandUrl(activity.brandId),
+    });
+    replyNotified += 1;
+  }
+  return { due, notified, replyDue, replyNotified };
 }
 
 export async function POST(request: Request) {

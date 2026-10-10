@@ -90,10 +90,11 @@ export function portalSampleUrl(brandId: string | null | undefined) {
 }
 
 export function eventTypeEnabled(
-  eventType: "reply.received" | "inbound.received" | "sample.visited" | "followup.resume_due",
+  eventType: "reply.received" | "inbound.received" | "sample.visited" | "followup.resume_due" | "reply.action_due",
 ) {
   if (eventType === "reply.received") return shouldNotifyReply();
   if (eventType === "inbound.received") return shouldNotifyInbound();
   if (eventType === "followup.resume_due") return shouldNotifyFollowUpReminder();
+  if (eventType === "reply.action_due") return shouldNotifyFollowUpReminder();
   return shouldNotifySampleVisit();
 }
