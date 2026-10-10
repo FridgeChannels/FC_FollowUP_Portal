@@ -256,18 +256,15 @@ export function BombsPage({ active }: { active: boolean }) {
                   className="cursor-pointer"
                   onClick={() => router.push(bombPath(b.id))}
                 >
-                  <TableCell className="pl-5">
-                    <div className="font-semibold">{b.name}</div>
-                    <div className="mt-1 max-w-sm truncate text-xs text-slate-500">
-                      {b.goal || "—"}
-                    </div>
+                  <TableCell className="py-4 pl-5">
+                    <div className="font-normal text-slate-700">{b.name}</div>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="py-4">
                     {b.cp ? <Badge variant="outline">{b.cp}</Badge> : "—"}
                   </TableCell>
-                  <TableCell className="text-xs">{b.scenarioName || "—"}</TableCell>
-                  <TableCell className="text-xs">{b.targetRole || "—"}</TableCell>
-                  <TableCell>
+                  <TableCell className="py-4 text-xs">{b.scenarioName || "—"}</TableCell>
+                  <TableCell className="py-4 text-xs">{b.targetRole || "—"}</TableCell>
+                  <TableCell className="py-4">
                     <Badge className={bombStatusClass(b.status)}>{b.status}</Badge>
                   </TableCell>
                 </TableRow>
@@ -463,7 +460,11 @@ function NewBombDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button disabled={!name.trim() || !scenarioId || !cpId || saving} onClick={submit}>
+          <Button
+            className="text-black disabled:bg-slate-100 disabled:text-black disabled:opacity-100"
+            disabled={!name.trim() || !scenarioId || !cpId || saving}
+            onClick={submit}
+          >
             {saving ? "Creating…" : "Create draft"}
           </Button>
         </DialogFooter>

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Bomb, CheckCheck, CheckCircle2, ChevronLeft, MailOpen, Reply, RotateCcw, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import type { CallReviewRound } from "@/lib/call-review-history";
-import { callReviewsFromTasks, type CallReviewResolution, type CallReviewStatus } from "@/lib/call-review-metadata";
+import { callerSubmittedPhoneCallIds, callReviewsFromTasks, type CallReviewResolution, type CallReviewStatus } from "@/lib/call-review-metadata";
 import { getDisplayTimeZone } from "@/lib/display-time";
 import { BombInstance, Channel, Contact, CPCode, CP_CODES, Interaction, ScheduledAction, compareInteractionSort, interactionSortAt, interactionSortMs } from "@/lib/outreach-domain";
 import { BombExecutionPlan, formatEasternDateTime } from "./bomb-plan";
@@ -349,10 +349,17 @@ export function InteractionFeed({
     }
     return false;
   });
+  const submittedPhoneCallIds = callerSubmittedPhoneCallIds(tasks);
+  const allChannelMessages = cpInteractions.filter((item) =>
+    isChannelMessage(item)
+    && (item.channel !== "Phone" || (!!item.quo?.callId && submittedPhoneCallIds.has(item.quo.callId))),
+  );
   const planState = bombInstances ? { ...state, bombInstances, actions: actions ?? [], interactions: cpInteractions } : state;
   const activeChannel = callerPhoneOnly ? "Phone" : selectedChannel;
   const visibleChannels: Channel[] = callerPhoneOnly ? ["Phone"] : CHANNELS;
-  const channelMessages = cpInteractions.filter(item => isChannelMessage(item) && (activeChannel === "All" || item.channel === activeChannel));
+  const channelMessages = activeChannel === "All"
+    ? allChannelMessages
+    : cpInteractions.filter((item) => isChannelMessage(item) && item.channel === activeChannel);
   // Newest OmniReach launch first (startedAt = creation/launch time).
   const bombsForCp = planState.bombInstances
     .filter(item => item.customerId === customerId && item.cp === selectedCp)
@@ -375,7 +382,7 @@ export function InteractionFeed({
       <div className="flex flex-wrap gap-1.5">
         {showAllChannels && !callerPhoneOnly && <button type="button" aria-pressed={activeChannel === "All"} disabled={loading} onClick={() => setSelectedChannel("All")} className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${activeChannel === "All" ? "bg-violet-600 text-white" : "bg-slate-50 text-slate-600 hover:bg-slate-100"} ${loading ? "opacity-70" : ""}`}>
           All
-          <span className={activeChannel === "All" ? "text-white/80" : "text-slate-400"}>{loading ? "…" : cpInteractions.filter(isChannelMessage).length}</span>
+          <span className={activeChannel === "All" ? "text-white/80" : "text-slate-400"}>{loading ? "…" : allChannelMessages.length}</span>
         </button>}
         {visibleChannels.map(channel => {
           const channelItems = interactions.filter(item =>
@@ -406,7 +413,7 @@ export function InteractionFeed({
           </button>;
         })}
       </div>
-      {!callerPhoneOnly && bombsForCp.length > 0 && <Button size="sm" variant="outline" onClick={() => setBombOpen(true)}><Bomb className="mr-1.5 size-3.5"/>OmniReach execution plan</Button>}
+      {!callerPhoneOnly && bombsForCp.length > 0 && <Button size="sm" variant="outline" className="ml-auto" onClick={() => setBombOpen(true)}><Bomb className="mr-1.5 size-3.5"/>OmniReach execution plan</Button>}
     </div>
 
     {channelHeader && (!channelHeaderCp || selectedCp === channelHeaderCp) && <div className="px-5 pt-5">{channelHeader}</div>}
@@ -1064,8 +1071,8 @@ function ThreadMessages({
               size="sm"
               variant="outline"
               className={replyOpenIds.has(item.id)
-                ? "border-emerald-700 bg-emerald-700 text-white shadow-sm ring-2 ring-emerald-200 hover:bg-emerald-800 hover:text-white"
-                : "border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700 hover:text-white"}
+                ? "!border-emerald-300 !bg-emerald-200 !text-black shadow-sm ring-2 ring-emerald-200 hover:!bg-emerald-300 hover:!text-black"
+                : "!border-emerald-300 !bg-emerald-100 !text-black hover:!bg-emerald-200 hover:!text-black"}
               aria-pressed={replyOpenIds.has(item.id)}
               onClick={(event) => {
                 event.stopPropagation();
@@ -1082,6 +1089,7 @@ function ThreadMessages({
             <Button
               size="sm"
               variant="outline"
+              className="!border-slate-300 !bg-slate-100 !text-black hover:!bg-slate-200 hover:!text-black"
               disabled={markingReadId === item.id}
               onClick={(event) => {
                 event.stopPropagation();
@@ -1099,10 +1107,10 @@ function ThreadMessages({
         ) : null}
         {phoneCall && item.quo && canReviewCalls && callReview?.status === "Awaiting Review" ? (
           <div className="mt-4 flex flex-wrap gap-2">
-            <Button size="sm" className="bg-emerald-600 text-white hover:bg-emerald-700" disabled={reviewingTaskId===item.taskId} onClick={() => void onReviewCall(item.id, item.taskId, "Qualified")}>
+            <Button size="sm" className="review-qualified-button bg-emerald-600 text-white hover:bg-emerald-700" disabled={reviewingTaskId===item.taskId} onClick={() => void onReviewCall(item.id, item.taskId, "Qualified")}>
               <CheckCircle2 className="mr-1.5 size-3.5"/>{reviewingTaskId===item.taskId ? "Saving…" : "Mark as Qualified"}
             </Button>
-            <Button size="sm" className="bg-rose-600 text-white hover:bg-rose-700" disabled={reviewingTaskId===item.taskId} onClick={() => { setRecallTaskId(item.taskId || item.id); setRecallReason(""); setRecallResolution("Recall"); }}>
+            <Button size="sm" className="review-unqualified-button bg-rose-600 text-white hover:bg-rose-700" disabled={reviewingTaskId===item.taskId} onClick={() => { setRecallTaskId(item.taskId || item.id); setRecallReason(""); setRecallResolution("Recall"); }}>
               <RotateCcw className="mr-1.5 size-3.5"/>Unqualified
             </Button>
             <UnqualifiedReviewDialog

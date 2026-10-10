@@ -838,10 +838,10 @@ function PhoneTaskBlock({
         {showReviewActions ? (
           <>
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" className="bg-emerald-600 text-white hover:bg-emerald-700" disabled={reviewing} onClick={() => onReview("Qualified")}>
+            <Button size="sm" className="review-qualified-button bg-emerald-600 text-white hover:bg-emerald-700" disabled={reviewing} onClick={() => onReview("Qualified")}>
               <CheckCircle2 className="mr-1.5 size-3.5"/>{reviewing ? "Saving…" : "Mark as Qualified"}
             </Button>
-            <Button size="sm" className="bg-rose-600 text-white hover:bg-rose-700" disabled={reviewing} onClick={() => { setRecallReason(""); setRecallResolution("Recall"); setRecallOpen(true); }}>
+            <Button size="sm" className="review-unqualified-button bg-rose-600 text-white hover:bg-rose-700" disabled={reviewing} onClick={() => { setRecallReason(""); setRecallResolution("Recall"); setRecallOpen(true); }}>
               <RotateCcw className="mr-1.5 size-3.5"/>Unqualified
             </Button>
           </div>

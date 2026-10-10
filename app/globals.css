@@ -158,6 +158,34 @@ body :is(.rounded-xl, .rounded-lg, .rounded-md)[class*="border"] {
   -webkit-backdrop-filter: blur(18px) saturate(125%);
   backdrop-filter: blur(18px) saturate(125%);
 }
+
+/* Preserve contrast for call-review actions on glass surfaces. */
+body [data-slot="button"].review-qualified-button {
+  background-color: #059669;
+  color: #fff;
+}
+body [data-slot="button"].review-qualified-button:hover {
+  background-color: #047857;
+  color: #fff;
+}
+body [data-slot="button"].review-qualified-button:disabled {
+  background-color: #d1fae5;
+  color: #065f46;
+  opacity: 1;
+}
+body [data-slot="button"].review-unqualified-button {
+  background-color: #e11d48;
+  color: #fff;
+}
+body [data-slot="button"].review-unqualified-button:hover {
+  background-color: #be123c;
+  color: #fff;
+}
+body [data-slot="button"].review-unqualified-button:disabled {
+  background-color: #ffe4e6;
+  color: #9f1239;
+  opacity: 1;
+}
 body [data-slot="button"][data-variant="outline"],
 body [data-slot="select-trigger"],
 body [data-slot="input"],

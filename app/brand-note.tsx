@@ -275,7 +275,12 @@ export function BrandNote({
 
   return (
     <div className={variant === "panel" ? "w-full" : "relative w-full"}>
-      <Button type="button" variant="outline" className="w-full" disabled={disabled} onClick={() => setOpen(true)}>
+      {variant === "panel" && (trimmed ? (
+        <p className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">{trimmed}</p>
+      ) : (
+        <p className="text-sm text-slate-400">No notes yet.</p>
+      ))}
+      <Button type="button" variant="outline" className={variant === "panel" ? "mt-3 w-full" : "w-full"} disabled={disabled} onClick={() => setOpen(true)}>
         <StickyNote className="mr-2 size-4" />
         {trimmed ? "Edit Note" : "Add Note"}
       </Button>

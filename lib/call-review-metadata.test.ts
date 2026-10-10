@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  callerSubmittedPhoneCallIds,
   shouldStopOmniReachOnReviewSubmit,
   taskStatusForCallReview,
   type CallReviewMetadata,
@@ -38,5 +39,23 @@ describe("OmniReach stop on call review submit", () => {
 
   it("does not stop a manual Phone task", () => {
     assert.equal(shouldStopOmniReachOnReviewSubmit({ sourceBombId: null }), false);
+  });
+});
+
+describe("callerSubmittedPhoneCallIds", () => {
+  it("keeps only call IDs selected by a Caller for Phone review", () => {
+    const callIds = callerSubmittedPhoneCallIds([
+      {
+        channel: "Phone",
+        callReviewHistory: [
+          { status: "Archived", callIds: ["earlier-attempt"] },
+          { status: "Unqualified", callIds: ["submitted-then-recalled"] },
+          { status: "Awaiting Review", callIds: ["awaiting-review"] },
+        ],
+      },
+      { channel: "Email", callReviewHistory: [{ status: "Qualified", callIds: ["not-a-phone-call"] }] },
+    ]);
+
+    assert.deepEqual([...callIds].sort(), ["awaiting-review", "submitted-then-recalled"]);
   });
 });

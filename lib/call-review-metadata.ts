@@ -44,3 +44,26 @@ export function callReviewsFromTasks(
   }
   return reviews;
 }
+
+/**
+ * Call IDs explicitly selected by a Caller when submitting a Phone task for
+ * Account Manager review. Archived IDs are earlier, unsubmitted attempts.
+ */
+export function callerSubmittedPhoneCallIds(
+  tasks: Array<{
+    channel?: string | null;
+    callReviewHistory?: Array<{ status: CallReviewStatus | "Archived"; callIds?: string[] }>;
+  }>,
+) {
+  const ids = new Set<string>();
+  for (const task of tasks) {
+    if (task.channel !== "Phone") continue;
+    for (const round of task.callReviewHistory || []) {
+      if (round.status === "Archived") continue;
+      for (const callId of round.callIds || []) {
+        if (callId.trim()) ids.add(callId);
+      }
+    }
+  }
+  return ids;
+}
