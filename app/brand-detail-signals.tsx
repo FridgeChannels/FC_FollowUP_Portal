@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { Check, ChevronDown, ExternalLink, MailOpen, SmartphoneNfc } from "lucide-react";
+import { ChevronDown, ExternalLink, MailOpen, SmartphoneNfc } from "lucide-react";
 import type { SignalEvent } from "@/lib/signals/model";
 import { safeSourceUrl } from "@/lib/signals/model";
 import type { MagnetBrandParam } from "@/lib/sample/magnet";
 import type { AmazonSampleProduct, ChannelType } from "@/lib/sample-product";
 import { ChannelIcon } from "./channel-icon";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const date = (value: string) => new Intl.DateTimeFormat("en-US", {
   month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
@@ -83,20 +84,31 @@ export function SampleActivity({
 }
 
 export function ImportantSignalsPanel({
-  events, readIds, onRead, onOpenEmailSignal,
+  events, readIds, brandName, ownerName, activeSignalId, onOpenSignal, onRead, onOpenEmailSignal,
 }: {
   events: SignalEvent[];
   readIds: string[];
-  onRead: (ids: string[]) => void;
+  brandName?: string;
+  ownerName?: string | null;
+  /** Keeps one just-opened signal stable while its details are being read. */
+  activeSignalId?: string | null;
+  onOpenSignal?: (event: SignalEvent) => void;
+  /** @deprecated Parents can pass onOpenSignal for coordinated detail panels. */
+  onRead?: (ids: string[]) => void;
   onOpenEmailSignal?: (event: SignalEvent) => void;
 }) {
+  const [localActiveSignalId, setLocalActiveSignalId] = useState<string | null>(null);
+  const viewingSignalId = activeSignalId ?? localActiveSignalId;
+  const openSignal = (event: SignalEvent) => {
+    const readId = event.signalReadId || event.id;
+    setLocalActiveSignalId(readId);
+    onRead?.([readId]);
+    onOpenSignal?.(event);
+    if (event.type === "email") onOpenEmailSignal?.(event);
+  };
   const groups = new Map<string, SignalEvent[]>();
   for (const event of [...new Map(events.map((item) => [item.id, item])).values()]) {
-    const key = event.type === "sample"
-      ? `sample:${event.sampleId || event.id}`
-      : event.type === "email"
-        ? `email:${event.conversationId || event.messageId || event.id}`
-        : `linkedin:${event.id}`;
+    const key = event.signalKey || event.id;
     groups.set(key, [...(groups.get(key) || []), event]);
   }
   const notifications = [...groups.entries()]
@@ -104,19 +116,23 @@ export function ImportantSignalsPanel({
       key,
       events: groupedEvents.sort((a, b) => Date.parse(b.detectedAt || b.occurredAt) - Date.parse(a.detectedAt || a.occurredAt)),
     }))
-    .filter(({ events: groupedEvents }) => groupedEvents.some((event) => !readIds.includes(event.id)))
+    .filter(({ events: groupedEvents }) => {
+      const readId = groupedEvents[0]?.signalReadId || groupedEvents[0]?.id;
+      return Boolean(readId && (!readIds.includes(readId) || readId === viewingSignalId));
+    })
     .sort((a, b) => Date.parse(b.events[0].detectedAt || b.events[0].occurredAt) - Date.parse(a.events[0].detectedAt || a.events[0].occurredAt));
 
   if (!notifications.length) return null;
   return <section id="brand-important-signals" aria-label="Brand signals" className="mx-5 mt-4 pb-1">
     <div className="mb-1 flex items-center justify-between">
-      <h2 className="text-sm font-semibold text-slate-900">Needs attention</h2>
-      <span className="text-xs text-slate-500">{notifications.length} notification{notifications.length === 1 ? "" : "s"}</span>
+      <h2 className="text-sm font-semibold text-slate-900">New Signals</h2>
+      <span className="text-xs text-slate-500">{notifications.length} signal{notifications.length === 1 ? "" : "s"}</span>
     </div>
     <div>
       {notifications.map(({ key, events: groupedEvents }) => {
         const latest = groupedEvents[0];
-        const unreadIds = groupedEvents.filter((event) => !readIds.includes(event.id)).map((event) => event.id);
+        const readId = latest.signalReadId || latest.id;
+        const isNew = !readIds.includes(readId);
         const isEmail = latest.type === "email";
         const title = latest.type === "sample"
           ? `Sample ${latest.sampleId || ""} visited ${groupedEvents.length} time${groupedEvents.length === 1 ? "" : "s"}`
@@ -131,21 +147,17 @@ export function ImportantSignalsPanel({
             ? <SmartphoneNfc className="size-4 text-[#7C3AED]" aria-hidden="true" />
             : <ChannelIcon channel="LinkedIn" className="size-4" alt="" />;
         const source = safeSourceUrl(latest.sourceUrl);
-        const content = <>
-          <p className="line-clamp-2 text-sm font-medium text-slate-800">{title}</p>
-          <p className="mt-1 text-xs text-slate-500"><span>{timeLabel} {date(timestamp)}</span>{isEmail && onOpenEmailSignal ? <> · <button type="button" className="text-violet-700 hover:underline" onClick={() => onOpenEmailSignal(latest)}>View conversation</button></> : source ? <> · <a href={source} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-violet-700 hover:underline">View source <ExternalLink className="size-3" /></a></> : null}</p>
-        </>;
-        return <article key={key} className="flex min-w-0 items-start gap-3 py-3">
-          <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center">{icon}</span>
-          <div className="min-w-0 flex-1">{content}</div>
-          {unreadIds.length ? <button
-            type="button"
-            className="inline-flex shrink-0 items-center gap-1 px-1 py-1 text-xs font-medium text-slate-600 transition-colors hover:text-slate-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
-            onClick={() => onRead(unreadIds)}
-          >
-            <Check className="size-3.5" aria-hidden="true" />
-            Mark read
-          </button> : null}
+        return <article key={key} className="min-w-0 py-3">
+          <button type="button" className="flex w-full min-w-0 items-start gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400" onClick={() => openSignal(latest)}>
+            <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center">{icon}</span>
+            <div className="min-w-0 flex-1">
+              <p className="line-clamp-2 text-sm font-medium text-slate-800">{title}</p>
+              <p className="mt-1 text-xs text-slate-500"><span>{timeLabel} {date(timestamp)}</span>{source ? <> · <span className="text-violet-700">View details</span></> : null}</p>
+              {latest.type === "sample" && (latest.tapLocation || latest.tapDevice) ? <p className="mt-1 truncate text-xs text-slate-500">{[latest.tapDevice, latest.tapLocation].filter(Boolean).join(" · ")}</p> : null}
+            </div>
+            {isNew ? <span className="shrink-0 rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700">New</span> : null}
+          </button>
+          {viewingSignalId === readId && latest.type === "sample" ? <SampleTapDetails event={latest} brandName={brandName} ownerName={ownerName} className="ml-8 mt-3" /> : null}
         </article>;
       })}
     </div>
@@ -164,39 +176,94 @@ function SignalHistoryType({ type }: { type: SignalEvent["type"] }) {
   return <span className="inline-flex items-center gap-1 text-xs font-medium text-[#0A66C2]"><ChannelIcon channel="LinkedIn" className="size-3.5" alt="" />LinkedIn</span>;
 }
 
-export function SignalHistoryPanel({ events, readIds }: { events: SignalEvent[]; readIds: string[] }) {
-  const records = [...new Map(events.map((event) => [event.id, event])).values()]
+export function SampleTapDetails({
+  event, brandName, ownerName, className = "",
+}: {
+  event: SignalEvent;
+  brandName?: string;
+  ownerName?: string | null;
+  className?: string;
+}) {
+  if (event.type !== "sample") return null;
+  const source = safeSourceUrl(event.sourceUrl);
+  const rows = [
+    ["Brand", brandName || event.tapBrandName],
+    ["Owner", ownerName || event.tapOwnerName],
+    ["SN", event.sampleId],
+    ["Location", event.tapLocation],
+    ["Device", event.tapDevice],
+  ].filter(([, value]) => Boolean(value));
+  if (!rows.length && !source) return null;
+  return <dl aria-label="Sample tap details" className={`grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs leading-5 ${className}`}>
+    {rows.map(([label, value]) => <div key={label} className="contents">
+      <dt className="text-slate-500">{label}</dt>
+      <dd className="min-w-0 truncate text-slate-700" title={value}>{value}</dd>
+    </div>)}
+    {source ? <div className="contents">
+      <dt className="text-slate-500">URL</dt>
+      <dd className="min-w-0 truncate"><a href={source} target="_blank" rel="noreferrer" className="text-violet-700 hover:underline" title={source}>{source.replace(/^https?:\/\//, "")}</a></dd>
+    </div> : null}
+  </dl>;
+}
+
+export function SignalHistoryPanel({ events, readIds, brandName, ownerName, activeSignalId, onOpenSignal }: {
+  events: SignalEvent[];
+  readIds: string[];
+  brandName?: string;
+  ownerName?: string | null;
+  activeSignalId?: string | null;
+  onOpenSignal?: (event: SignalEvent) => void;
+}) {
+  const [type, setType] = useState<"all" | SignalEvent["type"]>("all");
+  const allRecords = [...new Map(events.map((event) => [event.id, event])).values()]
     .sort((left, right) => Date.parse(signalHistoryTime(right)) - Date.parse(signalHistoryTime(left)));
-  if (!records.length) return <p className="text-sm text-slate-500">No signal history yet.</p>;
+  const records = allRecords.filter((event) => type === "all" || event.type === type);
+  if (!allRecords.length) return <p className="text-sm text-slate-500">No signal history yet.</p>;
   return <div className="min-w-0">
-    <p className="text-sm text-slate-500">{records.length} record{records.length === 1 ? "" : "s"}</p>
-    <div className="mt-3 divide-y divide-slate-100">
+    <div className="flex items-center justify-between gap-3">
+      <p className="text-sm text-slate-500">{records.length} record{records.length === 1 ? "" : "s"}</p>
+      <Select value={type} onValueChange={(value) => setType(value as "all" | SignalEvent["type"])}>
+        <SelectTrigger aria-label="Signal history type" size="sm" className="h-9 w-32 border-0 bg-slate-50 px-2.5 shadow-none">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">All</SelectItem>
+          <SelectItem value="sample">Sample Tap</SelectItem>
+          <SelectItem value="email">Email Open</SelectItem>
+          <SelectItem value="linkedin">LinkedIn</SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
+    {records.length ? <div className="mt-3 divide-y divide-slate-100">
       {records.map((event) => {
         const occurredAt = signalHistoryTime(event);
         const source = safeSourceUrl(event.sourceUrl);
-        const handled = readIds.includes(event.id);
+        const readId = event.signalReadId || event.id;
+        const read = readIds.includes(readId);
         return <article key={event.id} className="min-w-0 py-4 first:pt-0 last:pb-0">
           <div className="flex items-start justify-between gap-3">
             <SignalHistoryType type={event.type} />
             <time dateTime={occurredAt} className="shrink-0 text-[11px] text-slate-500">{date(occurredAt)}</time>
           </div>
-          <p className="mt-1.5 text-sm leading-5 text-slate-800">{event.summary}</p>
-          <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
-            <span>{handled ? "Handled" : "Needs attention"}</span>
-            {event.type === "sample" && event.sampleId ? <span>Sample {event.sampleId}</span> : null}
+          {event.type === "linkedin" ? <p className="mt-1.5 text-sm leading-5 text-slate-800">{event.summary}</p> : null}
+          {event.type !== "sample" ? <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
+            <span>{read ? "Read" : "New"}</span>
             {event.type === "email" && event.subject ? <span className="truncate">{event.subject}</span> : null}
-          </div>
-          {(event.evidence || source || event.type === "linkedin") ? <details className="mt-2 text-xs text-slate-500">
+          </div> : null}
+          {(event.evidence || source || event.type === "linkedin" || event.type === "sample") ? <details className="mt-2 text-xs text-slate-500" open={activeSignalId === event.id} onToggle={(toggle) => {
+            if (toggle.currentTarget.open) onOpenSignal?.(event);
+          }}>
             <summary className="cursor-pointer font-medium text-slate-600 hover:text-slate-900">Details</summary>
             <div className="mt-2 space-y-1.5 leading-5">
-              {event.evidence ? <p>{event.evidence}</p> : null}
+              {event.type === "sample" ? <SampleTapDetails event={event} brandName={brandName} ownerName={ownerName} /> : null}
+              {event.type !== "sample" && event.evidence ? <p>{event.evidence}</p> : null}
               {event.type === "linkedin" ? <p>Detected {date(event.detectedAt)}</p> : null}
-              {source ? <a href={source} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-violet-700 hover:underline">View source <ExternalLink className="size-3" /></a> : null}
+              {event.type !== "sample" && source ? <a href={source} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 text-violet-700 hover:underline">View source <ExternalLink className="size-3" /></a> : null}
             </div>
           </details> : null}
         </article>;
       })}
-    </div>
+    </div> : <p className="mt-5 text-sm text-slate-500">No {type === "all" ? "signal" : type === "sample" ? "Sample Tap" : type === "email" ? "Email Open" : "LinkedIn"} history yet.</p>}
   </div>;
 }
 

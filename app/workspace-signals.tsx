@@ -51,6 +51,7 @@ import {
   toCustomerContacts,
   toInteractions,
 } from "./workspace-customer";
+import { SampleTapDetails } from "./brand-detail-signals";
 import { usePageMetadata } from "./use-page-metadata";
 import { useSignals } from "./signals-store";
 import { ChannelIcon } from "./channel-icon";
@@ -103,12 +104,19 @@ function relativeTime(value: string, now: Date) {
   if (minutes < 7 * 24 * 60) return `${Math.floor(minutes / (24 * 60))}d ago`;
   return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(new Date(value));
 }
+function historyEventTime(event: SignalEvent) {
+  return event.type === "email"
+    ? event.detectedAt
+    : event.type === "linkedin"
+      ? event.publishedAt || event.occurredAt
+      : event.occurredAt;
+}
 function groupedSignals(events: SignalEvent[]) {
   const groups = new Map<string, SignalEvent[]>();
   for (const event of [...new Map(events.map((item) => [item.id, item])).values()]) {
-    const key = event.type === "sample" ? `sample:${event.sampleId || event.id}`
+    const key = event.signalKey || (event.type === "sample" ? `sample:${event.sampleId || event.id}`
       : event.type === "email" ? `email:${event.conversationId || event.messageId || event.id}`
-      : `linkedin:${event.id}`;
+      : `linkedin:${event.id}`);
     groups.set(key, [...(groups.get(key) || []), event]);
   }
   return [...groups].map(([key, items]) => ({ key, events: items.sort((a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt)) }))
@@ -150,6 +158,21 @@ export function SignalsPage() {
     () => filterWorkspaceQueue(data?.brands || [], view, type, now),
     [data, view, type, now],
   );
+  const historyBrands = useMemo(
+    () => (data?.brands || [])
+      .map((brand) => {
+        const events = brand.events
+          .filter((event) => type === "all" || event.type === type)
+          .sort((left, right) => Date.parse(historyEventTime(right)) - Date.parse(historyEventTime(left)));
+        return { brand, events, latest: events[0] };
+      })
+      .filter((item): item is { brand: SignalBrand; events: SignalEvent[]; latest: SignalEvent } => Boolean(item.latest))
+      .sort((left, right) => Date.parse(historyEventTime(right.latest)) - Date.parse(historyEventTime(left.latest))),
+    [data, type],
+  );
+  useEffect(() => {
+    if (!selected && queue[0]) setSelected(queue[0].id);
+  }, [selected, queue]);
   const summary = summarize(data?.brands || [], now);
   const [lastRequested, setLastRequested] = useState(requested);
   if (lastRequested !== requested) {
@@ -162,11 +185,9 @@ export function SignalsPage() {
   }
   const selectedBrand = data?.brands.find((b) => b.id === selected);
   // A notification deep link can open a brand outside the current filters.
-  const current =
-    selectedBrand &&
-    ((deepLinkActive && requested === selected) || queue.some((b) => b.id === selected))
-      ? selectedBrand
-      : queue[0];
+  // Keep an opened item visible while its read state settles; the queue itself
+  // can update immediately without interrupting comprehension.
+  const current = selectedBrand || queue[0];
   const onComplete = () => {
     const next = filterWorkspaceQueue(data?.brands || [], "review", "all", now)
       .find((b) => b.id !== current?.id);
@@ -185,7 +206,7 @@ export function SignalsPage() {
           <SidebarTrigger className="md:hidden" />
           <h1 className="text-2xl font-bold tracking-[-.035em] text-slate-950 sm:text-[28px]">Signals</h1>
         </div>
-        <p className="mt-1 text-sm text-muted-foreground">{summary.needsReview} brands need review</p>
+        <p className="mt-1 text-sm text-muted-foreground">{summary.unread} new signal{summary.unread === 1 ? "" : "s"}</p>
       </header>
       <div className="my-5 flex flex-wrap items-center gap-2">
         <Select value={type} onValueChange={(v) => { setType(v as typeof type); setDeepLinkActive(false); }}>
@@ -193,7 +214,7 @@ export function SignalsPage() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Signals</SelectItem>
+            <SelectItem value="all">All</SelectItem>
             {Object.entries(types).map(([key, t]) => (
               <SelectItem key={key} value={key}>
                 {t.label}
@@ -238,14 +259,39 @@ export function SignalsPage() {
             className={mobileDetail && current ? "hidden lg:block" : ""}
           >
             <div className="mb-3">
-              <h2 className="text-sm font-semibold">Brand Queue</h2>
+              <h2 className="text-sm font-semibold">{view === "history" ? "History" : "Brand Queue"}</h2>
             </div>
-            {queue.length ? (
+            {view === "history" ? (
+              historyBrands.length ? (
+                <div className="space-y-1">
+                  {historyBrands.map(({ brand, events, latest }) => {
+                    const occurredAt = historyEventTime(latest);
+                    const detailPath = `/customers/${encodeURIComponent(brand.id)}?returnTo=${encodeURIComponent(showingMock ? "/signals?mock=1" : "/signals")}&tab=signalHistory${showingMock ? "&mock=1" : ""}`;
+                    return <button
+                      key={brand.id}
+                      type="button"
+                      className="w-full px-3 py-3 text-left transition-colors hover:bg-slate-100/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={() => router.push(detailPath)}
+                    >
+                      <div className="flex min-w-0 items-center justify-between gap-3">
+                        <span className="truncate text-sm font-medium text-foreground">{brand.name}</span>
+                        <time dateTime={occurredAt} className="shrink-0 text-[11px] text-slate-500">{relativeTime(occurredAt, now)}</time>
+                      </div>
+                      <div className="mt-1 flex items-center gap-2">
+                        {[...new Set(events.map((event) => event.type))].map((signalType) => <SignalLabel key={signalType} type={signalType} />)}
+                        <span className="text-[11px] text-slate-500">{events.length} record{events.length === 1 ? "" : "s"}</span>
+                      </div>
+                      <p className="mt-1 line-clamp-2 text-xs text-slate-600">{latest.summary}</p>
+                    </button>;
+                  })}
+                </div>
+              ) : <p className="py-12 text-center text-sm text-muted-foreground">No signals match this filter</p>
+            ) : queue.length ? (
               <div className="space-y-1">
                 {queue.map((brand) => {
                   const visibleEvents = type === "all" ? brand.events : brand.events.filter((event) => event.type === type);
                   const latest = (view === "review"
-                    ? visibleEvents.find((event) => !brand.reviewedEventIds?.includes(event.id))
+                    ? visibleEvents.find((event) => event.isNewSignal && !brand.readEventIds?.includes(event.id))
                     : undefined) || visibleEvents[0];
                   const isSelected = current?.id === brand.id;
                   const isUnread = brand.unread;
@@ -374,14 +420,9 @@ function BrandReview({
   const [cursor, setCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [readError, setReadError] = useState<string | null>(null);
-  const readSnapshot = useRef("");
   const watchedMessage = useRef<string | null>(null);
   const callStarted = useRef<number | null>(null);
   const completing = useRef(false);
-  const snapshot = brand.events
-    .map((e) => e.id)
-    .sort()
-    .join("|");
   useEffect(() => {
     let cancelled = false;
     const activityRequest = mock ? Promise.resolve<ActivityPage>({ activities: [] }) : loadActivities(brand.id);
@@ -404,52 +445,31 @@ function BrandReview({
       cancelled = true;
     };
   }, [brand.id, reloadVersion]);
-  useEffect(() => {
-    if (!brand.unread || readSnapshot.current === snapshot) return;
-    readSnapshot.current = snapshot;
+  async function openSignal(key: string, events: SignalEvent[]) {
+    const anchor = events.find((event) => event.isNewSignal) || events[0];
+    if (!anchor) return;
+    setExpandedSignalKeys((old) => new Set(old).add(key));
+    const readId = anchor.signalReadId || anchor.id;
+    if (brand.readEventIds?.includes(readId)) return;
+    const snapshot = [...new Set([...(brand.readEventIds || []), readId])];
     if (mock) {
-      settle(brand.id, brand.events.map((e) => e.id));
+      settle(brand.id, snapshot);
       return;
     }
     if (readOnly) return;
-    let cancelled = false;
-    fetch(`/api/signals/${brand.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "read",
-        eventIds: brand.events.map((e) => e.id),
-      }),
-    })
-      .then(async (r) => {
-        if (!r.ok) throw new Error("Unable to update read status");
-        if (!cancelled) {
-          setReadError(null);
-          settle(
-            brand.id,
-            brand.events.map((e) => e.id),
-          );
-        }
-      })
-      .catch((e) => {
-        if (!cancelled) {
-          setReadError(e.message);
-          readSnapshot.current = "";
-        }
+    try {
+      const response = await fetch(`/api/signals/${brand.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "read", eventIds: snapshot }),
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    brand.id,
-    brand.unread,
-    brand.events,
-    snapshot,
-    refresh,
-    settle,
-    readOnly,
-    mock,
-  ]);
+      if (!response.ok) throw new Error("Unable to update read status");
+      setReadError(null);
+      settle(brand.id, snapshot);
+    } catch (error) {
+      setReadError(error instanceof Error ? error.message : "Unable to update read status");
+    }
+  }
   async function complete(
     action: "review" | "later" | "handled",
     linkedTask?: string,
@@ -660,12 +680,13 @@ function BrandReview({
   const phone = actionContacts.find((c) => dialPhoneOptions(c).length);
   const linkedin = actionContacts.find((c) => c.linkedin);
   const allSignalGroups = groupedSignals(brand.events);
-  const currentSignalGroups = brand.needsReview
-    ? groupedSignals(brand.events.filter((event) => !brand.reviewedEventIds?.includes(event.id)))
-    : allSignalGroups;
-  const visibleSignalGroups = signalsExpanded ? allSignalGroups : currentSignalGroups.slice(0, 3);
-  const hasMoreSignals = allSignalGroups.reduce((total, group) => total + group.events.length, 0) >
-    currentSignalGroups.slice(0, 3).reduce((total, group) => total + group.events.length, 0);
+  const currentSignalGroups = allSignalGroups.filter(({ key, events }) => {
+    const readId = events.find((event) => event.isNewSignal)?.signalReadId || events[0]?.signalReadId || events[0]?.id;
+    return Boolean(readId && (!brand.readEventIds?.includes(readId) || expandedSignalKeys.has(key)));
+  });
+  const groupsForView = currentSignalGroups;
+  const visibleSignalGroups = signalsExpanded ? groupsForView : groupsForView.slice(0, 3);
+  const hasMoreSignals = groupsForView.length > 3;
   const interactions = toInteractions(brand.id, activities, {}, detail?.tasks || []).sort(
         (a, b) =>
           Date.parse(b.recordedAt || b.createdAt) -
@@ -730,16 +751,20 @@ function BrandReview({
             const source = safeSourceUrl(latest.sourceUrl);
             return <article key={key} className="min-w-0 py-1">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1"><SignalLabel type={latest.type}/></div>
-              <p className={`mt-1 text-sm font-medium ${expanded ? "" : "line-clamp-2"}`} title={title}>{title}</p>
+              <button type="button" className={`mt-1 block text-left text-sm font-medium ${expanded ? "" : "line-clamp-2"}`} title={title} onClick={() => void openSignal(key, events)}>{title}</button>
               <div className="mt-1 flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground">
                 <span>{latest.type === "sample" ? "Last activity" : latest.type === "email" ? "Last detected" : "Published"} · {relativeTime(latest.type === "email" ? latest.detectedAt : latest.type === "linkedin" ? latest.publishedAt || latest.occurredAt : latest.occurredAt, now)}</span>
+                {latest.type === "sample" && (latest.tapLocation || latest.tapDevice) ? <span className="max-w-full truncate">{[latest.tapDevice, latest.tapLocation].filter(Boolean).join(" · ")}</span> : null}
                 {source ? <a href={source} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 hover:text-foreground">View source <ArrowUpRight className="size-3"/></a> : !mock && latest.type === "linkedin" ? <span>Source unavailable</span> : null}
-                {(events.length > 1 || latest.evidence || latest.type === "linkedin") ? <button type="button" className="hover:text-foreground" onClick={() => setExpandedSignalKeys((old) => { const next = new Set(old); if (next.has(key)) next.delete(key); else next.add(key); return next; })} aria-expanded={expanded}>{expanded ? "Hide details" : latest.type === "sample" ? "Visit history" : "Details"}</button> : null}
+                {(events.length > 1 || latest.evidence || latest.type === "linkedin") ? <button type="button" className="hover:text-foreground" onClick={() => { if (expanded) setExpandedSignalKeys((old) => { const next = new Set(old); next.delete(key); return next; }); else void openSignal(key, events); }} aria-expanded={expanded}>{expanded ? "Close details" : latest.type === "sample" ? "Visit history" : "Details"}</button> : null}
               </div>
               {expanded ? <div className="mt-2 space-y-1 text-xs text-muted-foreground">
                 {latest.type === "linkedin" ? <p>Published {date(latest.publishedAt)} · Detected {date(latest.detectedAt)}</p> : null}
                 {latest.type === "email" ? <p>Open detection does not confirm the recipient read the email.</p> : null}
-                {events.map((event) => <p key={event.id}><time dateTime={event.occurredAt}>{date(event.occurredAt)}</time>{event.evidence ? ` · ${event.evidence}` : ""}</p>)}
+                {events.map((event) => event.type === "sample" ? <div key={event.id} className="py-1">
+                  <time dateTime={event.occurredAt}>{date(event.occurredAt)}</time>
+                  <SampleTapDetails event={event} brandName={brand.name} ownerName={brand.ownerName} className="mt-1" />
+                </div> : <p key={event.id}><time dateTime={event.occurredAt}>{date(event.occurredAt)}</time>{event.evidence ? ` · ${event.evidence}` : ""}</p>)}
               </div> : null}
             </article>;
           })}

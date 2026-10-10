@@ -41,7 +41,7 @@ async function getSignals(request: Request) {
     // Re-evaluate viewer access on every response, including cached CRM projections.
     const brands = candidates
       .filter((brand) => canViewBrand(viewer, brand))
-      .map((brand) => aggregateSignals(brand, events, notifications));
+      .map((brand) => aggregateSignals(brand, events, notifications, viewer.ownerId || viewer.email));
     return Response.json(
       {
         readOnly: !signalsWritesEnabled(),

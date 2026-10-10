@@ -17,7 +17,6 @@ import {
   MessageCircle,
   PhoneCall,
   Plus,
-  RotateCcw,
   Search,
   Upload,
   UserPlus,
@@ -760,33 +759,6 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
     setHasMore(false);
     pageCursorMap.current = { 1: null };
   };
-  const resetListFilters = (nextReplyState = "all", nextSort = "ownerAssignedNewest") => {
-    const next: BrandListFilters = {
-      view: filters.view,
-      workQ: filters.workQ,
-      action: filters.action,
-      q: "",
-      status: "all",
-      cp: "all",
-      owner: "all",
-      replyState: nextReplyState,
-      handlingMode: "all",
-      exhibitionId: "all",
-      sort: nextSort,
-      replyFrom: "",
-      replyTo: "",
-    };
-    setFilters(next);
-    window.history.replaceState(window.history.state, "", brandListPath(next));
-    setDebouncedQuery("");
-    setCursor(null);
-    setCursorStack([]);
-    setPageNumber(1);
-    setNextCursor(null);
-    setHasMore(false);
-    pageCursorMap.current = { 1: null };
-  };
-  const clearAllListFilters = () => resetListFilters();
   const setWorkView = (view: BrandListFilters["view"]) => {
     setFilters((previous) => {
       const next = { ...previous, view };
@@ -1129,9 +1101,6 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
     : [pageNumber];
 
   // The work view uses the same row data and table as All Brands.
-  const selectedExhibitionName = exhibitionId === "all"
-    ? null
-    : exhibitionOptions.find((item) => item.id === exhibitionId)?.name ?? null;
   const workSearch = (query || filters.workQ).trim().toLowerCase();
   const workRows = (work?.brands || [])
     .filter((row) => filters.action === "all"
@@ -1139,12 +1108,7 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
       || filters.action === "replies" && WORK_REPLY_CHANNELS.some((channel) => !!row.channels[channel])
       || filters.action === "callReview" && !!row.callReview)
     .filter((row) => !workSearch || row.brand.name.toLowerCase().includes(workSearch))
-    .filter((row) => cp === "all" || row.brand.currentCp === cp)
-    .filter((row) => handlingMode === "all" || row.brand.handlingMode === handlingMode)
-    .filter((row) => !selectedExhibitionName || row.brand.followupExhibition === selectedExhibitionName)
-    .filter((row) => !isAdmin || status === "all" || row.brand.status === status)
-    .filter((row) => !isAdmin || owner === "all" || owner === "unassigned" && !row.brand.ownerId || row.brand.ownerId === owner)
-    .sort((a, b) => compareBrandListItems(a.brand, b.brand, sort as Parameters<typeof compareBrandListItems>[2]));
+    .sort((a, b) => compareBrandListItems(a.brand, b.brand, "ownerAssignedNewest"));
   const workByBrandId = new Map((work?.brands || []).map((row) => [row.brand.id, row]));
   const filtered = workView === "all" ? brands : workRows.map((row) => row.brand);
   const currentListPath = brandListPath(filters, { cursor, page: pageNumber });
@@ -1414,20 +1378,6 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
               <SelectItem value="nameDesc">Brand name Z–A</SelectItem>
             </SelectContent>
           </Select>
-          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              aria-label="Clear all filters"
-              title="Clear all"
-              className="group h-9 w-9 overflow-hidden px-0 text-slate-500 transition-[width,color] duration-200 hover:w-24 hover:text-slate-900"
-              onClick={clearAllListFilters}
-            >
-              <RotateCcw className="size-3.5 shrink-0" />
-              <span className="max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-[max-width,opacity] duration-200 group-hover:ml-1.5 group-hover:max-w-16 group-hover:opacity-100">Clear all</span>
-            </Button>
-          </div>
         </div>
         </> : <>
         <div className="flex flex-wrap gap-3 p-4">
@@ -1450,55 +1400,6 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
               <SelectItem value="callReview">Call Review</SelectItem>
             </SelectContent>
           </Select>
-          <Select value={cp} onValueChange={(value) => setWorkFilter({ cp: value })}>
-            <SelectTrigger className="w-full sm:w-28"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All CPs</SelectItem>
-              {cps.map((item) => <SelectItem key={item.id} value={item.name}>{item.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Select value={handlingMode} onValueChange={(value) => setWorkFilter({ handlingMode: value })}>
-            <SelectTrigger className="w-full sm:w-36"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All handling modes</SelectItem>
-              <SelectItem value="Automated">Automated</SelectItem>
-              <SelectItem value="Human">Human</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={exhibitionId} onValueChange={(value) => setWorkFilter({ exhibitionId: value })} disabled={exhibitionOptionsLoading}>
-            <SelectTrigger className="w-full sm:w-40"><SelectValue placeholder={exhibitionOptionsLoading ? "Loading exhibitions…" : "All exhibitions"} /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All exhibitions</SelectItem>
-              {exhibitionOptions.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Select value={sort} onValueChange={(value) => setWorkFilter({ sort: value })}>
-            <SelectTrigger aria-label="Sort brands needing action" title="Sort brands" className="w-full sm:w-56">
-              <ArrowDownUp className="size-4" />
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent className="w-auto min-w-52">
-              <SelectItem value="ownerAssignedNewest">Assigned: newest first</SelectItem>
-              <SelectItem value="lastInboundNewest">Last inbound: newest first</SelectItem>
-              <SelectItem value="lastOutboundNewest">Last outbound: newest first</SelectItem>
-              <SelectItem value="nameAsc">Brand name A–Z</SelectItem>
-              <SelectItem value="nameDesc">Brand name Z–A</SelectItem>
-            </SelectContent>
-          </Select>
-          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              aria-label="Clear action filters"
-              title="Clear all"
-              className="group h-9 w-9 overflow-hidden px-0 text-slate-500 transition-[width,color] duration-200 hover:w-24 hover:text-slate-900"
-              onClick={() => setWorkFilter({ action: "all", workQ: "", q: "", cp: "all", handlingMode: "all", exhibitionId: "all", sort: "ownerAssignedNewest" })}
-            >
-              <RotateCcw className="size-3.5 shrink-0" />
-              <span className="max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-[max-width,opacity] duration-200 group-hover:ml-1.5 group-hover:max-w-16 group-hover:opacity-100">Clear all</span>
-            </Button>
-          </div>
         </div>
         </>}
         {workView === "all" && workError && <div role="alert" className="flex flex-wrap items-center gap-2 px-5 pb-3 text-sm text-rose-700">

@@ -153,7 +153,6 @@ function SessionSignalsProvider({
       status?: SignalReview["status"],
       taskId?: string,
     ) => {
-      const ids = new Set(eventIds);
       setData((current) =>
         current
           ? {
@@ -164,16 +163,17 @@ function SessionSignalsProvider({
                   : {
                       ...brand,
                       readEventIds: [...new Set([...(brand.readEventIds||[]), ...eventIds])],
-                      unread: brand.events.some((event) => !ids.has(event.id) && !brand.readEventIds?.includes(event.id)),
+                      unread: (brand.newEventIds || brand.events.filter((event) => event.isNewSignal).map((event) => event.id))
+                        .some((id) => !new Set([...(brand.readEventIds || []), ...eventIds]).has(id)),
                       ...(status
                         ? {
-                            status: brand.events.some(
-                              (event) => !ids.has(event.id),
+                            status: (brand.newEventIds || brand.events.filter((event) => event.isNewSignal).map((event) => event.id)).some(
+                              (id) => !new Set([...(brand.readEventIds || []), ...eventIds]).has(id),
                             )
                               ? ("Needs Review" as const)
                               : status,
-                            needsReview: brand.events.some(
-                              (event) => !ids.has(event.id),
+                            needsReview: (brand.newEventIds || brand.events.filter((event) => event.isNewSignal).map((event) => event.id)).some(
+                              (id) => !new Set([...(brand.readEventIds || []), ...eventIds]).has(id),
                             ),
                             taskId,
                           }

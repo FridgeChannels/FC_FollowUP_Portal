@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   aggregateBrand,
+  classifySignalEvents,
   effectiveFollowup,
   filterQueue,
   filterWorkspaceQueue,
@@ -46,13 +47,13 @@ test("stable event IDs deduplicate events; three signal types aggregate into one
   assert.equal(summarize([brand], now).today, 1);
   assert.equal(summarize([brand], now).week, 1);
 });
-test("viewing clears unread but does not complete review", () => {
+test("reading one signal clears only that signal's New state", () => {
   const brand = aggregateBrand({
     ...input,
-    events: [event("tap")],
+    events: [event("tap"), event("email", "email")],
     readIds: ["tap"],
   });
-  assert.equal(brand.unread, false);
+  assert.equal(brand.unread, true);
   assert.equal(brand.needsReview, true);
   assert.equal(
     filterQueue([brand], { status: "review", time: "week", type: "all" }, now)
@@ -60,44 +61,42 @@ test("viewing clears unread but does not complete review", () => {
     1,
   );
 });
-test("workspace pending queue includes older unreviewed brands and history excludes them", () => {
+test("workspace New queue is independent from History", () => {
   const old = aggregateBrand({ ...input, events: [event("old", "sample", "2026-09-01T00:00:00Z")] });
-  const handled = aggregateBrand({ ...input, id: "handled", events: [event("done")], review: { eventIds: ["done"], status: "Handled" } });
-  assert.deepEqual(filterWorkspaceQueue([old, handled], "review", "all", now).map((b) => b.id), ["a"]);
-  assert.deepEqual(filterWorkspaceQueue([old, handled], "history", "all", now).map((b) => b.id), ["handled"]);
-  assert.deepEqual(filterWorkspaceQueue([old, handled], "today", "all", now).map((b) => b.id), ["handled"]);
+  const read = aggregateBrand({ ...input, id: "read", events: [event("done")], readIds: ["done"] });
+  assert.deepEqual(filterWorkspaceQueue([old, read], "review", "all", now).map((b) => b.id), ["a"]);
+  assert.deepEqual(filterWorkspaceQueue([old, read], "history", "all", now).map((b) => b.id), ["read"]);
 });
-test("workspace priority uses pending signals rather than already reviewed ones", () => {
+test("workspace priority ignores read high-priority signals", () => {
   const previouslyImportant = aggregateBrand({
     ...input,
     events: [
       { ...event("reviewed"), highPriority: true },
       event("pending", "email", "2026-10-09T10:00:00Z"),
     ],
-    review: { eventIds: ["reviewed"], status: "Reviewed" },
+    readIds: ["reviewed"],
   });
   const newImportant = aggregateBrand({
     ...input,
     id: "new",
     events: [{ ...event("new", "linkedin", "2026-10-09T09:00:00Z"), highPriority: true }],
   });
-  assert.deepEqual(previouslyImportant.reviewedEventIds, ["reviewed"]);
+  assert.deepEqual(previouslyImportant.readEventIds, ["reviewed"]);
   assert.deepEqual(filterWorkspaceQueue([previouslyImportant, newImportant], "review", "all", now).map((brand) => brand.id), ["new", "a"]);
 });
-test("review snapshot retains late-arriving and same-time events", () => {
-  const reviewed = aggregateBrand({
-    ...input,
-    events: [event("tap")],
-    review: { eventIds: ["tap"], status: "Reviewed" },
-  });
-  assert.equal(reviewed.needsReview, false);
-  const updated = aggregateBrand({
-    ...input,
-    events: [event("tap"), event("late", "email")],
-    review: { eventIds: ["tap"], status: "Reviewed" },
-  });
-  assert.equal(updated.needsReview, true);
-  assert.equal(updated.events.length, 2);
+test("signal cooldowns preserve all history without generating duplicate New signals", () => {
+  const first = event("tap-1", "sample", "2026-10-09T00:00:00Z");
+  const repeat = event("tap-2", "sample", "2026-10-09T04:00:00Z");
+  const later = event("tap-3", "sample", "2026-10-10T01:00:00Z");
+  const emailFirst = { ...event("email-1", "email", "2026-10-09T01:00:00Z"), messageId: "message-1" };
+  const emailRepeat = { ...event("email-2", "email", "2026-10-09T02:00:00Z"), messageId: "message-1" };
+  const linkedinFirst = { ...event("li-1", "linkedin", "2026-10-09T01:00:00Z"), summary: "New product launch" };
+  const linkedinRepeat = { ...event("li-2", "linkedin", "2026-10-12T01:00:00Z"), summary: "New product launch" };
+  const classified = classifySignalEvents([first, repeat, later, emailFirst, emailRepeat, linkedinFirst, linkedinRepeat]);
+  assert.deepEqual(classified.filter((item) => item.isNewSignal).map((item) => item.id).sort(), ["email-1", "li-1", "tap-1", "tap-3"]);
+  assert.equal(classified.find((item) => item.id === "tap-2")?.signalReadId, "tap-1");
+  assert.equal(classified.find((item) => item.id === "email-2")?.signalReadId, "email-1");
+  assert.equal(classified.find((item) => item.id === "li-2")?.signalReadId, "li-1");
 });
 test("filters apply immediately and priority precedes recency", () => {
   const ordinary = aggregateBrand({ ...input, events: [event("tap")] });

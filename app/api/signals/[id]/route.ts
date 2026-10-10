@@ -7,7 +7,7 @@ import {
 } from "@/lib/notion/followup-clients";
 import { loadSignalEvents, saveSignalSnapshot } from "@/lib/signals/data";
 import { signalsWritesEnabled } from "@/lib/signals/config";
-import { effectiveFollowup, type SignalReview } from "@/lib/signals/model";
+import { classifySignalEvents, effectiveFollowup, type SignalReview } from "@/lib/signals/model";
 
 type Params = { params: Promise<{ id: string }> };
 export async function PATCH(request: Request, { params }: Params) {
@@ -48,7 +48,7 @@ export async function PATCH(request: Request, { params }: Params) {
         { status: 400 },
       );
     const { events } = await loadSignalEvents(id);
-    const allowed = new Set(events.map((e) => e.id));
+    const allowed = new Set(classifySignalEvents(events).filter((e) => e.isNewSignal).map((e) => e.id));
     if (body.eventIds.some((id) => !allowed.has(id)))
       return Response.json(
         { error: "Signal snapshot is no longer available. Refresh and retry." },
@@ -96,7 +96,7 @@ export async function PATCH(request: Request, { params }: Params) {
     }
     await saveSignalSnapshot(
       id,
-      brand.ownerId,
+      viewer.ownerId || viewer.email,
       body.eventIds,
       body.action === "read" ? "read" : "review",
       body.action === "read" ? undefined : review,

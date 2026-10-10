@@ -657,6 +657,7 @@ export function BrandDetail({customerId}:{customerId:string}){
   const requestedWorkReply=searchParams.get("workReply");
   const requestedWorkTask=searchParams.get("workTask");
   const requestedNewAssignment=searchParams.get("newAssignment")==="1";
+  const requestedSignalHistory=searchParams.get("tab")==="signalHistory";
   const mockDetailPreview=process.env.NODE_ENV!=="production"&&searchParams.get("mock")==="1"&&customerId===MOCK_PETER_SIGNAL_BRAND_ID;
   const requestedReturnTo=searchParams.get("returnTo");
   const brandListReturnTo=requestedReturnTo==="/customers"||requestedReturnTo?.startsWith("/customers?")||requestedReturnTo==="/signals"||requestedReturnTo?.startsWith("/signals?")
@@ -671,7 +672,7 @@ export function BrandDetail({customerId}:{customerId:string}){
     router.replace(backPath);
   };
   const [launch,setLaunch]=useState(false); const [reply,setReply]=useState(false); const [cp,setCP]=useState(false); const [contact,setContact]=useState(false); const [ownerDraft,setOwnerDraft]=useState<string>();
-  const [detailsTab,setDetailsTab]=useState<BrandDetailsTab|null>(requestedSignalId||requestedNewAssignment?"details":null);
+  const [detailsTab,setDetailsTab]=useState<BrandDetailsTab|null>(requestedSignalId||requestedNewAssignment?"details":requestedSignalHistory?"signalHistory":null);
   const [sampleProfiles,setSampleProfiles]=useState<Array<{sn:string;profile:MagnetBrandParam|null}>>([]);
   const [attentionTarget,setAttentionTarget]=useState<{cp:CPCode;channel:Channel}|null>(null);
   const [creatingMeeting,setCreatingMeeting]=useState(false);
@@ -681,6 +682,7 @@ export function BrandDetail({customerId}:{customerId:string}){
   const [followUpAt,setFollowUpAt]=useState("");
   const [focusedEmailInteractionId,setFocusedEmailInteractionId]=useState<string|null>(null);
   const [focusedWorkInteractionId,setFocusedWorkInteractionId]=useState<string|null>(null);
+  const [activeSignalId,setActiveSignalId]=useState<string|null>(null);
   const [currentTimeMs,setCurrentTimeMs]=useState(()=>Date.now());
   useEffect(()=>{const timer=window.setInterval(()=>setCurrentTimeMs(Date.now()),60_000);return ()=>window.clearInterval(timer);},[]);
   const cached=getCachedBrand(customerId);
@@ -718,6 +720,7 @@ export function BrandDetail({customerId}:{customerId:string}){
     setOwnerDraft(undefined);
     setFocusedEmailInteractionId(null);
     setFocusedWorkInteractionId(null);
+    setActiveSignalId(null);
     const next=getCachedBrand(customerId);
     setRemote(next?{
       ...next,
@@ -762,17 +765,22 @@ export function BrandDetail({customerId}:{customerId:string}){
   const emailSignals=(brandSignals?.events||[]).filter(event=>event.type==="email");
   const requestedSignal=brandSignals?.events.find(event=>event.id===requestedSignalId);
   const requestedSignalType=requestedSignal?.type;
-  const requestedSignalContactId=requestedSignal?.contactId;
-  const requestedContactTargetId=remote?.contacts.find(contact=>contact.id===requestedSignalContactId||contact.keyPersonId===requestedSignalContactId)?.id||requestedSignalContactId;
   useEffect(()=>{
     if(!requestedSignalType)return;
-    setDetailsTab(requestedSignalType==="email"?null:requestedSignalContactId?"contacts":"details");
-    const target=requestedSignalContactId&&requestedSignalType==="linkedin"?`contact-linkedin-${requestedContactTargetId}`:requestedSignalType?"brand-important-signals":"brand-conversations";
+    const readId=requestedSignal?.signalReadId||requestedSignal?.id;
+    if(readId) readSignalEvents([readId]);
+    setActiveSignalId(requestedSignal.id);
+    setDetailsTab("signalHistory");
+    const target="brand-important-signals";
     requestAnimationFrame(()=>document.getElementById(target)?.scrollIntoView({block:"center",behavior:"smooth"}));
-  },[requestedSignalId,requestedSignalType,requestedSignalContactId,requestedContactTargetId]);
-  const readSignalEvents=(eventIds:string[])=>{
+  },[requestedSignalId,requestedSignalType,requestedSignal]);
+  function readSignalEvents(eventIds:string[]){
     if(!brandSignals||!eventIds.length)return;
-    const snapshot=[...new Set([...(brandSignals.readEventIds||[]),...eventIds])];
+    const requested=new Set(eventIds);
+    const readIds=brandSignals.events.filter(event=>requested.has(event.id)||requested.has(event.signalReadId||""))
+      .map(event=>event.signalReadId||event.id);
+    if(!readIds.length)return;
+    const snapshot=[...new Set([...(brandSignals.readEventIds||[]),...readIds])];
     if(process.env.NODE_ENV!=="production"&&searchParams.get("mock")==="1"){
       settleSignals(customerId,snapshot);
       return;
@@ -782,7 +790,7 @@ export function BrandDetail({customerId}:{customerId:string}){
       method:"PATCH",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({action:"read",eventIds:snapshot}),
     }).then(response=>{if(response.ok)settleSignals(customerId,snapshot);}).catch(()=>{});
-  };
+  }
   const isAdmin=state.currentRole==="Admin";
   const manager=isAdmin||state.currentRole==="AccountManager";
   const mockCustomer:Customer|undefined=mockDetailPreview?{
@@ -1162,10 +1170,10 @@ export function BrandDetail({customerId}:{customerId:string}){
     <div className="grid min-w-0 items-start lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-stretch">
     <aside aria-label="Brand information" className="order-2 flex min-w-0 flex-col overflow-hidden border-t border-slate-200 bg-white lg:min-h-0 lg:border-l lg:border-t-0 lg:flex-row">
       <div className="flex shrink-0 flex-row items-center gap-2 border-b border-slate-100 p-2 lg:w-12 lg:flex-col lg:border-b-0 lg:border-r lg:py-3">
-        {detailTabs.map(({id,label,icon:Icon})=><Button key={id} type="button" variant={detailsTab===id?"secondary":"ghost"} size="icon" className="size-9" aria-label={label} title={label} aria-pressed={detailsTab===id} onClick={()=>setDetailsTab(detailsTab===id?null:id)}><Icon className="size-4"/></Button>)}
+        {detailTabs.map(({id,label,icon:Icon})=><Button key={id} type="button" variant={detailsTab===id?"secondary":"ghost"} size="icon" className="size-9" aria-label={label} title={label} aria-pressed={detailsTab===id} onClick={()=>{const next=detailsTab===id?null:id;if(detailsTab==="signalHistory"&&next!=="signalHistory")setActiveSignalId(null);setDetailsTab(next);}}><Icon className="size-4"/></Button>)}
       </div>
       {detailsTab&&<section className="min-w-0 w-full space-y-5 overflow-y-auto p-4 lg:w-[320px]">
-        <div className="flex items-center justify-between"><h2 className="font-semibold">{detailTabs.find(tab=>tab.id===detailsTab)?.label}</h2><Button type="button" variant="ghost" size="icon" aria-label="Close details" onClick={()=>setDetailsTab(null)}><PanelRightClose className="size-4"/></Button></div>
+        <div className="flex items-center justify-between"><h2 className="font-semibold">{detailTabs.find(tab=>tab.id===detailsTab)?.label}</h2><Button type="button" variant="ghost" size="icon" aria-label="Close details" onClick={()=>{if(detailsTab==="signalHistory")setActiveSignalId(null);setDetailsTab(null);}}><PanelRightClose className="size-4"/></Button></div>
       <div className={detailsTab==="details"?"min-w-0":"hidden"}>
         <div className="min-w-0">
           <h3 className="text-base font-semibold tracking-tight">{c.name}</h3>
@@ -1223,7 +1231,7 @@ export function BrandDetail({customerId}:{customerId:string}){
         {partnershipContext&&<div className="rounded-xl bg-emerald-50 p-4"><h3 className="font-semibold text-emerald-950">{partnershipContext.headline}</h3><p className="mt-2 text-sm text-emerald-900">{partnershipContext.summary}</p>{partnershipContext.signals.map(signal=><p key={signal} className="mt-2 text-xs text-emerald-800">{signal}</p>)}<p className="mt-3 text-[11px] text-emerald-700">Updated {dateOnly(partnershipContext.updatedAt)}</p></div>}
       </div>
       <div className={detailsTab==="signalHistory"?"min-w-0":"hidden"}>
-        <SignalHistoryPanel events={brandSignals?.events||[]} readIds={signalReadIds}/>
+        <SignalHistoryPanel events={brandSignals?.events||[]} readIds={signalReadIds} activeSignalId={activeSignalId} onOpenSignal={event=>{setActiveSignalId(event.id);readSignalEvents([event.signalReadId||event.id]);}}/>
       </div>
       </section>}
     </aside>

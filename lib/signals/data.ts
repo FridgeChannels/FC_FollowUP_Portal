@@ -69,6 +69,9 @@ export async function loadSignalEvents(brandId?: string) {
       id: `sample:${v.posthog_event_uuid}`,
       brandId: v.brand_id!,
       sampleId: v.sn,
+      tapLocation:
+        [v.geo_city, v.geo_country].filter(Boolean).join(", ") || undefined,
+      tapDevice: [v.browser, v.os].filter(Boolean).join(" · ") || undefined,
       type: "sample",
       summary: `Sample ${v.sn} visited`,
       occurredAt: v.occurred_at,
@@ -95,9 +98,10 @@ export function aggregateSignals(
   },
   events: SignalEvent[],
   notifications: SystemNotification[],
+  viewerId?: string | null,
 ) {
   const read = notifications.find(
-    (n) => n.brand_id === brand.id && n.type === "signals.read",
+    (n) => n.brand_id === brand.id && n.type === "signals.read" && n.owner_id === (viewerId || null),
   );
   const review = notifications.find(
     (n) => n.brand_id === brand.id && n.type === "signals.review",
@@ -109,7 +113,13 @@ export function aggregateSignals(
   );
   return aggregateBrand({
     ...brand,
-    events: events.filter((e) => e.brandId === brand.id),
+    events: events
+      .filter((e) => e.brandId === brand.id)
+      .map((event) => event.type === "sample" ? {
+        ...event,
+        tapBrandName: brand.name,
+        tapOwnerName: brand.ownerName || undefined,
+      } : event),
     readIds: Array.isArray(readBody.eventIds) ? readBody.eventIds : [],
     review:
       reviewBody && Array.isArray(reviewBody.eventIds) ? reviewBody : undefined,
@@ -124,7 +134,7 @@ export async function saveSignalSnapshot(
 ) {
   if (!signalsWritesEnabled())
     throw new Error("Signals review writes are disabled");
-  // Each brand has exactly one current read marker and one review marker, never one task per event.
+  // Each AM has one compact read snapshot per brand; raw signal history is never mutated.
   await supabaseUpsert(
     "system_notifications",
     [
@@ -135,7 +145,7 @@ export async function saveSignalSnapshot(
         title: `Signals ${kind}`,
         body: JSON.stringify({ eventIds, ...review }),
         deep_link: `/signals?brand=${encodeURIComponent(brandId)}`,
-        dedupe_key: `signals.${kind}:${brandId}`,
+        dedupe_key: `signals.${kind}:${ownerId || "unassigned"}:${brandId}`,
         read_at: new Date().toISOString(),
       },
     ],

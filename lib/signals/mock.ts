@@ -1,4 +1,4 @@
-import { summarize, type SignalBrand, type SignalsPayload } from "./model.ts";
+import { aggregateBrand, summarize, type SignalBrand, type SignalsPayload } from "./model.ts";
 
 /** The stable demo brand used by `/signals?mock=1`. */
 export const MOCK_SIGNAL_BRAND_ID = "3dc9166f-d9fd-8095-991c-d2bbb00ad58e";
@@ -57,8 +57,8 @@ export function mockSignals(now = new Date()): SignalsPayload {
     },
     {
       id: MOCK_SIGNAL_BRAND_ID,
-      name: "Test FridgeChannel Atlas",
-      ownerName: "Peter",
+      name: "Genius Gourmet",
+      ownerName: "Mark Bai",
       currentCp: "CP2 · Sample Delivered to Owner",
       unread: true,
       needsReview: true,
@@ -108,7 +108,12 @@ export function mockSignals(now = new Date()): SignalsPayload {
           id: "mock-test-atlas-tap-2",
           brandId: MOCK_SIGNAL_BRAND_ID,
           type: "sample",
-          sampleId: "FC-ATLAS-2026",
+          sampleId: "G1GGGVDQVG",
+          tapLocation: "United States",
+          tapDevice: "Mobile Safari · iOS",
+          tapBrandName: "Genius Gourmet",
+          tapOwnerName: "Mark Bai",
+          sourceUrl: "https://sample.fridgechannels.com/p/G1GGGVDQVG",
           summary: "Second sample tap in the last two hours.",
           occurredAt: at(now, -95),
           detectedAt: at(now, -95),
@@ -119,7 +124,12 @@ export function mockSignals(now = new Date()): SignalsPayload {
           id: "mock-test-atlas-tap-1",
           brandId: MOCK_SIGNAL_BRAND_ID,
           type: "sample",
-          sampleId: "FC-ATLAS-2026",
+          sampleId: "G1GGGVDQVG",
+          tapLocation: "United States",
+          tapDevice: "Mobile Safari · iOS",
+          tapBrandName: "Genius Gourmet",
+          tapOwnerName: "Mark Bai",
+          sourceUrl: "https://sample.fridgechannels.com/p/G1GGGVDQVG",
           summary: "Sample tap detected after delivery.",
           occurredAt: at(now, -165),
           detectedAt: at(now, -165),
@@ -130,14 +140,17 @@ export function mockSignals(now = new Date()): SignalsPayload {
     },
   ];
 
+  const classifiedBrands = brands.map(({ events, ...brand }) =>
+    aggregateBrand({ ...brand, events, readIds: [] }),
+  );
   return {
     readOnly: true,
-    brands,
+    brands: classifiedBrands,
     sources: {
       sample: "Not connected",
       email: "Not connected",
       linkedin: "Not connected",
     },
-    summary: summarize(brands, now),
+    summary: summarize(classifiedBrands, now),
   };
 }

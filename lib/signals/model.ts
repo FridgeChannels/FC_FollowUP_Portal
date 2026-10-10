@@ -4,6 +4,11 @@ export type SignalEvent = {
   brandId: string;
   contactId?: string;
   sampleId?: string;
+  /** Sample Tap context captured with the raw visit. */
+  tapLocation?: string;
+  tapDevice?: string;
+  tapBrandName?: string;
+  tapOwnerName?: string;
   conversationId?: string;
   messageId?: string;
   threadId?: string;
@@ -16,6 +21,12 @@ export type SignalEvent = {
   subject?: string;
   publishedAt?: string;
   highPriority: boolean;
+  /** A stable logical signal group. Raw activity in the same group remains History only. */
+  signalKey?: string;
+  /** The event ID that carries this logical signal's read state. */
+  signalReadId?: string;
+  /** True only for the event that creates a new AM-facing signal. */
+  isNewSignal?: boolean;
 };
 export type SignalReview = {
   eventIds: string[];
@@ -29,6 +40,7 @@ export type SignalBrand = {
   currentCp: string;
   events: SignalEvent[];
   readEventIds?: string[];
+  newEventIds?: string[];
   reviewedEventIds?: string[];
   unread: boolean;
   needsReview: boolean;
@@ -57,22 +69,86 @@ export function aggregateBrand(input: {
       Date.parse(b.occurredAt) - Date.parse(a.occurredAt) ||
       a.id.localeCompare(b.id),
   );
+  const classified = classifySignalEvents(events);
   const read = new Set(input.readIds);
   const reviewed = new Set(input.review?.eventIds || []);
-  const needsReview = events.some((event) => !reviewed.has(event.id));
+  const newEventIds = classified
+    .filter((event) => event.isNewSignal)
+    .map((event) => event.id);
+  const needsReview = newEventIds.some((id) => !read.has(id));
   return {
     id: input.id,
     name: input.name,
     ownerName: input.ownerName,
     currentCp: input.currentCp,
-    events,
+    events: classified,
     readEventIds: [...read],
+    newEventIds,
     reviewedEventIds: [...reviewed],
     unread: events.some((event) => !read.has(event.id)),
     needsReview,
     status: needsReview ? "Needs Review" : input.review?.status || "Reviewed",
     taskId: input.review?.taskId,
   };
+}
+
+const SAMPLE_SIGNAL_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const LINKEDIN_SIGNAL_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
+
+function signalTime(event: SignalEvent) {
+  const value = Date.parse(event.detectedAt || event.occurredAt);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function normalizedLinkedInSignature(event: SignalEvent) {
+  return [
+    event.brandId,
+    event.contactId || "brand",
+    (event.sourceUrl || "").trim().toLowerCase(),
+    event.summary.trim().toLowerCase().replace(/\s+/g, " "),
+  ].join(":");
+}
+
+/**
+ * Every activity remains available in History. This annotates only the events
+ * that should surface as a fresh Signal to an AM.
+ */
+export function classifySignalEvents(events: SignalEvent[]) {
+  const ordered = [...events].sort(
+    (a, b) => signalTime(a) - signalTime(b) || a.id.localeCompare(b.id),
+  );
+  const sampleState = new Map<string, { at: number; readId: string }>();
+  const emailState = new Map<string, string>();
+  const linkedinState = new Map<string, { at: number; readId: string }>();
+
+  return ordered.map((event) => {
+    const at = signalTime(event);
+    if (event.type === "sample") {
+      const key = `sample:${event.brandId}:${event.sampleId || "unknown"}`;
+      const previous = sampleState.get(key);
+      const isNew = !previous || at - previous.at >= SAMPLE_SIGNAL_COOLDOWN_MS;
+      const readId = isNew ? event.id : previous!.readId;
+      if (isNew) sampleState.set(key, { at, readId });
+      return { ...event, signalKey: `${key}:${readId}`, signalReadId: readId, isNewSignal: isNew };
+    }
+    if (event.type === "email") {
+      const key = `email:${event.brandId}:${event.messageId || event.conversationId || event.id}`;
+      const readId = emailState.get(key) || event.id;
+      const isNew = !emailState.has(key);
+      if (isNew) emailState.set(key, readId);
+      return { ...event, signalKey: key, signalReadId: readId, isNewSignal: isNew };
+    }
+    const key = `linkedin:${normalizedLinkedInSignature(event)}`;
+    const previous = linkedinState.get(key);
+    const isNew = !previous || at - previous.at >= LINKEDIN_SIGNAL_COOLDOWN_MS;
+    const readId = isNew ? event.id : previous!.readId;
+    if (isNew) linkedinState.set(key, { at, readId });
+    return { ...event, signalKey: `${key}:${readId}`, signalReadId: readId, isNewSignal: isNew };
+  }).sort(
+    (a, b) =>
+      Date.parse(b.occurredAt) - Date.parse(a.occurredAt) ||
+      a.id.localeCompare(b.id),
+  );
 }
 export function periodStart(period: "today" | "week", now = new Date()) {
   const start = new Date(now);
@@ -120,10 +196,11 @@ export function filterWorkspaceQueue(
   const start = view === "today" || view === "week" ? periodStart(view, now) : 0;
   return brands
     .filter((brand) =>
-      (view !== "review" || brand.needsReview) &&
-      (view !== "history" || !brand.needsReview) &&
+      (view !== "review" || brand.unread) &&
+      (view !== "history" || !brand.unread) &&
       brand.events.some((event) =>
         (type === "all" || event.type === type) &&
+        (view !== "review" || (event.isNewSignal && !brand.readEventIds?.includes(event.id))) &&
         (view !== "today" && view !== "week" ||
           Date.parse(event.occurredAt) >= start && Date.parse(event.occurredAt) <= now.getTime()),
       ),
@@ -131,15 +208,15 @@ export function filterWorkspaceQueue(
     .sort((a, b) => {
       const matching = (brand: SignalBrand) => {
         const byType = type === "all" ? brand.events : brand.events.filter((event) => event.type === type);
-        const pending = brand.needsReview
-          ? byType.filter((event) => !brand.reviewedEventIds?.includes(event.id))
-          : [];
+        const pending = byType.filter(
+          (event) => event.isNewSignal && !brand.readEventIds?.includes(event.id),
+        );
         return view === "review" && pending.length ? pending : byType;
       };
       const aEvents = matching(a);
       const bEvents = matching(b);
-      return Number(b.needsReview && bEvents.some((event) => event.highPriority)) -
-        Number(a.needsReview && aEvents.some((event) => event.highPriority)) ||
+      return Number(b.unread && bEvents.some((event) => event.highPriority)) -
+        Number(a.unread && aEvents.some((event) => event.highPriority)) ||
         Date.parse(bEvents[0].occurredAt) - Date.parse(aEvents[0].occurredAt);
     });
 }
@@ -155,8 +232,11 @@ export function summarize(brands: SignalBrand[], now = new Date()) {
   return {
     today: updated("today"),
     week: updated("week"),
-    needsReview: brands.filter((b) => b.needsReview).length,
-    unread: brands.filter((b) => b.unread).length,
+    needsReview: brands.filter((b) => b.unread).length,
+    unread: brands.reduce(
+      (total, brand) => total + (brand.newEventIds || []).filter((id) => !brand.readEventIds?.includes(id)).length,
+      0,
+    ),
   };
 }
 export function safeSourceUrl(value?: string | null) {
