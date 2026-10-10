@@ -621,8 +621,8 @@ export function BombEditor({ bombId }: { bombId: string }) {
           </section>
         </main>
         <aside className="space-y-5">
-          <section className="sticky top-24 rounded-2xl bg-slate-950 p-5 text-white">
-            <div className="text-xs font-semibold uppercase tracking-wide text-violet-300">
+          <section className="sticky top-24 rounded-2xl bg-white p-5 text-slate-900 shadow-[0_12px_32px_rgb(100_116_139/10%)]">
+            <div className="text-xs font-semibold uppercase tracking-wide text-violet-700">
               Estimated flow
             </div>
             <h2 className="mt-1 font-bold">{draft.name || "Untitled OmniReach"}</h2>
@@ -641,12 +641,12 @@ export function BombEditor({ bombId }: { bombId: string }) {
                 </div>
               ))}
             </div>
-            <div className="mt-6 rounded-xl bg-white/5 p-4 text-xs leading-5 text-slate-400">
+            <div className="mt-6 rounded-xl bg-violet-50 p-4 text-xs leading-5 text-slate-600">
               Phone timing may shift with Caller capacity. Any meaningful reply
               stops all future actions.
             </div>
             {errors.length > 0 && (
-              <div className="mt-4 rounded-xl bg-rose-500/10 p-4 text-xs text-rose-200">
+              <div className="mt-4 rounded-xl bg-rose-50 p-4 text-xs text-rose-700">
                 Complete: {errors.join(", ")}
               </div>
             )}

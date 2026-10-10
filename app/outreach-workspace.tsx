@@ -413,7 +413,7 @@ export function WorkspaceRouteContent() {
 
       {mountedRoots.includes("omnireach") ? (
         <div hidden={activeRoot !== "omnireach"}>
-          <BombsPage />
+          <BombsPage active={activeRoot === "omnireach"} />
         </div>
       ) : null}
       {bombDetailId ? <BombEditor bombId={bombDetailId} /> : null}

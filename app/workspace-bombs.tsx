@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Bomb, CircleAlert, MoreHorizontal, Plus } from "lucide-react";
+import { ArrowLeft, Bomb, CircleAlert, Plus } from "lucide-react";
 import { toast } from "sonner";
 import type { CurrentCpOption } from "@/lib/brand-list";
 import {
@@ -32,12 +32,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
   Empty,
   EmptyDescription,
   EmptyHeader,
@@ -56,6 +50,16 @@ import { ChannelIcon } from "./channel-icon";
 import { usePageMetadata } from "./use-page-metadata";
 import { useWorkspace } from "./workspace-store";
 import { CP, PageHeader, Status } from "./workspace-pages";
+import { DEFAULT_BRAND_PAGE_SIZE } from "@/lib/notion/owner-filter";
+import {
+  GlassPagination,
+  GlassPaginationContent,
+  GlassPaginationEllipsis,
+  GlassPaginationItem,
+  GlassPaginationLink,
+  GlassPaginationNext,
+  GlassPaginationPrevious,
+} from "@/components/ui/glass-pagination";
 
 function bombStatusClass(status: string) {
   if (status === "Active") return "bg-emerald-100 text-emerald-700";
@@ -130,20 +134,22 @@ function TemplateCard({ template, index }: { template: BombTemplateItem; index: 
   );
 }
 
-export function BombsPage() {
+export function BombsPage({ active }: { active: boolean }) {
   const router = useRouter();
   const { can } = useWorkspace();
   const [tab, setTab] = useState<"Active" | "Draft" | "All">("Active");
   const [create, setCreate] = useState(false);
   const [bombs, setBombs] = useState<BombListItem[]>([]);
+  const [pageNumber, setPageNumber] = useState(1);
   const [scenarios, setScenarios] = useState<BombScenario[]>([]);
   const [cps, setCps] = useState<CurrentCpOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
   useEffect(() => {
+    if (!active) return;
     let cancelled = false;
     setLoading(true);
-    fetch("/api/bombs")
+    fetch("/api/bombs", { cache: "no-store" })
       .then(async (response) => {
         const payload = (await response.json()) as {
           bombs?: BombListItem[];
@@ -171,15 +177,38 @@ export function BombsPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [active]);
   const visible = bombs.filter((bomb) => tab === "All" || bomb.status === tab);
+  const totalPages = Math.max(1, Math.ceil(visible.length / DEFAULT_BRAND_PAGE_SIZE));
+  const currentPage = Math.min(pageNumber, totalPages);
+  const paginationItems = (() => {
+    if (totalPages <= 7) {
+      return Array.from({ length: totalPages }, (_, index) => index + 1) as Array<number | "ellipsis">;
+    }
+    const pages = [...new Set([1, currentPage - 1, currentPage, currentPage + 1, totalPages])]
+      .filter((page) => page >= 1 && page <= totalPages)
+      .sort((left, right) => left - right);
+    return pages.flatMap((page, index) =>
+      index && page - pages[index - 1] > 1 ? ["ellipsis" as const, page] : [page],
+    );
+  })();
+  const pagedBombs = visible.slice(
+    (currentPage - 1) * DEFAULT_BRAND_PAGE_SIZE,
+    currentPage * DEFAULT_BRAND_PAGE_SIZE,
+  );
   return (
     <div className="mx-auto max-w-[1480px]">
       <PageHeader
         eyebrow={loading ? "Loading" : `${bombs.length} records`}
         title="OmniReach"
       >
-        <Select value={tab} onValueChange={(value) => setTab(value as typeof tab)}>
+        <Select
+          value={tab}
+          onValueChange={(value) => {
+            setTab(value as typeof tab);
+            setPageNumber(1);
+          }}
+        >
           <SelectTrigger className="w-44">
             <SelectValue />
           </SelectTrigger>
@@ -217,14 +246,11 @@ export function BombsPage() {
                 <TableHead>CP</TableHead>
                 <TableHead>Scenario</TableHead>
                 <TableHead>Target</TableHead>
-                <TableHead>Flow</TableHead>
-                <TableHead>Priority</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead />
               </TableRow>
             </TableHeader>
             <TableBody>
-              {visible.map((b) => (
+              {pagedBombs.map((b) => (
                 <TableRow
                   key={b.id}
                   className="cursor-pointer"
@@ -242,49 +268,7 @@ export function BombsPage() {
                   <TableCell className="text-xs">{b.scenarioName || "—"}</TableCell>
                   <TableCell className="text-xs">{b.targetRole || "—"}</TableCell>
                   <TableCell>
-                    {b.channels.length ? (
-                      <div className="flex items-center gap-1.5">
-                        {b.channels.map((channel) =>
-                          isBombChannel(channel) ? (
-                            <span
-                              key={channel}
-                              title={channel}
-                              className="grid size-7 place-items-center"
-                            >
-                              <ChannelIcon channel={channel} className="size-6" />
-                            </span>
-                          ) : (
-                            <span key={channel} className="text-xs text-slate-500">
-                              {channel}
-                            </span>
-                          ),
-                        )}
-                      </div>
-                    ) : b.templateCount > 0 ? (
-                      <span className="text-xs text-slate-500">
-                        {b.templateCount} template{b.templateCount === 1 ? "" : "s"}
-                      </span>
-                    ) : (
-                      <span className="text-xs text-slate-400">No templates</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-xs">{b.priority || "—"}</TableCell>
-                  <TableCell>
                     <Badge className={bombStatusClass(b.status)}>{b.status}</Badge>
-                  </TableCell>
-                  <TableCell onClick={(e) => e.stopPropagation()}>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button size="icon-sm" variant="ghost">
-                          <MoreHorizontal className="size-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => router.push(bombPath(b.id))}>
-                          Open
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
                   </TableCell>
                 </TableRow>
               ))}
@@ -303,6 +287,60 @@ export function BombsPage() {
             </EmptyHeader>
           </Empty>
         )}
+        {!error && !loading && visible.length > 0 ? (
+          <div
+            id="omnireach-pagination"
+            className="relative flex min-h-14 items-center justify-center px-5 py-3 text-xs text-slate-500"
+          >
+            <span className="absolute left-5 hidden sm:block">
+              Showing {pagedBombs.length} of {visible.length} OmniReach
+            </span>
+            <GlassPagination className="w-auto">
+              <GlassPaginationContent>
+                <GlassPaginationItem>
+                  <GlassPaginationPrevious
+                    href="#omnireach-pagination"
+                    aria-disabled={currentPage === 1}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      if (currentPage > 1) setPageNumber(currentPage - 1);
+                    }}
+                  />
+                </GlassPaginationItem>
+                {paginationItems.map((item, index) =>
+                  item === "ellipsis" ? (
+                    <GlassPaginationItem key={`ellipsis-${index}`}>
+                      <GlassPaginationEllipsis />
+                    </GlassPaginationItem>
+                  ) : (
+                    <GlassPaginationItem key={item}>
+                      <GlassPaginationLink
+                        href="#omnireach-pagination"
+                        isActive={item === currentPage}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          if (item !== currentPage) setPageNumber(item);
+                        }}
+                      >
+                        {item}
+                      </GlassPaginationLink>
+                    </GlassPaginationItem>
+                  ),
+                )}
+                <GlassPaginationItem>
+                  <GlassPaginationNext
+                    href="#omnireach-pagination"
+                    aria-disabled={currentPage === totalPages}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      if (currentPage < totalPages) setPageNumber(currentPage + 1);
+                    }}
+                  />
+                </GlassPaginationItem>
+              </GlassPaginationContent>
+            </GlassPagination>
+          </div>
+        ) : null}
       </div>
       <NewBombDialog
         open={create}
