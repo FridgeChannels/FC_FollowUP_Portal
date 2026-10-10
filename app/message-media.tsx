@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { FileText, ImagePlus, Paperclip, Play, Video, X } from "lucide-react";
+import { FileText, ImagePlus, Paperclip, Pause, Play, Video, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   DEFAULT_EMAIL_ATTACHMENT_MAX_COUNT,
@@ -163,21 +163,145 @@ export async function uploadMediaFile(
   };
 }
 
+function isAudioAttachment(item: { mimeType?: string; url?: string; name?: string }) {
+  const mime = (item.mimeType || "").toLowerCase();
+  if (mime.startsWith("audio/")) return true;
+  return /\.(opus|ogg|oga|mp3|m4a|aac|wav|amr)(\?|$)/i.test(item.url || "");
+}
+
+function formatAudioClock(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
+  const total = Math.floor(seconds);
+  const mins = Math.floor(total / 60);
+  const secs = total % 60;
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
+
+/** Chat-bubble voice player — avoids native <audio controls> which get crushed in flex layouts. */
+export function VoiceMessagePlayer({
+  src,
+  label = "Voice message",
+  className,
+}: {
+  src: string;
+  label?: string;
+  className?: string;
+}) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [current, setCurrent] = useState(0);
+  const [duration, setDuration] = useState(0);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const onTime = () => setCurrent(audio.currentTime || 0);
+    const onMeta = () => setDuration(Number.isFinite(audio.duration) ? audio.duration : 0);
+    const onEnded = () => {
+      setPlaying(false);
+      setCurrent(0);
+    };
+    const onPause = () => setPlaying(false);
+    const onPlay = () => setPlaying(true);
+    audio.addEventListener("timeupdate", onTime);
+    audio.addEventListener("loadedmetadata", onMeta);
+    audio.addEventListener("durationchange", onMeta);
+    audio.addEventListener("ended", onEnded);
+    audio.addEventListener("pause", onPause);
+    audio.addEventListener("play", onPlay);
+    return () => {
+      audio.removeEventListener("timeupdate", onTime);
+      audio.removeEventListener("loadedmetadata", onMeta);
+      audio.removeEventListener("durationchange", onMeta);
+      audio.removeEventListener("ended", onEnded);
+      audio.removeEventListener("pause", onPause);
+      audio.removeEventListener("play", onPlay);
+    };
+  }, [src]);
+
+  const toggle = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (audio.paused) {
+      void audio.play().catch(() => setPlaying(false));
+    } else {
+      audio.pause();
+    }
+  };
+
+  const progress = duration > 0 ? Math.min(1, current / duration) : 0;
+
+  return (
+    <div
+      className={cn(
+        "box-border flex w-full min-w-[15rem] max-w-sm shrink-0 items-center gap-3 rounded-xl border border-slate-200/80 bg-white px-3 py-2.5",
+        className,
+      )}
+    >
+      <audio ref={audioRef} preload="metadata" src={src} className="hidden" />
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          toggle();
+        }}
+        className="grid size-9 shrink-0 place-items-center rounded-full bg-slate-900 text-white hover:bg-slate-800"
+        aria-label={playing ? `Pause ${label}` : `Play ${label}`}
+      >
+        {playing ? <Pause className="size-4 fill-current" /> : <Play className="size-4 fill-current" />}
+      </button>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-xs font-medium text-slate-700">{label}</p>
+        <div className="mt-1.5 flex items-center gap-2">
+          <input
+            type="range"
+            min={0}
+            max={duration || 0}
+            step={0.1}
+            value={Math.min(current, duration || 0)}
+            aria-label={`${label} progress`}
+            className="h-1.5 w-full min-w-0 cursor-pointer appearance-none rounded-full bg-slate-200 accent-slate-900 [&::-webkit-slider-thumb]:size-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-slate-900"
+            style={{ background: `linear-gradient(to right, #0f172a ${progress * 100}%, #e2e8f0 ${progress * 100}%)` }}
+            onClick={(event) => event.stopPropagation()}
+            onChange={(event) => {
+              const next = Number(event.target.value);
+              const audio = audioRef.current;
+              if (audio) audio.currentTime = next;
+              setCurrent(next);
+            }}
+          />
+          <span className="shrink-0 font-mono text-[10px] tabular-nums text-slate-500">
+            {formatAudioClock(playing || current > 0 ? current : duration)}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function MessageMediaThumbnails({
   attachments,
   onRemove,
   onPreview,
+  variant = "thumb",
 }: {
   attachments: Array<MediaAttachment & { previewUrl?: string; uploading?: boolean; error?: string }>;
   onRemove?: (id: string) => void;
   onPreview: (item: DraftMedia | MediaAttachment) => void;
+  /** Thread display uses a larger image preview; the composer keeps compact thumbs. */
+  variant?: "thumb" | "preview";
 }) {
   if (!attachments.length) return null;
   return (
-    <div className="flex flex-wrap gap-2">
+    <div className="flex w-full min-w-0 flex-wrap gap-2">
       {attachments.map((item) => (
-        <div key={item.id} className="relative">
-          {item.kind === "file" ? (
+        <div key={item.id} className={cn("relative", isAudioAttachment(item) && "w-full min-w-[16rem] max-w-sm shrink-0")}>
+          {isAudioAttachment(item) ? (
+            <VoiceMessagePlayer
+              src={item.previewUrl || item.url}
+              label={item.name || "Voice message"}
+            />
+          ) : item.kind === "file" ? (
             <button
               type="button"
               className="group flex max-w-[14rem] items-center gap-2 rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-left"
@@ -197,13 +321,19 @@ export function MessageMediaThumbnails({
           ) : (
             <button
               type="button"
-              className="group relative size-16 overflow-hidden rounded-xl border border-slate-200 bg-slate-100"
+              className={item.kind === "image" && variant === "preview"
+                ? "group relative block max-w-xs overflow-hidden rounded-xl border border-slate-200 bg-slate-100 text-left"
+                : "group relative size-16 overflow-hidden rounded-xl border border-slate-200 bg-slate-100"}
               onClick={() => onPreview(item)}
               aria-label={`Preview ${item.name}`}
             >
               {item.kind === "image" ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={item.previewUrl || item.url} alt="" className="size-full object-cover" />
+                <img
+                  src={item.previewUrl || item.url}
+                  alt=""
+                  className={variant === "preview" ? "max-h-64 w-full object-contain" : "size-full object-cover"}
+                />
               ) : (
                 <video src={item.previewUrl || item.url} className="size-full object-cover" muted playsInline />
               )}

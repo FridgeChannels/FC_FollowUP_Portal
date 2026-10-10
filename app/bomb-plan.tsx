@@ -6,6 +6,7 @@ import { Channel, Contact, Interaction, ScheduledAction, User, WorkspaceState, d
 import { formatScheduledDateTime } from "@/lib/display-time";
 import { BrandReplyBox } from "./brand-reply-box";
 import { ChannelIcon } from "./channel-icon";
+import { ChannelMessageBody } from "./channel-message-body";
 import { MessageMediaPreview, MessageMediaThumbnails } from "./message-media";
 import { EmailHtmlBody } from "./email-html-body";
 import type { MediaAttachment } from "@/lib/media-attachments";
@@ -127,8 +128,8 @@ export function BombExecutionPlan({
           <PlanPeople contact={contact} channel={action.channel} caller={skipped ? undefined : caller} action={action}/>
           {skipped && <p className="mt-2 text-xs text-amber-800">{action.note || "Channel unavailable"}</p>}
           </button>
-          {expanded&&<div className="mt-3 pt-3"><div className="text-[11px] font-semibold uppercase tracking-[.12em] text-slate-400">Sent content</div>{action.channel === "Email" && action.content ? <div className="mt-2"><EmailHtmlBody html={action.content} /></div> : <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{action.content||(action.attachments?.length?"Attachment":"No written content for this step.")}</p>}{action.attachments?.length?<PlanStepAttachments attachments={action.attachments}/>:null}</div>}
-          {related.filter(item=>item.direction==="Inbound").map(item=><div key={item.id} className="mt-3"><div className="rounded-xl bg-rose-50 p-3"><div className="text-[11px] font-semibold uppercase tracking-wide text-rose-700">This is a reply</div><div className="mt-0.5 text-[11px] font-medium text-rose-600">from {contact?.name}</div>{item.channel === "Email" ? <div className="mt-1"><EmailHtmlBody html={item.content} /></div> : <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-700">{item.content}</p>}</div><BrandReplyBox customerId={action.customerId} interaction={item} bombInstanceId={instanceId} contacts={contacts} interactions={state.interactions} actions={actions} taskId={action.id} onSend={onSend}/></div>)}
+          {expanded&&<div className="mt-3 pt-3"><div className="text-[11px] font-semibold uppercase tracking-[.12em] text-slate-400">Sent content</div>{action.channel === "Email" && action.content ? <div className="mt-2"><EmailHtmlBody html={action.content} /></div> : action.content ? <div className="mt-2"><ChannelMessageBody channel={action.channel} content={action.content} skipUrls={action.attachments?.map((attachment) => attachment.url)} /></div> : <p className="mt-2 text-sm leading-6 text-slate-700">{action.attachments?.length?"Attachment":"No written content for this step."}</p>}{action.attachments?.length?<PlanStepAttachments attachments={action.attachments}/>:null}</div>}
+          {related.filter(item=>item.direction==="Inbound").map(item=><div key={item.id} className="mt-3"><div className="rounded-xl bg-rose-50 p-3"><div className="text-[11px] font-semibold uppercase tracking-wide text-rose-700">This is a reply</div><div className="mt-0.5 text-[11px] font-medium text-rose-600">from {contact?.name}</div>{item.channel === "Email" ? <div className="mt-1"><EmailHtmlBody html={item.content} /></div> : item.content ? <div className="mt-1"><ChannelMessageBody channel={item.channel} content={item.content} skipUrls={item.attachments?.map((attachment) => attachment.url)} /></div> : null}</div><BrandReplyBox customerId={action.customerId} interaction={item} bombInstanceId={instanceId} contacts={contacts} interactions={state.interactions} actions={actions} taskId={action.id} onSend={onSend}/></div>)}
         </div>
       </li>;
     })}
@@ -171,7 +172,7 @@ function PlanStepAttachments({ attachments }: { attachments: MediaAttachment[] }
   const [preview, setPreview] = useState<MediaAttachment | null>(null);
   return (
     <div className="mt-3">
-      <MessageMediaThumbnails attachments={attachments} onPreview={setPreview} />
+      <MessageMediaThumbnails attachments={attachments} onPreview={setPreview} variant="preview" />
       <MessageMediaPreview item={preview} onOpenChange={(open) => { if (!open) setPreview(null); }} />
     </div>
   );

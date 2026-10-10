@@ -13,6 +13,8 @@ import { ChannelIcon } from "./channel-icon";
 import { PhoneTaskBoard, UnqualifiedRecallForm, type QuoDialOpening } from "./phone-task-board";
 import { QuoCallPanel } from "./quo-call-panel";
 import { useWorkspace } from "./workspace-store";
+import { ChannelMessageBody } from "./channel-message-body";
+import { inlineMessagePreview } from "@/lib/inline-message-media";
 import { MessageMediaPreview, MessageMediaThumbnails } from "./message-media";
 import { EmailHtmlBody } from "./email-html-body";
 import { htmlToPlainText, looksLikeEmailHtml } from "@/lib/email-html";
@@ -71,6 +73,9 @@ function messagePreviewText(item: Interaction) {
   if (item.channel === "Email" && looksLikeEmailHtml(item.content)) {
     return htmlToPlainText(item.content) || (item.attachments?.length ? "Attachment" : "No message content");
   }
+  if (item.channel === "WhatsApp") {
+    return inlineMessagePreview(item.content) || (item.attachments?.length ? "Attachment" : "No message content");
+  }
   return item.content.replace(/\s+/g, " ").trim();
 }
 
@@ -86,7 +91,7 @@ function ThreadMedia({ attachments }: { attachments: NonNullable<Interaction["at
   const [preview, setPreview] = useState<NonNullable<Interaction["attachments"]>[number] | null>(null);
   return (
     <>
-      <MessageMediaThumbnails attachments={attachments} onPreview={setPreview} />
+      <MessageMediaThumbnails attachments={attachments} onPreview={setPreview} variant="preview" />
       <MessageMediaPreview item={preview} onOpenChange={(open) => { if (!open) setPreview(null); }} />
     </>
   );
@@ -953,7 +958,11 @@ function ThreadMessages({
               item.channel === "Email" ? (
                 <EmailHtmlBody html={item.content} />
               ) : (
-                <p className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">{item.content}</p>
+                <ChannelMessageBody
+                  channel={item.channel}
+                  content={item.content}
+                  skipUrls={item.attachments?.map((attachment) => attachment.url)}
+                />
               )
             ) : null}
             {item.attachments?.length ? (
