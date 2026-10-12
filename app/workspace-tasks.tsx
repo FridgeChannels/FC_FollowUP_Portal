@@ -230,7 +230,7 @@ export function TasksPage({ selectedId, selectedCallId, returnToDashboard = fals
         };
         if (!response.ok) throw new Error(payload.error || "Failed to load owners");
         return (payload.owners || [])
-          .filter((owner) => owner.role !== "Admin")
+          .filter((owner) => owner.name !== "Admin")
           .map(({ id, name }) => ({ id, name }));
       })
       .then((items) => {
