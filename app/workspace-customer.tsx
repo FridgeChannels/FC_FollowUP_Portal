@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, Bomb, ChevronRight, CircleAlert, CircleCheck, CirclePause, ContactRound, ExternalLink, FileText, History, Loader2, MessageSquareText, MoreHorizontal, PanelRightClose, Plus, Search, Send, StickyNote, UserCheck } from "lucide-react";
+import { ArrowLeft, Bomb, CalendarPlus, ChevronRight, CircleAlert, CircleCheck, CirclePause, ContactRound, ExternalLink, FileText, History, Loader2, MessageSquareText, MoreHorizontal, PanelRightClose, Plus, Search, Send, StickyNote, UserCheck } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "./workspace-store";
 import { cacheBrandItem, getCachedBrand, requestBrandListPageRefresh } from "@/lib/brand-list-cache";
@@ -12,7 +12,7 @@ import type { BombDetail, BombListItem } from "@/lib/bomb-list";
 import { ActionStatus, BombInstance, Channel, Contact, CPCode, Customer, dateOnly, Interaction, ScheduledAction, WorkspaceState, compareInteractionSort, interactionCpCode, uid } from "@/lib/outreach-domain";
 import { brandDetailMetadata } from "@/lib/page-metadata";
 import { usePageMetadata } from "./use-page-metadata";
-import { BombExecutionPlan, formatEasternDateTime } from "./bomb-plan";
+import { BombExecutionPlan } from "./bomb-plan";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -117,60 +117,6 @@ function BrandMeetingNoteLink({
         <ChevronRight className="size-4 shrink-0" aria-hidden="true" />
       </a>}
     </>
-  );
-}
-
-function MeetingHistoryDialog({
-  open,
-  onOpenChange,
-  links,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  links: BrandAiMeetingLink[];
-}) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Follow up Meeting</DialogTitle>
-          <DialogDescription>
-            Portal-created Notion AI Meeting Notes for this brand.
-          </DialogDescription>
-        </DialogHeader>
-        {links.length ? (
-          <ul className="max-h-[50vh] space-y-1 overflow-y-auto">
-            {links.map((item) => (
-              <li key={item.id}>
-                <a
-                  href={item.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  title={item.title}
-                  className="flex items-start justify-between gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-slate-50"
-                  onClick={() => onOpenChange(false)}
-                >
-                  <span className="min-w-0">
-                    <span className="block truncate text-sm font-medium text-slate-900">{item.title}</span>
-                    {item.createdAt ? (
-                      <span className="mt-0.5 block text-[11px] text-slate-400">
-                        {formatEasternDateTime(item.createdAt)}
-                      </span>
-                    ) : null}
-                  </span>
-                  <ExternalLink className="mt-0.5 size-3.5 shrink-0 text-slate-400" />
-                </a>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="py-6 text-center text-sm text-slate-500">No meetings yet. Use Meeting to create one.</p>
-        )}
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }
 
@@ -677,7 +623,6 @@ export function BrandDetail({customerId}:{customerId:string}){
   const [sampleProfiles,setSampleProfiles]=useState<Array<{sn:string;profile:MagnetBrandParam|null}>>([]);
   const [attentionTarget,setAttentionTarget]=useState<{cp:CPCode;channel:Channel}|null>(null);
   const [creatingMeeting,setCreatingMeeting]=useState(false);
-  const [meetingHistory,setMeetingHistory]=useState(false);
   const [followUpAction,setFollowUpAction]=useState<"Paused"|"Completed"|null>(null);
   const [followUpNote,setFollowUpNote]=useState("");
   const [followUpAt,setFollowUpAt]=useState("");
@@ -1030,6 +975,9 @@ export function BrandDetail({customerId}:{customerId:string}){
   const openFollowUpAction=(next:"Paused"|"Completed")=>{setFollowUpNote("");setFollowUpAt("");setFollowUpAction(next);};
   const createMeeting=async ()=>{
     if(!notionBacked||creatingMeeting)return;
+    // Open synchronously so the browser retains the user gesture and does not
+    // block the Notion tab after the creation request completes.
+    const meetingWindow=window.open("about:blank","_blank");
     setCreatingMeeting(true);
     try{
       const response=await fetch(`/api/brands/${c.id}/meetings`,{method:"POST"});
@@ -1037,9 +985,14 @@ export function BrandDetail({customerId}:{customerId:string}){
       if(!response.ok||!payload.meeting)throw new Error(payload.error||"Unable to create meeting");
       const meeting=payload.meeting;
       setRemote(prev=>prev?{...prev,aiMeetingLinks:payload.meetings||[meeting,...(prev.aiMeetingLinks||[])]}:prev);
-      if(meeting.url)window.open(meeting.url,"_blank","noopener,noreferrer");
-      toast.success("Meeting created");
+      if(meetingWindow){
+        meetingWindow.opener=null;
+        meetingWindow.location.replace(meeting.url);
+      }else{
+        window.location.assign(meeting.url);
+      }
     }catch(error){
+      meetingWindow?.close();
       toast.error(error instanceof Error?error.message:"Unable to create meeting");
     }finally{
       setCreatingMeeting(false);
@@ -1055,6 +1008,7 @@ export function BrandDetail({customerId}:{customerId:string}){
   const currentCp=notionBacked?asCpCode(remote?.currentCp):c.cp;
   const currentCpDetails=currentCpOption(notionBacked&&remote?remote.currentCp:c.cp);
   const originMeeting=remote?.meetingNotes?.[0];
+  const followUpMeeting=remote?.aiMeetingLinks?.[0];
   const bombPlan=notionBacked?toBombPlan(c.id,remote?.tasks||[],remote?.activities||[]):undefined;
   const hasActiveOmniReach=notionBacked?brandHasActiveOmniReach(remote?.tasks||[]):!!(c.activeBombId||c.status==="Bomb Running");
   const mockEmailInteraction:Interaction|undefined=mockDetailPreview&&emailSignals.length?{
@@ -1162,8 +1116,8 @@ export function BrandDetail({customerId}:{customerId:string}){
       <div className="ml-auto flex items-center gap-1">
         {can("reply")&&<TooltipProvider><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-9" aria-label="New message" disabled={!brandReady||(notionBacked&&!c.contacts.length)} onClick={()=>setReply(true)}><Send className="size-4"/></Button></TooltipTrigger><TooltipContent>New message</TooltipContent></Tooltip></TooltipProvider>}
         {can("launch")&&<LaunchOmniReachButton iconOnly className="size-9" disabled={!brandReady||hasActiveOmniReach} disabledReason={!brandReady?"Loading brand…":ACTIVE_OMNIREACH_BLOCK_REASON} onClick={()=>setLaunch(true)}/>}
-        {(notionBacked||mockDetailPreview)&&<TooltipProvider><Tooltip><TooltipTrigger asChild><span><Button variant="ghost" size="icon" className="size-9" aria-label="Follow up Meeting" disabled={!notionBacked} onClick={()=>setMeetingHistory(true)}><History className="size-4"/></Button></span></TooltipTrigger><TooltipContent>{notionBacked?"Follow up Meeting":"Unavailable in mock preview"}</TooltipContent></Tooltip></TooltipProvider>}
-        {(notionBacked||mockDetailPreview)&&can("editBrand")&&(notionBacked?<DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="size-9" aria-label="More follow-up actions" title="More follow-up actions" disabled={saving}><MoreHorizontal className="size-4"/></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem disabled={!brandReady||creatingMeeting} onSelect={()=>void createMeeting()}><Plus className="mr-2 size-4"/>Create meeting</DropdownMenuItem><DropdownMenuItem disabled={saving||remote?.status==="Paused"||remote?.status==="Completed"} onSelect={()=>openFollowUpAction("Paused")}><CirclePause className="mr-2 size-4"/>Pause FollowUp</DropdownMenuItem><DropdownMenuItem disabled={saving||remote?.status==="Completed"} onSelect={()=>openFollowUpAction("Completed")}><CircleCheck className="mr-2 size-4"/>Complete FollowUp</DropdownMenuItem></DropdownMenuContent></DropdownMenu>:<TooltipProvider><Tooltip><TooltipTrigger asChild><span><Button variant="ghost" size="icon" className="size-9" aria-label="More follow-up actions" disabled><MoreHorizontal className="size-4"/></Button></span></TooltipTrigger><TooltipContent>Unavailable in mock preview</TooltipContent></Tooltip></TooltipProvider>)}
+        {(notionBacked||mockDetailPreview)&&<TooltipProvider><Tooltip><TooltipTrigger asChild><span>{followUpMeeting?<Button asChild variant="ghost" size="icon" className="size-9" aria-label={`Open FollowUp Meeting: ${followUpMeeting.title}`}><a href={followUpMeeting.url} target="_blank" rel="noreferrer" title={followUpMeeting.title}><ExternalLink className="size-4"/></a></Button>:<Button type="button" variant="ghost" size="icon" className="size-9" disabled={!notionBacked||!brandReady||!can("editBrand")||creatingMeeting} onClick={()=>void createMeeting()} aria-label="Create FollowUp Meeting">{creatingMeeting?<Loader2 className="size-4 animate-spin"/>:<CalendarPlus className="size-4"/>}</Button>}</span></TooltipTrigger><TooltipContent>{followUpMeeting?"Open FollowUp Meeting":creatingMeeting?"Creating FollowUp Meeting…":"Create FollowUp Meeting"}</TooltipContent></Tooltip></TooltipProvider>}
+        {(notionBacked||mockDetailPreview)&&can("editBrand")&&(notionBacked?<DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="size-9" aria-label="More follow-up actions" title="More follow-up actions" disabled={saving}><MoreHorizontal className="size-4"/></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem disabled={saving||remote?.status==="Paused"||remote?.status==="Completed"} onSelect={()=>openFollowUpAction("Paused")}><CirclePause className="mr-2 size-4"/>Pause FollowUp</DropdownMenuItem><DropdownMenuItem disabled={saving||remote?.status==="Completed"} onSelect={()=>openFollowUpAction("Completed")}><CircleCheck className="mr-2 size-4"/>Complete FollowUp</DropdownMenuItem></DropdownMenuContent></DropdownMenu>:<TooltipProvider><Tooltip><TooltipTrigger asChild><span><Button variant="ghost" size="icon" className="size-9" aria-label="More follow-up actions" disabled><MoreHorizontal className="size-4"/></Button></span></TooltipTrigger><TooltipContent>Unavailable in mock preview</TooltipContent></Tooltip></TooltipProvider>)}
       </div>
     </header>
     {(needsReplyCount>0||callReviewCount>0||overdueCount>0)&&<div role="status" className="flex flex-wrap items-center gap-2 border-b border-rose-200 bg-rose-50 px-4 py-2.5 text-xs font-semibold text-rose-800">
@@ -1252,7 +1206,7 @@ export function BrandDetail({customerId}:{customerId:string}){
   </section></div></div>
   <LaunchBombDialog customerId={c.id} open={launch} onOpenChange={setLaunch} contacts={notionBacked?c.contacts:undefined} currentCp={notionBacked&&remote?remote.currentCp:undefined} companyName={c.name} productDescription={notionBacked?remote?.productDescription:undefined} matchedCategory={notionBacked?remote?.matchedCategory:undefined} followupExhibition={notionBacked?remote?.followupExhibition:undefined} previewOnly={notionBacked} hasActiveOmniReach={hasActiveOmniReach} onLaunched={notionBacked?()=>{void refreshBrandAndActivities()}:undefined}/><ReplyDialog customerId={c.id} open={reply} onOpenChange={setReply} contacts={notionBacked?c.contacts:undefined} onSend={notionBacked?async (contactId,channel,content,object,deliveryMode,scheduledAt,attachments,cc)=>{
     await sendBrandMessage(contactId, channel, content, undefined, undefined, object, deliveryMode, scheduledAt, attachments, cc);
-  }:undefined}/><ChangeCPDialog customerId={c.id} open={cp} onOpenChange={setCP} currentCp={notionBacked&&remote?remote.currentCp:undefined} cps={notionBacked?remoteCps:undefined} onSave={notionBacked?async (currentCpId,evidence,note)=>{await patchBrand({currentCpId,evidence,note});}:undefined}/><ContactDialog customerId={c.id} open={contact} onOpenChange={setContact} notionBacked={notionBacked} onCreated={notionBacked?async ()=>{await refreshRemote();}:undefined}/>{notionBacked?<MeetingHistoryDialog open={meetingHistory} onOpenChange={setMeetingHistory} links={remote?.aiMeetingLinks||[]}/>:null}<Dialog open={followUpAction!==null} onOpenChange={open=>{if(!open){setFollowUpAction(null);setFollowUpNote("");setFollowUpAt("");}}}><DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle>{followUpAction==="Paused"?"Pause FollowUp":"Complete FollowUp"}</DialogTitle><DialogDescription>Record the customer’s explicit reply and the reason for this outcome. This note is required.</DialogDescription></DialogHeader><Textarea value={followUpNote} onChange={event=>setFollowUpNote(event.target.value)} placeholder={followUpAction==="Paused"?"For example: The customer asked us to reconnect after their budget review in January.":"For example: The customer confirmed they do not wish to continue."} className="min-h-32" autoFocus/>{followUpAction==="Paused"&&<div className="space-y-2"><label htmlFor="next-follow-up-at" className="text-sm font-medium text-slate-700">Next contact date <span className="font-normal text-slate-500">(optional)</span></label><Input id="next-follow-up-at" type="datetime-local" value={followUpAt} onChange={event=>setFollowUpAt(event.target.value)}/><p className="text-xs text-slate-500">On this date, Admin receives a reminder to review and assign the follow-up.</p></div>}<DialogFooter><Button variant="outline" onClick={()=>{setFollowUpAction(null);setFollowUpNote("");setFollowUpAt("");}}>Cancel</Button><Button disabled={saving||!followUpNote.trim()||!followUpAction} onClick={()=>{if(!followUpAction)return;void (async ()=>{const saved=await updateFollowUpStatus(followUpAction,followUpNote.trim(),followUpAt);if(saved){setFollowUpAction(null);setFollowUpNote("");setFollowUpAt("");}})();}}>{followUpAction==="Paused"?"Pause FollowUp":"Complete FollowUp"}</Button></DialogFooter></DialogContent></Dialog></div></div>;
+  }:undefined}/><ChangeCPDialog customerId={c.id} open={cp} onOpenChange={setCP} currentCp={notionBacked&&remote?remote.currentCp:undefined} cps={notionBacked?remoteCps:undefined} onSave={notionBacked?async (currentCpId,evidence,note)=>{await patchBrand({currentCpId,evidence,note});}:undefined}/><ContactDialog customerId={c.id} open={contact} onOpenChange={setContact} notionBacked={notionBacked} onCreated={notionBacked?async ()=>{await refreshRemote();}:undefined}/><Dialog open={followUpAction!==null} onOpenChange={open=>{if(!open){setFollowUpAction(null);setFollowUpNote("");setFollowUpAt("");}}}><DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle>{followUpAction==="Paused"?"Pause FollowUp":"Complete FollowUp"}</DialogTitle><DialogDescription>Record the customer’s explicit reply and the reason for this outcome. This note is required.</DialogDescription></DialogHeader><Textarea value={followUpNote} onChange={event=>setFollowUpNote(event.target.value)} placeholder={followUpAction==="Paused"?"For example: The customer asked us to reconnect after their budget review in January.":"For example: The customer confirmed they do not wish to continue."} className="min-h-32" autoFocus/>{followUpAction==="Paused"&&<div className="space-y-2"><label htmlFor="next-follow-up-at" className="text-sm font-medium text-slate-700">Next contact date <span className="font-normal text-slate-500">(optional)</span></label><Input id="next-follow-up-at" type="datetime-local" value={followUpAt} onChange={event=>setFollowUpAt(event.target.value)}/><p className="text-xs text-slate-500">On this date, Admin receives a reminder to review and assign the follow-up.</p></div>}<DialogFooter><Button variant="outline" onClick={()=>{setFollowUpAction(null);setFollowUpNote("");setFollowUpAt("");}}>Cancel</Button><Button disabled={saving||!followUpNote.trim()||!followUpAction} onClick={()=>{if(!followUpAction)return;void (async ()=>{const saved=await updateFollowUpStatus(followUpAction,followUpNote.trim(),followUpAt);if(saved){setFollowUpAction(null);setFollowUpNote("");setFollowUpAt("");}})();}}>{followUpAction==="Paused"?"Pause FollowUp":"Complete FollowUp"}</Button></DialogFooter></DialogContent></Dialog></div></div>;
 }
 
 type DetailContact = {

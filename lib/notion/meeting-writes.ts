@@ -2,15 +2,12 @@ import {
   aiMeetingLinksPropertyName,
   appendAiMeetingLink,
   encodeAiMeetingLinks,
-  parseAiMeetingLinks,
   type AiMeetingLink,
 } from "../ai-meeting-links";
 import { getDisplayTimeZone } from "../display-time";
 import {
   createChildPage,
   notionPageUrl,
-  propertyText,
-  retrievePage,
   richText,
   updatePage,
 } from "./client";
@@ -46,6 +43,7 @@ function meetingNotesMarkdown(title: string) {
 export async function createAiMeetingForFollowupClient(input: {
   followupClientId: string;
   brandName: string;
+  existingLinks: AiMeetingLink[];
 }) {
   const title = formatMeetingTitle(input.brandName);
   const parentPageId = getFollowupMeetingListPageId();
@@ -72,10 +70,8 @@ export async function createAiMeetingForFollowupClient(input: {
     createdAt: page.created_time || new Date().toISOString(),
   };
 
-  const clientPage = await retrievePage(input.followupClientId);
   const propertyName = aiMeetingLinksPropertyName();
-  const existing = parseAiMeetingLinks(propertyText(clientPage.properties?.[propertyName]));
-  const next = appendAiMeetingLink(existing, link);
+  const next = appendAiMeetingLink(input.existingLinks, link);
   await updatePage(input.followupClientId, {
     [propertyName]: { rich_text: richText(encodeAiMeetingLinks(next)) },
   });

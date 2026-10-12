@@ -90,7 +90,10 @@ export function canViewBrand(viewer: BrandViewer, brand: BrandListItem, tasks?: 
   return false;
 }
 
-export function canWriteBrand(viewer: BrandViewer, brand: BrandListItem) {
+export function canWriteBrand(
+  viewer: BrandViewer,
+  brand: Pick<BrandListItem, "isTest" | "ownerId" | "ownerEmail">,
+) {
   if (isTestOnlyViewer(viewer)) {
     if (!brand.isTest) return false;
   } else if (brand.isTest && !canAccessTestBrands(viewer)) {
