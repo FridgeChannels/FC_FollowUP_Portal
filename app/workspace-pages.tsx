@@ -638,7 +638,7 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
   const [filters, setFilters] = useState<BrandListFilters>(() =>
     brandListFiltersFromSearch(searchParams, isAdmin ? "all" : "myWork"),
   );
-  const workView = state.currentRole === "Caller" ? "all" : filters.view;
+  const workView = isAdmin || state.currentRole === "Caller" ? "all" : filters.view;
   const { q: query, status, cp, owner, replyState, handlingMode, exhibitionId, sort, replyFrom, replyTo } = filters;
   const [exhibitionOptions, setExhibitionOptions] = useState<ExhibitionOption[]>([]);
   const [exhibitionOptionsLoading, setExhibitionOptionsLoading] = useState(false);
@@ -765,6 +765,14 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
       return next;
     });
   };
+  useEffect(() => {
+    if (!isAdmin || filters.view === "all") return;
+    setFilters((previous) => {
+      const next = { ...previous, view: "all" as const };
+      window.history.replaceState(window.history.state, "", brandListPath(next, { cursor, page: pageNumber }));
+      return next;
+    });
+  }, [cursor, filters.view, isAdmin, pageNumber]);
   const setWorkFilter = (patch: Partial<BrandListFilters>) => {
     setFilters((previous) => {
       const next = { ...previous, ...patch };
@@ -1217,7 +1225,7 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
   return (
     <div className="mx-auto max-w-[1480px]">
       <PageHeader title="Brands">
-        {state.currentRole !== "Caller" && <nav aria-label="Brand views" className="inline-flex max-w-full gap-1 overflow-x-auto rounded-lg bg-slate-100 p-1">
+        {!isAdmin && state.currentRole !== "Caller" && <nav aria-label="Brand views" className="inline-flex max-w-full gap-1 overflow-x-auto rounded-lg bg-slate-100 p-1">
           {([
             { view: "myWork", label: "Needs Action", count: work?.counts.myWork },
             { view: "all", label: "All Brands", count: undefined },
@@ -1225,7 +1233,7 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
         </nav>}
         <div className="flex w-full items-center justify-end gap-3 sm:w-auto">
           {can("importBrands") && (
-            <Button className="shrink-0 bg-slate-950 text-white hover:bg-slate-800" onClick={() => setAddBrandOpen(true)}>
+            <Button className="shrink-0 bg-slate-950 text-black hover:bg-slate-800" onClick={() => setAddBrandOpen(true)}>
               <Plus className="mr-2 size-4" />
               Add Brand
             </Button>

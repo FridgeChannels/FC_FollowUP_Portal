@@ -202,8 +202,8 @@ export async function mapFollowupClientPage(
     ownerId: owner?.id || ownerId || null,
     ownerName: owner?.name || null,
     ownerEmail: owner?.account || null,
-    ownerAssignedAt: assignment?.ownerId === ownerId ? assignment.assignedAt : null,
-    ownerAssignmentHandledAt: assignment?.ownerId === ownerId ? assignment.handledAt || null : null,
+    ownerAssignedAt: assignment && assignment.ownerId === ownerId ? assignment.assignedAt : null,
+    ownerAssignmentHandledAt: assignment && assignment.ownerId === ownerId ? assignment.handledAt || null : null,
     // Exhibition names are resolved on the brand detail page. Resolving the
     // relation for every list row would turn a single list request into many
     // extra Notion requests and make the Brands page slow to open.
