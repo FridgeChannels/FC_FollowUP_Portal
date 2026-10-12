@@ -188,6 +188,10 @@ export type BrandListItem = {
   ownerAssignedAt?: string | null;
   /** The current assignment has been explicitly reviewed by its Account Manager. */
   ownerAssignmentHandledAt?: string | null;
+  /** Most recent non-empty Account Manager assignment, retained after a later unassignment. */
+  lastAssignedOwnerId?: string | null;
+  lastAssignedOwnerName?: string | null;
+  lastAssignedAt?: string | null;
   followupExhibition?: string | null;
   /** Follow-up ClientDB `Human Notes` — Portal Add Note content. */
   humanNotes?: string | null;
@@ -334,6 +338,13 @@ export type BrandAiMeetingLink = {
 };
 
 export type BrandDetail = BrandListItem & {
+  /** Account Manager assignment events, newest first. */
+  assignmentHistory?: Array<{
+    ownerId: string;
+    ownerName: string | null;
+    assignedAt: string;
+    handledAt?: string | null;
+  }>;
   channelType?: import("./sample-product").ChannelType | null;
   amazonSampleProduct?: import("./sample-product").AmazonSampleProduct;
   priority: string | null;

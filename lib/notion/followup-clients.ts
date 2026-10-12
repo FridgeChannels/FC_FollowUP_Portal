@@ -28,7 +28,7 @@ import {
   type NotionPage,
 } from "./client";
 import { parseNfcCardSns } from "../sample/sns";
-import { latestBrandAssignment } from "../brand-assignment";
+import { brandAssignmentHistory, latestBrandAssignment } from "../brand-assignment";
 import { listFollowupContacts } from "./contacts";
 import { listFollowupConversations, listFollowupConversationsByBrands } from "./conversations";
 import {
@@ -176,11 +176,20 @@ export async function mapFollowupClientPage(
   const followupTitle = titleFromProperties(properties);
   const clientId = firstRelationId(properties.Client);
   const ownerId = firstRelationId(properties.Owner);
-  const assignment = latestBrandAssignment(propertyText(properties.Notes));
+  const assignmentNotes = propertyText(properties.Notes);
+  const assignment = latestBrandAssignment(assignmentNotes);
+  const assignmentHistory = brandAssignmentHistory(assignmentNotes);
+  const lastRecordedAssignment = assignmentHistory.find((item) => item.ownerId);
+  // Older brands predate assignment events. Their currently linked Owner is
+  // still the best available "last assigned" context for a paused follow-up.
+  const lastAssignedOwnerId = lastRecordedAssignment?.ownerId || ownerId || null;
   const currentCpId = firstRelationId(properties["Current CP"]);
-  const [clientName, owner, currentCpTitle] = await Promise.all([
+  const [clientName, owner, lastAssignedOwner, currentCpTitle] = await Promise.all([
     followupTitle ? Promise.resolve("") : resolveRelatedTitle(clientId, titleCache),
     resolveOwner(ownerId, ownerCache),
+    lastAssignedOwnerId && lastAssignedOwnerId !== ownerId
+      ? resolveOwner(lastAssignedOwnerId, ownerCache)
+      : Promise.resolve(null),
     resolveRelatedTitle(currentCpId, titleCache).catch(() => ""),
   ]);
   const name = followupTitle || clientName || "Untitled Client";
@@ -204,6 +213,9 @@ export async function mapFollowupClientPage(
     ownerEmail: owner?.account || null,
     ownerAssignedAt: assignment && assignment.ownerId === ownerId ? assignment.assignedAt : null,
     ownerAssignmentHandledAt: assignment && assignment.ownerId === ownerId ? assignment.handledAt || null : null,
+    lastAssignedOwnerId,
+    lastAssignedOwnerName: lastAssignedOwner?.name || (lastAssignedOwnerId === ownerId ? owner?.name || null : null),
+    lastAssignedAt: lastRecordedAssignment?.assignedAt || null,
     // Exhibition names are resolved on the brand detail page. Resolving the
     // relation for every list row would turn a single list request into many
     // extra Notion requests and make the Brands page slow to open.
@@ -1239,13 +1251,21 @@ export async function mapFollowupClientDetail(
   options: MapFollowupClientDetailOptions = {},
 ): Promise<BrandDetail> {
   const properties = page.properties || {};
-  const [brand, contacts, company, followupExhibition, meetingNotes] = await Promise.all([
+  const [brand, contacts, company, followupExhibition, meetingNotes, owners] = await Promise.all([
     mapFollowupClientPage(page),
     listFollowupContacts(page.id, relationIds(properties["Follow-up Contacts"])),
     resolveClientCompany(firstRelationId(properties.Client)),
     resolveFollowupExhibition(page),
     resolveMeetingNotes(relationIds(properties["FC3.0-FollowUp-NotionAIMeetings"])),
+    listOwnersForBrandMapping(),
   ]);
+  const ownersById = new Map(owners.map((owner) => [owner.id, owner]));
+  const assignmentHistory = brandAssignmentHistory(propertyText(properties.Notes))
+    .filter((assignment): assignment is typeof assignment & { ownerId: string } => !!assignment.ownerId)
+    .map((assignment) => ({
+      ...assignment,
+      ownerName: ownersById.get(assignment.ownerId)?.name || null,
+    }));
   const cpMeta =
     (brand.currentCpId ? await resolveCheckpoint(brand.currentCpId) : null) ||
     currentCpOption(brand.currentCp);
@@ -1292,6 +1312,7 @@ export async function mapFollowupClientDetail(
       parseAiMeetingLinks(propertyText(properties[aiMeetingLinksPropertyName()])),
     ),
     priority: propertyText(properties.Priority) || null,
+    assignmentHistory,
     notes: propertyText(properties.Notes) || null,
     humanNotes: propertyText(properties["Human Notes"]) || null,
     createdAt: page.created_time || properties["Created At"]?.created_time || null,

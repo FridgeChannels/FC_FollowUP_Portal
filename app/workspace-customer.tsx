@@ -958,6 +958,14 @@ export function BrandDetail({customerId}:{customerId:string}){
     catch(error){toast.error(error instanceof Error?error.message:"Assign failed");}
     finally{setSaving(false);}
   };
+  const reassignLastOwner=async ()=>{
+    const ownerId=remote?.lastAssignedOwnerId;
+    if(!notionBacked||!ownerId||saving)return;
+    setSaving(true);
+    try{await patchBrand({ownerId});setOwnerDraft(ownerId);toast.success(`Assigned to ${remote?.lastAssignedOwnerName||"previous Account Manager"}`);}
+    catch(error){toast.error(error instanceof Error?error.message:"Assign failed");}
+    finally{setSaving(false);}
+  };
   const markAssignmentReviewed=async ()=>{
     if(!notionBacked||saving)return;
     setSaving(true);
@@ -1165,7 +1173,9 @@ export function BrandDetail({customerId}:{customerId:string}){
               <div className="flex items-start justify-between gap-3"><dt className="shrink-0 text-slate-500">Account Manager</dt><dd className="text-right text-slate-700">{remote?.ownerName || state.users.find((user) => user.id === c.ownerId)?.name || "Unassigned"}</dd></div>
               {!notionBacked && <div className="flex items-start justify-between gap-3"><dt className="shrink-0 text-slate-500">Source</dt><dd className="text-right text-slate-700">{c.source}</dd></div>}
             </dl>
+            {can("assignOwner")&&notionBacked&&remote?.status==="Paused"&&remote.lastAssignedOwnerName&&<div className="mt-3 text-sm text-slate-600"><span>Last assigned: {remote.lastAssignedOwnerName}</span>{remote.lastAssignedAt&&<span className="text-slate-400"> · {new Intl.DateTimeFormat("en-US",{month:"short",day:"numeric",year:"numeric",timeZone:"America/New_York"}).format(new Date(remote.lastAssignedAt))}</span>}{remote.lastAssignedOwnerId!==remote.ownerId&&<Button type="button" variant="ghost" size="sm" className="ml-1 h-8 px-2 text-violet-700 hover:text-violet-900" disabled={saving||!brandReady} onClick={()=>void reassignLastOwner()}>Assign again</Button>}</div>}
             {can("assignOwner") && <div className="mt-3 flex flex-wrap items-center gap-2"><Select value={ownerDraft ?? c.ownerId ?? "unassigned"} onValueChange={setOwnerDraft} disabled={!brandReady}><SelectTrigger size="sm" className="w-44"><SelectValue placeholder="Select owner" /></SelectTrigger><SelectContent><SelectItem value="unassigned">Unassigned</SelectItem>{ownerChoices.map((user) => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}</SelectContent></Select><Button size="sm" disabled={saving || !brandReady || (ownerDraft ?? c.ownerId ?? "unassigned") === (c.ownerId || "unassigned")} onClick={() => void handleAssign()}>Assign</Button></div>}
+            {can("assignOwner")&&notionBacked&&remote?.assignmentHistory?.length? <div className="mt-5"><p className="text-xs font-semibold text-slate-500">Assignment history</p><ol className="mt-2 space-y-2">{remote.assignmentHistory.map((assignment)=><li key={`${assignment.ownerId}-${assignment.assignedAt}`} className="text-sm text-slate-600"><span className="font-medium text-slate-800">{assignment.ownerName||"Former Account Manager"}</span><span className="text-slate-400"> · {new Intl.DateTimeFormat("en-US",{month:"short",day:"numeric",year:"numeric",timeZone:"America/New_York"}).format(new Date(assignment.assignedAt))}{assignment.handledAt?" · reviewed":""}</span></li>)}</ol></div>:null}
             {notionBacked && state.currentRole === "AccountManager" && remote?.ownerId === state.currentUserId && remote.ownerAssignedAt && !remote.ownerAssignmentHandledAt && <Button variant="outline" size="sm" className="mt-3" disabled={saving || !brandReady} onClick={() => void markAssignmentReviewed()}><UserCheck className="mr-2 size-4" />Mark assignment reviewed</Button>}
           </section>
         </div>

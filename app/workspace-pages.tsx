@@ -593,6 +593,9 @@ function mergeBrandListItem(current: BrandListItem, next: BrandListItem): BrandL
     ownerEmail: next.ownerEmail,
     ownerAssignedAt: next.ownerAssignedAt,
     ownerAssignmentHandledAt: next.ownerAssignmentHandledAt,
+    lastAssignedOwnerId: next.lastAssignedOwnerId,
+    lastAssignedOwnerName: next.lastAssignedOwnerName,
+    lastAssignedAt: next.lastAssignedAt,
     followupExhibition: next.followupExhibition ?? current.followupExhibition,
     humanNotes: next.humanNotes ?? current.humanNotes,
     status: next.status,
@@ -1521,6 +1524,11 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
                                 {(c.replyDueAt || c.replyUpdatedAt)
                                   ? ` · ${formatEasternDateTime(c.replyDueAt || c.replyUpdatedAt || "")}`
                                   : ""}
+                              </div>
+                            ) : null}
+                            {isAdmin && c.status === "Paused" && c.lastAssignedOwnerName ? (
+                              <div className="mt-0.5 truncate text-xs text-slate-500" title={`Last assigned to ${c.lastAssignedOwnerName}`}>
+                                Last assigned: {c.lastAssignedOwnerName}{c.lastAssignedAt ? ` · ${formatEasternDateTime(c.lastAssignedAt)}` : ""}
                               </div>
                             ) : null}
                           </div>
