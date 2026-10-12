@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
@@ -30,7 +31,7 @@ import { ChannelIcon, ChannelOption } from "./channel-icon";
 import { easternDateTimeLocalToIso } from "@/lib/scheduling-engine/calendar";
 import { SendTimingToggle, type DeliveryMode } from "./send-timing-toggle";
 import { BrandNote } from "./brand-note";
-import { MessageMediaInputFrame, useMessageMedia } from "./message-media";
+import { MessageMediaInputFrame, MessageMediaPreview, MessageMediaThumbnails, useMessageMedia } from "./message-media";
 import type { MediaAttachment } from "@/lib/media-attachments";
 import { buildTemplateVariableContext, ownerNameFromContacts, resolveLaunchStepCopy } from "@/lib/template-variables";
 import { brandHasActiveOmniReach } from "@/lib/notion/reply-inbox";
@@ -1313,6 +1314,12 @@ type EnrichPreview = {
   /** Compact summary: found + misses, e.g. Email (existing) · LinkedIn not found */
   note?: string;
 };
+type EnrichmentProgress = {
+  contactId: string;
+  percent: number;
+  state: "running" | "complete" | "error";
+  error?: string;
+};
 
 /** Short LinkedIn / WhatsApp verdicts for the green summary line. */
 function enrichMissLabels(steps: string[] | undefined, found: {
@@ -1362,12 +1369,14 @@ function BrandContactList({
 }) {
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [enrichingId, setEnrichingId] = useState<string | null>(null);
-  const [enrichStatus, setEnrichStatus] = useState<string | null>(null);
+  const [enrichmentProgress, setEnrichmentProgress] = useState<EnrichmentProgress | null>(null);
   const [previews, setPreviews] = useState<Record<string, EnrichPreview>>({});
   const [conflicts, setConflicts] = useState<EnrichConflict[] | null>(null);
   const [conflictContactId, setConflictContactId] = useState<string | null>(null);
   const [selectedFields, setSelectedFields] = useState<Record<string, boolean>>({});
   const [applying, setApplying] = useState(false);
+  const progressContactId = enrichmentProgress?.contactId;
+  const progressState = enrichmentProgress?.state;
 
   const toggle = (id: string) =>
     setOpen((prev) => {
@@ -1377,9 +1386,36 @@ function BrandContactList({
       return next;
     });
 
+  useEffect(() => {
+    if (!progressContactId || progressState !== "running") return;
+    const updateProgress = () => {
+      // The enrichment API is a single request, so this reflects its usual three-minute window.
+      // It deliberately stops at 95% until the server confirms completion.
+      setEnrichmentProgress((current) =>
+        current?.contactId === progressContactId && current.state === "running"
+          ? current.percent < 95
+            ? { ...current, percent: current.percent + 1 }
+            : current
+          : current,
+      );
+    };
+    const interval = window.setInterval(updateProgress, 2_000);
+    return () => window.clearInterval(interval);
+  }, [progressContactId, progressState]);
+
+  useEffect(() => {
+    if (enrichmentProgress?.state !== "complete") return;
+    const timeout = window.setTimeout(() => {
+      setEnrichmentProgress((current) =>
+        current?.state === "complete" ? null : current,
+      );
+    }, 1_200);
+    return () => window.clearTimeout(timeout);
+  }, [enrichmentProgress?.state]);
+
   const runEnrich = async (contactId: string) => {
     setEnrichingId(contactId);
-    setEnrichStatus("Icypeas → FullEnrich（查手机号可能需要约 1 分钟）…");
+    setEnrichmentProgress({ contactId, percent: 5, state: "running" });
     setOpen((prev) => new Set(prev).add(contactId));
     try {
       const response = await fetch(`/api/brands/${brandId}/contacts/${contactId}/enrich`, {
@@ -1465,10 +1501,11 @@ function BrandContactList({
         );
       }
 
-      setEnrichStatus(null);
+      setEnrichmentProgress({ contactId, percent: 100, state: "complete" });
     } catch (error) {
-      setEnrichStatus(null);
-      toast.error(error instanceof Error ? error.message : "Enrichment failed");
+      const message = error instanceof Error ? error.message : "Enrichment failed";
+      setEnrichmentProgress({ contactId, percent: 0, state: "error", error: message });
+      toast.error(message);
     } finally {
       setEnrichingId(null);
     }
@@ -1549,14 +1586,50 @@ function BrandContactList({
           find contact information takes about 3 minutes, please wait patiently.
         </p>
       )}
-      {(enrichingId || enrichStatus) && (
-        <p className="mt-2 flex items-center gap-1.5 text-xs text-slate-500">
-          {enrichingId ? <Spinner className="size-3" /> : null}
-          {enrichingId
-            ? enrichStatus || "Finding contact information..."
-            : enrichStatus}
-        </p>
-      )}
+      {enrichmentProgress && (() => {
+        const contactName = contacts.find((contact) => contact.id === enrichmentProgress.contactId)?.name || "Contact";
+        const isRunning = enrichmentProgress.state === "running";
+        const isComplete = enrichmentProgress.state === "complete";
+        const label = isRunning
+          ? `Finding ${contactName}`
+          : isComplete
+            ? `${contactName} completed`
+            : `${contactName} could not be completed`;
+        return (
+          <div
+            role="status"
+            className={`mt-3 grid gap-1.5 text-xs ${enrichmentProgress.state === "error" ? "text-rose-700" : "text-slate-600"}`}
+          >
+            <div className="flex min-w-0 items-center gap-2">
+              {isRunning ? <Spinner className="size-3.5 shrink-0" /> : isComplete ? <CircleCheck className="size-3.5 shrink-0 text-emerald-600" /> : <CircleAlert className="size-3.5 shrink-0" />}
+              <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
+              <span className="shrink-0 tabular-nums">{enrichmentProgress.percent}%</span>
+            </div>
+            <Progress
+              value={enrichmentProgress.percent}
+              aria-label={`${label}: ${enrichmentProgress.percent}%`}
+              className={enrichmentProgress.state === "error" ? "[&_[data-slot=progress-indicator]]:bg-rose-500" : isComplete ? "[&_[data-slot=progress-indicator]]:bg-emerald-500" : ""}
+            />
+            {isRunning ? (
+              <span className="text-[11px] text-slate-400">Estimated progress · typically up to 3 minutes</span>
+            ) : enrichmentProgress.state === "error" ? (
+              <div className="flex min-w-0 items-center gap-2 text-[11px]">
+                <span className="truncate">{enrichmentProgress.error}</span>
+                <Button
+                  type="button"
+                  variant="link"
+                  size="xs"
+                  className="h-auto shrink-0 p-0 text-rose-700"
+                  disabled={!!enrichingId || loading}
+                  onClick={() => void runEnrich(enrichmentProgress.contactId)}
+                >
+                  Retry
+                </Button>
+              </div>
+            ) : null}
+          </div>
+        );
+      })()}
       {loading ? (
         <div className="mt-3 flex items-center gap-2 text-sm text-slate-400">
           <Spinner className="size-3.5" />
@@ -1788,31 +1861,32 @@ type LaunchStepCopy = {
   attachments?: MediaAttachment[];
 };
 
-type LaunchBombOption = {id:string;name:string;version?:number;goal:string;cp?:string;status?:string;priority?:string|null;steps:Array<{id:string;channel:Channel;subject?:string;content:string;callGoal?:string;script?:string}>};
+type LaunchBombOption = {id:string;name:string;version?:number;goal:string;cp?:string;status?:string;priority?:string|null;steps:Array<{id:string;channel:Channel;subject?:string;content:string;callGoal?:string;script?:string;attachments?:MediaAttachment[]}>};
 
-function LaunchEmailStepEditor({
-  subject,
-  cc,
-  content,
+function LaunchStepEditor({
+  channel,
+  copy,
   disabled,
   onChange,
   onUploadingChange,
 }: {
-  subject: string;
-  cc: string;
-  content: string;
+  channel: Channel;
+  copy: LaunchStepCopy;
   disabled?: boolean;
-  onChange: (patch: Pick<LaunchStepCopy, "subject" | "cc" | "content" | "attachments">) => void;
+  onChange: (patch: Partial<LaunchStepCopy>) => void;
   onUploadingChange?: (uploading: boolean) => void;
 }) {
-  const media = useMessageMedia("Email");
+  const media = useMessageMedia(channel);
+  const [storedAttachments, setStoredAttachments] = useState(copy.attachments || []);
+  const [preview, setPreview] = useState<MediaAttachment | null>(null);
   const readyKey = media.readyAttachments.map((item) => item.id).join("|");
+  const storedKey = storedAttachments.map((item) => item.id).join("|");
 
   useEffect(() => {
-    onChange({ attachments: media.readyAttachments });
-    // Sync ready uploads into launch copies; intentionally keyed by attachment ids.
+    onChange({ attachments: [...storedAttachments, ...media.readyAttachments] });
+    // Attachment IDs are the synchronization boundary between this draft and its launch copy.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readyKey]);
+  }, [readyKey, storedKey]);
 
   useEffect(() => {
     onUploadingChange?.(media.uploading);
@@ -1820,28 +1894,52 @@ function LaunchEmailStepEditor({
   }, [media.uploading]);
 
   return (
-    <div className="grid gap-2">
-      <Input
-        value={subject}
-        onChange={(e) => onChange({ subject: e.target.value })}
-        placeholder="Email subject"
-        disabled={disabled}
-      />
-      <Input
-        value={cc}
-        onChange={(e) => onChange({ cc: e.target.value })}
-        placeholder="CC (comma-separated)"
-        disabled={disabled}
-      />
-      <MessageMediaInputFrame channel="Email" media={media} disabled={disabled}>
-        <Textarea
-          className="min-h-24"
-          value={content}
-          onChange={(e) => onChange({ content: e.target.value })}
-          placeholder="Email body"
+    <div className="space-y-2">
+      {channel === "Email" ? <>
+        <Input
+          value={copy.subject || ""}
+          onChange={(e) => onChange({ subject: e.target.value })}
+          placeholder="Email subject"
           disabled={disabled}
         />
+        <Input
+          value={copy.cc || ""}
+          onChange={(e) => onChange({ cc: e.target.value })}
+          placeholder="CC (comma-separated)"
+          disabled={disabled}
+        />
+      </> : null}
+      <MessageMediaInputFrame channel={channel} media={media} disabled={disabled}>
+        {channel === "Email" ? (
+          <EmailBodyEditor
+            value={copy.content || ""}
+            onChange={(content) => onChange({ content })}
+            disabled={disabled}
+            placeholder="Write an email…"
+          />
+        ) : channel === "Phone" ? (
+          <div className="grid gap-2">
+            <Input value={copy.callGoal || ""} onChange={(e) => onChange({ callGoal: e.target.value })} placeholder="Call goal" disabled={disabled}/>
+            <Textarea className="max-h-60 min-h-32 resize-none overflow-y-auto [field-sizing:fixed]" value={copy.script || ""} onChange={(e) => onChange({ script: e.target.value })} placeholder="Suggested script" disabled={disabled}/>
+          </div>
+        ) : (
+          <Textarea
+            className="max-h-60 min-h-32 resize-none overflow-y-auto [field-sizing:fixed]"
+            value={copy.content || ""}
+            onChange={(e) => onChange({ content: e.target.value })}
+            placeholder="Write a message…"
+            disabled={disabled}
+          />
+        )}
       </MessageMediaInputFrame>
+      {storedAttachments.length ? <>
+        <MessageMediaThumbnails
+          attachments={storedAttachments}
+          onPreview={setPreview}
+          onRemove={(id) => setStoredAttachments((items) => items.filter((item) => item.id !== id))}
+        />
+        <MessageMediaPreview item={preview} onOpenChange={(open) => { if (!open) setPreview(null); }} />
+      </> : null}
     </div>
   );
 }
@@ -1868,6 +1966,7 @@ function bombDetailToLaunch(detail: BombDetail): LaunchBombOption {
         content: item.content,
         callGoal: channel === "Phone" ? item.name || "Call" : undefined,
         script: channel === "Phone" ? item.content : undefined,
+        attachments: item.attachments || [],
       }];
     }),
   };
@@ -1881,7 +1980,7 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
   const [bombId,setBombId]=useState("");
   const [target,setTarget]=useState("");
   const [copies,setCopies]=useState<Record<string,LaunchStepCopy>>({});
-  const [emailUploading,setEmailUploading]=useState<Record<string,boolean>>({});
+  const [stepUploading,setStepUploading]=useState<Record<string,boolean>>({});
   const [launchedInstanceId,setLaunchedInstanceId]=useState("");
   const [previewReady,setPreviewReady]=useState(false);
   const [launchPlan,setLaunchPlan]=useState<{instanceId:string;state:WorkspaceState}|null>(null);
@@ -1938,7 +2037,7 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
     setBombId("");
     setTarget("");
     setCopies({});
-    setEmailUploading({});
+    setStepUploading({});
     setRemoteDetail(undefined);
     setRemoteBombs([]);
     setLaunchPlan(null);
@@ -1949,7 +2048,7 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
     if(!selected||!person){setCopies({});return;}
     const next:Record<string,LaunchStepCopy>={};
     selected.steps.forEach(s=>{
-      next[s.id]=resolveLaunchStepCopy({subject:s.subject,content:s.content,callGoal:s.callGoal,script:s.script},templateContext);
+      next[s.id]={...resolveLaunchStepCopy({subject:s.subject,content:s.content,callGoal:s.callGoal,script:s.script},templateContext),attachments:s.attachments||[]};
     });
     setCopies(next);
   },[selected,target,companyName,productDescription,matchedCategory,followupExhibition,ownerName]);
@@ -1968,7 +2067,7 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
     if(s.channel==="Phone")return !copy.callGoal?.trim()||!copy.script?.trim();
     return !copy.content?.trim();
   });
-  const anyEmailUploading=Object.values(emailUploading).some(Boolean);
+  const anyStepUploading=Object.values(stepUploading).some(Boolean);
   const hasReachableStep=!!selected&&!!person&&selected.steps.some((s)=>channelAvailable(person,s.channel));
   const launched=!!launchedInstanceId||previewReady||!!launchPlan;
   const launchedInstance=launchedInstanceId?state.bombInstances.find(item=>item.id===launchedInstanceId):undefined;
@@ -1989,28 +2088,23 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
           const disabled=!!person&&!channelAvailable(person,s.channel);
           return <div key={s.id} className={`rounded-xl bg-slate-50 p-4 ${disabled?"pointer-events-none opacity-50":""}`} aria-disabled={disabled||undefined}>
             <div className="mb-3 flex items-center justify-between gap-2"><div className="flex items-center gap-2"><span className={`grid size-7 place-items-center rounded-md bg-slate-50 text-xs font-bold ${disabled?"text-slate-400":"text-violet-600"}`}>{index+1}</span><ChannelOption channel={s.channel}/></div><span className={`text-xs ${disabled?"font-medium text-slate-400":"text-slate-500"}`}>{disabled?"Unavailable · no contact info":"System will schedule this step"}</span></div>
-            {s.channel==="Email"&&(
-              <LaunchEmailStepEditor
-                key={`${s.id}:${target}:${bombId}`}
-                subject={copy.subject||""}
-                cc={copy.cc||""}
-                content={copy.content||""}
-                disabled={disabled}
-                onChange={(patch)=>updateCopy(s.id,patch)}
-                onUploadingChange={(uploading)=>setEmailUploading((prev)=>(
-                  prev[s.id]===uploading?prev:{...prev,[s.id]:uploading}
-                ))}
-              />
-            )}
-            {s.channel==="Phone"&&<div className="grid gap-2"><Input value={copy.callGoal||""} onChange={e=>updateCopy(s.id,{callGoal:e.target.value})} placeholder="Call goal" disabled={disabled}/><Textarea className="min-h-24" value={copy.script||""} onChange={e=>updateCopy(s.id,{script:e.target.value})} placeholder="Suggested script" disabled={disabled}/></div>}
-            {s.channel!=="Email"&&s.channel!=="Phone"&&<Textarea className="min-h-24" value={copy.content||""} onChange={e=>updateCopy(s.id,{content:e.target.value})} placeholder={`${s.channel} content`} disabled={disabled}/>}
+            <LaunchStepEditor
+              key={`${s.id}:${target}:${bombId}`}
+              channel={s.channel}
+              copy={copy}
+              disabled={disabled}
+              onChange={(patch)=>updateCopy(s.id,patch)}
+              onUploadingChange={(uploading)=>setStepUploading((prev)=>(
+                prev[s.id]===uploading?prev:{...prev,[s.id]:uploading}
+              ))}
+            />
           </div>;
         })}
         </>}
       </>}
       </>}
     </div>
-    <DialogFooter>{launched?<Button onClick={()=>onOpenChange(false)}>Done</Button>:<><Button variant="outline" onClick={()=>onOpenChange(false)}>Cancel</Button><Button disabled={launching||anyEmailUploading||!selected||!person||!hasReachableStep||incomplete||!!hasActiveOmniReach||(!previewOnly&&(!!c?.activeBombId||c?.status==="Bomb Running"))} onClick={()=>{if(!selected||!person)return;if(previewOnly){if(!customerId)return;void (async ()=>{setLaunching(true);try{const response=await fetch(`/api/brands/${customerId}/launch`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({bombId:selected.id,contactId:person.id,copies})});const payload=await response.json() as {message?:string;error?:string;omniReachRunId?:string;bombId?:string;bombName?:string;contactId?:string;steps?:Array<{taskId:string;channel:string;scheduledAt:string;templateId?:string;content:string;attachments?:MediaAttachment[]}>};if(!response.ok)throw new Error(payload.error||"Launch failed");if(!payload.omniReachRunId||!payload.steps?.length)throw new Error("Launch succeeded but no execution plan steps were returned");const plan=launchPlanFromApiSteps({customerId,bombId:payload.bombId||selected.id,bombName:payload.bombName||selected.name,contactId:payload.contactId||person.id,omniReachRunId:payload.omniReachRunId,steps:payload.steps});setLaunchPlan(plan);setPreviewReady(true);toast.success(payload.message||"OmniReach launched");onLaunched?.();}catch(error){toast.error(error instanceof Error?error.message:"Launch failed");}finally{setLaunching(false);}})();return;}if(!c)return;const r=launchBomb(c.id,selected.id,person.id,copies);show(r);if(r.ok&&r.id)setLaunchedInstanceId(r.id);}}>Launch OmniReach</Button></>}</DialogFooter>
+    <DialogFooter>{launched?<Button onClick={()=>onOpenChange(false)}>Done</Button>:<><Button variant="outline" onClick={()=>onOpenChange(false)}>Cancel</Button><Button disabled={launching||anyStepUploading||!selected||!person||!hasReachableStep||incomplete||!!hasActiveOmniReach||(!previewOnly&&(!!c?.activeBombId||c?.status==="Bomb Running"))} onClick={()=>{if(!selected||!person)return;if(previewOnly){if(!customerId)return;void (async ()=>{setLaunching(true);try{const response=await fetch(`/api/brands/${customerId}/launch`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({bombId:selected.id,contactId:person.id,copies})});const payload=await response.json() as {message?:string;error?:string;omniReachRunId?:string;bombId?:string;bombName?:string;contactId?:string;steps?:Array<{taskId:string;channel:string;scheduledAt:string;templateId?:string;content:string;attachments?:MediaAttachment[]}>};if(!response.ok)throw new Error(payload.error||"Launch failed");if(!payload.omniReachRunId||!payload.steps?.length)throw new Error("Launch succeeded but no execution plan steps were returned");const plan=launchPlanFromApiSteps({customerId,bombId:payload.bombId||selected.id,bombName:payload.bombName||selected.name,contactId:payload.contactId||person.id,omniReachRunId:payload.omniReachRunId,steps:payload.steps});setLaunchPlan(plan);setPreviewReady(true);toast.success(payload.message||"OmniReach launched");onLaunched?.();}catch(error){toast.error(error instanceof Error?error.message:"Launch failed");}finally{setLaunching(false);}})();return;}if(!c)return;const r=launchBomb(c.id,selected.id,person.id,copies);show(r);if(r.ok&&r.id)setLaunchedInstanceId(r.id);}}>Launch OmniReach</Button></>}</DialogFooter>
   </DialogContent></Dialog>;
 }
 

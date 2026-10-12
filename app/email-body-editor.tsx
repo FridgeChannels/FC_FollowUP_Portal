@@ -8,6 +8,8 @@ import Placeholder from "@tiptap/extension-placeholder";
 import { Bold, ImagePlus, Italic, Link2, List, ListOrdered, Underline as UnderlineIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { containsInlineBase64 } from "@/lib/email-html";
 import { cn } from "@/lib/utils";
 import { uploadMediaFile } from "./message-media";
@@ -18,6 +20,33 @@ function isHttpsUrl(url: string) {
   } catch {
     return false;
   }
+}
+
+function isAllowedLinkUrl(url: string) {
+  return isHttpsUrl(url) || url.toLowerCase().startsWith("mailto:");
+}
+
+type LinkDialogMode = "selection" | "existing" | "insert";
+
+function getSelectedLinkUrl(editor: Editor) {
+  const { $from, from, to } = editor.state.selection;
+  const link = editor.schema.marks.link;
+  if (!link) return undefined;
+
+  const currentMark = [$from.marks(), $from.nodeBefore?.marks || [], $from.nodeAfter?.marks || []]
+    .flat()
+    .find((mark) => mark.type === link);
+  if (typeof currentMark?.attrs.href === "string") return currentMark.attrs.href;
+
+  let selectedHref: string | undefined;
+  editor.state.doc.nodesBetween(from, to, (node) => {
+    const mark = node.marks.find((item) => item.type === link);
+    if (typeof mark?.attrs.href === "string") selectedHref = mark.attrs.href;
+  });
+  if (selectedHref) return selectedHref;
+
+  const selectedText = editor.state.doc.textBetween(from, to).trim();
+  return isAllowedLinkUrl(selectedText) ? selectedText : undefined;
 }
 
 async function uploadAndInsert(editor: Editor, files: File[]) {
@@ -46,6 +75,10 @@ export function EmailBodyEditor({
   const fileRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<Editor | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+  const [linkDialogMode, setLinkDialogMode] = useState<LinkDialogMode>("insert");
+  const [linkText, setLinkText] = useState("");
+  const [linkUrl, setLinkUrl] = useState("");
   const onChangeRef = useRef(onChange);
 
   useEffect(() => {
@@ -90,7 +123,7 @@ export function EmailBodyEditor({
     editorProps: {
       attributes: {
         class:
-          "min-h-28 px-3 py-2 pb-10 text-sm leading-6 text-slate-800 outline-none [&_img]:max-h-40 [&_img]:max-w-full [&_img]:rounded-md",
+          "min-h-28 px-3 py-2 pb-10 text-sm leading-6 text-slate-800 outline-none [&_a]:cursor-pointer [&_a]:text-blue-600 [&_a]:underline [&_a]:underline-offset-2 [&_img]:max-h-40 [&_img]:max-w-full [&_img]:rounded-md",
       },
       handlePaste(_view, event) {
         const files = event.clipboardData?.files;
@@ -143,21 +176,50 @@ export function EmailBodyEditor({
     }
   }, [editor, value]);
 
-  const setLink = () => {
+  const openLinkDialog = () => {
     if (!editor) return;
-    const previous = editor.getAttributes("link").href as string | undefined;
-    const next = window.prompt("Link URL", previous || "https://");
-    if (next == null) return;
-    const trimmed = next.trim();
+    const { from, to } = editor.state.selection;
+    const selectedText = editor.state.doc.textBetween(from, to).trim();
+    const previous = getSelectedLinkUrl(editor);
+    setLinkDialogMode(selectedText ? "selection" : editor.isActive("link") ? "existing" : "insert");
+    setLinkText(selectedText);
+    setLinkUrl(previous || "https://");
+    setLinkDialogOpen(true);
+  };
+
+  const saveLink = () => {
+    if (!editor) return;
+    const trimmed = linkUrl.trim();
     if (!trimmed) {
-      editor.chain().focus().extendMarkRange("link").unsetLink().run();
+      if (linkDialogMode !== "insert") {
+        editor.chain().focus().extendMarkRange("link").unsetLink().run();
+      }
+      setLinkDialogOpen(false);
       return;
     }
-    if (!isHttpsUrl(trimmed) && !trimmed.toLowerCase().startsWith("mailto:")) {
+    if (!isAllowedLinkUrl(trimmed)) {
       toast.error("Use an https or mailto link.");
       return;
     }
-    editor.chain().focus().extendMarkRange("link").setLink({ href: trimmed }).run();
+    if (linkDialogMode === "insert") {
+      const displayText = linkText.trim();
+      if (!displayText) {
+        toast.error("Enter the text to display.");
+        return;
+      }
+      editor
+        .chain()
+        .focus()
+        .insertContent({
+          type: "text",
+          text: displayText,
+          marks: [{ type: "link", attrs: { href: trimmed } }],
+        })
+        .run();
+    } else {
+      editor.chain().focus().extendMarkRange("link").setLink({ href: trimmed }).run();
+    }
+    setLinkDialogOpen(false);
   };
 
   return (
@@ -210,7 +272,13 @@ export function EmailBodyEditor({
         >
           <ListOrdered />
         </ToolbarButton>
-        <ToolbarButton label="Link" active={editor?.isActive("link")} disabled={!editor || disabled} onClick={setLink}>
+        <ToolbarButton
+          label="Link"
+          active={editor?.isActive("link")}
+          disabled={!editor || disabled}
+          onClick={openLinkDialog}
+          preserveEditorFocus
+        >
           <Link2 />
         </ToolbarButton>
         <ToolbarButton
@@ -240,6 +308,53 @@ export function EmailBodyEditor({
           if (fileRef.current) fileRef.current.value = "";
         }}
       />
+      <Dialog open={linkDialogOpen} onOpenChange={setLinkDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add link</DialogTitle>
+            <DialogDescription>
+              {linkDialogMode === "insert"
+                ? "Enter the visible text and a secure web address or email address."
+                : "The selected text will be displayed as a clickable link."}
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              saveLink();
+            }}
+          >
+            {linkDialogMode === "insert" ? (
+              <label className="space-y-1.5 text-sm font-medium text-slate-800" htmlFor="email-link-text">
+                Text to display
+                <Input
+                  id="email-link-text"
+                  autoFocus
+                  placeholder="Link text"
+                  value={linkText}
+                  onChange={(event) => setLinkText(event.target.value)}
+                />
+              </label>
+            ) : null}
+            <label className="space-y-1.5 text-sm font-medium text-slate-800" htmlFor="email-link-url">
+              Link URL
+              <Input
+                id="email-link-url"
+                autoFocus={linkDialogMode !== "insert"}
+                type="url"
+                placeholder="https://example.com"
+                value={linkUrl}
+                onChange={(event) => setLinkUrl(event.target.value)}
+              />
+            </label>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setLinkDialogOpen(false)}>Cancel</Button>
+              <Button type="submit">Save link</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -249,12 +364,14 @@ function ToolbarButton({
   active,
   disabled,
   onClick,
+  preserveEditorFocus,
   children,
 }: {
   label: string;
   active?: boolean;
   disabled?: boolean;
   onClick: () => void;
+  preserveEditorFocus?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -265,6 +382,9 @@ function ToolbarButton({
       disabled={disabled}
       title={label}
       aria-label={label}
+      onMouseDown={(event) => {
+        if (preserveEditorFocus) event.preventDefault();
+      }}
       onClick={onClick}
     >
       {children}
