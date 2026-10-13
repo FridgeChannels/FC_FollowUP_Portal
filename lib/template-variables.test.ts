@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   buildTemplateVariableContext,
   ownerNameFromContacts,
+  restoreTemplateVariables,
   resolveOutboundFields,
   resolveTemplateVariables,
 } from "./template-variables.ts";
@@ -151,6 +152,15 @@ describe("template variable engine", () => {
     assert.equal(
       resolveTemplateVariables("Best,\n[ sender name ]", context),
       "Best,\nElla",
+    );
+  });
+
+  it("restores source-template variables before saving a launch copy", () => {
+    const source = "Hi {{contact_name}}, welcome to {{company_name}}.\n[Sender Name]";
+    const rendered = resolveTemplateVariables(source, context);
+    assert.equal(
+      restoreTemplateVariables(`${rendered}\nLet’s talk next week.`, source, context),
+      "Hi {{contact_name}}, welcome to {{company_name}}.\n[Sender Name]\nLet’s talk next week.",
     );
   });
 });

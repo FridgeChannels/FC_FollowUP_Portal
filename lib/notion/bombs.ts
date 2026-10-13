@@ -290,17 +290,22 @@ export async function createFollowupBomb(input: CreateBombInput) {
     await retrievePage(scenarioId);
   }
   const checkpoint = await resolveBombCheckpoint(input.cpIds || []);
+  const status = input.status?.trim() || "Draft";
+  if (!(BOMB_STATUSES as readonly string[]).includes(status)) {
+    throw new Error("Invalid OmniReach Status");
+  }
   const page = await createPage(getFollowupBombDbId(), {
     "OmniReach Name": { title: richText(name) },
     Goal: { rich_text: input.goal?.trim() ? richText(input.goal.trim()) : [] },
     Scenario: { relation: scenarioId ? [{ id: scenarioId }] : [] },
     ...(checkpoint ? { CP: bombCpWrite(checkpoint) } : {}),
     ...(targetRole ? { "Target Role": { select: { name: targetRole } } } : {}),
-    "OmniReach Status": { status: { name: "Draft" } },
+    "OmniReach Status": { status: { name: status } },
   });
 
-  if (input.template?.content?.trim()) {
-    await createBombTemplate(page.id, name, input.template);
+  const templates = input.templates || (input.template?.content?.trim() ? [input.template] : []);
+  for (const template of templates) {
+    if (template.content.trim()) await createBombTemplate(page.id, name, template);
   }
 
   invalidateBombsCatalogCache();

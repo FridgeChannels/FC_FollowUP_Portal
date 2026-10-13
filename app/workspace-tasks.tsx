@@ -35,6 +35,7 @@ import { devCallPhoneOnClient } from "@/lib/quo/dev-call-phone";
 import { partitionRoundCalls, reviewRoundsForTask, type CallReviewRound } from "@/lib/call-review-history";
 import { taskStatusForCallReview, type CallReviewMetadata, type CallReviewStatus } from "@/lib/call-review-metadata";
 import { useSession } from "./use-session";
+import { TodaysNotion } from "./todays-notion";
 
 type TaskType = "Call" | "Reply";
 type UnifiedTask = {
@@ -379,6 +380,7 @@ export function TasksPage({ selectedId, selectedCallId, returnToDashboard = fals
   }
 
   return <div className="mx-auto max-w-[1540px]">
+    {isCaller ? <TodaysNotion /> : null}
     <div className="mb-5">
       <h1 className="text-2xl font-bold tracking-tight">ReplyTask</h1>
     </div>
@@ -429,7 +431,7 @@ export function TasksPage({ selectedId, selectedCallId, returnToDashboard = fals
           </Button>
         ) : null}
       </div>}
-      <Select value={status} onValueChange={value => setStatus(value as typeof status)}><SelectTrigger className="h-8 w-auto border-0 bg-transparent px-0 text-xs shadow-none hover:bg-transparent focus-visible:ring-2"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="Open">Open</SelectItem><SelectItem value="Completed">Completed</SelectItem><SelectItem value="All">All statuses</SelectItem></SelectContent></Select>
+      {!isCaller && <Select value={status} onValueChange={value => setStatus(value as typeof status)}><SelectTrigger className="h-8 w-auto border-0 bg-transparent px-0 text-xs shadow-none hover:bg-transparent focus-visible:ring-2"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="Open">Open</SelectItem><SelectItem value="Completed">Completed</SelectItem><SelectItem value="All">All statuses</SelectItem></SelectContent></Select>}
     </div>
 
     <div className="overflow-hidden rounded-2xl bg-white">

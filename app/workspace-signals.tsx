@@ -104,13 +104,6 @@ function relativeTime(value: string, now: Date) {
   if (minutes < 7 * 24 * 60) return `${Math.floor(minutes / (24 * 60))}d ago`;
   return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(new Date(value));
 }
-function historyEventTime(event: SignalEvent) {
-  return event.type === "email"
-    ? event.detectedAt
-    : event.type === "linkedin"
-      ? event.publishedAt || event.occurredAt
-      : event.occurredAt;
-}
 function groupedSignals(events: SignalEvent[]) {
   const groups = new Map<string, SignalEvent[]>();
   for (const event of [...new Map(events.map((item) => [item.id, item])).values()]) {
@@ -157,18 +150,6 @@ export function SignalsPage() {
   const queue = useMemo(
     () => filterWorkspaceQueue(data?.brands || [], view, type, now),
     [data, view, type, now],
-  );
-  const historyBrands = useMemo(
-    () => (data?.brands || [])
-      .map((brand) => {
-        const events = brand.events
-          .filter((event) => type === "all" || event.type === type)
-          .sort((left, right) => Date.parse(historyEventTime(right)) - Date.parse(historyEventTime(left)));
-        return { brand, events, latest: events[0] };
-      })
-      .filter((item): item is { brand: SignalBrand; events: SignalEvent[]; latest: SignalEvent } => Boolean(item.latest))
-      .sort((left, right) => Date.parse(historyEventTime(right.latest)) - Date.parse(historyEventTime(left.latest))),
-    [data, type],
   );
   useEffect(() => {
     if (!selected && queue[0]) setSelected(queue[0].id);
@@ -222,7 +203,6 @@ export function SignalsPage() {
             ))}
           </SelectContent>
         </Select>
-        <Button variant="ghost" size="sm" aria-pressed={view === "history"} className={view === "history" ? "font-semibold text-foreground" : "text-muted-foreground"} onClick={() => { setView(view === "history" ? "review" : "history"); setMobileDetail(false); setDeepLinkActive(false); }}>History</Button>
         {process.env.NODE_ENV !== "production" ? (
           <Button
             variant="ghost"
@@ -259,34 +239,9 @@ export function SignalsPage() {
             className={mobileDetail && current ? "hidden lg:block" : ""}
           >
             <div className="mb-3">
-              <h2 className="text-sm font-semibold">{view === "history" ? "History" : "Brand Queue"}</h2>
+              <h2 className="text-sm font-semibold">Brand Queue</h2>
             </div>
-            {view === "history" ? (
-              historyBrands.length ? (
-                <div className="space-y-1">
-                  {historyBrands.map(({ brand, events, latest }) => {
-                    const occurredAt = historyEventTime(latest);
-                    const detailPath = `/customers/${encodeURIComponent(brand.id)}?returnTo=${encodeURIComponent(showingMock ? "/signals?mock=1" : "/signals")}&tab=signalHistory${showingMock ? "&mock=1" : ""}`;
-                    return <button
-                      key={brand.id}
-                      type="button"
-                      className="w-full px-3 py-3 text-left transition-colors hover:bg-slate-100/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      onClick={() => router.push(detailPath)}
-                    >
-                      <div className="flex min-w-0 items-center justify-between gap-3">
-                        <span className="truncate text-sm font-medium text-foreground">{brand.name}</span>
-                        <time dateTime={occurredAt} className="shrink-0 text-[11px] text-slate-500">{relativeTime(occurredAt, now)}</time>
-                      </div>
-                      <div className="mt-1 flex items-center gap-2">
-                        {[...new Set(events.map((event) => event.type))].map((signalType) => <SignalLabel key={signalType} type={signalType} />)}
-                        <span className="text-[11px] text-slate-500">{events.length} record{events.length === 1 ? "" : "s"}</span>
-                      </div>
-                      <p className="mt-1 line-clamp-2 text-xs text-slate-600">{latest.summary}</p>
-                    </button>;
-                  })}
-                </div>
-              ) : <p className="py-12 text-center text-sm text-muted-foreground">No signals match this filter</p>
-            ) : queue.length ? (
+            {queue.length ? (
               <div className="space-y-1">
                 {queue.map((brand) => {
                   const visibleEvents = type === "all" ? brand.events : brand.events.filter((event) => event.type === type);

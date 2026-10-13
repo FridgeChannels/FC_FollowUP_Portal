@@ -49,6 +49,17 @@ function authHeaders(prefer?: string): HeadersInit {
   };
 }
 
+/** Service-only transactional database functions; never call from browser code. */
+export async function supabaseRpc<T>(name: string, args: Record<string, unknown>): Promise<T> {
+  requireConfigured();
+  const response = await fetch(`${getSupabaseUrl()}/rest/v1/rpc/${encodeURIComponent(name)}`, {
+    method: "POST", headers: authHeaders(), body: JSON.stringify(args),
+  });
+  const body = await response.text();
+  if (!response.ok) throw new SupabaseError(`Supabase RPC ${name} failed`, response.status, body);
+  return body ? JSON.parse(body) as T : null as T;
+}
+
 export async function supabaseSelect<T>(table: string, options: QueryOptions = {}): Promise<T[]> {
   requireConfigured();
   const response = await fetch(buildUrl(table, options), {

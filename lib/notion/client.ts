@@ -49,6 +49,7 @@ export type NotionProperty = {
 
 export type NotionPage = {
   id: string;
+  parent?: { database_id?: string; data_source_id?: string; page_id?: string };
   url?: string;
   created_time?: string;
   last_edited_time?: string;
@@ -310,6 +311,8 @@ export async function createPage(
   databaseId: string,
   properties: Record<string, unknown>,
 ) {
+  const { withRoundAttribution } = await import("./round-attribution");
+  properties = await withRoundAttribution(databaseId, properties);
   return notionFetch<NotionPage>("/pages", {
     method: "POST",
     body: JSON.stringify({

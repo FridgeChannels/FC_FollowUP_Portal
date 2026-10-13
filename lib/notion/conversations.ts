@@ -18,6 +18,7 @@ import { parseQuoCallData, quoFromMessageId } from "../quo/call-payload";
 import { attachmentsFromProperty } from "../email-attachments";
 import { attachmentsFromExtendedParameters } from "../media-attachments";
 import { REPLY_ACTION_REMINDER_MARKER } from "../reply-action-reminder";
+import { communicationRoundId } from "../followup-history";
 
 const CONTACT_CONVERSATION_KEYS = ["Interactions", "Conversations", "Conversation Records"];
 
@@ -48,6 +49,7 @@ function mapConversation(
     : attachmentsFromExtendedParameters(extendedParameters);
   return {
     id: page.id,
+    roundId: communicationRoundId(extendedParameters),
     brandId: firstRelationId(properties["Follow-up Client"]) || null,
     contactId: firstRelationId(properties["Follow-up Contact"]) || null,
     taskId: firstRelationId(properties["Follow-up Task"]) || null,
@@ -130,6 +132,7 @@ function queryConversationsByBrands(brandIds: string[]) {
 }
 
 export type ListConversationsPageOptions = {
+  brandId?: string;
   limit?: number;
   cursor?: string | null;
   /** Drop raw Extended Parameters from JSON (parsed quo is kept). */
@@ -144,13 +147,15 @@ export type ConversationsPage = {
 
 async function queryConversationsPageByContacts(
   contactIds: string[],
-  options: { limit: number; cursor?: string | null },
+  options: { limit: number; cursor?: string | null; brandId?: string },
 ) {
   // Pagination cursors are only safe for a single Notion filter; brands rarely exceed 100 contacts.
   const chunk = contactIds.slice(0, 100);
   const body: Record<string, unknown> = {
     page_size: Math.min(Math.max(options.limit, 1), 100),
-    filter: relationFilter("Follow-up Contact", chunk),
+    filter: options.brandId ? {
+      or: [{ property: "Follow-up Client", relation: { contains: options.brandId } }, ...(chunk.length ? [relationFilter("Follow-up Contact", chunk)] : [])],
+    } : relationFilter("Follow-up Contact", chunk),
     sorts: [{ timestamp: "created_time", direction: "descending" }],
   };
   if (options.cursor) body.start_cursor = options.cursor;
@@ -182,7 +187,7 @@ export async function listFollowupConversationsPage(
   contactIds: string[],
   options: ListConversationsPageOptions = {},
 ): Promise<ConversationsPage> {
-  if (!contactIds.length) {
+  if (!contactIds.length && !options.brandId) {
     return { activities: [], nextCursor: null, hasMore: false };
   }
   const limit = Math.min(Math.max(options.limit ?? 40, 1), 100);
@@ -195,6 +200,7 @@ export async function listFollowupConversationsPage(
     data = await queryConversationsPageByContacts(contactIds, {
       limit,
       cursor: options.cursor,
+      brandId: options.brandId,
     });
   } catch (error) {
     if (isRetryableNotionError(error)) throw error;
@@ -265,12 +271,17 @@ export async function listConversationsByIds(ids: string[]): Promise<BrandActivi
 
 export async function listFollowupConversations(
   contactIds: string[],
+  brandId?: string,
 ): Promise<BrandActivity[]> {
-  if (!contactIds.length) return [];
+  if (!contactIds.length && !brandId) return [];
 
   let pages: NotionPage[] = [];
   try {
-    pages = await queryConversationsByContacts(contactIds);
+    const [byContact, byBrand] = await Promise.all([
+      contactIds.length ? queryConversationsByContacts(contactIds) : Promise.resolve([]),
+      brandId ? queryConversationsByBrands([brandId]) : Promise.resolve([]),
+    ]);
+    pages = [...new Map([...byContact, ...byBrand].map(page => [page.id, page])).values()];
   } catch (error) {
     if (isRetryableNotionError(error)) throw error;
     try {

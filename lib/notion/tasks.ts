@@ -1,4 +1,5 @@
 import type { BrandTask } from "../brand-list";
+import { taskRoundId, withoutTaskRound } from "../followup-history";
 import { isLinkedInColdCapacityTask } from "../linkedin/notes.ts";
 import { CHANNELS, type Channel, type ExistingTask, type TaskStatus } from "../scheduling-engine/types";
 import {
@@ -992,6 +993,7 @@ async function mapTaskPage(
   return {
     id: page.id,
     title: titleFromProperties(properties) || "Untitled Task",
+    roundId: taskRoundId(propertyText(properties.Notes)),
     contactId,
     contactName,
     brandId: brand?.id || null,
@@ -1008,7 +1010,7 @@ async function mapTaskPage(
     scheduledAt: propertyDate(properties["Scheduled At"]),
     endedAt: propertyDate(properties["Ended At"]),
     createdAt: page.created_time || null,
-    notes: propertyText(properties.Notes) || null,
+    notes: withoutTaskRound(propertyText(properties.Notes)) || null,
     conversationIds: relationIds(properties.Conversations),
     templateId: firstRelationId(properties.Template) || null,
     sourceBombId: firstRelationId(properties["Source Bomb"]) || null,

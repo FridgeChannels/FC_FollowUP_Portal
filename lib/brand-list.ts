@@ -240,6 +240,7 @@ export function keyPersonNotionUrl(pageId: string) {
 
 export type BrandTask = {
   id: string;
+  roundId?: string | null;
   title: string;
   contactId: string | null;
   contactName: string | null;
@@ -281,6 +282,7 @@ export type BrandTask = {
 
 export type BrandActivity = {
   id: string;
+  roundId?: string | null;
   /** Direct ConversationDB → Follow-up Client relation when available. */
   brandId?: string | null;
   contactId: string | null;
@@ -338,6 +340,10 @@ export type BrandAiMeetingLink = {
 };
 
 export type BrandDetail = BrandListItem & {
+  followupHistory?: import("./followup-history").FollowupHistory;
+  relationshipSummary?: string | null;
+  /** Saved, manually refreshed AI progress summaries. */
+  aiSummaries?: import("./brand-ai-summary").BrandAiSummaryStore;
   /** Account Manager assignment events, newest first. */
   assignmentHistory?: Array<{
     ownerId: string;

@@ -187,3 +187,26 @@ export function resolveLaunchStepCopy(
     script: resolve(copy.script),
   };
 }
+
+/**
+ * Converts values rendered for one brand back to the variable tokens that
+ * existed in the source template, so a saved OmniReach stays reusable.
+ */
+export function restoreTemplateVariables(
+  rendered: string | undefined,
+  sourceTemplate: string | undefined,
+  context: TemplateVariableContext,
+) {
+  let restored = rendered || "";
+  const replacements = new Map<string, string>();
+  const pattern = /\{\{\s*([^}]+?)\s*\}\}|\[\s*Sender\s+Name\s*\]/gi;
+  for (const match of (sourceTemplate || "").matchAll(pattern)) {
+    const token = match[0];
+    const value = resolveTemplateVariables(token, context);
+    if (value && value !== token) replacements.set(value, token);
+  }
+  for (const [value, token] of [...replacements].sort(([left], [right]) => right.length - left.length)) {
+    restored = restored.split(value).join(token);
+  }
+  return restored;
+}

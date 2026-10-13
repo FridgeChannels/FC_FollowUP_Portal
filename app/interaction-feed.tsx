@@ -205,6 +205,7 @@ export function InteractionFeed({
   initialChannel,
   showAllChannels = false,
   showCpSelector = true,
+  includeAllCps = false,
   initialCp,
   focusedInteractionId,
   callerPhoneOnly,
@@ -243,6 +244,8 @@ export function InteractionFeed({
   initialChannel?: Channel;
   showAllChannels?: boolean;
   showCpSelector?: boolean;
+  /** History already filters an explicit Round; retain its messages across CPs. */
+  includeAllCps?: boolean;
   initialCp?: CPCode;
   focusedInteractionId?: string;
   callerPhoneOnly?: boolean;
@@ -321,7 +324,7 @@ export function InteractionFeed({
   const currentIndex = currentCp === "Nurture"
     ? visibleCps.length - 1
     : visibleCps.indexOf(displayCurrentCp as (typeof visibleCps)[number]);
-  const taskIdsForCp = phoneTaskIdsForCp(interactions, selectedCp, displayCurrentCp, tasks);
+  const taskIdsForCp = includeAllCps ? new Set(tasks.map(task => task.id)) : phoneTaskIdsForCp(interactions, selectedCp, displayCurrentCp, tasks);
   if (activeTaskId) taskIdsForCp.add(activeTaskId);
   const phoneTasks = tasks
     .filter((item) => item.channel === "Phone" && [...taskIdsForCp].some((id) => sameNotionId(id, item.id)))
@@ -339,6 +342,7 @@ export function InteractionFeed({
     }));
   const phoneBoardTaskIds = phoneTasks.map((item) => item.id);
   const cpInteractions = interactions.filter((item) => {
+    if (includeAllCps) return true;
     if (!isChannelMessage(item)) return true;
     // Strict: only show messages stamped for this CP tab.
     if (belongsToCp(item, selectedCp, displayCurrentCp)) return true;
@@ -368,9 +372,9 @@ export function InteractionFeed({
     : cpInteractions.filter((item) => isChannelMessage(item) && item.channel === activeChannel);
   // Newest OmniReach launch first (startedAt = creation/launch time).
   const bombsForCp = planState.bombInstances
-    .filter(item => item.customerId === customerId && item.cp === selectedCp)
+    .filter(item => item.customerId === customerId && (includeAllCps || item.cp === selectedCp))
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt) || b.id.localeCompare(a.id));
-  const usePhoneTaskBoard = activeChannel === "Phone" && (callerPhoneOnly || phoneTasks.length > 0);
+  const usePhoneTaskBoard = activeChannel === "Phone" && (callerPhoneOnly || phoneTasks.length > 0 || cpInteractions.some((item) => item.quo));
   const cpLabel = (cp: CPCode) => {
     const name = cpGoals?.[cp] || state.cps.find(item => item.code === cp)?.goal;
     return name ? `${cp} · ${name}` : cp;
@@ -392,7 +396,7 @@ export function InteractionFeed({
         </button>}
         {visibleChannels.map(channel => {
           const channelItems = interactions.filter(item =>
-            isChannelMessage(item) && item.channel === channel && belongsToCp(item, selectedCp, displayCurrentCp),
+            isChannelMessage(item) && item.channel === channel && (includeAllCps || belongsToCp(item, selectedCp, displayCurrentCp)),
           );
           const count = channel === "Phone" && phoneTasks.length
             ? phoneTasks.length
@@ -430,6 +434,7 @@ export function InteractionFeed({
       </div>
     ) : usePhoneTaskBoard ? (
       <PhoneTaskBoard
+        brandId={customerId}
         phoneTasks={phoneTasks}
         contacts={contacts}
         timeline={cpInteractions}

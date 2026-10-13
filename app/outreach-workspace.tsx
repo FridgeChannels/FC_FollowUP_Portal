@@ -67,6 +67,7 @@ function WorkspaceShell({ children }: { children?: ReactNode }) {
   const [brandReplyCount, setBrandReplyCount] = useState(0);
   const [clearingCache, setClearingCache] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(() => !/^\/customers\/[^/]+/.test(pathname));
+  const isBrandDetailPath = /^\/customers\/[^/]+/.test(pathname);
   const isAdmin = user?.role === "Admin" || state.currentRole === "Admin";
 
   useEffect(() => {
@@ -202,7 +203,13 @@ function WorkspaceShell({ children }: { children?: ReactNode }) {
       <Sidebar collapsible="icon" className="border-r-0">
         <SidebarHeader className="border-b border-slate-300/45 px-3 py-4 group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:px-0">
           <button
-            onClick={() => router.push(roleHome[state.currentRole])}
+            onClick={() => {
+              if (isBrandDetailPath) {
+                setSidebarOpen(true);
+                return;
+              }
+              router.push(roleHome[state.currentRole]);
+            }}
             className="flex items-center gap-3 px-1 text-left"
           >
             <span className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-[6px] bg-white/35 shadow-[0_8px_24px_rgb(55_125_225/22%)]">
@@ -382,7 +389,7 @@ export function WorkspaceRouteContent() {
       {section === "signals" ? <SignalsPage /> : null}
       {mountedRoots.includes("dashboard") ? (
         <div hidden={activeRoot !== "dashboard"}>
-          <QualifiedCallsDashboard />
+          <CallerDashboard />
         </div>
       ) : null}
       {mountedRoots.includes("brands") ? (
@@ -419,4 +426,8 @@ export function WorkspaceRouteContent() {
       {bombDetailId ? <BombEditor bombId={bombDetailId} /> : null}
     </>
   );
+}
+
+function CallerDashboard() {
+  return <QualifiedCallsDashboard />;
 }

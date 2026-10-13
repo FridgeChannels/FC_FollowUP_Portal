@@ -30,6 +30,7 @@ declare namespace Cloudflare {
     NOTIFY_ON_INBOUND?: string;
     NOTIFY_ON_PHONE?: string;
     NOTIFY_ON_SAMPLE_VISIT?: string;
+    NOTIFY_ON_ENCOUNTER?: string;
     NOTIFY_CONTENT_MAX_CHARS?: string;
     PORTAL_BASE_URL?: string;
     SUPABASE_URL?: string;

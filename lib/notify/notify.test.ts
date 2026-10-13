@@ -35,6 +35,12 @@ describe("truncatePreview", () => {
 });
 
 describe("formatSlackNotificationText", () => {
+  it("labels significant Exhibition updates without treating them as inbound replies", () => {
+    const text = formatSlackNotificationText({ eventType: "encounter.updated", channel: "Exhibition", brandName: "Brand", ownerName: "Ella", subject: "Newtopia", contentPreview: "Customer requested product information.", portalUrl: "https://portal.example/customers/brand?followupHistory=1" }, { contentMaxChars: 300 });
+    assert.match(text, /^Exhibition key changes · Exhibition/m);
+    assert.match(text, /Owner: Ella/);
+    assert.match(text, /followupHistory=1/);
+  });
   it("uses one field per line and includes portal link", () => {
     const text = formatSlackNotificationText(baseEvent, {
       contentMaxChars: 300,

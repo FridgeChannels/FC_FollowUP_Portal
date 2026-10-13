@@ -54,6 +54,8 @@ export type CreateBombInput = {
   priority?: string | null;
   notes?: string | null;
   template?: BombTemplateInput | null;
+  templates?: BombTemplateInput[];
+  status?: string | null;
 };
 
 export type UpdateBombInput = {

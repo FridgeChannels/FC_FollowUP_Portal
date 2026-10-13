@@ -8,6 +8,7 @@ type NotifyEnvName =
   | "NOTIFY_ON_INBOUND"
   | "NOTIFY_ON_PHONE"
   | "NOTIFY_ON_SAMPLE_VISIT"
+  | "NOTIFY_ON_ENCOUNTER"
   | "NOTIFY_ON_FOLLOWUP_REMINDER"
   | "FOLLOWUP_REMINDER_CRON_SECRET"
   | "NOTIFY_CONTENT_MAX_CHARS"
@@ -90,9 +91,10 @@ export function portalSampleUrl(brandId: string | null | undefined) {
 }
 
 export function eventTypeEnabled(
-  eventType: "reply.received" | "inbound.received" | "sample.visited" | "followup.resume_due" | "reply.action_due",
+  eventType: "reply.received" | "inbound.received" | "sample.visited" | "encounter.updated" | "followup.resume_due" | "reply.action_due",
 ) {
   if (eventType === "reply.received") return shouldNotifyReply();
+  if (eventType === "encounter.updated") return asBool(raw("NOTIFY_ON_ENCOUNTER"), true);
   if (eventType === "inbound.received") return shouldNotifyInbound();
   if (eventType === "followup.resume_due") return shouldNotifyFollowUpReminder();
   if (eventType === "reply.action_due") return shouldNotifyFollowUpReminder();

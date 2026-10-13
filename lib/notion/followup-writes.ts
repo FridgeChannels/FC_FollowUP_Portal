@@ -1,4 +1,5 @@
 import { FOLLOW_UP_STATUSES, HANDLING_MODES, type BrandActivity, type BrandTask } from "../brand-list";
+import { BRAND_AI_SUMMARY_PROPERTY } from "../brand-ai-summary";
 import {
   mergeLinkedInNotes,
   prepareLinkedInOutbound,
@@ -6,7 +7,7 @@ import {
   releaseLinkedInColdQuotaFromTask,
 } from "../linkedin";
 import { conversationCpRelation, resolveCheckpoint } from "./cps";
-import { createPage, propertyText, retrievePage, richText, updatePage } from "./client";
+import { createPage, notionFetch, propertyText, retrievePage, richText, updatePage } from "./client";
 import { getFollowupClientDbId, getFollowupConversationDbId, getFollowupTaskDbId, isScheduleTestMode } from "./config";
 import {
   easternDateOnly,
@@ -279,6 +280,38 @@ export async function updateFollowupClient(
   const page = await updatePage(pageId, properties);
   invalidateBrandReplySignalCache();
   return page;
+}
+
+/**
+ * Adds the private Portal field on first use, so existing Follow-up ClientDBs
+ * do not need a manual schema migration before the feature is turned on.
+ */
+async function ensureBrandAiSummaryProperty() {
+  await notionFetch(`/databases/${getFollowupClientDbId()}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      properties: {
+        [BRAND_AI_SUMMARY_PROPERTY]: { rich_text: {} },
+      },
+    }),
+  });
+}
+
+export async function saveBrandAiSummary(pageId: string, value: string) {
+  try {
+    return await updatePage(pageId, {
+      [BRAND_AI_SUMMARY_PROPERTY]: { rich_text: richText(value) },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to save AI summary";
+    // Existing workspaces will not have the field until the first generation.
+    // Add it once and retry only for a missing-property failure.
+    if (!/property|schema|validation/i.test(message)) throw error;
+    await ensureBrandAiSummaryProperty();
+    return updatePage(pageId, {
+      [BRAND_AI_SUMMARY_PROPERTY]: { rich_text: richText(value) },
+    });
+  }
 }
 
 export type CreateFollowupClientInput = {

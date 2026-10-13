@@ -305,6 +305,25 @@ body [data-sidebar="sidebar"] [data-sidebar="menu-sub-button"][data-active="true
 }
 body [data-sidebar="inset"] { background: transparent; }
 
+/* Product-wide rule: button labels remain black in every state and variant. */
+body :is(button, [data-slot="button"]) {
+  color: #000 !important;
+}
+body :is(button, [data-slot="button"]):disabled {
+  color: #000 !important;
+  opacity: 1 !important;
+}
+
+/* Phone-script fields intentionally read as part of one continuous document. */
+body textarea.phone-script-section,
+body textarea.phone-script-section:focus-visible {
+  background-color: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
 /* Semantic UI tokens: use color to explain state, never as decoration. */
 .ui-surface { background: var(--card); border-color: var(--border); }
 .ui-eyebrow { color: #5146e5; }

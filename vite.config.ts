@@ -47,6 +47,9 @@ export default defineConfig(async ({ mode }) => {
   const notifyContentMaxChars =
     process.env.NOTIFY_CONTENT_MAX_CHARS || loadedEnv.NOTIFY_CONTENT_MAX_CHARS;
   const portalBaseUrl = process.env.PORTAL_BASE_URL || loadedEnv.PORTAL_BASE_URL;
+  const supabaseUrl = process.env.SUPABASE_URL || loadedEnv.SUPABASE_URL;
+  const supabaseServiceRoleKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY || loadedEnv.SUPABASE_SERVICE_ROLE_KEY;
   const quoApiKey = process.env.QUO_API_KEY || loadedEnv.QUO_API_KEY;
   const quoFromNumber = process.env.QUO_FROM_NUMBER || loadedEnv.QUO_FROM_NUMBER;
   const devCallPhone = process.env.DEV_CALL_PHONE || loadedEnv.DEV_CALL_PHONE;
@@ -142,6 +145,10 @@ export default defineConfig(async ({ mode }) => {
         ? { NOTIFY_CONTENT_MAX_CHARS: notifyContentMaxChars }
         : {}),
       ...(portalBaseUrl ? { PORTAL_BASE_URL: portalBaseUrl } : {}),
+      ...(supabaseUrl ? { SUPABASE_URL: supabaseUrl } : {}),
+      ...(supabaseServiceRoleKey
+        ? { SUPABASE_SERVICE_ROLE_KEY: supabaseServiceRoleKey }
+        : {}),
       ...(quoApiKey ? { QUO_API_KEY: quoApiKey } : {}),
       ...(quoFromNumber ? { QUO_FROM_NUMBER: quoFromNumber } : {}),
       ...(devCallPhone ? { DEV_CALL_PHONE: devCallPhone } : {}),

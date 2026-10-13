@@ -1,0 +1,233 @@
+{
+  "brand": {
+    "id": "11111111-2222-4333-8444-555555555555",
+    "name": "Northstar Pantry",
+    "initials": "NP",
+    "currentCp": "CP2",
+    "currentCpId": "CP2",
+    "status": "In Progress",
+    "handlingMode": "Human",
+    "lastInteractionAt": null,
+    "lastInteractionChannel": null,
+    "lastInteractionDirection": null,
+    "lastInteractionStatus": null,
+    "lastInteractionCallResult": null,
+    "lastReplyAt": null,
+    "ownerId": "am-ella",
+    "ownerName": "Ella",
+    "ownerEmail": "ella@example.com",
+    "priority": null,
+    "notes": null,
+    "humanNotes": "Preserved brand-level notes.",
+    "createdAt": "2026-08-13T00:00:00Z",
+    "lastEditedAt": "2026-10-01T00:00:00Z",
+    "currentCpFullName": "Sample Delivered to Owner",
+    "currentCpDefinition": "Owner confirmed receipt.",
+    "productDescription": "Premium pantry products",
+    "matchedCategory": "Food",
+    "icpGroup": "A",
+    "channelType": "DTC",
+    "followupExhibition": "SUPERZOO 2026",
+    "meetingNotes": [
+      {
+        "id": "legacy-meeting",
+        "title": "First Exhibition meeting",
+        "url": "https://www.notion.so/first-meeting",
+        "nfcCardUrl": null
+      }
+    ],
+    "aiMeetingLinks": [],
+    "contacts": [
+      {
+        "id": "contact-1",
+        "name": "Morgan Lee",
+        "role": "Owner",
+        "title": "Founder",
+        "contactRole": null,
+        "email": "morgan@example.com",
+        "phone": null,
+        "directPhone": null,
+        "officePhone": null,
+        "linkedin": null,
+        "emailValid": true,
+        "phoneValid": false,
+        "followupStatus": "In Progress",
+        "followupMode": "Manual",
+        "contactOrder": null,
+        "notes": "Do not use SMS.",
+        "lastInteractionAt": null
+      }
+    ],
+    "tasks": [],
+    "activities": [],
+    "followupHistory": {
+      "version": 3,
+      "projectionPending": false,
+      "relationshipSummary": "Morgan makes the final decision. The brand requested product information after trying the sample. Budget approval remains unverified.",
+      "rounds": [
+        {
+          "id": "round-2",
+          "brand_id": "11111111-2222-4333-8444-555555555555",
+          "round_number": 2,
+          "status": "Active",
+          "assigned_am_id": "am-ella",
+          "assigned_am_name": "Ella",
+          "origin_encounter_id": "enc-2",
+          "current_cp": "CP2",
+          "started_at": "2026-09-10T00:00:00Z",
+          "paused_at": null,
+          "completed_at": null,
+          "paused_reason": null,
+          "outcome": null,
+          "migrated": false,
+          "created_at": "2026-08-13T00:00:00Z",
+          "updated_at": "2026-08-28T00:00:00Z"
+        },
+        {
+          "id": "round-1",
+          "brand_id": "11111111-2222-4333-8444-555555555555",
+          "round_number": 1,
+          "status": "Completed",
+          "assigned_am_id": "am-peter",
+          "assigned_am_name": "Peter",
+          "origin_encounter_id": "enc-1",
+          "current_cp": "CP2",
+          "started_at": "2026-08-13T00:00:00Z",
+          "paused_at": null,
+          "completed_at": "2026-08-28T00:00:00Z",
+          "paused_reason": null,
+          "outcome": "Customer interested but not ready to proceed.",
+          "migrated": false,
+          "created_at": "2026-08-13T00:00:00Z",
+          "updated_at": "2026-08-28T00:00:00Z"
+        }
+      ],
+      "encounters": [
+        {
+          "id": "enc-1",
+          "brand_id": "11111111-2222-4333-8444-555555555555",
+          "round_id": "round-1",
+          "exhibition_id": "show-1",
+          "exhibition_name": "SUPERZOO 2026",
+          "meeting_at": "2026-08-13T00:00:00Z",
+          "met_by": "Peter",
+          "meeting_notes": "Customer is interested, but the budget is not approved.",
+          "key_changes": [
+            {
+              "type": "Objection",
+              "text": "Budget not approved.",
+              "source": "enc-1"
+            }
+          ],
+          "next_step": "Reconnect after budget review.",
+          "meeting_record_url": "https://www.notion.so/original-meeting-1",
+          "created_at": "2026-08-13T00:00:00Z"
+        },
+        {
+          "id": "enc-2",
+          "brand_id": "11111111-2222-4333-8444-555555555555",
+          "round_id": "round-2",
+          "exhibition_id": "show-2",
+          "exhibition_name": "Newtopia Now 2026",
+          "meeting_at": "2026-09-10T00:00:00Z",
+          "met_by": "Ella",
+          "meeting_notes": "Customer tried the sample and requested product information.",
+          "key_changes": [
+            {
+              "type": "Interest",
+              "text": "Customer has tried the sample and requested product information.",
+              "source": "enc-2"
+            }
+          ],
+          "next_step": "Send the product overview.",
+          "meeting_record_url": "https://www.notion.so/original-meeting-2",
+          "created_at": "2026-08-13T00:00:00Z"
+        },
+        {
+          "id": "enc-3",
+          "brand_id": "11111111-2222-4333-8444-555555555555",
+          "round_id": "round-2",
+          "exhibition_id": "show-2",
+          "exhibition_name": "Newtopia Now 2026",
+          "meeting_at": "2026-10-01T00:00:00Z",
+          "met_by": "Peter",
+          "meeting_notes": "Ella is now responsible for this follow-up. Decision maker confirmed an October review.",
+          "key_changes": [
+            {
+              "type": "Commitment",
+              "text": "Decision maker confirmed an October review.",
+              "source": "enc-3"
+            }
+          ],
+          "next_step": "Confirm the review agenda.",
+          "meeting_record_url": "https://www.notion.so/original-meeting-2",
+          "created_at": "2026-08-13T00:00:00Z"
+        }
+      ],
+      "assignments": [
+        {
+          "id": "assignment-1",
+          "round_id": "round-2",
+          "previous_am_id": "am-peter",
+          "previous_am_name": "Peter",
+          "new_am_id": "am-ella",
+          "new_am_name": "Ella",
+          "changed_by": "QA Admin",
+          "changed_at": "2026-09-15T00:00:00Z"
+        }
+      ],
+      "unreadEncounterCount": 1
+    },
+    "relationshipSummary": "Morgan makes the final decision. The brand requested product information after trying the sample. Budget approval remains unverified.",
+    "assignmentHistory": []
+  },
+  "cps": [],
+  "activities": [
+    {
+      "id": "activity-2",
+      "roundId": "round-2",
+      "brandId": "11111111-2222-4333-8444-555555555555",
+      "contactId": "contact-1",
+      "taskId": null,
+      "channel": "Email",
+      "direction": "Outbound",
+      "status": null,
+      "subject": "Round 2 product information",
+      "content": "Current round email content.",
+      "sender": "Ella",
+      "notes": null,
+      "callResult": null,
+      "sourceUrl": null,
+      "threadId": "thread-2",
+      "messageId": "msg-2",
+      "replyStatus": null,
+      "cpId": "CP2",
+      "cpAtInteraction": "CP2",
+      "createdAt": "2026-09-20T00:00:00Z",
+      "recordedAt": "2026-09-20T00:00:00Z"
+    },
+    {
+      "id": "activity-1",
+      "roundId": "round-1",
+      "brandId": "11111111-2222-4333-8444-555555555555",
+      "contactId": "contact-1",
+      "taskId": null,
+      "channel": "Email",
+      "direction": "Outbound",
+      "status": null,
+      "subject": "Round 1 product overview",
+      "content": "Original first-round email content.",
+      "sender": "Peter",
+      "notes": null,
+      "callResult": null,
+      "sourceUrl": null,
+      "threadId": "thread-1",
+      "messageId": "msg-1",
+      "replyStatus": null,
+      "cpId": "CP1",
+      "cpAtInteraction": "CP1",
+      "createdAt": "2026-08-20T00:00:00Z",
+      "recordedAt": "2026-08-20T00:00:00Z"
+    }
+  ]
+}

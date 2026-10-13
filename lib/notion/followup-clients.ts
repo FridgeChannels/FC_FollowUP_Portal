@@ -7,6 +7,7 @@ import {
   type BrandMeetingNote,
   type HandlingMode,
 } from "../brand-list";
+import { BRAND_AI_SUMMARY_PROPERTY, parseBrandAiSummaryStore } from "../brand-ai-summary";
 import {
   aiMeetingLinksPropertyName,
   parseAiMeetingLinks,
@@ -59,6 +60,7 @@ import {
 } from "./brand-list-order";
 import { DEFAULT_BRAND_PAGE_SIZE, followupClientListFilter, matchesNeedsReplyBrandScope, normalizeHandlingModeFilter, type NeedsReplyBrandScope } from "./owner-filter";
 import { listFollowupTasks, type TaskResolveHints } from "./tasks";
+import { optionalFollowupHistory } from "../followup-data";
 import { queryOwnerPages, retrieveOwner, type FollowupOwner } from "./owners";
 const HANDLING_MODES = new Set(["Automated", "Human"]);
 const OWNER_DIRECTORY_CACHE_MS = 60_000;
@@ -1235,9 +1237,9 @@ async function resolveMeetingNotes(pageIds: string[]): Promise<BrandMeetingNote[
       title: titleFromProperties(page.properties) || "Meeting note",
       url: notionPageUrl(page),
       nfcCardUrl: propertyText(page.properties?.["NFC Card URL"]) || null,
-      sortAt: notionDate(page.properties?.["Meeting Time"]) || page.last_edited_time || "",
+      sortAt: notionDate(page.properties?.["Meeting Time"]) || page.created_time || "",
     }))
-    .sort((a, b) => b.sortAt.localeCompare(a.sortAt) || a.title.localeCompare(b.title))
+    .sort((a, b) => a.sortAt.localeCompare(b.sortAt) || a.title.localeCompare(b.title))
     .map(({ id, title, url, nfcCardUrl }) => ({ id, title, url, nfcCardUrl }));
 }
 
@@ -1251,13 +1253,14 @@ export async function mapFollowupClientDetail(
   options: MapFollowupClientDetailOptions = {},
 ): Promise<BrandDetail> {
   const properties = page.properties || {};
-  const [brand, contacts, company, followupExhibition, meetingNotes, owners] = await Promise.all([
+  const [brand, contacts, company, followupExhibition, meetingNotes, owners, followupHistory] = await Promise.all([
     mapFollowupClientPage(page),
     listFollowupContacts(page.id, relationIds(properties["Follow-up Contacts"])),
     resolveClientCompany(firstRelationId(properties.Client)),
     resolveFollowupExhibition(page),
     resolveMeetingNotes(relationIds(properties["FC3.0-FollowUp-NotionAIMeetings"])),
     listOwnersForBrandMapping(),
+    optionalFollowupHistory(page.id),
   ]);
   const ownersById = new Map(owners.map((owner) => [owner.id, owner]));
   const assignmentHistory = brandAssignmentHistory(propertyText(properties.Notes))
@@ -1296,6 +1299,8 @@ export async function mapFollowupClientDetail(
   );
   return {
     ...brand,
+    followupHistory,
+    relationshipSummary: followupHistory.relationshipSummary || propertyText(properties["Portal Relationship Summary"]) || null,
     channelType: resolveChannelType({
       portal: propertyText(properties["Portal Channel Type"]),
       icpGroup: company.icpGroup,
@@ -1311,6 +1316,7 @@ export async function mapFollowupClientDetail(
     aiMeetingLinks: sortAiMeetingLinks(
       parseAiMeetingLinks(propertyText(properties[aiMeetingLinksPropertyName()])),
     ),
+    aiSummaries: parseBrandAiSummaryStore(propertyText(properties[BRAND_AI_SUMMARY_PROPERTY])),
     priority: propertyText(properties.Priority) || null,
     assignmentHistory,
     notes: propertyText(properties.Notes) || null,

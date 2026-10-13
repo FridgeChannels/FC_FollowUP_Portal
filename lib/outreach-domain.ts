@@ -45,6 +45,7 @@ export type ScheduledAction = {
   attachments?: import("./media-attachments").MediaAttachment[];
 };
 export type Interaction = {
+  roundId?: string | null;
   id: string; customerId: string; contactId?: string; bombInstanceId?: string; cp?: CPCode; type: "Message" | "Phone" | "Bomb" | "CP" | "Follow-up" | "Human" | "System";
   channel?: Channel; direction?: "Inbound" | "Outbound"; title: string; content: string; createdAt: string; outcome?: CallOutcome; recording?: string;
   /** Email CC (comma-separated), from ConversationDB. */

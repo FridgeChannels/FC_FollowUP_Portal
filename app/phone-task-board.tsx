@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { CheckCircle2, ChevronDown, ChevronRight, Phone, RotateCcw } from "lucide-react";
+import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
+import { CheckCircle2, ChevronDown, ChevronRight, Phone, RotateCcw, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 import { callReviewsFromTasks, type CallReviewResolution, type CallReviewStatus } from "@/lib/call-review-metadata";
 import {
@@ -17,6 +17,10 @@ import {
   type DialPhoneOption,
 } from "@/lib/dial-phones";
 import { parsePhoneCallContent } from "@/lib/phone-call-content";
+import { formatPhoneCallTime, groupPhoneCallsByDay, phoneCallOccurredAt, type PhoneCallDay } from "@/lib/phone-call-days";
+import type { CallerNotionReport } from "@/lib/caller-notion";
+import { useBrandNotion } from "./use-brand-notion";
+import { getDisplayTimeZone } from "@/lib/display-time";
 import { isCancelledTaskStatus, isClosedTaskStatus, type Contact, type Interaction } from "@/lib/outreach-domain";
 import { devCallPhoneOnClient } from "@/lib/quo/dev-call-phone";
 import { formatEasternDateTime } from "./bomb-plan";
@@ -220,15 +224,9 @@ function PhoneTaskStatusBadge({ status }: { status: string }) {
   return <Badge className={`rounded-full px-2 py-0.5 text-[10px] leading-none ${className}`}>{normalized}</Badge>;
 }
 
-function phoneTaskPriority(task: PhoneBoardTask) {
-  // Cancelled tasks are retained for auditability, but never interrupt the
-  // active Phone work queue—even when they have a historical review label.
-  if (isCancelledTaskStatus(task.status)) return 5;
-  if (task.callReviewStatus === "Unqualified") return 0;
-  if (task.status === "Pending") return 1;
-  if (task.status === "In Progress") return 2;
-  if (task.callReviewStatus === "Awaiting Review") return 3;
-  return 4;
+function phoneTaskTime(task: PhoneBoardTask) {
+  const time = Date.parse(task.dueAt || "");
+  return Number.isFinite(time) ? time : Number.NEGATIVE_INFINITY;
 }
 
 function formatReviewDay(iso?: string) {
@@ -347,6 +345,7 @@ export function UnqualifiedReviewDialog({
 }
 
 export function PhoneTaskBoard({
+  brandId,
   phoneTasks,
   contacts,
   timeline,
@@ -368,6 +367,7 @@ export function PhoneTaskBoard({
   submittingCallerReview = false,
   showDial = true,
 }: {
+  brandId?: string;
   phoneTasks: PhoneBoardTask[];
   contacts: Contact[];
   timeline: Interaction[];
@@ -391,12 +391,12 @@ export function PhoneTaskBoard({
 }) {
   const [reviewingTaskId, setReviewingTaskId] = useState<string | null>(null);
   const reviews = callReviewsFromTasks(phoneTasks);
+  const notion = useBrandNotion(brandId);
 
   const tasks = useMemo(() => {
     const byId = new Map(phoneTasks.map((item) => [item.id, item]));
     return [...byId.values()].sort((left, right) =>
-      phoneTaskPriority(left) - phoneTaskPriority(right)
-      || (left.dueAt || "").localeCompare(right.dueAt || "")
+      phoneTaskTime(right) - phoneTaskTime(left)
       || left.id.localeCompare(right.id),
     );
   }, [phoneTasks]);
@@ -447,6 +447,9 @@ export function PhoneTaskBoard({
       }).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
       return <PhoneTaskBlock
         key={item.id}
+        reports={notion.reports}
+        notionLoading={notion.loading}
+        notionError={!!notion.error}
         task={item}
         contact={taskContact}
         active={active}
@@ -506,7 +509,73 @@ export function PhoneTaskBoard({
   </div>;
 }
 
+function CallDayGroup({
+  day,
+  latest,
+  highlighted,
+  report,
+  notionLoading,
+  notionError,
+  showNotion,
+  children,
+}: {
+  report?: CallerNotionReport;
+  notionLoading?: boolean;
+  notionError?: boolean;
+  showNotion?: boolean;
+  day: PhoneCallDay<Interaction>;
+  latest: boolean;
+  highlighted: boolean;
+  children: ReactNode;
+}) {
+  const contentId = useId();
+  // New dates follow the default; an explicit toggle survives Quo refreshes.
+  const [openOverride, setOpenOverride] = useState<boolean>();
+  const open = openOverride ?? (latest || highlighted || day.key === "unknown");
+  const results = new Map<string, number>();
+  day.items.forEach((item) => {
+    const result = item.callResult || "Pending result";
+    results.set(result, (results.get(result) || 0) + 1);
+  });
+  return <section className={`overflow-hidden rounded-xl border ${latest ? "border-blue-200" : "border-slate-200"}`}>
+    <div className={`flex flex-wrap items-center ${latest ? "bg-blue-50/70" : "bg-slate-50/70"}`}>
+    <button
+      type="button"
+      aria-expanded={open}
+      aria-controls={contentId}
+      onClick={() => setOpenOverride(!open)}
+      className={`flex min-w-0 flex-1 basis-52 items-start gap-3 px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 ${latest ? "bg-blue-50/70 hover:bg-blue-50" : "bg-slate-50/70 hover:bg-slate-100"}`}
+    >
+      {open ? <ChevronDown aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-slate-600"/> : <ChevronRight aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-slate-600"/>}
+      <span className="min-w-0 flex-1">
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="text-sm font-semibold tabular-nums text-slate-900">{day.label}</span>
+          {day.weekday ? <span className="text-xs text-slate-500">{day.weekday}</span> : null}
+          {latest ? <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-800">Latest</span> : null}
+        </span>
+        {!open ? <span className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+          {[...results].map(([result, count]) => <span key={result} className={result === "Connected" ? "font-medium text-emerald-700" : "text-slate-600"}>{count} {result}</span>)}
+        </span> : null}
+      </span>
+      <span className="shrink-0 pt-0.5 text-xs tabular-nums text-slate-600">{day.items.length} call{day.items.length === 1 ? "" : "s"}</span>
+    </button>
+    {showNotion && day.key !== "unknown" ? <div className="px-4 pb-3 pt-1 sm:py-3">
+      {report ? <a href={report.url} target="_blank" rel="noopener noreferrer" title={report.title} className="inline-flex items-center gap-1.5 rounded-md text-xs font-semibold text-violet-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">{report.callerName} · {report.pageId.startsWith("mock-") ? "Mock Notion" : "Notion"} <ExternalLink aria-hidden="true" className="size-3.5"/></a>
+        : <span className="text-[11px] text-slate-500">{notionLoading ? "Loading Notion…" : notionError ? "Notion unavailable" : "Notion not linked"}</span>}
+    </div> : null}
+    </div>
+    <div id={contentId} hidden={!open} className="space-y-3 border-t border-slate-100 bg-slate-50/40 p-3">
+      {children}
+    </div>
+  </section>;
+}
+
 function CallResultList({
+  reports,
+  notionLoading,
+  notionError,
+  renderContext,
+  compactSelection = false,
   items,
   emptyLabel,
   onRefreshQuo,
@@ -516,6 +585,11 @@ function CallResultList({
   onSelectCall,
   highlightedCallId,
 }: {
+  reports?: CallerNotionReport[];
+  notionLoading?: boolean;
+  notionError?: boolean;
+  renderContext?: (item: Interaction) => ReactNode;
+  compactSelection?: boolean;
   items: Interaction[];
   emptyLabel: string;
   onRefreshQuo?: (callId: string) => void;
@@ -528,27 +602,38 @@ function CallResultList({
   if (!items.length) {
     return <p className="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-5 text-sm text-slate-500">{emptyLabel}</p>;
   }
-  const cards = items.map((item) => {
+  const timeZone = getDisplayTimeZone();
+  const days = groupPhoneCallsByDay(items, timeZone);
+  const latestDay = days.find((day) => day.key !== "unknown")?.key;
+  const renderCard = (item: Interaction) => {
+    const occurredAt = phoneCallOccurredAt(item);
     const callId = item.quo?.callId;
     const selected = selectable && !!callId && selectedCallId === callId;
     const highlighted = !!callId && highlightedCallId === callId;
     const card = <article id={highlighted ? `call-${callId}` : undefined} className={`rounded-xl border bg-white p-4 ${highlighted ? "border-blue-400 ring-2 ring-blue-100" : selectable && selected ? "border-amber-400 ring-2 ring-amber-200" : "border-slate-200"} ${selectable && callId ? "cursor-pointer" : ""}`}>
+      {renderContext?.(item)}
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           {selectable ? <RadioGroupItem value={callId || item.id} disabled={!callId} /> : null}
           <Badge variant="secondary" className="text-[10px]">{item.direction || "Outbound"}</Badge>
-          {item.callResult ? <Badge variant="outline" className="text-[10px]">{item.callResult}</Badge> : null}
+          {item.callResult ? <Badge variant="outline" className={`text-[10px] ${item.callResult === "Connected" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : ""}`}>{item.callResult}</Badge> : null}
         </div>
-        <time dateTime={item.createdAt} className="font-mono text-[11px] text-slate-500">{formatEasternDateTime(item.createdAt)}</time>
+        <time dateTime={occurredAt || undefined} title={formatEasternDateTime(occurredAt)} className="text-xs tabular-nums text-slate-600">{compactSelection ? formatEasternDateTime(occurredAt) || "Time unavailable" : formatPhoneCallTime(occurredAt, timeZone)}</time>
       </div>
-      <QuoCallPanel
+      {!compactSelection ? <QuoCallPanel
         compact
         data={item.quo || null}
         refreshing={quoRefreshingCallId === callId}
         onRefresh={canRefreshQuo(callId, onRefreshQuo) ? () => onRefreshQuo?.(callId!) : undefined}
-      />
+      /> : <span className="break-all text-[11px] text-slate-500">Call ID · {callId}</span>}
     </article>;
     return selectable ? <label key={item.id} className="block">{card}</label> : <div key={item.id}>{card}</div>;
+  };
+  const cards = compactSelection ? days.flatMap((day) => day.items.map(renderCard)) : days.map((day) => {
+    const highlighted = !!highlightedCallId && day.items.some((item) => item.quo?.callId === highlightedCallId);
+    return <CallDayGroup key={`${day.key}:${highlighted ? highlightedCallId : ""}`} day={day} latest={day.key === latestDay} highlighted={highlighted} report={reports?.find((report) => report.date === day.key)} showNotion={!!reports} notionLoading={notionLoading} notionError={notionError}>
+      {day.items.map(renderCard)}
+    </CallDayGroup>;
   });
   if (!selectable) return <div className="space-y-3">{cards}</div>;
   return <RadioGroup className="gap-3" value={selectedCallId || ""} onValueChange={(value) => onSelectCall?.(value)}>
@@ -594,6 +679,9 @@ function ReviewDecision({ round }: { round: ReviewRoundDisplay }) {
 }
 
 function ReviewRoundCard({
+  reports,
+  notionLoading,
+  notionError,
   round,
   calls,
   current = false,
@@ -607,6 +695,9 @@ function ReviewRoundCard({
   highlightedCallId,
   children,
 }: {
+  reports?: CallerNotionReport[];
+  notionLoading?: boolean;
+  notionError?: boolean;
   round: ReviewRoundDisplay;
   calls: Interaction[];
   current?: boolean;
@@ -645,7 +736,7 @@ function ReviewRoundCard({
             </div>
             <span className="text-[11px] text-slate-400">{calls.length} call{calls.length === 1 ? "" : "s"}</span>
           </div>
-          <CallResultList
+          {<CallResultList
             items={calls}
             emptyLabel={emptyLabel}
             onRefreshQuo={onRefreshQuo}
@@ -654,7 +745,10 @@ function ReviewRoundCard({
             selectedCallId={selectedCallId}
             onSelectCall={onSelectCall}
             highlightedCallId={highlightedCallId}
-          />
+            reports={reports}
+            notionLoading={notionLoading}
+            notionError={notionError}
+          />}
         </div>
       ) : null}
       {!inProgress && round.status !== "Archived" ? <ReviewDecision round={round}/> : null}
@@ -664,6 +758,9 @@ function ReviewRoundCard({
 }
 
 function PhoneTaskBlock({
+  reports,
+  notionLoading,
+  notionError,
   task,
   contact,
   active,
@@ -687,6 +784,9 @@ function PhoneTaskBlock({
   onSubmitCallerReview,
   submittingCallerReview = false,
 }: {
+  reports?: CallerNotionReport[];
+  notionLoading?: boolean;
+  notionError?: boolean;
   task: PhoneBoardTask;
   contact?: Contact;
   active: boolean;
@@ -749,7 +849,7 @@ function PhoneTaskBlock({
         ? "You can keep calling for this task until it is complete, or submit this task for review now."
         : "Complete a connected call for this task before submitting it for review.";
 
-  return <section className={`rounded-2xl border p-5 ${active ? "border-blue-300 bg-blue-50/70 shadow-sm" : "border-slate-200 bg-slate-50/70"}`}>
+  return <section id={`phone-task-${task.id}`} className={`rounded-2xl border p-5 ${active ? "border-blue-300 bg-blue-50/70 shadow-sm" : "border-slate-200 bg-slate-50/70"}`}>
     <div className="flex flex-wrap items-start justify-between gap-4">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
@@ -793,6 +893,9 @@ function PhoneTaskBlock({
     {currentCalls.length || (showCallerReview && currentRound.recalled) ? (
     <div className="mt-5">
       <ReviewRoundCard
+        reports={reports}
+        notionLoading={notionLoading}
+        notionError={notionError}
         current
         round={currentRound}
         calls={currentCalls}
@@ -878,6 +981,9 @@ function PhoneTaskBlock({
         {historyOpen ? <div className="space-y-3 border-t border-slate-100 px-4 py-4">
           {historyCalls.map(({ round, calls }) => (
             <ReviewRoundCard
+              reports={reports}
+              notionLoading={notionLoading}
+              notionError={notionError}
               key={`${round.round}-${round.reviewedAt || round.submittedAt || "past"}`}
               round={round}
               calls={calls}

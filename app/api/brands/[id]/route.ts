@@ -9,6 +9,9 @@ import { updateFollowupClient } from "@/lib/notion/followup-writes";
 import { encodeFollowUpReminder } from "@/lib/followup-reminder";
 import { encodeBrandAssignment } from "@/lib/brand-assignment";
 import type { AmazonSampleProduct, ChannelType } from "@/lib/sample-product";
+import { FOLLOW_UP_STATUSES } from "@/lib/brand-list";
+import { followupHistory, mutateFollowup, projectFollowupState, seedFollowupHistory } from "@/lib/followup-data";
+import { FollowupError } from "@/lib/followup-history";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -42,6 +45,15 @@ export async function GET(request: Request, { params }: Params) {
     if (!canViewBrand(viewer, brand, brand.tasks)) {
       return Response.json({ error: "You do not have access to this brand" }, { status: 403 });
     }
+    try {
+      await seedFollowupHistory(page);
+      if (await projectFollowupState(page.id)) Object.assign(brand, await mapDetailWithReplySignal(await retrievePage(page.id)));
+      brand.followupHistory = await followupHistory(page.id);
+    } catch (error) {
+      // Rollout compatibility: brand/profile/conversations remain readable even
+      // before the additive migration or during a history-provider outage.
+      brand.followupHistory = { ...(brand.followupHistory || { version: 0, rounds: [], encounters: [], assignments: [], projectionPending: false }), unavailable: error instanceof Error ? error.message : "History unavailable" };
+    }
     return Response.json({ brand, cps });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
@@ -69,6 +81,8 @@ export async function PATCH(request: Request, { params }: Params) {
       channelType?: ChannelType;
       amazonSampleProduct?: AmazonSampleProduct;
       assignmentHandled?: boolean;
+      expectedVersion?: number;
+      expectedRoundId?: string | null;
     };
     const page = await retrievePage(id);
     const brand = await mapFollowupClientPage(page);
@@ -78,6 +92,15 @@ export async function PATCH(request: Request, { params }: Params) {
     if (body.ownerId !== undefined && !canAssignBrandOwner(viewer)) {
       return Response.json({ error: "Only Admin can assign Owner" }, { status: 403 });
     }
+    if (body.status !== undefined && (!body.status || !FOLLOW_UP_STATUSES.includes(body.status as typeof FOLLOW_UP_STATUSES[number]))) throw new FollowupError("Invalid follow-up status");
+    if (body.ownerId !== undefined && body.ownerId !== null && typeof body.ownerId !== "string") throw new FollowupError("Invalid Account Manager");
+    if (body.handlingMode !== undefined && body.handlingMode !== "Human" && body.handlingMode !== "Automated") throw new FollowupError("Invalid handling mode");
+    if (body.channelType !== undefined && !["DTC", "Amazon", "DTC&Amazon"].includes(body.channelType)) throw new FollowupError("Invalid channel type");
+    if ([body.note, body.humanNotes, body.evidence].some(value=>value!=null&&typeof value!=="string")) throw new FollowupError("Notes must be text");
+    if (body.currentCpId !== undefined && body.currentCpId !== null && typeof body.currentCpId !== "string") throw new FollowupError("Invalid Current CP");
+    if (body.expectedVersion !== undefined && (!Number.isInteger(body.expectedVersion)||body.expectedVersion<0)) throw new FollowupError("Invalid history version");
+    if (body.expectedRoundId !== undefined && body.expectedRoundId !== null && typeof body.expectedRoundId !== "string") throw new FollowupError("Invalid Round ID");
+    if (body.amazonSampleProduct !== undefined && (body.ownerId !== undefined || body.status !== undefined || body.currentCpId !== undefined)) throw new FollowupError("Save sample product changes separately from follow-up changes");
     if (body.assignmentHandled && viewer.ownerId !== brand.ownerId) {
       return Response.json({ error: "Only the assigned Account Manager can review this assignment" }, { status: 403 });
     }
@@ -135,7 +158,7 @@ export async function PATCH(request: Request, { params }: Params) {
       ? [propertyText(page.properties?.Notes) || null, ...extras].filter(Boolean).join("\n")
       : undefined;
 
-    await updateFollowupClient(id, {
+    const patch = {
       currentCpId: body.currentCpId,
       ownerId: body.ownerId,
       status: body.status,
@@ -144,7 +167,18 @@ export async function PATCH(request: Request, { params }: Params) {
       humanNotes: body.humanNotes,
       channelType: body.channelType,
       amazonSampleProduct: body.amazonSampleProduct,
-    });
+    };
+    if (body.ownerId !== undefined || body.status !== undefined || body.currentCpId !== undefined) {
+      // Keep the existing assignment marker and reminders for existing inboxes;
+      // the transaction additionally preserves their Round attribution.
+      await mutateFollowup(page, "patch", {
+        ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)),
+        note: body.note, followUpAt: body.followUpAt,
+        changedBy: viewer.name || viewer.email,
+        ...(body.expectedVersion !== undefined ? { expectedVersion: body.expectedVersion } : {}),
+        ...(body.expectedRoundId !== undefined ? { expectedRoundId: body.expectedRoundId } : {}),
+      });
+    } else await updateFollowupClient(id, patch);
     const updatedPage = await retrievePage(id);
     const [updated, cps] = await Promise.all([
       mapDetailWithReplySignal(updatedPage),
@@ -153,7 +187,7 @@ export async function PATCH(request: Request, { params }: Params) {
     return Response.json({ brand: updated, cps });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
-    const status = /^(Invalid channel type|Invalid Amazon product details|Enter a valid|Product details are too long|A note is required)/.test(message)
+    const status = error instanceof FollowupError ? error.status : /^(Invalid channel type|Invalid Amazon product details|Enter a valid|Product details are too long|A note is required)/.test(message)
       ? 400
       : message.includes("404") ? 404 : 500;
     return Response.json({ error: message }, { status });

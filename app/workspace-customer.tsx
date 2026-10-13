@@ -1,14 +1,15 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, Bomb, CalendarPlus, ChevronRight, CircleAlert, CircleCheck, CirclePause, ContactRound, ExternalLink, FileText, History, Loader2, MessageSquareText, MoreHorizontal, PanelRightClose, Plus, Search, Send, StickyNote, UserCheck } from "lucide-react";
+import { ArrowLeft, Bomb, CalendarPlus, ChevronRight, CircleAlert, CircleCheck, CirclePause, ContactRound, ExternalLink, FileText, History, Loader2, MessageSquareText, MoreHorizontal, PanelRightClose, Plus, Save, Search, Send, StickyNote, UserCheck } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "./workspace-store";
 import { cacheBrandItem, getCachedBrand, requestBrandListPageRefresh } from "@/lib/brand-list-cache";
 import { currentCpOption, FOLLOW_UP_STATUSES, keyPersonNotionUrl, listCurrentCps, type BrandActivity, type BrandAiMeetingLink, type BrandContact, type BrandDetail, type BrandMeetingNote, type BrandTask, type CurrentCpOption } from "@/lib/brand-list";
-import type { BombDetail, BombListItem } from "@/lib/bomb-list";
+import type { BombDetail, BombListItem, BombScenario } from "@/lib/bomb-list";
 import { ActionStatus, BombInstance, Channel, Contact, CPCode, Customer, dateOnly, Interaction, ScheduledAction, WorkspaceState, compareInteractionSort, interactionCpCode, uid } from "@/lib/outreach-domain";
 import { brandDetailMetadata } from "@/lib/page-metadata";
 import { usePageMetadata } from "./use-page-metadata";
@@ -33,7 +34,8 @@ import { SendTimingToggle, type DeliveryMode } from "./send-timing-toggle";
 import { BrandNote } from "./brand-note";
 import { MessageMediaInputFrame, MessageMediaPreview, MessageMediaThumbnails, useMessageMedia } from "./message-media";
 import type { MediaAttachment } from "@/lib/media-attachments";
-import { buildTemplateVariableContext, ownerNameFromContacts, resolveLaunchStepCopy } from "@/lib/template-variables";
+import { buildTemplateVariableContext, ownerNameFromContacts, resolveLaunchStepCopy, restoreTemplateVariables } from "@/lib/template-variables";
+import { formatPhoneScriptSections, parsePhoneScriptSections, PHONE_SCRIPT_SECTIONS, phoneScriptSectionsComplete } from "@/lib/phone-script-sections";
 import { brandHasActiveOmniReach } from "@/lib/notion/reply-inbox";
 import { buildInteractionCpFallbacks, resolveInteractionDisplayCp } from "@/lib/interaction-cp";
 import { channelAvailable } from "@/lib/channel-availability";
@@ -46,6 +48,10 @@ import type { SignalEvent } from "@/lib/signals/model";
 import { emailSignalMatchesInteraction } from "@/lib/signals/match";
 import { MOCK_PETER_SIGNAL_BRAND_ID } from "@/lib/signals/mock";
 import { withoutBrandAssignmentRecords } from "@/lib/brand-assignment";
+import { summaryForScope, type BrandAiSummaryScope, type BrandAiSummaryStore } from "@/lib/brand-ai-summary";
+import { FollowupHistoryPanel, RoundStatusBadge } from "./followup-history-panel";
+import { emptyFollowupHistory, hasFollowupHistory } from "@/lib/followup-history";
+import { signalFollowUps, signalFollowUpTime, type SignalFollowUp } from "@/lib/brand-ai-signal-followups";
 
 const show=(r:{ok:boolean;message:string})=>r.ok?toast.success(r.message):toast.error(r.message);
 const hasCjk=(value?:string|null)=>/[\u4e00-\u9fff]/.test(value||"");
@@ -530,6 +536,7 @@ export function toInteractions(
   );
   return resolved.map(({ item, cp }) => ({
     id: item.id,
+    roundId: item.roundId,
     customerId,
     contactId: item.contactId || undefined,
     bombInstanceId: activityInstanceIds[item.id],
@@ -593,7 +600,7 @@ export function toCustomerContacts(contacts: BrandContact[]): Contact[] {
 }
 
 const ACTIVITY_PAGE_SIZE = 50;
-type BrandDetailsTab = "details" | "contacts" | "notes" | "plan" | "signalHistory";
+type BrandDetailsTab = "followupHistory" | "details" | "contacts" | "notes" | "plan" | "signalHistory";
 
 export function BrandDetail({customerId}:{customerId:string}){
   const {state,can,assignBrand,cancelBomb}=useWorkspace();
@@ -605,7 +612,9 @@ export function BrandDetail({customerId}:{customerId:string}){
   const requestedWorkTask=searchParams.get("workTask");
   const requestedNewAssignment=searchParams.get("newAssignment")==="1";
   const requestedSignalHistory=searchParams.get("tab")==="signalHistory";
+  const requestedFollowupHistory=searchParams.get("followupHistory")==="1";
   const mockDetailPreview=process.env.NODE_ENV!=="production"&&searchParams.get("mock")==="1"&&customerId===MOCK_PETER_SIGNAL_BRAND_ID;
+  const aiSummaryDemo=customerId==="ai-summary-demo"&&searchParams.get("aiSummaryDemo")==="1";
   const requestedReturnTo=searchParams.get("returnTo");
   const brandListReturnTo=requestedReturnTo==="/customers"||requestedReturnTo?.startsWith("/customers?")||requestedReturnTo==="/signals"||requestedReturnTo?.startsWith("/signals?")
     ? requestedReturnTo
@@ -618,14 +627,22 @@ export function BrandDetail({customerId}:{customerId:string}){
     }
     router.replace(backPath);
   };
-  const [launch,setLaunch]=useState(false); const [reply,setReply]=useState(false); const [cp,setCP]=useState(false); const [contact,setContact]=useState(false); const [ownerDraft,setOwnerDraft]=useState<string>();
-  const [detailsTab,setDetailsTab]=useState<BrandDetailsTab|null>(requestedSignalId||requestedNewAssignment?"details":requestedSignalHistory?"signalHistory":null);
+  const [launch,setLaunch]=useState(false); const [reply,setReply]=useState(false); const [cp,setCP]=useState(false); const [contact,setContact]=useState(false); const [ownerDraft,setOwnerDraft]=useState<string>(); const [aiSummaryOpen,setAiSummaryOpen]=useState(false);
+  const [detailsTab,setDetailsTab]=useState<BrandDetailsTab|null>(requestedFollowupHistory?"followupHistory":requestedSignalId||requestedNewAssignment?"details":requestedSignalHistory?"signalHistory":null);
   const [sampleProfiles,setSampleProfiles]=useState<Array<{sn:string;profile:MagnetBrandParam|null}>>([]);
   const [attentionTarget,setAttentionTarget]=useState<{cp:CPCode;channel:Channel}|null>(null);
   const [creatingMeeting,setCreatingMeeting]=useState(false);
   const [followUpAction,setFollowUpAction]=useState<"Paused"|"Completed"|null>(null);
   const [followUpNote,setFollowUpNote]=useState("");
   const [followUpAt,setFollowUpAt]=useState("");
+  const [newRoundOpen,setNewRoundOpen]=useState(false);
+  const [newRoundOwner,setNewRoundOwner]=useState<string>("unassigned");
+  const [newRoundOrigin,setNewRoundOrigin]=useState<string>("none");
+  const [conversationRound,setConversationRound]=useState<{id:string;number:number}|null>(null);
+  const [roundActivities,setRoundActivities]=useState<BrandActivity[]>([]);
+  const [roundLoading,setRoundLoading]=useState(false);
+  const [roundCursor,setRoundCursor]=useState<string|null>(null);
+  const roundRequestId=useRef(0);
   const [focusedEmailInteractionId,setFocusedEmailInteractionId]=useState<string|null>(null);
   const [focusedWorkInteractionId,setFocusedWorkInteractionId]=useState<string|null>(null);
   const [activeSignalId,setActiveSignalId]=useState<string|null>(null);
@@ -664,6 +681,12 @@ export function BrandDetail({customerId}:{customerId:string}){
   const [quoRefreshingCallId,setQuoRefreshingCallId]=useState<string|null>(null);
   useEffect(()=>{
     setOwnerDraft(undefined);
+    setNewRoundOpen(false);
+    roundRequestId.current+=1;
+    setConversationRound(null);
+    setRoundActivities([]);
+    setRoundCursor(null);
+    setAiSummaryOpen(false);
     setFocusedEmailInteractionId(null);
     setFocusedWorkInteractionId(null);
     setActiveSignalId(null);
@@ -711,15 +734,6 @@ export function BrandDetail({customerId}:{customerId:string}){
   const emailSignals=(brandSignals?.events||[]).filter(event=>event.type==="email");
   const requestedSignal=brandSignals?.events.find(event=>event.id===requestedSignalId);
   const requestedSignalType=requestedSignal?.type;
-  useEffect(()=>{
-    if(!requestedSignalType)return;
-    const readId=requestedSignal?.signalReadId||requestedSignal?.id;
-    if(readId) readSignalEvents([readId]);
-    setActiveSignalId(requestedSignal.id);
-    setDetailsTab("signalHistory");
-    const target="brand-important-signals";
-    requestAnimationFrame(()=>document.getElementById(target)?.scrollIntoView({block:"center",behavior:"smooth"}));
-  },[requestedSignalId,requestedSignalType,requestedSignal]);
   function readSignalEvents(eventIds:string[]){
     if(!brandSignals||!eventIds.length)return;
     const requested=new Set(eventIds);
@@ -737,22 +751,31 @@ export function BrandDetail({customerId}:{customerId:string}){
       body:JSON.stringify({action:"read",eventIds:snapshot}),
     }).then(response=>{if(response.ok)settleSignals(customerId,snapshot);}).catch(()=>{});
   }
+  useEffect(()=>{
+    if(!requestedSignalType)return;
+    const readId=requestedSignal?.signalReadId||requestedSignal?.id;
+    if(readId) readSignalEvents([readId]);
+    setActiveSignalId(requestedSignal.id);
+    setDetailsTab("signalHistory");
+    const target="brand-important-signals";
+    requestAnimationFrame(()=>document.getElementById(target)?.scrollIntoView({block:"center",behavior:"smooth"}));
+  },[requestedSignalId,requestedSignalType,requestedSignal]);
   const isAdmin=state.currentRole==="Admin";
   const manager=isAdmin||state.currentRole==="AccountManager";
-  const mockCustomer:Customer|undefined=mockDetailPreview?{
+  const mockCustomer:Customer|undefined=(mockDetailPreview||aiSummaryDemo)?{
     id:customerId,
-    name:"Test FridgeChannel Peter",
-    initials:"TP",
+    name:"Northstar Pantry · AI Summary Demo",
+    initials:"NP",
     cp:"CP2",
     status:"Waiting for Reply",
-    source:"Signal mock preview",
+    source:"AI summary demo",
     ownerId:state.currentUserId,
     contacts:[{
-      id:"mock-test-peter-contact",
-      name:"Peter Test",
+      id:"mock-ai-summary-contact",
+      name:"Morgan Lee",
       role:"Owner",
-      title:"Founder",
-      email:"peter@testfridgechannel.example",
+      title:"Co-founder",
+      email:"morgan@northstarpantry.example",
       preferredChannel:"Email",
       emailValid:true,
       phoneValid:false,
@@ -934,7 +957,7 @@ export function BrandDetail({customerId}:{customerId:string}){
   const notionBacked=!local&&!!remote;
   const contactsLoading=notionBacked&&!brandReady;
   const activityLoading=notionBacked&&(!brandReady||!activitiesReady||activitiesLoading);
-  const visible=!!c&&(local?(manager||c.ownerId===state.currentUserId):!!remote);
+  const visible=!!c&&(aiSummaryDemo||(local?(manager||c.ownerId===state.currentUserId):!!remote));
   usePageMetadata(brandDetailMetadata(visible&&c?{name:c.name,cp:notionBacked&&remote?remote.currentCp:c.cp,status:c.status,source:c.source}:null));
   if(remoteLoading&&!c)return <div className="grid min-h-[60vh] place-items-center gap-2 text-sm text-slate-500"><Spinner className="size-5 text-slate-400"/>Loading brand…</div>;
   if(!visible||!c)return <div className="grid min-h-[60vh] place-items-center"><div className="text-center"><CircleAlert className="mx-auto mb-3 size-8 text-slate-300"/><h1 className="font-bold">Brand not found</h1><Button variant="link" onClick={returnToList}>{backLabel}</Button></div></div>;
@@ -944,7 +967,7 @@ export function BrandDetail({customerId}:{customerId:string}){
       : owners)
     : state.users.filter(u=>["Admin","AccountManager"].includes(u.role)).map(u=>({id:u.id,name:u.name}));
   const patchBrand=async (body:Record<string,unknown>)=>{
-    const response=await fetch(`/api/brands/${c.id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    const response=await fetch(`/api/brands/${c.id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({...body,...(remote?.followupHistory&&!remote.followupHistory.unavailable?{expectedVersion:remote.followupHistory.version,expectedRoundId:remote.followupHistory.rounds[0]?.id||null}:{})})});
     const payload=await response.json() as {brand?:BrandDetail;cps?:CurrentCpOption[];error?:string};
     if(!response.ok||!payload.brand)throw new Error(payload.error||"Update failed");
     applyRemote(payload.brand,payload.cps||remoteCps);
@@ -1049,7 +1072,7 @@ export function BrandDetail({customerId}:{customerId:string}){
   };
   const partnershipContext=c.partnershipContext;
   const summary=notionBacked
-    ? currentCpOption(remote?.currentCp).definition
+    ? remote?.relationshipSummary || remote?.aiSummaries?.overall?.content || "No saved relationship summary yet."
     : state.cps.find(x=>x.code===c.cp)?.goal||"—";
   const sendBrandMessage = async (
     contactId: string,
@@ -1104,7 +1127,47 @@ export function BrandDetail({customerId}:{customerId:string}){
     document.getElementById("brand-conversations")?.scrollIntoView({block:"start",behavior:"smooth"});
   };
   const firstNeedsReply=interactions.find(item=>item.direction==="Inbound"&&item.replyStatus==="Needs Reply");
-  const firstOverdue=interactions.find(item=>remote?.activities.some(activity=>activity.id===item.id&&activity.direction==="Inbound"&&activity.replyStatus==="Needs Reply"&&activity.replyDueAt&&Date.parse(activity.replyDueAt)<Date.now()));
+  const history=remote?.followupHistory||emptyFollowupHistory();
+  const latestRound=history.rounds[0];
+  const hasHistory=hasFollowupHistory(history,remote?.meetingNotes.length||0,remote?.assignmentHistory?.length||0);
+  const visibleInteractions=conversationRound?toInteractions(c.id,roundActivities,bombPlan?.activityInstanceIds,remote?.tasks||[],bombPlan?.bombInstances||[]).sort((a,b)=>compareInteractionSort(b,a)):interactions;
+  const openFollowupHistory=async ()=>{
+    setDetailsTab("followupHistory");
+    if(!notionBacked)return;
+    try{
+      const response=await fetch(`/api/brands/${encodeURIComponent(c.id)}/followup`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"read"})});
+      const payload=await response.json() as {brand?:BrandDetail;error?:string};
+      if(!response.ok)throw new Error(payload.error||"Unable to review history");
+      if(payload.brand)applyRemote(payload.brand,remoteCps);
+    }catch(error){toast.error(error instanceof Error?error.message:"Unable to review history");}
+  };
+  const runRoundAction=async (action:"start"|"resume")=>{
+    setSaving(true);
+    try{
+      const response=await fetch(`/api/brands/${encodeURIComponent(c.id)}/followup`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action,expectedVersion:history.version,expectedRoundId:latestRound?.id||null,...(action==="start"?{...(can("assignOwner")?{ownerId:newRoundOwner==="unassigned"?null:newRoundOwner}:{}),originEncounterId:newRoundOrigin==="none"?undefined:newRoundOrigin}:{})})});
+      const payload=await response.json() as {brand?:BrandDetail;error?:string};
+      if(!response.ok||!payload.brand)throw new Error(payload.error||"Follow-up action failed");
+      applyRemote(payload.brand,remoteCps);setOwnerDraft(undefined);setNewRoundOpen(false);setConversationRound(null);
+      toast.success(action==="resume"?"Follow-up resumed at the same CP":"New Round started");
+    }catch(error){toast.error(error instanceof Error?error.message:"Follow-up action failed");}
+    finally{setSaving(false);}
+  };
+  const openRoundConversations=async (id:string,number:number,cursor?:string)=>{
+    const requestId=++roundRequestId.current;
+    setConversationRound({id,number});setFocusedWorkInteractionId(null);setFocusedEmailInteractionId(null);setAttentionTarget(null);
+    if(!cursor)setRoundActivities([]);
+    setRoundLoading(true);
+    try{
+      const query=new URLSearchParams({roundId:id,limit:String(ACTIVITY_PAGE_SIZE),...(cursor?{cursor}:{})});
+      const response=await fetch(`/api/brands/${encodeURIComponent(c.id)}/activities?${query}`);
+      const payload=await response.json() as {activities?:BrandActivity[];nextCursor?:string|null;error?:string};
+      if(requestId!==roundRequestId.current)return;
+      if(!response.ok)throw new Error(payload.error||"Unable to load Round conversations");
+      setRoundActivities(previous=>cursor?[...previous,...(payload.activities||[])]:payload.activities||[]);
+      setRoundCursor(payload.nextCursor||null);
+    }catch(error){if(requestId===roundRequestId.current)toast.error(error instanceof Error?error.message:"Unable to load Round conversations");}
+    finally{if(requestId===roundRequestId.current)setRoundLoading(false);}
+  };
   const detailTabs=[
     {id:"details" as const,label:"Brand details",icon:FileText},
     {id:"contacts" as const,label:"Contacts",icon:ContactRound},
@@ -1117,9 +1180,10 @@ export function BrandDetail({customerId}:{customerId:string}){
       <Button type="button" variant="ghost" size="icon" aria-label={backLabel} onClick={returnToList}><ArrowLeft className="size-4"/></Button>
       <Avatar className="size-9"><AvatarFallback className="bg-violet-100 text-xs font-bold text-violet-700">{c.initials}</AvatarFallback></Avatar>
       <div className="flex min-w-0 flex-1 items-center gap-2"><h1 className="min-w-0 truncate text-lg font-semibold text-slate-950">{c.name}</h1>{notionBacked&&remote?.followupExhibition&&(originMeeting?<a href={originMeeting.url} target="_blank" rel="noreferrer" className="hidden shrink-0 rounded-full bg-violet-100 px-2 py-1 text-xs font-medium text-violet-800 hover:bg-violet-200 lg:inline-flex">{remote.followupExhibition}<ExternalLink className="ml-1 size-3"/></a>:<span className="hidden shrink-0 rounded-full bg-violet-100 px-2 py-1 text-xs font-medium text-violet-800 lg:inline-flex">{remote.followupExhibition}</span>)}
-        <Button type="button" size="sm" variant="outline" className="min-w-0 max-w-[22rem] shrink" disabled={!brandReady||!can("changeCP")} onClick={()=>setCP(true)} aria-label={`Current ${currentCpDetails.name}: ${currentCpDetails.fullName}. Change CP`}>
+        <Button type="button" size="sm" variant="outline" className="min-w-0 max-w-[22rem] shrink" disabled={!brandReady||!can("changeCP")||latestRound?.status==="Completed"||history.projectionPending} onClick={()=>setCP(true)} aria-label={`Current ${currentCpDetails.name}: ${currentCpDetails.fullName}. Change CP`}>
           <span className="truncate">{currentCpDetails.name} · {currentCpDetails.fullName}</span><ChevronRight className="ml-1 size-3.5 shrink-0 rotate-90"/>
-        </Button></div>
+        </Button>
+        {(notionBacked||mockDetailPreview||aiSummaryDemo)&&manager&&<TooltipProvider><Tooltip><TooltipTrigger asChild><span><Button type="button" variant="ghost" size="icon" className="size-11 shrink-0" aria-label="AI progress summary" disabled={!brandReady} onClick={()=>setAiSummaryOpen(true)}><Image src="/ai-summary-icon.svg" alt="" aria-hidden="true" width={40} height={40} className="size-10 object-contain"/></Button></span></TooltipTrigger><TooltipContent>AI progress summary</TooltipContent></Tooltip></TooltipProvider>}</div>
       {hasActiveOmniReach&&<Badge className="bg-blue-100 text-blue-700">OmniReach running</Badge>}
       <div className="ml-auto flex items-center gap-1">
         {can("reply")&&<TooltipProvider><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-9" aria-label="New message" disabled={!brandReady||(notionBacked&&!c.contacts.length)} onClick={()=>setReply(true)}><Send className="size-4"/></Button></TooltipTrigger><TooltipContent>New message</TooltipContent></Tooltip></TooltipProvider>}
@@ -1130,7 +1194,6 @@ export function BrandDetail({customerId}:{customerId:string}){
     </header>
     {(needsReplyCount>0||callReviewCount>0||overdueCount>0)&&<div role="status" className="flex flex-wrap items-center gap-2 border-b border-rose-200 bg-rose-50 px-4 py-2.5 text-xs font-semibold text-rose-800">
       <CircleAlert className="size-4"/>Needs attention
-      {overdueCount>0&&<button type="button" className="rounded-full bg-rose-200 px-2 py-1 hover:bg-rose-300" onClick={()=>focusAttention(firstOverdue||firstNeedsReply)}>{overdueCount} overdue</button>}
       {needsReplyCount>0&&<button type="button" className="rounded-full bg-white px-2 py-1 hover:bg-rose-100" onClick={()=>focusAttention(firstNeedsReply)}>{needsReplyCount} replies needed</button>}
       {callReviewCount>0&&<button type="button" className="rounded-full bg-white px-2 py-1 hover:bg-rose-100" onClick={()=>focusAttention(undefined,"Phone")}>{callReviewCount} calls to review</button>}
     </div>}
@@ -1140,18 +1203,19 @@ export function BrandDetail({customerId}:{customerId:string}){
         {detailTabs.map(({id,label,icon:Icon})=><Button key={id} type="button" variant={detailsTab===id?"secondary":"ghost"} size="icon" className="size-9" aria-label={label} title={label} aria-pressed={detailsTab===id} onClick={()=>{const next=detailsTab===id?null:id;if(detailsTab==="signalHistory"&&next!=="signalHistory")setActiveSignalId(null);setDetailsTab(next);}}><Icon className="size-4"/></Button>)}
       </div>
       {detailsTab&&<section className="min-w-0 w-full space-y-5 overflow-y-auto p-4 lg:w-[320px]">
-        <div className="flex items-center justify-between"><h2 className="font-semibold">{detailTabs.find(tab=>tab.id===detailsTab)?.label}</h2><Button type="button" variant="ghost" size="icon" aria-label="Close details" onClick={()=>{if(detailsTab==="signalHistory")setActiveSignalId(null);setDetailsTab(null);}}><PanelRightClose className="size-4"/></Button></div>
+        <div className="flex items-center justify-between"><h2 className="font-semibold">{detailsTab==="followupHistory"?"Follow-up History":detailTabs.find(tab=>tab.id===detailsTab)?.label}</h2><Button type="button" variant="ghost" size="icon" aria-label="Close details" onClick={()=>{if(detailsTab==="signalHistory")setActiveSignalId(null);setDetailsTab(null);}}><PanelRightClose className="size-4"/></Button></div>
+      {detailsTab==="followupHistory"&&<FollowupHistoryPanel history={history} legacyMeetings={remote?.meetingNotes||[]} legacyAssignments={remote?.assignmentHistory||[]} onBack={()=>setDetailsTab("details")} onConversations={(id,number)=>void openRoundConversations(id,number)}/>}
       <div className={detailsTab==="details"?"min-w-0":"hidden"}>
         <div className="min-w-0">
           <h3 className="text-base font-semibold tracking-tight">{c.name}</h3>
           {(notionBacked?(!!remote?.meetingNotes.length||!!remote?.followupExhibition):!!c.source)&&<section className="mt-4">
             <p className="text-xs font-semibold text-slate-500">Relationship origin</p>
-            <div className="mt-2 flex flex-wrap items-center gap-3">{notionBacked&&remote?.meetingNotes.length?<BrandMeetingNoteLink notes={remote.meetingNotes} fallback="" customerId={c.id} sampleType={remote?.channelType||formatIcpGroupLabel(remote?.icpGroup)} showSample={false}/>:<p className="text-sm font-medium text-slate-700">{notionBacked?remote?.followupExhibition:c.source}</p>}</div>
+            <div className="mt-2 flex flex-wrap items-center gap-3">{notionBacked&&remote?.meetingNotes.length?<BrandMeetingNoteLink notes={remote.meetingNotes.slice(0,1)} fallback="" customerId={c.id} sampleType={remote?.channelType||formatIcpGroupLabel(remote?.icpGroup)} showSample={false}/>:<p className="text-sm font-medium text-slate-700">{notionBacked?remote?.followupExhibition:c.source}</p>}</div>
           </section>}
           <section className="border-t border-slate-100 py-4">
             <p className="text-xs font-semibold text-slate-500">Brand profile</p>
             <div className="mt-2 flex flex-wrap gap-2">
-              {state.currentRole!=="AccountManager"&&(notionBacked&&remote?.status?(can("editBrand")?<BadgeSelect value={remote.status} options={FOLLOW_UP_STATUSES} disabled={saving||!brandReady} onChange={value=>{if(value==="Paused"||value==="Completed"){openFollowUpAction(value);return;}void patchBrand({status:value}).then(()=>toast.success("Status updated")).catch(error=>toast.error(error instanceof Error?error.message:"Update failed"));}}/>:<Status value={remote.status}/>):(c.status?<Status value={c.status}/>:null))}
+              {state.currentRole!=="AccountManager"&&(notionBacked&&remote?.status?(can("editBrand")?<BadgeSelect value={remote.status} options={latestRound?.status==="Completed"?["Completed"]:latestRound?.status==="Paused"?["Paused","Completed"]:FOLLOW_UP_STATUSES} disabled={saving||!brandReady||history.projectionPending} onChange={value=>{if(value==="Paused"||value==="Completed"){openFollowUpAction(value);return;}void patchBrand({status:value}).then(()=>toast.success("Status updated")).catch(error=>toast.error(error instanceof Error?error.message:"Update failed"));}}/>:<Status value={remote.status}/>):(c.status?<Status value={c.status}/>:null))}
               {notionBacked && can("editBrand") ? (
                 <ChannelTypeSelect value={(remote?.channelType || "DTC") as ChannelType} disabled={saving || !brandReady} onChange={async (value) => { try { await patchBrand({ channelType: value }); toast.success("Channel Type updated"); } catch (error) { toast.error(error instanceof Error ? error.message : "Update failed"); throw error; } }} />
               ) : notionBacked && remote?.channelType ? <Status value={remote.channelType} /> : null}
@@ -1164,18 +1228,26 @@ export function BrandDetail({customerId}:{customerId:string}){
             <p className="text-xs font-semibold text-slate-500">Brand summary</p>
             {brandReady ? <>
               <p className="mt-2 text-sm leading-6 text-slate-600">{summary}</p>
-              {notionBacked && displayNote(remote?.notes) && <p className="mt-2 text-sm leading-6 text-slate-600">{displayNote(remote?.notes)}</p>}
+              {notionBacked && displayNote(remote?.notes) && <p className="mt-2 text-sm leading-6 text-slate-600">{displayNote(remote?.notes)}</p>}{history.encounters.some(e=>e.key_changes.length>0)&&<details className="mt-3"><summary className="min-h-11 cursor-pointer text-xs font-medium text-violet-700">Latest sourced key context</summary><ul className="space-y-3 text-sm text-slate-600">{history.encounters.filter(e=>e.key_changes.length>0).slice(-3).reverse().map(e=><li key={e.id}><p className="text-xs font-medium text-slate-400">{e.exhibition_name} · {dateOnly(e.meeting_at)}</p>{e.key_changes.map((change,index)=><p key={index} className="mt-1"><span className="font-medium">{change.type}: </span>{change.text}<span className="block break-words text-xs text-slate-400">Source: {change.source}</span></p>)}</li>)}</ul></details>}
             </> : <p className="mt-2 text-sm text-slate-400">Loading brand details…</p>}
           </section>
           <section className="border-t border-slate-100 py-4">
             <p className="text-xs font-semibold text-slate-500">Follow-up details</p>
             <dl className="mt-2 space-y-2 text-sm">
-              <div className="flex items-start justify-between gap-3"><dt className="shrink-0 text-slate-500">Account Manager</dt><dd className="text-right text-slate-700">{remote?.ownerName || state.users.find((user) => user.id === c.ownerId)?.name || "Unassigned"}</dd></div>
+              {latestRound&&<><div className="flex items-center justify-between gap-3"><dt className="text-slate-500">Round</dt><dd className="text-slate-700">{history.rounds.length>1?`Round ${latestRound.round_number}`:"Current follow-up"}</dd></div><div className="flex items-center justify-between gap-3"><dt className="text-slate-500">Status</dt><dd><RoundStatusBadge status={latestRound.status}/></dd></div></>}
+              <div className="flex items-start justify-between gap-3"><dt className="shrink-0 text-slate-500">Account Manager</dt><dd className="text-right text-slate-700">{latestRound ? latestRound.assigned_am_name || "Unassigned" : remote?.ownerName || state.users.find((user) => user.id === c.ownerId)?.name || "Unassigned"}</dd></div>
               {!notionBacked && <div className="flex items-start justify-between gap-3"><dt className="shrink-0 text-slate-500">Source</dt><dd className="text-right text-slate-700">{c.source}</dd></div>}
             </dl>
             {can("assignOwner")&&notionBacked&&remote?.status==="Paused"&&remote.lastAssignedOwnerName&&<div className="mt-3 text-sm text-slate-600"><span>Last assigned: {remote.lastAssignedOwnerName}</span>{remote.lastAssignedAt&&<span className="text-slate-400"> · {new Intl.DateTimeFormat("en-US",{month:"short",day:"numeric",year:"numeric",timeZone:"America/New_York"}).format(new Date(remote.lastAssignedAt))}</span>}{remote.lastAssignedOwnerId!==remote.ownerId&&<Button type="button" variant="ghost" size="sm" className="ml-1 h-8 px-2 text-violet-700 hover:text-violet-900" disabled={saving||!brandReady} onClick={()=>void reassignLastOwner()}>Assign again</Button>}</div>}
-            {can("assignOwner") && <div className="mt-3 flex flex-wrap items-center gap-2"><Select value={ownerDraft ?? c.ownerId ?? "unassigned"} onValueChange={setOwnerDraft} disabled={!brandReady}><SelectTrigger size="sm" className="w-44"><SelectValue placeholder="Select owner" /></SelectTrigger><SelectContent><SelectItem value="unassigned">Unassigned</SelectItem>{ownerChoices.map((user) => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}</SelectContent></Select><Button size="sm" disabled={saving || !brandReady || (ownerDraft ?? c.ownerId ?? "unassigned") === (c.ownerId || "unassigned")} onClick={() => void handleAssign()}>Assign</Button></div>}
-            {can("assignOwner")&&notionBacked&&remote?.assignmentHistory?.length? <div className="mt-5"><p className="text-xs font-semibold text-slate-500">Assignment history</p><ol className="mt-2 space-y-2">{remote.assignmentHistory.map((assignment)=><li key={`${assignment.ownerId}-${assignment.assignedAt}`} className="text-sm text-slate-600"><span className="font-medium text-slate-800">{assignment.ownerName||"Former Account Manager"}</span><span className="text-slate-400"> · {new Intl.DateTimeFormat("en-US",{month:"short",day:"numeric",year:"numeric",timeZone:"America/New_York"}).format(new Date(assignment.assignedAt))}{assignment.handledAt?" · reviewed":""}</span></li>)}</ol></div>:null}
+            {can("assignOwner") && <div className="mt-3 flex flex-wrap items-center gap-2"><Select value={ownerDraft ?? c.ownerId ?? "unassigned"} onValueChange={setOwnerDraft} disabled={!brandReady||latestRound?.status==="Completed"||history.projectionPending}><SelectTrigger size="sm" className="w-44"><SelectValue placeholder="Select owner" /></SelectTrigger><SelectContent><SelectItem value="unassigned">Unassigned</SelectItem>{ownerChoices.map((user) => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}</SelectContent></Select><Button size="sm" disabled={saving || !brandReady || latestRound?.status==="Completed" || history.projectionPending || (ownerDraft ?? c.ownerId ?? "unassigned") === (c.ownerId || "unassigned")} onClick={() => void handleAssign()}>Assign</Button></div>}
+            {can("editBrand")&&notionBacked&&!history.unavailable&&<div className="mt-3 flex flex-wrap gap-2">
+              {latestRound?.status==="Paused"&&<Button variant="outline" size="sm" disabled={saving||history.projectionPending} onClick={()=>void runRoundAction("resume")}>Resume follow-up</Button>}
+              {(!latestRound||latestRound.status==="Completed")&&<Button variant="outline" size="sm" disabled={saving||history.projectionPending} onClick={()=>{setNewRoundOwner(latestRound?.assigned_am_id||remote?.ownerId||"unassigned");setNewRoundOrigin(history.encounters.filter(e=>!e.round_id).at(-1)?.id||"none");setNewRoundOpen(true);}}>{latestRound?"Start new Round":"Start follow-up"}</Button>}
+            </div>}
+            {history.projectionPending&&<p role="status" className="mt-3 text-xs text-amber-700">Changes saved. Waiting for Brand details to synchronize.</p>}
+            {history.unavailable&&<p role="status" className="mt-3 text-xs text-amber-700">{history.unavailable}</p>}
+            {!!history.unreadEncounterCount&&<p role="status" className="mt-3 text-xs text-violet-700">{history.unreadEncounterCount} new Exhibition update{history.unreadEncounterCount===1?"":"s"}</p>}
+            {hasHistory&&<Button type="button" variant="link" size="sm" className="mt-3 h-11 px-0 text-violet-700" onClick={()=>void openFollowupHistory()}>View History →</Button>}
             {notionBacked && state.currentRole === "AccountManager" && remote?.ownerId === state.currentUserId && remote.ownerAssignedAt && !remote.ownerAssignmentHandledAt && <Button variant="outline" size="sm" className="mt-3" disabled={saving || !brandReady} onClick={() => void markAssignmentReviewed()}><UserCheck className="mr-2 size-4" />Mark assignment reviewed</Button>}
           </section>
         </div>
@@ -1204,19 +1276,231 @@ export function BrandDetail({customerId}:{customerId:string}){
       </div>
       </section>}
     </aside>
-    <div className="order-1 flex min-w-0 flex-col overflow-hidden bg-white lg:min-h-0"><ImportantSignalsPanel events={brandSignals?.events || []} readIds={signalReadIds} onRead={readSignalEvents} onOpenEmailSignal={openEmailSignal}/><section id="brand-conversations" aria-label="Brand communication" className="flex min-w-0 flex-col overflow-hidden lg:min-h-0 lg:flex-1"><div className="flex items-center justify-between border-b border-slate-100 px-5 py-3"><h2 className="flex items-center gap-2 font-semibold"><MessageSquareText className="size-4 text-violet-600"/>Conversations</h2><span className="text-xs text-slate-500">{interactions.length} activities</span></div><div className="min-h-[50vh] max-h-[calc(100vh-290px)] min-w-0 overflow-y-auto lg:min-h-0 lg:max-h-none lg:flex-1">
-    <InteractionFeed key={`${c.id}-${currentCp}-${attentionTarget?.cp||""}-${attentionTarget?.channel||""}-${focusedWork?.id||focusedEmail?.id||""}`} customerId={c.id} currentCp={currentCp} initialCp={focusedWork?.cp||focusedEmail?.cp||attentionTarget?.cp} initialChannel={focusedWork?.channel||(focusedEmail?"Email":attentionTarget?.channel)} focusedInteractionId={focusedWork?.id||focusedEmail?.id} showAllChannels showCpSelector={false} cpGoals={notionBacked?toCpGoals(remoteCps):undefined} interactions={interactions} contacts={c.contacts} bombInstances={bombPlan?.bombInstances} actions={bombPlan?.actions} loading={activityLoading} canReviewCalls={notionBacked&&can("reply")} tasks={remote?.tasks||[]} onMarkReplyRead={notionBacked&&can("reply")?markReplyRead:undefined} onRefreshQuo={notionBacked?refreshQuoForBrand:undefined} quoRefreshingCallId={quoRefreshingCallId} onPersistCallReview={notionBacked?async (taskId,status,reviewReason,reviewNote,resolution)=>{
+    <div className="order-1 flex min-w-0 flex-col overflow-hidden bg-white lg:min-h-0"><ImportantSignalsPanel events={brandSignals?.events || []} readIds={signalReadIds} onRead={readSignalEvents} onOpenEmailSignal={openEmailSignal}/><section id="brand-conversations" aria-label="Brand communication" className="flex min-w-0 flex-col overflow-hidden lg:min-h-0 lg:flex-1"><div className="flex items-center justify-between border-b border-slate-100 px-5 py-3"><h2 className="flex items-center gap-2 font-semibold"><MessageSquareText className="size-4 text-violet-600"/>Conversations</h2><span className="text-xs text-slate-500">{visibleInteractions.length} activities</span></div>{conversationRound&&<div className="flex items-center justify-between gap-2 border-b border-violet-100 bg-violet-50 px-5 py-2"><div><p className="text-xs font-semibold text-violet-800">Round {conversationRound.number} · All CPs</p><p className="text-xs text-violet-600">Only conversations with a recorded Round association.</p></div><Button variant="ghost" size="sm" onClick={()=>{setConversationRound(null);setRoundCursor(null);}}>Show all Rounds</Button></div>}<div className="min-h-[50vh] max-h-[calc(100vh-290px)] min-w-0 overflow-y-auto lg:min-h-0 lg:max-h-none lg:flex-1">
+    <InteractionFeed key={`${c.id}-${conversationRound?.id||"all"}-${currentCp}-${attentionTarget?.cp||""}-${attentionTarget?.channel||""}-${focusedWork?.id||focusedEmail?.id||""}`} customerId={c.id} currentCp={currentCp} initialCp={focusedWork?.cp||focusedEmail?.cp||attentionTarget?.cp} initialChannel={focusedWork?.channel||(focusedEmail?"Email":attentionTarget?.channel)} focusedInteractionId={focusedWork?.id||focusedEmail?.id} showAllChannels showCpSelector={false} includeAllCps={!!conversationRound} cpGoals={notionBacked?toCpGoals(remoteCps):undefined} interactions={visibleInteractions} contacts={c.contacts} bombInstances={conversationRound?bombPlan?.bombInstances.filter(instance=>roundActivities.some(activity=>bombPlan.activityInstanceIds[activity.id]===instance.id)):bombPlan?.bombInstances} actions={bombPlan?.actions} loading={conversationRound?roundLoading:activityLoading} canReviewCalls={notionBacked&&can("reply")} tasks={conversationRound?(remote?.tasks||[]).filter(t=>t.roundId===conversationRound.id):remote?.tasks||[]} onMarkReplyRead={notionBacked&&can("reply")?markReplyRead:undefined} onRefreshQuo={notionBacked?refreshQuoForBrand:undefined} quoRefreshingCallId={quoRefreshingCallId} onPersistCallReview={notionBacked?async (taskId,status,reviewReason,reviewNote,resolution)=>{
     const response=await fetch(`/api/tasks/${taskId}/call-review`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status,reviewReason,reviewNote,resolution})});
     const payload=await response.json() as {error?:string};
     if(!response.ok)throw new Error(payload.error||"Unable to save call review");
     await refreshBrandAndActivities();
   }:undefined} onCancelBomb={async instance=>{if(!notionBacked){const result=cancelBomb(c.id,instance.id);if(!result.ok)throw new Error(result.message);toast.success(result.message);return;}const response=await fetch(`/api/brands/${c.id}/bombs/${instance.templateId}/cancel`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contactId:instance.targetContactId,omniReachRunId:instance.id.startsWith("run:")?instance.id.slice(4):undefined})});const payload=await response.json() as {cancelledTaskIds?:string[];error?:string};if(!response.ok)throw new Error(payload.error||"Unable to stop OmniReach");const cancelled=new Set(payload.cancelledTaskIds||[]);if(cancelled.size){setRemote(prev=>prev?{...prev,tasks:prev.tasks.map(task=>cancelled.has(task.id)?{...task,status:"Cancelled"}:task),handlingMode:prev.handlingMode==="Human"?prev.handlingMode:"Human"}:prev);}toast.success(`${payload.cancelledTaskIds?.length||0} remaining task${payload.cancelledTaskIds?.length===1?"":"s"} cancelled`);void Promise.all([refreshRemote(),fetchActivitiesPage(null,"replace")]);}} onCancelPending={notionBacked&&can("reply")?async taskId=>{const response=await fetch(`/api/tasks/${taskId}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({status:"Cancelled"})});const payload=await response.json() as {error?:string};if(!response.ok)throw new Error(payload.error||"Unable to cancel");setRemote(prev=>prev?{...prev,tasks:prev.tasks.map(task=>task.id===taskId?{...task,status:"Cancelled"}:task)}:prev);toast.success("Pending message cancelled");void Promise.all([refreshRemote(),fetchActivitiesPage(null,"replace")]);}:undefined} onSend={notionBacked?sendBrandMessage:undefined}/>
-  {notionBacked&&activitiesHasMore&&activitiesCursor?<div className="border-t border-slate-100 p-3"><Button variant="outline" size="sm" className="w-full" disabled={activitiesLoadingMore||activitiesLoading} onClick={loadMoreActivities}>{activitiesLoadingMore?<span className="inline-flex items-center gap-2"><Spinner className="size-3.5"/>Loading…</span>:"Load more activity"}</Button></div>:null}
+  {conversationRound&&roundCursor?<div className="border-t border-slate-100 p-3"><Button variant="outline" size="sm" className="w-full" disabled={roundLoading} onClick={()=>void openRoundConversations(conversationRound.id,conversationRound.number,roundCursor)}>Load more Round conversations</Button></div>:notionBacked&&!conversationRound&&activitiesHasMore&&activitiesCursor?<div className="border-t border-slate-100 p-3"><Button variant="outline" size="sm" className="w-full" disabled={activitiesLoadingMore||activitiesLoading} onClick={loadMoreActivities}>{activitiesLoadingMore?<span className="inline-flex items-center gap-2"><Spinner className="size-3.5"/>Loading…</span>:"Load more activity"}</Button></div>:null}
   </div>
   </section></div></div>
+  <Dialog open={newRoundOpen} onOpenChange={setNewRoundOpen}><DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle>{latestRound?"Start new follow-up Round":"Start follow-up"}</DialogTitle><DialogDescription>Start a new cooperation cycle. The new Round begins at NONE. Brand profile, relationship context, previous conversations and tasks are retained.</DialogDescription></DialogHeader>{can("assignOwner")&&<div className="space-y-2"><label className="text-sm font-medium">Account Manager</label><Select value={newRoundOwner} onValueChange={setNewRoundOwner}><SelectTrigger aria-label="New Round Account Manager"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="unassigned">Unassigned</SelectItem>{ownerChoices.map(owner=><SelectItem key={owner.id} value={owner.id}>{owner.name}</SelectItem>)}</SelectContent></Select></div>}{history.encounters.some(e=>!e.round_id)&&<div className="space-y-2"><label className="text-sm font-medium">Origin Encounter</label><Select value={newRoundOrigin} onValueChange={setNewRoundOrigin}><SelectTrigger aria-label="New Round origin Encounter"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="none">No specific Encounter</SelectItem>{history.encounters.filter(e=>!e.round_id).map(e=><SelectItem key={e.id} value={e.id}>{e.exhibition_name} · {dateOnly(e.meeting_at)}</SelectItem>)}</SelectContent></Select></div>}<DialogFooter><Button variant="outline" onClick={()=>setNewRoundOpen(false)}>Cancel</Button><Button disabled={saving} onClick={()=>void runRoundAction("start")}>{saving?"Starting…":"Start Round"}</Button></DialogFooter></DialogContent></Dialog>
+  <BrandAiSummaryDialog open={aiSummaryOpen} onOpenChange={setAiSummaryOpen} brandId={c.id} brand={remote} signals={brandSignals?.events || []} demo={mockDetailPreview||aiSummaryDemo} onSummariesChange={summaries=>setRemote(previous=>previous?{...previous,aiSummaries:summaries}:previous)}/>
   <LaunchBombDialog customerId={c.id} open={launch} onOpenChange={setLaunch} contacts={notionBacked?c.contacts:undefined} currentCp={notionBacked&&remote?remote.currentCp:undefined} companyName={c.name} productDescription={notionBacked?remote?.productDescription:undefined} matchedCategory={notionBacked?remote?.matchedCategory:undefined} followupExhibition={notionBacked?remote?.followupExhibition:undefined} previewOnly={notionBacked} hasActiveOmniReach={hasActiveOmniReach} onLaunched={notionBacked?()=>{void refreshBrandAndActivities()}:undefined}/><ReplyDialog customerId={c.id} open={reply} onOpenChange={setReply} contacts={notionBacked?c.contacts:undefined} onSend={notionBacked?async (contactId,channel,content,object,deliveryMode,scheduledAt,attachments,cc)=>{
     await sendBrandMessage(contactId, channel, content, undefined, undefined, object, deliveryMode, scheduledAt, attachments, cc);
   }:undefined}/><ChangeCPDialog customerId={c.id} open={cp} onOpenChange={setCP} currentCp={notionBacked&&remote?remote.currentCp:undefined} cps={notionBacked?remoteCps:undefined} onSave={notionBacked?async (currentCpId,evidence,note)=>{await patchBrand({currentCpId,evidence,note});}:undefined}/><ContactDialog customerId={c.id} open={contact} onOpenChange={setContact} notionBacked={notionBacked} onCreated={notionBacked?async ()=>{await refreshRemote();}:undefined}/><Dialog open={followUpAction!==null} onOpenChange={open=>{if(!open){setFollowUpAction(null);setFollowUpNote("");setFollowUpAt("");}}}><DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle>{followUpAction==="Paused"?"Pause FollowUp":"Complete FollowUp"}</DialogTitle><DialogDescription>Record the customer’s explicit reply and the reason for this outcome. This note is required.</DialogDescription></DialogHeader><Textarea value={followUpNote} onChange={event=>setFollowUpNote(event.target.value)} placeholder={followUpAction==="Paused"?"For example: The customer asked us to reconnect after their budget review in January.":"For example: The customer confirmed they do not wish to continue."} className="min-h-32" autoFocus/>{followUpAction==="Paused"&&<div className="space-y-2"><label htmlFor="next-follow-up-at" className="text-sm font-medium text-slate-700">Next contact date <span className="font-normal text-slate-500">(optional)</span></label><Input id="next-follow-up-at" type="datetime-local" value={followUpAt} onChange={event=>setFollowUpAt(event.target.value)}/><p className="text-xs text-slate-500">On this date, Admin receives a reminder to review and assign the follow-up.</p></div>}<DialogFooter><Button variant="outline" onClick={()=>{setFollowUpAction(null);setFollowUpNote("");setFollowUpAt("");}}>Cancel</Button><Button disabled={saving||!followUpNote.trim()||!followUpAction} onClick={()=>{if(!followUpAction)return;void (async ()=>{const saved=await updateFollowUpStatus(followUpAction,followUpNote.trim(),followUpAt);if(saved){setFollowUpAction(null);setFollowUpNote("");setFollowUpAt("");}})();}}>{followUpAction==="Paused"?"Pause FollowUp":"Complete FollowUp"}</Button></DialogFooter></DialogContent></Dialog></div></div>;
+}
+
+const AI_SUMMARY_DEMO_AM_ID = "demo-am-jamie";
+const AI_SUMMARY_DEMO: BrandAiSummaryStore = {
+  overall: {
+    content: `Current Progress
+品牌已进入 CP2（样品送达 Owner）阶段。系统记录显示样品确认邮件已发出，当前正在等待 Owner 对样品送达情况的回复。
+
+Key Progress
+• 已识别 Owner，并已保留其有效邮箱。
+• 已完成一封样品确认邮件的发送记录。
+
+Current Blocker
+尚未收到 Owner 对样品是否送达的明确回复；系统内没有已确认会议记录。
+
+Next Step
+Jamie Chen 在当前邮件回复到期前跟进 Owner；如仍未回复，按既定渠道继续下一次人工跟进。`,
+    generatedAt: "2026-10-13T09:30:00.000Z",
+    generatedBy: "Demo",
+    dataAsOf: "2026-10-13T09:25:00.000Z",
+  },
+  am: {
+    [AI_SUMMARY_DEMO_AM_ID]: {
+      content: `Activity Summary｜操作统计与总结
+Jamie Chen 累计执行 1 次 Send Message，主要完成样品送达确认邮件的后续跟进；涉及 Email，系统记录为已发送。系统记录到一次 Sample Tap 后，该 AM 在 20 分钟内完成了邮件跟进；当前没有 Omnireach 执行记录。
+
+Engagement & Outcomes｜客户响应及推进成果
+系统内尚未记录 Owner 对该邮件的回复，因此不能据此判断合作意向或会议状态；目前未见已确认 Meeting。
+
+Current Status｜当前状态
+该 AM 已完成样品确认跟进，当前正在等待 Owner 对样品送达情况的反馈。`,
+      generatedAt: "2026-10-13T09:30:00.000Z",
+      generatedBy: "Demo",
+      dataAsOf: "2026-10-13T09:25:00.000Z",
+      amId: AI_SUMMARY_DEMO_AM_ID,
+      amName: "Jamie Chen",
+    },
+  },
+};
+
+const AI_SUMMARY_DEMO_AM_OPERATIONS: BrandActivity[] = [{
+  id: "demo-send-message-1",
+  contactId: "mock-ai-summary-contact",
+  taskId: null,
+  channel: "Email",
+  direction: "Outbound",
+  status: "Sent",
+  subject: "Sample delivery confirmation",
+  content: "Confirmed sample delivery status with the Owner.",
+  sender: "Jamie Chen",
+  notes: null,
+  callResult: null,
+  sourceUrl: null,
+  threadId: null,
+  messageId: null,
+  replyStatus: null,
+  cpId: "CP2",
+  cpAtInteraction: "CP2",
+  createdAt: "2026-10-13T09:20:00.000Z",
+}];
+
+const AI_SUMMARY_DEMO_SIGNALS: SignalEvent[] = [{
+  id: "demo-sample-tap-1",
+  brandId: "ai-summary-demo",
+  contactId: "mock-ai-summary-contact",
+  sampleId: "FC-DEMO-01",
+  type: "sample",
+  summary: "Sample FC-DEMO-01 visited",
+  occurredAt: "2026-10-13T09:00:00.000Z",
+  detectedAt: "2026-10-13T09:00:00.000Z",
+  evidence: "Demo visit",
+  highPriority: false,
+  isNewSignal: true,
+}];
+
+function BrandAiSummaryDialog({
+  open,
+  onOpenChange,
+  brandId,
+  brand,
+  signals,
+  demo = false,
+  onSummariesChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  brandId: string;
+  brand: BrandDetail | null;
+  signals: SignalEvent[];
+  demo?: boolean;
+  onSummariesChange: (summaries: BrandAiSummaryStore) => void;
+}) {
+  const [scope, setScope] = useState<BrandAiSummaryScope>("overall");
+  const [amId, setAmId] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [configurationError, setConfigurationError] = useState<string | null>(null);
+  const ams = demo ? [{ id: AI_SUMMARY_DEMO_AM_ID, name: "Jamie Chen" }] : (() => {
+    const choices = new Map<string, string>();
+    if (brand?.ownerId) choices.set(brand.ownerId, brand.ownerName || "Current Account Manager");
+    brand?.assignmentHistory?.forEach((item) => choices.set(item.ownerId, item.ownerName || "Former Account Manager"));
+    return [...choices].map(([id, name]) => ({ id, name }));
+  })();
+  const defaultAmId = demo ? AI_SUMMARY_DEMO_AM_ID : brand?.ownerId || brand?.assignmentHistory?.[0]?.ownerId || "";
+
+  useEffect(() => {
+    setScope("overall");
+    setAmId("");
+  }, [brandId]);
+
+  useEffect(() => {
+    if (!open) return;
+    setConfigurationError(null);
+    setAmId((current) => current || defaultAmId);
+  }, [open, defaultAmId]);
+
+  const summary = summaryForScope(demo ? AI_SUMMARY_DEMO : brand?.aiSummaries, scope, amId);
+  const operationScope = scope === "am" ? amOperationScope(brand, amId) : null;
+  const operationRecords = scope === "am" ? (demo ? AI_SUMMARY_DEMO_AM_OPERATIONS : operationScope?.records || []) : [];
+  const signalRecords = scope === "am" ? signalFollowUps({
+    signals: demo ? AI_SUMMARY_DEMO_SIGNALS : signals,
+    outboundActivities: operationRecords,
+    startAt: operationScope?.startAt,
+    endAt: operationScope?.endAt,
+  }) : [];
+  const generate = async () => {
+    if (generating || (scope === "am" && !amId)) return;
+    if (demo) {
+      toast.message("This is a demo result. No AI request was made.");
+      return;
+    }
+    setGenerating(true);
+    setConfigurationError(null);
+    try {
+      const response = await fetch(`/api/brands/${encodeURIComponent(brandId)}/ai-summary`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scope, amId: scope === "am" ? amId : undefined }),
+      });
+      const payload = await response.json() as { error?: string; summaries?: BrandAiSummaryStore };
+      if (!response.ok || !payload.summaries) {
+        if (response.status === 422) setConfigurationError(payload.error || "AI summary is not configured yet");
+        else throw new Error(payload.error || "Unable to generate AI summary");
+        return;
+      }
+      onSummariesChange(payload.summaries);
+      toast.success("AI progress summary updated");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to generate AI summary");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const activeAmName = ams.find((item) => item.id === amId)?.name || "Account Manager";
+  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="flex max-h-[85vh] flex-col sm:max-w-xl"><DialogHeader><div className="flex items-center gap-2 pr-8"><DialogTitle>AI progress summary</DialogTitle>{demo&&<Badge className="bg-amber-100 text-amber-800">Demo</Badge>}</div><DialogDescription>Saved summaries appear by default. Generate only refreshes this selected view.</DialogDescription></DialogHeader><div className="min-h-0 space-y-4 overflow-y-auto"><div className="flex flex-wrap items-center gap-2" role="tablist" aria-label="AI summary view"><Button type="button" size="sm" variant={scope==="overall"?"secondary":"ghost"} aria-selected={scope==="overall"} onClick={()=>setScope("overall")}>Overall</Button><Button type="button" size="sm" variant={scope==="am"?"secondary":"ghost"} aria-selected={scope==="am"} onClick={()=>setScope("am")}>AM progress</Button>{scope==="am"&&<span className="text-sm font-medium text-slate-700">AM · {activeAmName}</span>}</div>{scope==="am"&&!ams.length?<p className="py-8 text-sm text-slate-500">No Account Manager has been assigned to this brand yet.</p>:summary?<div className="space-y-4"><AiSummaryContent content={summary.content}/>{scope==="am"&&<AmSignalFollowUps records={signalRecords}/>} {scope==="am"&&<AmOperationRecords records={operationRecords} brand={brand}/>}<p className="text-xs text-slate-500">Data as of {new Date(summary.dataAsOf).toLocaleString()} · Generated {new Date(summary.generatedAt).toLocaleString()}{summary.generatedBy?` by ${summary.generatedBy}`:""}</p></div>:<p className="py-8 text-sm text-slate-500">No saved summary for this view. Generate one when you need an updated readout.</p>}{configurationError&&<p role="status" className="text-sm text-amber-700">{configurationError}</p>}</div><DialogFooter><Button type="button" variant="outline" onClick={()=>onOpenChange(false)}>Close</Button><Button type="button" disabled={!demo&&(generating||(scope==="am"&&!amId)||!brand)} onClick={()=>void generate()}>{generating?<><Loader2 className="mr-2 size-4 animate-spin"/>Generating…</>:summary?"Regenerate":"Generate"}</Button></DialogFooter></DialogContent></Dialog>;
+}
+
+function AiSummaryContent({ content }: { content: string }) {
+  const headings = new Set(["Current Progress", "Key Progress", "Current Blocker", "Next Step", "Activity Summary｜操作统计与总结", "Engagement & Outcomes｜客户响应及推进成果", "Current Status｜当前状态"]);
+  const sections = content.trim().split(/\n\s*\n/).map((block) => {
+    const [title, ...body] = block.trim().split("\n");
+    return headings.has(title.trim()) ? { title: title.trim(), body: body.join("\n").trim() } : { title: "", body: block.trim() };
+  });
+  return <div className="space-y-4">{sections.map((section, index) => <section key={`${section.title}-${index}`} className="space-y-1.5"><h3 className="text-sm font-semibold text-slate-900">{section.title}</h3><p className="whitespace-pre-wrap text-sm leading-6 text-slate-700">{section.body}</p></section>)}</div>;
+}
+
+function activityAt(activity: BrandActivity) {
+  return activity.recordedAt || activity.createdAt || activity.scheduledAt || null;
+}
+
+function amOperationScope(brand: BrandDetail | null, amId: string) {
+  if (!brand || !amId) return null;
+  const assignments = [...(brand.assignmentHistory || [])]
+    .filter((item) => item.ownerId)
+    .sort((left, right) => left.assignedAt.localeCompare(right.assignedAt));
+  const index = assignments.map((item) => item.ownerId).lastIndexOf(amId);
+  const startAt = index >= 0 ? assignments[index].assignedAt : brand.ownerId === amId ? brand.ownerAssignedAt || brand.createdAt : null;
+  const endAt = index >= 0 ? assignments[index + 1]?.assignedAt || null : null;
+  if (!startAt) return null;
+  const records = brand.activities.filter((activity) => {
+    const timestamp = activityAt(activity);
+    return activity.direction === "Outbound" && !!timestamp && timestamp >= startAt && (!endAt || timestamp < endAt);
+  }).sort((left, right) => (activityAt(right) || "").localeCompare(activityAt(left) || ""));
+  return { startAt, endAt, records };
+}
+
+function signalLabel(event: SignalEvent) {
+  return event.type === "sample" ? "Sample Tap" : event.type === "email" ? "Email Open" : "LinkedIn";
+}
+
+function AmSignalFollowUps({ records }: { records: SignalFollowUp[] }) {
+  if (!records.length) return <section className="space-y-1.5"><h3 className="text-sm font-semibold text-slate-900">Key signal follow-up</h3><p className="text-sm leading-6 text-slate-500">No key Signal was recorded during this AM period.</p></section>;
+  return <section className="space-y-3"><div className="space-y-1"><h3 className="text-sm font-semibold text-slate-900">Key signal follow-up</h3><p className="text-xs leading-5 text-slate-500">Shows the first recorded AM action within 7 days. It indicates sequence, not that the Signal caused the action.</p></div><div className="space-y-3">{records.map(({ signal, action }) => {
+    const signalAt = signal.detectedAt || signal.occurredAt;
+    const actionAt = action ? signalFollowUpTime(action) : null;
+    return <div key={signal.id} className="space-y-1 text-sm"><div className="flex flex-wrap items-center gap-x-2 gap-y-1"><span className="font-medium text-slate-900">{signalLabel(signal)}</span><span className="text-slate-500">{new Date(signalAt).toLocaleString()}</span></div><p className="leading-6 text-slate-700">{action ? <>First recorded follow-up: <span className="font-medium">{action.channel || "Unknown channel"}</span>{action.status ? ` · ${action.status}` : ""}{action.subject || action.content ? ` · ${action.subject || action.content}` : ""}</> : "No AM follow-up recorded within 7 days."}</p>{actionAt&&<p className="text-xs text-slate-500">Action time: {new Date(actionAt).toLocaleString()}</p>}</div>;
+  })}</div></section>;
+}
+
+function AmOperationRecords({ records, brand }: { records: BrandActivity[]; brand: BrandDetail | null }) {
+  const tasks = new Map((brand?.tasks || []).map((task) => [task.id, task]));
+  if (!records.length) return <p className="text-sm text-slate-500">No system operation records are available for this AM period.</p>;
+  return <details className="group"><summary className="min-h-11 cursor-pointer list-none text-sm font-medium text-violet-700 marker:hidden">View {records.length} operation record{records.length === 1 ? "" : "s"}<span className="ml-2 text-slate-400 group-open:hidden">⌄</span><span className="ml-2 text-slate-400 group-open:inline hidden">⌃</span></summary><div className="space-y-3 pt-3">{records.map((record) => {
+    const task = record.taskId ? tasks.get(record.taskId) : undefined;
+    const kind = task?.omniReachRunId || task?.sourceBombId || /OmniReach|Bomb/.test(record.notes || "") ? "OmniReach" : "Send Message";
+    const time = activityAt(record);
+    const status = record.status || task?.status || "Recorded";
+    const detail = record.subject || record.content || "No message content recorded";
+    return <div key={record.id} className="space-y-1 text-sm"><div className="flex flex-wrap items-center gap-x-2 gap-y-1"><span className="font-medium text-slate-900">{kind}</span><span className="text-slate-500">{record.channel || "Unknown channel"} · {status}</span></div><p className="line-clamp-2 text-slate-600">{detail}</p>{time&&<p className="text-xs text-slate-500">{new Date(time).toLocaleString()}</p>}</div>;
+  })}</div></details>;
 }
 
 type DetailContact = {
@@ -1825,7 +2109,7 @@ type LaunchStepCopy = {
   attachments?: MediaAttachment[];
 };
 
-type LaunchBombOption = {id:string;name:string;version?:number;goal:string;cp?:string;status?:string;priority?:string|null;steps:Array<{id:string;channel:Channel;subject?:string;content:string;callGoal?:string;script?:string;attachments?:MediaAttachment[]}>};
+type LaunchBombOption = {id:string;name:string;version?:number;goal:string;cp?:string;cpIds?:string[];scenarioId?:string|null;targetRole?:string|null;status?:string;priority?:string|null;steps:Array<{id:string;channel:Channel;subject?:string;content:string;callGoal?:string;script?:string;attachments?:MediaAttachment[]}>};
 
 function LaunchStepEditor({
   channel,
@@ -1845,6 +2129,7 @@ function LaunchStepEditor({
   const [preview, setPreview] = useState<MediaAttachment | null>(null);
   const readyKey = media.readyAttachments.map((item) => item.id).join("|");
   const storedKey = storedAttachments.map((item) => item.id).join("|");
+  const phoneSections = channel === "Phone" ? parsePhoneScriptSections(copy.script) : null;
 
   useEffect(() => {
     onChange({ attachments: [...storedAttachments, ...media.readyAttachments] });
@@ -1882,9 +2167,28 @@ function LaunchStepEditor({
             placeholder="Write an email…"
           />
         ) : channel === "Phone" ? (
-          <div className="grid gap-2">
-            <Input value={copy.callGoal || ""} onChange={(e) => onChange({ callGoal: e.target.value })} placeholder="Call goal" disabled={disabled}/>
-            <Textarea className="max-h-60 min-h-32 resize-none overflow-y-auto [field-sizing:fixed]" value={copy.script || ""} onChange={(e) => onChange({ script: e.target.value })} placeholder="Suggested script" disabled={disabled}/>
+          <div className="space-y-3">
+            <label className="grid gap-2 text-xs font-medium text-slate-700">
+              Title
+              <Input value={copy.callGoal || ""} onChange={(e) => onChange({ callGoal: e.target.value })} placeholder="Call script title" disabled={disabled}/>
+            </label>
+            <div className="space-y-0">
+              {PHONE_SCRIPT_SECTIONS.map((section) => {
+                return <div key={section.key} className="border-t border-slate-200 py-3 first:pt-0">
+                  <div className="mb-2 flex items-center gap-1 text-xs font-medium text-slate-700">
+                    <span>{section.label}</span>
+                    {section.required ? <span className="text-rose-500" aria-label="Required">*</span> : null}
+                  </div>
+                  <Textarea
+                    className="phone-script-section min-h-20 resize-y rounded-none border-0 px-3 py-3 text-sm leading-6 shadow-none focus-visible:border-transparent focus-visible:outline-none focus-visible:ring-0"
+                    value={phoneSections?.[section.key] || ""}
+                    onChange={(event) => onChange({ script: formatPhoneScriptSections({ ...phoneSections!, [section.key]: event.target.value }) })}
+                    placeholder={section.placeholder}
+                    disabled={disabled}
+                  />
+                </div>;
+              })}
+            </div>
           </div>
         ) : (
           <Textarea
@@ -1918,6 +2222,9 @@ function bombDetailToLaunch(detail: BombDetail): LaunchBombOption {
     name: detail.name,
     goal: detail.goal,
     cp: detail.cp || undefined,
+    cpIds: detail.cpIds,
+    scenarioId: detail.scenarioId,
+    targetRole: detail.targetRole,
     status: detail.status,
     priority: detail.priority,
     steps: detail.templates.flatMap((item) => {
@@ -1940,6 +2247,8 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
   const {state,launchBomb}=useWorkspace();
   const c=state.customers.find(x=>x.id===customerId);
   const [remoteBombs,setRemoteBombs]=useState<BombListItem[]>([]);
+  const [remoteScenarios,setRemoteScenarios]=useState<BombScenario[]>([]);
+  const [remoteCps,setRemoteCps]=useState<CurrentCpOption[]>([]);
   const [remoteDetail,setRemoteDetail]=useState<LaunchBombOption>();
   const [bombId,setBombId]=useState("");
   const [target,setTarget]=useState("");
@@ -1949,6 +2258,11 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
   const [previewReady,setPreviewReady]=useState(false);
   const [launchPlan,setLaunchPlan]=useState<{instanceId:string;state:WorkspaceState}|null>(null);
   const [launching,setLaunching]=useState(false);
+  const [saveAsTemplateOpen,setSaveAsTemplateOpen]=useState(false);
+  const [saveAsTemplateName,setSaveAsTemplateName]=useState("");
+  const [saveAsTemplateScenarioId,setSaveAsTemplateScenarioId]=useState("");
+  const [saveAsTemplateCpId,setSaveAsTemplateCpId]=useState("");
+  const [savingTemplate,setSavingTemplate]=useState(false);
   const localBombs=state.bombs.filter(b=>b.status==="Active"&&b.cp===c?.cp);
   const notionBombs=remoteBombs.filter(b=>b.status==="Active"&&(!currentCp||currentCp==="NONE"||!b.cp||b.cp.split(",").some(item=>item.trim()===currentCp)));
   const selected=previewOnly?remoteDetail:localBombs.find(b=>b.id===bombId);
@@ -1975,12 +2289,12 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
     let cancelled=false;
     fetch("/api/bombs")
       .then(async response=>{
-        const payload=await response.json() as {bombs?:BombListItem[];error?:string};
+        const payload=await response.json() as {bombs?:BombListItem[];scenarios?:BombScenario[];cps?:CurrentCpOption[];error?:string};
         if(!response.ok)throw new Error(payload.error||"Failed to load OmniReach");
-        return payload.bombs||[];
+        return payload;
       })
-      .then(items=>{if(!cancelled)setRemoteBombs(items);})
-      .catch(()=>{if(!cancelled)setRemoteBombs([]);});
+      .then(catalog=>{if(!cancelled){setRemoteBombs(catalog.bombs||[]);setRemoteScenarios(catalog.scenarios||[]);setRemoteCps(catalog.cps||[]);}})
+      .catch(()=>{if(!cancelled){setRemoteBombs([]);setRemoteScenarios([]);setRemoteCps([]);}});
     return ()=>{cancelled=true};
   },[open,previewOnly]);
   useEffect(()=>{
@@ -2004,9 +2318,15 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
     setStepUploading({});
     setRemoteDetail(undefined);
     setRemoteBombs([]);
+    setRemoteScenarios([]);
+    setRemoteCps([]);
     setLaunchPlan(null);
     setPreviewReady(false);
     setLaunchedInstanceId("");
+    setSaveAsTemplateOpen(false);
+    setSaveAsTemplateName("");
+    setSaveAsTemplateScenarioId("");
+    setSaveAsTemplateCpId("");
   },[open]);
   useEffect(()=>{
     if(!selected||!person){setCopies({});return;}
@@ -2028,7 +2348,7 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
       const hasBody=!!copy.content?.trim()||(copy.attachments?.length||0)>0;
       return !copy.subject?.trim()||!hasBody;
     }
-    if(s.channel==="Phone")return !copy.callGoal?.trim()||!copy.script?.trim();
+    if(s.channel==="Phone")return !copy.callGoal?.trim()||!phoneScriptSectionsComplete(parsePhoneScriptSections(copy.script));
     return !copy.content?.trim();
   });
   const anyStepUploading=Object.values(stepUploading).some(Boolean);
@@ -2037,21 +2357,53 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
   const launchedInstance=launchedInstanceId?state.bombInstances.find(item=>item.id===launchedInstanceId):undefined;
   const resultPlanState=launchPlan?.state || state;
   const resultPlanInstanceId=launchPlan?.instanceId || launchedInstanceId;
-  return <Dialog open={open} onOpenChange={value=>{if(!value){setLaunchedInstanceId("");setPreviewReady(false);setLaunchPlan(null);setLaunching(false);}onOpenChange(value)}}><DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-2xl"><DialogHeader><DialogTitle>{launched?"OmniReach launched · execution plan":"Launch OmniReach"}</DialogTitle><DialogDescription>{launched?"The system assigned this execution order and schedule. This plan is read-only.":"Review and edit each step’s copy for this launch only. The template is not changed. After confirmation, the system assigns timing and order based on channel availability and caller capacity. Any meaningful reply stops the run."}</DialogDescription></DialogHeader>
+  const openSaveAsTemplate=()=>{
+    if(!selected||!person)return;
+    setSaveAsTemplateName(`${selected.name} copy`);
+    setSaveAsTemplateScenarioId(selected.scenarioId||"");
+    setSaveAsTemplateCpId(("cpIds" in selected?selected.cpIds?.[0]:undefined)||remoteCps.find((item)=>item.name===selected.cp)?.id||"");
+    setSaveAsTemplateOpen(true);
+  };
+  const saveAsTemplate=async ()=>{
+    if(!selected||!person||savingTemplate||!saveAsTemplateName.trim()||!saveAsTemplateScenarioId||!saveAsTemplateCpId)return;
+    setSavingTemplate(true);
+    try{
+      const templates=selected.steps.flatMap((step)=>{
+        const copy=copies[step.id];
+        if(!copy)return [];
+        const restore=(value:string|undefined,source:string|undefined)=>restoreTemplateVariables(value,source,templateContext);
+        return [{
+          channel:step.channel,
+          name:step.channel==="Phone"?restore(copy.callGoal,step.callGoal):undefined,
+          subject:step.channel==="Email"?restore(copy.subject,step.subject):undefined,
+          content:step.channel==="Phone"?restore(copy.script,step.script):restore(copy.content,step.content),
+          attachments:copy.attachments||[],
+        }];
+      });
+      const response=await fetch("/api/bombs",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:saveAsTemplateName.trim(),goal:selected.goal,cpIds:[saveAsTemplateCpId],scenarioId:saveAsTemplateScenarioId,targetRole:selected.targetRole||null,status:"Active",templates})});
+      const payload=await response.json() as {bomb?:BombDetail;error?:string};
+      if(!response.ok||!payload.bomb)throw new Error(payload.error||"Unable to save OmniReach template");
+      setRemoteBombs(previous=>[payload.bomb!,...previous.filter(item=>item.id!==payload.bomb!.id)].sort((left,right)=>left.name.localeCompare(right.name)));
+      setSaveAsTemplateOpen(false);
+      toast.success(`Saved “${payload.bomb.name}” as an OmniReach template`);
+    }catch(error){toast.error(error instanceof Error?error.message:"Unable to save OmniReach template");}
+    finally{setSavingTemplate(false);}
+  };
+  return <Dialog open={open} onOpenChange={value=>{if(!value){setLaunchedInstanceId("");setPreviewReady(false);setLaunchPlan(null);setLaunching(false);setSaveAsTemplateOpen(false);}onOpenChange(value)}}><DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-2xl"><DialogHeader><div className="flex items-center gap-2 pr-8"><DialogTitle className="min-w-0 flex-1">{launched?"OmniReach launched · execution plan":"Launch OmniReach"}</DialogTitle>{!launched&&previewOnly&&selected&&person&&<Button type="button" variant="ghost" size="icon" className="size-11 shrink-0" aria-label="Save as OmniReach template" onClick={openSaveAsTemplate}><Save className="size-4"/></Button>}</div><DialogDescription>{launched?"The system assigned this execution order and schedule. This plan is read-only.":"Review and edit each step’s copy for this launch only. The template is not changed. After confirmation, the system assigns timing and order based on channel availability and caller capacity. Any meaningful reply stops the run."}</DialogDescription></DialogHeader>
     <div className="min-h-0 space-y-4 overflow-y-auto pr-1">
       {!launched&&hasActiveOmniReach&&<div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">This Brand already has an active OmniReach. Stop it before launching another.</div>}
       {launched&&<div className="rounded-xl bg-emerald-50 p-4"><div className="text-sm font-semibold text-emerald-900">System assignment complete</div><p className="mt-1 text-xs text-emerald-800">{selected?`${selected.name}${selected.goal?` · ${selected.goal}`:""}`:launchedInstance?`${launchedInstance.templateName} · Version ${launchedInstance.version}`:"The order and timing below are informational only and cannot be edited."}{person?` · ${person.name}`:""}</p><div className="mt-4 rounded-xl border border-emerald-100 bg-white p-4">{resultPlanInstanceId?<BombExecutionPlan state={resultPlanState} instanceId={resultPlanInstanceId} contacts={targets} tone="success"/>:<div className="text-xs text-slate-500">Execution plan is loading…</div>}</div></div>}
       {!launched&&<>
-      <label className="text-sm font-medium">OmniReach<Select value={bombId} onValueChange={v=>{setBombId(v);setTarget("");}}><SelectTrigger className="mt-2 w-full"><SelectValue placeholder="Select an OmniReach"/></SelectTrigger><SelectContent>{(previewOnly?notionBombs:localBombs).map(b=><SelectItem key={b.id} value={b.id}>{previewOnly?`${b.name}${b.cp?` · ${b.cp}`:""}`:`${b.name} · V${"version" in b ? b.version : ""}`}</SelectItem>)}</SelectContent></Select></label>
+      <label className="text-sm font-medium">OmniReach<Select value={bombId} onValueChange={setBombId}><SelectTrigger className="mt-2 w-full"><SelectValue placeholder="Select an OmniReach"/></SelectTrigger><SelectContent>{(previewOnly?notionBombs:localBombs).map(b=><SelectItem key={b.id} value={b.id}>{previewOnly?`${b.name}${b.cp?` · ${b.cp}`:""}`:`${b.name} · V${"version" in b ? b.version : ""}`}</SelectItem>)}</SelectContent></Select></label>
+      <label className="text-sm font-medium">KeyPerson<Select value={target} onValueChange={setTarget}><SelectTrigger className="mt-2 w-full"><SelectValue placeholder="Select a KeyPerson"/></SelectTrigger><SelectContent>{targets.map(t=><SelectItem key={t.id} value={t.id}>{t.name} · {t.role}</SelectItem>)}</SelectContent></Select></label>
       {selected&&<>
-        <label className="text-sm font-medium">Launch for<Select value={target} onValueChange={setTarget}><SelectTrigger className="mt-2 w-full"><SelectValue placeholder="Select a KeyPerson"/></SelectTrigger><SelectContent>{targets.map(t=><SelectItem key={t.id} value={t.id}>{t.name} · {t.role}</SelectItem>)}</SelectContent></Select></label>
         {person&&<>
         <div className="rounded-xl bg-slate-50 p-4 text-sm"><b>{selected.goal}</b><p className="mt-1 text-xs text-slate-500">Edits apply only to this launch.</p>{unavailable.length>0&&<div className="mt-2 text-xs text-amber-700">No contact info for: {[...new Set(unavailable)].join(", ")}. These channels are disabled and will not create send tasks.</div>}</div>
         {selected.steps.map((s,index)=>{
           const copy=copies[s.id]||{};
           const disabled=!!person&&!channelAvailable(person,s.channel);
           return <div key={s.id} className={`rounded-xl bg-slate-50 p-4 ${disabled?"pointer-events-none opacity-50":""}`} aria-disabled={disabled||undefined}>
-            <div className="mb-3 flex items-center justify-between gap-2"><div className="flex items-center gap-2"><span className={`grid size-7 place-items-center rounded-md bg-slate-50 text-xs font-bold ${disabled?"text-slate-400":"text-violet-600"}`}>{index+1}</span><ChannelOption channel={s.channel}/></div><span className={`text-xs ${disabled?"font-medium text-slate-400":"text-slate-500"}`}>{disabled?"Unavailable · no contact info":"System will schedule this step"}</span></div>
+            <div className="mb-3 flex items-center justify-between gap-2"><div className="flex items-center gap-2"><span className={`grid size-7 place-items-center rounded-md bg-slate-50 text-xs font-bold ${disabled?"text-slate-400":"text-violet-600"}`}>{index+1}</span><ChannelOption channel={s.channel}/></div>{disabled?<span className="text-xs font-medium text-slate-400">Unavailable · no contact info</span>:null}</div>
             <LaunchStepEditor
               key={`${s.id}:${target}:${bombId}`}
               channel={s.channel}
@@ -2069,6 +2421,7 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
       </>}
     </div>
     <DialogFooter>{launched?<Button onClick={()=>onOpenChange(false)}>Done</Button>:<><Button variant="outline" onClick={()=>onOpenChange(false)}>Cancel</Button><Button disabled={launching||anyStepUploading||!selected||!person||!hasReachableStep||incomplete||!!hasActiveOmniReach||(!previewOnly&&(!!c?.activeBombId||c?.status==="Bomb Running"))} onClick={()=>{if(!selected||!person)return;if(previewOnly){if(!customerId)return;void (async ()=>{setLaunching(true);try{const response=await fetch(`/api/brands/${customerId}/launch`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({bombId:selected.id,contactId:person.id,copies})});const payload=await response.json() as {message?:string;error?:string;omniReachRunId?:string;bombId?:string;bombName?:string;contactId?:string;steps?:Array<{taskId:string;channel:string;scheduledAt:string;templateId?:string;content:string;attachments?:MediaAttachment[]}>};if(!response.ok)throw new Error(payload.error||"Launch failed");if(!payload.omniReachRunId||!payload.steps?.length)throw new Error("Launch succeeded but no execution plan steps were returned");const plan=launchPlanFromApiSteps({customerId,bombId:payload.bombId||selected.id,bombName:payload.bombName||selected.name,contactId:payload.contactId||person.id,omniReachRunId:payload.omniReachRunId,steps:payload.steps});setLaunchPlan(plan);setPreviewReady(true);toast.success(payload.message||"OmniReach launched");onLaunched?.();}catch(error){toast.error(error instanceof Error?error.message:"Launch failed");}finally{setLaunching(false);}})();return;}if(!c)return;const r=launchBomb(c.id,selected.id,person.id,copies);show(r);if(r.ok&&r.id)setLaunchedInstanceId(r.id);}}>Launch OmniReach</Button></>}</DialogFooter>
+    <Dialog open={saveAsTemplateOpen} onOpenChange={setSaveAsTemplateOpen}><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>Save as OmniReach template</DialogTitle><DialogDescription>This saves the edited steps as a new reusable OmniReach. The original is unchanged.</DialogDescription></DialogHeader><label className="grid gap-2 text-sm font-medium">Name<Input autoFocus value={saveAsTemplateName} onChange={event=>setSaveAsTemplateName(event.target.value)} placeholder="OmniReach name"/></label><label className="grid gap-2 text-sm font-medium">Scenario<Select value={saveAsTemplateScenarioId||undefined} onValueChange={setSaveAsTemplateScenarioId}><SelectTrigger className="w-full"><SelectValue placeholder="Select a scenario"/></SelectTrigger><SelectContent position="popper">{remoteScenarios.map((item)=><SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectContent></Select></label><label className="grid gap-2 text-sm font-medium">Applicable CP<Select value={saveAsTemplateCpId||undefined} onValueChange={setSaveAsTemplateCpId}><SelectTrigger className="w-full"><SelectValue placeholder="Select a CP"/></SelectTrigger><SelectContent position="popper">{remoteCps.map((item)=><SelectItem key={item.id} value={item.id}>{item.fullName?`${item.name} · ${item.fullName}`:item.name}</SelectItem>)}</SelectContent></Select></label><DialogFooter><Button type="button" variant="outline" onClick={()=>setSaveAsTemplateOpen(false)}>Cancel</Button><Button type="button" disabled={savingTemplate||!saveAsTemplateName.trim()||!saveAsTemplateScenarioId||!saveAsTemplateCpId} onClick={()=>void saveAsTemplate()}>{savingTemplate?"Saving…":"Save template"}</Button></DialogFooter></DialogContent></Dialog>
   </DialogContent></Dialog>;
 }
 
