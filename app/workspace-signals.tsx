@@ -1,5 +1,6 @@
 "use client";
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -32,6 +33,7 @@ import {
 import {
   effectiveFollowup,
   filterWorkspaceQueue,
+  pendingSignalIds,
   summarize,
   safeSourceUrl,
   type SignalBrand,
@@ -138,7 +140,7 @@ export function SignalsPage() {
     () => window.matchMedia(desktopQuery).matches,
     () => false,
   );
-  const { data, error, refresh } = useSignals();
+  const { data, error, refresh, settle } = useSignals();
   const router = useRouter();
   const params = useSearchParams();
   const requested = params.get("brand");
@@ -188,6 +190,59 @@ export function SignalsPage() {
   // Keep an opened item visible while its read state settles; the queue itself
   // can update immediately without interrupting comprehension.
   const current = selectedBrand || queue[0];
+  /**
+   * Opening a brand's review panel clears its unread marker only
+   * (docs/signals.md). The red dot, the nav badge and the pending queue all key
+   * off the still-fresh signal IDs, so the snapshot has to cover every one of
+   * them — sending a single signal group's ID would leave the dot lit.
+   */
+  const markBrandRead = useCallback(
+    async (brand: SignalBrand) => {
+      const fresh = brand.newEventIds?.length
+        ? brand.newEventIds
+        : brand.events.filter((event) => event.isNewSignal).map((event) => event.id);
+      const read = new Set(brand.readEventIds || []);
+      if (!fresh.some((id) => !read.has(id))) return;
+      const snapshot = [...new Set([...read, ...fresh])].filter((id) => fresh.includes(id));
+      if (showingMock) {
+        settle(brand.id, snapshot);
+        return;
+      }
+      if (data?.readOnly) {
+        console.warn("[signals] read skipped: payload is read-only", {
+          brandId: brand.id,
+        });
+        return;
+      }
+      try {
+        const response = await fetch(`/api/signals/${brand.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "read", eventIds: snapshot }),
+        });
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => null)) as
+            | { error?: string }
+            | null;
+          throw new Error(
+            payload?.error || `Unable to update read status (${response.status})`,
+          );
+        }
+        settle(brand.id, snapshot);
+      } catch (error) {
+        // Surface the failure: a silent catch left the dot lit with no clue why.
+        console.error("[signals] mark read failed", {
+          brandId: brand.id,
+          eventIds: snapshot.length,
+          error,
+        });
+        toast.error(
+          error instanceof Error ? error.message : "Unable to update read status",
+        );
+      }
+    },
+    [data?.readOnly, settle, showingMock],
+  );
   const onComplete = () => {
     const next = filterWorkspaceQueue(data?.brands || [], "review", "all", now)
       .find((b) => b.id !== current?.id);
@@ -291,7 +346,7 @@ export function SignalsPage() {
                 {queue.map((brand) => {
                   const visibleEvents = type === "all" ? brand.events : brand.events.filter((event) => event.type === type);
                   const latest = (view === "review"
-                    ? visibleEvents.find((event) => event.isNewSignal && !brand.readEventIds?.includes(event.id))
+                    ? visibleEvents.find((event) => event.isNewSignal && !brand.reviewedEventIds?.includes(event.id))
                     : undefined) || visibleEvents[0];
                   const isSelected = current?.id === brand.id;
                   const isUnread = brand.unread;
@@ -302,6 +357,7 @@ export function SignalsPage() {
                         setSelected(brand.id);
                         setMobileDetail(true);
                         setDeepLinkActive(false);
+                        void markBrandRead(brand);
                       }}
                       aria-current={isSelected ? "true" : undefined}
                       className={`w-full rounded-md px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${isSelected ? "bg-slate-200/85 shadow-sm" : isUnread ? "bg-slate-100/90 shadow-sm hover:bg-slate-200/75" : "bg-transparent hover:bg-slate-100/60"}`}
@@ -451,7 +507,16 @@ function BrandReview({
     setExpandedSignalKeys((old) => new Set(old).add(key));
     const readId = anchor.signalReadId || anchor.id;
     if (brand.readEventIds?.includes(readId)) return;
-    const snapshot = [...new Set([...(brand.readEventIds || []), readId])];
+    // Keep the snapshot to currently-fresh signal IDs only: once a newer tap
+    // supersedes an older one, re-sending the stale ID would fail validation.
+    const fresh = new Set(
+      brand.newEventIds?.length
+        ? brand.newEventIds
+        : brand.events.filter((event) => event.isNewSignal).map((event) => event.id),
+    );
+    const snapshot = [...new Set([...(brand.readEventIds || []), readId])].filter(
+      (id) => fresh.has(id),
+    );
     if (mock) {
       settle(brand.id, snapshot);
       return;
@@ -475,10 +540,17 @@ function BrandReview({
     linkedTask?: string,
     activityId?: string,
   ) {
+    // The review snapshot covers the still-pending signals only. Sending every
+    // raw event would drag History-only activity into the snapshot, which the
+    // API rejects with 409 ("Signal snapshot is no longer available").
+    const pending = pendingSignalIds(brand);
+    const eventIds = pending.length
+      ? pending
+      : brand.events.filter((event) => event.isNewSignal).map((event) => event.id);
     if (mock) {
       settle(
         brand.id,
-        brand.events.map((event) => event.id),
+        eventIds,
         action === "later" ? "Later" : action === "handled" ? "Handled" : "Reviewed",
         linkedTask,
       );
@@ -500,7 +572,7 @@ function BrandReview({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action,
-          eventIds: brand.events.map((e) => e.id),
+          eventIds,
           taskId: linkedTask,
           activityId,
         }),
@@ -508,7 +580,7 @@ function BrandReview({
       if (!response.ok) throw new Error("Unable to save review");
       settle(
         brand.id,
-        brand.events.map((e) => e.id),
+        eventIds,
         action === "later"
           ? "Later"
           : action === "handled"
@@ -680,10 +752,9 @@ function BrandReview({
   const phone = actionContacts.find((c) => dialPhoneOptions(c).length);
   const linkedin = actionContacts.find((c) => c.linkedin);
   const allSignalGroups = groupedSignals(brand.events);
-  const currentSignalGroups = allSignalGroups.filter(({ key, events }) => {
-    const readId = events.find((event) => event.isNewSignal)?.signalReadId || events[0]?.signalReadId || events[0]?.id;
-    return Boolean(readId && (!brand.readEventIds?.includes(readId) || expandedSignalKeys.has(key)));
-  });
+  // Reviewing clears the unread marker only (docs/signals.md): read signal
+  // groups stay visible here so the panel keeps showing the tap details.
+  const currentSignalGroups = allSignalGroups;
   const groupsForView = currentSignalGroups;
   const visibleSignalGroups = signalsExpanded ? groupsForView : groupsForView.slice(0, 3);
   const hasMoreSignals = groupsForView.length > 3;

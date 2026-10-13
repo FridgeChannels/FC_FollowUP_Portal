@@ -24,6 +24,13 @@ import type {
 import { CHANNELS as SCHEDULE_CHANNELS } from "../scheduling-engine/types";
 import { notionScheduledAtProperty } from "./scheduled-at";
 import { invalidateBrandReplySignalCache } from "./brand-reply-signal-cache";
+import { getPortalBaseUrl } from "../notify/config";
+import { getEmailTrackSecret } from "../signals/email-config";
+import {
+  buildOpenTrackingToken,
+  makeEmailTrackable,
+  openTrackingPixelUrl,
+} from "../signals/email-tracking";
 import { encodeBrandAssignment } from "../brand-assignment";
 import { invalidateExhibitionOptionsCache } from "./exhibition-options-cache";
 import { listChannelCapacityConfig } from "./capacity";
@@ -438,6 +445,36 @@ function encodeOutboundExtendedParameters(
   }
 }
 
+/**
+ * Append the open-tracking pixel to an outbound email body.
+ *
+ * Returns the body unchanged (so callers can skip the assignment) when tracking
+ * is not configured or the token cannot be built — a missing secret must never
+ * block a send.
+ */
+async function stampEmailOpenTracking(input: {
+  brandId: string;
+  contactId: string;
+  messageId: string;
+  threadId?: string | null;
+  subject: string;
+  content: string;
+}) {
+  const token = await buildOpenTrackingToken(
+    {
+      b: input.brandId,
+      m: input.messageId,
+      t: input.threadId || undefined,
+      c: input.contactId,
+      s: input.subject,
+    },
+    getEmailTrackSecret(),
+  );
+  const pixelUrl = openTrackingPixelUrl(token, getPortalBaseUrl());
+  if (!pixelUrl) return null;
+  return makeEmailTrackable(input.content, pixelUrl);
+}
+
 export async function createOutboundConversation(input: {
   brandId: string;
   brandName: string;
@@ -475,7 +512,7 @@ export async function createOutboundConversation(input: {
     ? sanitizeEmailAttachments(input.attachments)
     : [];
   const attachments = whatsappAttachments.length ? whatsappAttachments : emailAttachments;
-  const content = input.content.trim() || captionForAttachments(attachments);
+  let content = input.content.trim() || captionForAttachments(attachments);
   if (!content) throw new Error("Message content is required");
 
   const suffix = input.titleSuffix || "Pending";
@@ -492,6 +529,20 @@ export async function createOutboundConversation(input: {
   );
   if (input.messageId?.trim()) {
     thread.messageId = input.messageId.trim();
+  }
+  // Outbound email only: stamp an open-tracking pixel so a recipient opening the
+  // mail raises an `email.opened` Signals event. Every human/automated email
+  // flows through here, so this is the one place the pixel needs to land.
+  if (input.channel === "Email" && (input.direction || "Outbound") === "Outbound") {
+    const tracked = await stampEmailOpenTracking({
+      brandId: input.brandId,
+      contactId: input.contactId,
+      messageId: thread.messageId,
+      threadId: thread.threadId,
+      subject,
+      content,
+    });
+    if (tracked) content = tracked;
   }
   const properties: Record<string, unknown> = {
     "Conversation Record": { title: richText(title) },

@@ -87,13 +87,44 @@ export async function queryOwnerPages() {
   return (await queryOwnerPagesRaw()).map(mapOwner);
 }
 
+/**
+ * Viewer identity is resolved on every authenticated request, and each miss
+ * costs a Notion query (plus a full owner-DB scan when the Account filter finds
+ * nothing). The identity behind an email changes rarely, so it is cached and
+ * concurrent lookups for the same account share one request.
+ */
+const OWNER_LOOKUP_CACHE_MS = 60_000;
+const ownerLookupCache = new Map<
+  string,
+  { at: number; owner: FollowupOwner | null }
+>();
+const ownerLookupPending = new Map<string, Promise<FollowupOwner | null>>();
+
 export async function findOwnerByAccount(email?: string | null) {
+  const key = email?.trim().toLowerCase() || "";
+  if (!key) return null;
+  const cached = ownerLookupCache.get(key);
+  if (cached && Date.now() - cached.at < OWNER_LOOKUP_CACHE_MS) {
+    return cached.owner;
+  }
+  const pending = ownerLookupPending.get(key);
+  if (pending) return pending;
+  const task = (async () => {
+    try {
+      const page = await findOwnerPageByAccount(email);
+      return page ? mapOwner(page) : null;
+    } catch (error) {
+      if (isMissingObject(error)) throw new Error(OWNER_DB_SHARE_ERROR);
+      throw error;
+    }
+  })();
+  ownerLookupPending.set(key, task);
   try {
-    const page = await findOwnerPageByAccount(email);
-    return page ? mapOwner(page) : null;
-  } catch (error) {
-    if (isMissingObject(error)) throw new Error(OWNER_DB_SHARE_ERROR);
-    throw error;
+    const owner = await task;
+    ownerLookupCache.set(key, { at: Date.now(), owner });
+    return owner;
+  } finally {
+    if (ownerLookupPending.get(key) === task) ownerLookupPending.delete(key);
   }
 }
 

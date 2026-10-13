@@ -46,5 +46,6 @@ next-env.d.ts
 /work/
 /.data/
 /logs/
+/.workbuddy/
 
 *.code-workspace

@@ -12,8 +12,19 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { mockSignals } from "@/lib/signals/mock";
 import type { SignalsPayload, SignalReview } from "@/lib/signals/model";
+import { summarize } from "@/lib/signals/model";
 import type { SessionUser } from "@/lib/auth-session";
 import { useSession } from "./use-session";
+
+/**
+ * How often the cheap change token at /api/signals/pulse is polled. The probe
+ * only reads a few Supabase timestamps, so it can run far more often than the
+ * full payload request (which fans out to Notion).
+ */
+const PULSE_INTERVAL_MS = 5000;
+/** Safety net: force a full refresh even if the probe never reports a change. */
+const FULL_REFRESH_INTERVAL_MS = 60000;
+
 const Context = createContext<{
   data: SignalsPayload | null;
   error: string | null;
@@ -62,27 +73,19 @@ function SessionSignalsProvider({
   const [error, setError] = useState<string | null>(null);
   const previous = useRef<SignalsPayload | null>(null);
   const busy = useRef(false);
-  const refresh = useCallback(async () => {
-    if (mock) {
-      const payload = mockSignals();
-      previous.current = payload;
-      setData(payload);
-      setError(null);
-      return;
-    }
-    if (busy.current || loading || !user || user.role === "Caller") return;
-    busy.current = true;
-    try {
-      const response = await fetch("/api/signals", { cache: "no-store" });
-      const payload = (await response.json()) as SignalsPayload & {
-        error?: string;
-      };
-      // Ignore a live response that began before the user switched to mock data.
-      if (
-        isMockPreviewPath(window.location.pathname, new URLSearchParams(window.location.search)) !== mock
-      )
-        return;
-      if (!response.ok) throw new Error("Unable to load signals");
+  /** Last change token the UI has already rendered. */
+  const seenVersion = useRef<string | null>(null);
+  const stillOnSameMode = useCallback(
+    (isMock: boolean) =>
+      isMockPreviewPath(
+        window.location.pathname,
+        new URLSearchParams(window.location.search),
+      ) === isMock,
+    [],
+  );
+  /** Swap in a fresh payload, surfacing first-of-its-kind activity to the AM. */
+  const applyPayload = useCallback(
+    (payload: SignalsPayload) => {
       if (previous.current) {
         const ids = new Set(
           previous.current.brands.flatMap((b) => b.events.map((e) => e.id)),
@@ -123,29 +126,80 @@ function SessionSignalsProvider({
       previous.current = payload;
       setData(payload);
       setError(null);
+    },
+    [router],
+  );
+  const refresh = useCallback(async () => {
+    if (mock) {
+      const payload = mockSignals();
+      previous.current = payload;
+      setData(payload);
+      setError(null);
+      return;
+    }
+    if (busy.current || loading || !user || user.role === "Caller") return;
+    busy.current = true;
+    try {
+      const response = await fetch("/api/signals", { cache: "no-store" });
+      const payload = (await response.json()) as SignalsPayload & {
+        error?: string;
+      };
+      // Ignore a live response that began before the user switched to mock data.
+      if (!stillOnSameMode(mock)) return;
+      if (!response.ok) throw new Error("Unable to load signals");
+      applyPayload(payload);
     } catch {
-      if (
-        isMockPreviewPath(window.location.pathname, new URLSearchParams(window.location.search)) !== mock
-      )
-        return;
+      if (!stillOnSameMode(mock)) return;
       setError("Unable to load signals");
     } finally {
       busy.current = false;
     }
-  }, [loading, mock, user, router]);
+  }, [applyPayload, loading, mock, stillOnSameMode, user]);
   useEffect(() => {
-    const initial = setTimeout(() => void refresh(), 0);
-    const timer = setInterval(() => {
+    if (loading || !user || user.role === "Caller") return;
+    // Initial load, deferred so state lands in a callback rather than inline.
+    // refresh() owns the mock branch, so preview paths stop here.
+    const initial = window.setTimeout(() => void refresh(), 0);
+    if (mock) return () => window.clearTimeout(initial);
+    let stopped = false;
+    // Poll the cheap token first; only pull the full payload when it moves, so
+    // a new tap lands without the user reloading and without hammering Notion.
+    const probe = async () => {
+      if (stopped || busy.current) return;
+      try {
+        const response = await fetch("/api/signals/pulse", { cache: "no-store" });
+        if (!response.ok) return;
+        const { version } = (await response.json()) as { version?: string };
+        if (stopped || !version) return;
+        // First observation only records the token: the initial refresh below
+        // already rendered exactly this state.
+        if (seenVersion.current === null) {
+          seenVersion.current = version;
+          return;
+        }
+        if (version === seenVersion.current) return;
+        seenVersion.current = version;
+        await refresh();
+      } catch {
+        // Transient probe failure: the next tick retries.
+      }
+    };
+    const pulse = window.setInterval(() => {
+      if (document.visibilityState === "visible") void probe();
+    }, PULSE_INTERVAL_MS);
+    const safety = window.setInterval(() => {
       if (document.visibilityState === "visible") void refresh();
-    }, 15000);
-    const onFocus = () => void refresh();
+    }, FULL_REFRESH_INTERVAL_MS);
+    const onFocus = () => void probe();
     window.addEventListener("focus", onFocus);
     return () => {
-      clearTimeout(initial);
-      clearInterval(timer);
+      stopped = true;
+      window.clearTimeout(initial);
+      window.clearInterval(pulse);
+      window.clearInterval(safety);
       window.removeEventListener("focus", onFocus);
     };
-  }, [refresh]);
+  }, [loading, mock, refresh, user]);
   const settle = useCallback(
     (
       brandId: string,
@@ -153,36 +207,38 @@ function SessionSignalsProvider({
       status?: SignalReview["status"],
       taskId?: string,
     ) => {
-      setData((current) =>
-        current
-          ? {
-              ...current,
-              brands: current.brands.map((brand) =>
-                brand.id !== brandId
-                  ? brand
-                  : {
-                      ...brand,
-                      readEventIds: [...new Set([...(brand.readEventIds||[]), ...eventIds])],
-                      unread: (brand.newEventIds || brand.events.filter((event) => event.isNewSignal).map((event) => event.id))
-                        .some((id) => !new Set([...(brand.readEventIds || []), ...eventIds]).has(id)),
-                      ...(status
-                        ? {
-                            status: (brand.newEventIds || brand.events.filter((event) => event.isNewSignal).map((event) => event.id)).some(
-                              (id) => !new Set([...(brand.readEventIds || []), ...eventIds]).has(id),
-                            )
-                              ? ("Needs Review" as const)
-                              : status,
-                            needsReview: (brand.newEventIds || brand.events.filter((event) => event.isNewSignal).map((event) => event.id)).some(
-                              (id) => !new Set([...(brand.readEventIds || []), ...eventIds]).has(id),
-                            ),
-                            taskId,
-                          }
-                        : {}),
-                    },
-              ),
-            }
-          : current,
-      );
+      setData((current) => {
+        if (!current) return current;
+        const brands = current.brands.map((brand) => {
+          if (brand.id !== brandId) return brand;
+          const readIds = [...new Set([...(brand.readEventIds || []), ...eventIds])];
+          const fresh =
+            brand.newEventIds?.length
+              ? brand.newEventIds
+              : brand.events.filter((event) => event.isNewSignal).map((event) => event.id);
+          // The red dot and the nav badge follow unread only. `needsReview` must
+          // be recomputed here too — leaving it stale kept the sidebar count lit
+          // after the list had already settled.
+          const unread = fresh.some((id) => !readIds.includes(id));
+          const next: typeof brand = {
+            ...brand,
+            readEventIds: readIds,
+            unread,
+            needsReview: unread,
+          };
+          if (!status) return next;
+          return {
+            ...next,
+            reviewedEventIds: [
+              ...new Set([...(brand.reviewedEventIds || []), ...eventIds]),
+            ],
+            status: unread ? ("Needs Review" as const) : status,
+            needsReview: unread,
+            taskId,
+          };
+        });
+        return { ...current, brands, summary: summarize(brands) };
+      });
     },
     [],
   );
