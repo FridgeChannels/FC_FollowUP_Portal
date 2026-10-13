@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  Activity,
   Bot,
   CalendarClock,
   Clock3,
@@ -18,15 +17,9 @@ import type {
   QuoTranscriptLine,
   QuoVoicemail,
 } from "@/lib/quo/types";
-import { formatScheduledDateTime } from "@/lib/display-time";
 import { recordingsForQuoCall } from "@/lib/quo/data";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-
-function formatDate(value?: string | null) {
-  if (!value) return "—";
-  return formatScheduledDateTime(value) || value;
-}
 
 function formatDuration(value?: number | null) {
   if (typeof value !== "number" || !Number.isFinite(value)) return "—";
@@ -66,10 +59,10 @@ function SpeakerLine({ line }: { line: QuoTranscriptLine }) {
 
 function Recording({ recording }: { recording: QuoRecording }) {
   return <div className="rounded-xl bg-slate-50 p-4">
-    <Field label="Duration" value={formatDuration(recording.duration)}/>
-    {recording.url ? <div className="mt-3">
-      <audio className="w-full" controls preload="metadata" src={recording.url}>Your browser does not support audio playback.</audio>
-    </div> : <p className="mt-3 text-sm text-slate-500">Recording URL is not available yet.</p>}
+    {recording.url ? <div className="flex min-w-0 items-center gap-3">
+      <span className="shrink-0 text-xs tabular-nums text-slate-600"><span className="text-slate-400">Duration </span>{formatDuration(recording.duration)}</span>
+      <audio className="min-w-0 flex-1" controls preload="metadata" src={recording.url}>Your browser does not support audio playback.</audio>
+    </div> : <><Field label="Duration" value={formatDuration(recording.duration)}/><p className="mt-3 text-sm text-slate-500">Recording URL is not available yet.</p></>}
   </div>;
 }
 
@@ -118,23 +111,23 @@ export function QuoCallPanel({
   const nextSteps = data.summary?.nextSteps || [];
   const jobs = data.summary?.jobs || [];
   const eventTypes = new Set(data.eventTypes || []);
+  const defaultTab = data.summary || eventTypes.has("call.summary.completed")
+    ? "summary"
+    : recordings.length || voicemail
+      ? "recording"
+      : "transcript";
 
   return <section className={compact ? "rounded-xl bg-white p-4" : "mt-6 rounded-2xl bg-white p-4 shadow-sm sm:p-5"}>
     <div className="flex flex-wrap items-start justify-between gap-3 pb-3">
       <div className="flex min-w-0 items-start gap-3"><span className="grid size-9 shrink-0 place-items-center rounded-xl bg-blue-100 text-blue-700"><PhoneCall className="size-4"/></span><h3 className="pt-1 font-bold text-slate-950">Quo call details</h3></div>
       {onRefresh ? <Button size="sm" variant="outline" disabled={refreshing} onClick={onRefresh}><RefreshCw className={`mr-2 size-3.5 ${refreshing ? "animate-spin" : ""}`}/>Refresh Quo data</Button> : null}
     </div>
-    <Tabs defaultValue="call">
-      <TabsList variant="line" className="grid h-11 w-full grid-cols-4 gap-0">
-        <TabsTrigger value="call" className="min-w-0 px-1 text-xs sm:text-sm"><Activity className="size-3.5"/>Call</TabsTrigger>
+    <Tabs defaultValue={defaultTab}>
+      <TabsList variant="line" className="grid h-11 w-full grid-cols-3 gap-0">
         <TabsTrigger value="recording" className="min-w-0 px-1 text-xs sm:text-sm"><FileAudio className="size-3.5"/>Recording</TabsTrigger>
         <TabsTrigger value="summary" className="min-w-0 px-1 text-xs sm:text-sm"><Bot className="size-3.5"/>Summary</TabsTrigger>
         <TabsTrigger value="transcript" className="min-w-0 px-1 text-xs sm:text-sm"><UsersRound className="size-3.5"/>Transcript</TabsTrigger>
       </TabsList>
-
-      <TabsContent value="call" className="mt-5">
-        <div className="grid gap-4 rounded-xl bg-slate-50 p-4 sm:grid-cols-2 lg:grid-cols-4"><Field label="Call ID" value={call?.id || data.callId}/><Field label="Status" value={call?.status}/><Field label="Started" value={formatDate(call?.createdAt)}/><Field label="Answered" value={formatDate(call?.answeredAt)}/><Field label="Completed" value={formatDate(call?.completedAt)}/><Field label="Duration" value={formatDuration(call?.duration ?? data.transcript?.duration)}/><Field label="From" value={call?.from}/><Field label="To" value={call?.to}/></div>
-      </TabsContent>
 
       <TabsContent value="recording" className="mt-5 space-y-4">
         {recordings.length ? recordings.map((recording, index) => <Recording key={recording.id || recording.url || index} recording={recording}/>) : <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">{eventTypes.has("call.recording.completed") ? "Quo reported that recording processing completed, but no recording file was included." : "No recording available yet."}</p>}

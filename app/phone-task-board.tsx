@@ -12,7 +12,6 @@ import {
 } from "@/lib/call-review-history";
 import {
   dialPhoneOptions,
-  formatDialPhoneSummary,
   quoDialHref,
   type DialPhoneOption,
 } from "@/lib/dial-phones";
@@ -227,6 +226,12 @@ function PhoneTaskStatusBadge({ status }: { status: string }) {
 function phoneTaskTime(task: PhoneBoardTask) {
   const time = Date.parse(task.dueAt || "");
   return Number.isFinite(time) ? time : Number.NEGATIVE_INFINITY;
+}
+
+function formatCallDuration(value?: number | null) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  const seconds = Math.max(0, Math.round(value));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
 function formatReviewDay(iso?: string) {
@@ -557,7 +562,6 @@ function CallDayGroup({
           {[...results].map(([result, count]) => <span key={result} className={result === "Connected" ? "font-medium text-emerald-700" : "text-slate-600"}>{count} {result}</span>)}
         </span> : null}
       </span>
-      <span className="shrink-0 pt-0.5 text-xs tabular-nums text-slate-600">{day.items.length} call{day.items.length === 1 ? "" : "s"}</span>
     </button>
     {showNotion && day.key !== "unknown" ? <div className="px-4 pb-3 pt-1 sm:py-3">
       {report ? <a href={report.url} target="_blank" rel="noopener noreferrer" title={report.title} className="inline-flex items-center gap-1.5 rounded-md text-xs font-semibold text-violet-700 underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">{report.callerName} · {report.pageId.startsWith("mock-") ? "Mock Notion" : "Notion"} <ExternalLink aria-hidden="true" className="size-3.5"/></a>
@@ -608,6 +612,9 @@ function CallResultList({
   const renderCard = (item: Interaction) => {
     const occurredAt = phoneCallOccurredAt(item);
     const callId = item.quo?.callId;
+    const duration = formatCallDuration(item.quo?.call?.duration ?? item.quo?.transcript?.duration);
+    const from = item.quo?.call?.from;
+    const to = item.quo?.call?.to;
     const selected = selectable && !!callId && selectedCallId === callId;
     const highlighted = !!callId && highlightedCallId === callId;
     const card = <article id={highlighted ? `call-${callId}` : undefined} className={`rounded-xl border bg-white p-4 ${highlighted ? "border-blue-400 ring-2 ring-blue-100" : selectable && selected ? "border-amber-400 ring-2 ring-amber-200" : "border-slate-200"} ${selectable && callId ? "cursor-pointer" : ""}`}>
@@ -618,8 +625,15 @@ function CallResultList({
           <Badge variant="secondary" className="text-[10px]">{item.direction || "Outbound"}</Badge>
           {item.callResult ? <Badge variant="outline" className={`text-[10px] ${item.callResult === "Connected" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : ""}`}>{item.callResult}</Badge> : null}
         </div>
-        <time dateTime={occurredAt || undefined} title={formatEasternDateTime(occurredAt)} className="text-xs tabular-nums text-slate-600">{compactSelection ? formatEasternDateTime(occurredAt) || "Time unavailable" : formatPhoneCallTime(occurredAt, timeZone)}</time>
+        <div className="flex shrink-0 items-center gap-2 text-xs tabular-nums text-slate-600">
+          <time dateTime={occurredAt || undefined} title={formatEasternDateTime(occurredAt)}>{compactSelection ? formatEasternDateTime(occurredAt) || "Time unavailable" : formatPhoneCallTime(occurredAt, timeZone)}</time>
+          {duration ? <span aria-label={`Call duration ${duration}`}>{duration}</span> : null}
+        </div>
       </div>
+      {(from || to) ? <div className="mb-3 flex flex-wrap gap-x-3 gap-y-1 text-xs tabular-nums text-slate-600">
+        {from ? <span><span className="text-slate-400">From </span>{from}</span> : null}
+        {to ? <span><span className="text-slate-400">To </span>{to}</span> : null}
+      </div> : null}
       {!compactSelection ? <QuoCallPanel
         compact
         data={item.quo || null}
@@ -823,7 +837,6 @@ function PhoneTaskBlock({
     task.contactPhone,
     devCallPhoneOnClient(),
   );
-  const phoneSummary = formatDialPhoneSummary(dialOptions);
   const actionState = dialState(task.status, reviewStatus);
   const rounds = reviewRoundsForTask(task.callReviewHistory || []);
   const partitioned = partitionRoundCalls(quoResults, rounds, quoCallId, (item) => item.createdAt);
@@ -853,41 +866,49 @@ function PhoneTaskBlock({
     <div className="flex flex-wrap items-start justify-between gap-4">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <div className={`text-[11px] font-semibold tracking-[.14em] ${active ? "text-blue-700" : "text-slate-500"}`}>Task Description</div>
+          {onFocusTask ? <button type="button" className={`text-[11px] font-semibold tracking-[.14em] hover:underline ${active ? "text-blue-700" : "text-slate-500"}`} onClick={onFocusTask}>Phone task</button> : <div className={`text-[11px] font-semibold tracking-[.14em] ${active ? "text-blue-700" : "text-slate-500"}`}>Phone task</div>}
           {active ? <Badge className="bg-violet-600 text-[10px] text-white hover:bg-violet-600">Current</Badge> : null}
           <PhoneTaskStatusBadge status={task.status}/>
           {task.dueAt ? <span className="text-[11px] text-slate-400">{formatEasternDateTime(task.dueAt)}</span> : null}
           <ReviewBadge status={reviewStatus} resolution={reviewResolution}/>
         </div>
-        <h3 className={`mt-1 text-base font-bold ${active ? "text-blue-950" : "text-slate-900"}`}>
-          {onFocusTask ? <button type="button" className="text-left hover:underline" onClick={onFocusTask}>{task.title || "Call this Contact"}</button> : (task.title || "Call this Contact")}
-        </h3>
-        <p className={`mt-1 text-sm ${active ? "text-blue-900" : "text-slate-600"}`}>{contact?.name || "Contact"} · {phoneSummary}</p>
       </div>
       {showDial ? <div className="flex shrink-0"><CallWithQuoButton options={dialOptions} state={actionState} onCallOpening={onCallOpening}/></div> : null}
     </div>
 
-    <div className={`mt-5 rounded-xl border ${active ? "border-blue-100/80 bg-white/70" : "border-slate-200 bg-white"}`}>
-      <button
-        type="button"
-        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
-        onClick={() => setScriptOpen((open) => !open)}
-        aria-expanded={scriptOpen}
-      >
-        <span className={`text-xs font-semibold tracking-wide ${active ? "text-blue-700" : "text-slate-500"}`}>Call script</span>
-        {scriptOpen ? <ChevronDown className="size-4 shrink-0 text-slate-500"/> : <ChevronRight className="size-4 shrink-0 text-slate-500"/>}
-      </button>
-      {scriptOpen && <div className="border-t border-slate-100 px-4 pb-4 pt-3 text-sm text-slate-800">
-        {scriptLoading ? <p className="text-slate-500">Loading call script…</p>
-          : script ? (
-            <PhoneCallCopy
-              script={script}
-              bodyClassName="text-slate-700"
-              labelClassName="mb-1 text-[11px] font-semibold tracking-wide text-slate-500"
-            />
-          )
-          : <p className="text-slate-500">No call content yet.</p>}
-      </div>}
+    <div className="mt-5 grid gap-3 md:grid-cols-2">
+      <section className={`rounded-xl border px-4 py-3 ${active ? "border-blue-100/80 bg-white/70" : "border-slate-200 bg-white"}`}>
+        <div className={`text-xs font-semibold tracking-wide ${active ? "text-blue-700" : "text-slate-500"}`}>Call contact</div>
+        <p className={`mt-2 text-sm font-semibold ${active ? "text-blue-950" : "text-slate-900"}`}>{contact?.name || "No contact assigned"}</p>
+        {dialOptions.length ? <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
+          {dialOptions.map((option) => <div key={option.key} className="text-sm tabular-nums text-slate-700">
+            <span className="mr-1.5 text-xs text-slate-400">{option.label}</span>{option.number}
+          </div>)}
+        </div> : <p className="mt-3 text-sm text-slate-500">No phone number available.</p>}
+      </section>
+
+      <div className={`rounded-xl border ${active ? "border-blue-100/80 bg-white/70" : "border-slate-200 bg-white"}`}>
+        <button
+          type="button"
+          className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+          onClick={() => setScriptOpen((open) => !open)}
+          aria-expanded={scriptOpen}
+        >
+          <span className={`text-xs font-semibold tracking-wide ${active ? "text-blue-700" : "text-slate-500"}`}>Call script</span>
+          {scriptOpen ? <ChevronDown className="size-4 shrink-0 text-slate-500"/> : <ChevronRight className="size-4 shrink-0 text-slate-500"/>}
+        </button>
+        {scriptOpen && <div className="border-t border-slate-100 px-4 pb-4 pt-3 text-sm text-slate-800">
+          {scriptLoading ? <p className="text-slate-500">Loading call script…</p>
+            : script ? (
+              <PhoneCallCopy
+                script={script}
+                bodyClassName="text-slate-700"
+                labelClassName="mb-1 text-[11px] font-semibold tracking-wide text-slate-500"
+              />
+            )
+            : <p className="text-slate-500">No call content yet.</p>}
+        </div>}
+      </div>
     </div>
 
     {currentCalls.length || (showCallerReview && currentRound.recalled) ? (
