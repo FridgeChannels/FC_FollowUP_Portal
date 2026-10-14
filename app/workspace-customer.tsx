@@ -27,6 +27,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { EmailBodyEditor } from "./email-body-editor";
+import { EmailCcInput } from "./email-cc-input";
 import { emailBodyIsEmpty } from "@/lib/email-html";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -2033,13 +2034,15 @@ function BrandContactList({
                               href={linkedinUrl}
                               target="_blank"
                               rel="noreferrer"
-                              className={`truncate text-sky-700 underline-offset-2 hover:underline ${pendingField ? "text-amber-700" : ""}`}
+                              title={value}
+                              className={`min-w-0 max-w-full overflow-x-auto whitespace-nowrap [scrollbar-width:thin] text-sky-700 underline-offset-2 hover:underline ${pendingField ? "text-amber-700" : ""}`}
                             >
                               {value}
                             </a>
                           ) : (
                             <span
-                              className={`truncate ${value ? "" : "text-slate-400"} ${pendingField ? "text-amber-700" : ""}`}
+                              title={value || undefined}
+                              className={`min-w-0 max-w-full overflow-x-auto whitespace-nowrap [scrollbar-width:thin] ${value ? "" : "text-slate-400"} ${pendingField ? "text-amber-700" : ""}`}
                             >
                               {value || "—"}
                             </span>
@@ -2194,7 +2197,7 @@ function LaunchStepEditor({
         <Input
           value={copy.cc || ""}
           onChange={(e) => onChange({ cc: e.target.value })}
-          placeholder="CC (comma-separated)"
+          placeholder="CC email addresses (separate with ;)"
           disabled={disabled}
         />
       </> : null}
@@ -2678,7 +2681,7 @@ export function ReplyDialog({
           <Input value={object} onChange={(e) => setObject(e.target.value)} placeholder="Email subject" />
         ) : null}
         {emailNeedsObject ? (
-          <Input value={cc} onChange={(e) => setCc(e.target.value)} placeholder="CC (comma-separated)" />
+          <EmailCcInput contacts={people} value={cc} onChange={setCc} disabled={saving} />
         ) : null}
         <MessageMediaInputFrame channel={effective} media={media} disabled={readOnly || saving}>
           {emailNeedsObject ? (

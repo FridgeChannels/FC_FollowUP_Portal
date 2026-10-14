@@ -4,7 +4,7 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export class EmailCcError extends Error {}
 
 /**
- * Parse a comma-separated CC string into a normalized Notion `CC` value.
+ * Parse comma- or semicolon-separated CC addresses into a normalized Notion `CC` value.
  * Returns null when empty (caller should omit the property).
  */
 export function normalizeEmailCc(input?: string | null): string | null {
@@ -14,7 +14,7 @@ export function normalizeEmailCc(input?: string | null): string | null {
 
   const seen = new Set<string>();
   const emails: string[] = [];
-  for (const part of raw.split(",")) {
+  for (const part of raw.split(/[;,]/)) {
     const email = part.trim().toLowerCase();
     if (!email) continue;
     if (!EMAIL_PATTERN.test(email)) {
@@ -24,5 +24,5 @@ export function normalizeEmailCc(input?: string | null): string | null {
     seen.add(email);
     emails.push(email);
   }
-  return emails.length ? emails.join(",") : null;
+  return emails.length ? emails.join(";") : null;
 }

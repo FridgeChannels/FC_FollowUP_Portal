@@ -13,15 +13,19 @@ describe("normalizeEmailCc", () => {
   it("normalizes comma-separated emails", () => {
     assert.equal(
       normalizeEmailCc(" Amy@Acme.com , bob@acme.com "),
-      "amy@acme.com,bob@acme.com",
+      "amy@acme.com;bob@acme.com",
     );
   });
 
   it("deduplicates case-insensitively", () => {
     assert.equal(
       normalizeEmailCc("a@x.com,A@x.com, b@y.com"),
-      "a@x.com,b@y.com",
+      "a@x.com;b@y.com",
     );
+  });
+
+  it("accepts commas for compatibility and normalizes all separators to semicolons", () => {
+    assert.equal(normalizeEmailCc("a@x.com; b@y.com, c@z.com"), "a@x.com;b@y.com;c@z.com");
   });
 
   it("rejects invalid addresses", () => {

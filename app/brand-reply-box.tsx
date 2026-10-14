@@ -16,6 +16,7 @@ import { EmailBodyEditor } from "./email-body-editor";
 import { emailBodyIsEmpty } from "@/lib/email-html";
 import type { MediaAttachment } from "@/lib/media-attachments";
 import { channelAvailable } from "@/lib/channel-availability";
+import { EmailCcInput } from "./email-cc-input";
 
 const show = (result: { ok: boolean; message: string }) => result.ok ? toast.success(result.message) : toast.error(result.message);
 
@@ -148,7 +149,7 @@ export function BrandReplyBox({
       </div>
       <div className="min-w-0 space-y-2">
         {channel === "Email" && <Input value={subject} onChange={event => setSubject(event.target.value)} placeholder="Email subject" disabled={busy} />}
-        {channel === "Email" && <Input value={cc} onChange={event => setCc(event.target.value)} placeholder="CC (comma-separated)" disabled={busy} />}
+        {channel === "Email" && <EmailCcInput contacts={people} value={cc} onChange={setCc} disabled={busy} />}
         <MessageMediaInputFrame channel={channel} media={media} disabled={busy}>
           {channel === "Email" ? (
             <EmailBodyEditor value={content} onChange={setContent} disabled={busy} placeholder="Write a reply…" />
@@ -284,7 +285,7 @@ export function ThreadSendBox({
         </div>
         <div className="min-w-0 space-y-2">
           {channel === "Email" && <Input value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="Email subject" disabled={busy} />}
-          {channel === "Email" && <Input value={cc} onChange={(event) => setCc(event.target.value)} placeholder="CC (comma-separated)" disabled={busy} />}
+          {channel === "Email" && <EmailCcInput contacts={contacts} value={cc} onChange={setCc} disabled={busy} />}
           <MessageMediaInputFrame channel={channel} media={media} disabled={busy}>
             {channel === "Email" ? (
               <EmailBodyEditor value={content} onChange={setContent} disabled={busy} placeholder="Write a follow-up…" />

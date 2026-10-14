@@ -50,7 +50,7 @@ import { isAllowedS3MediaUrl } from "../s3-media";
 
 export type LaunchStepCopy = {
   subject?: string;
-  /** Email CC: comma-separated addresses (normalized before write). */
+  /** Email CC: semicolon-separated addresses (normalized before write). */
   cc?: string;
   content?: string;
   callGoal?: string;

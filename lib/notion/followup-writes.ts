@@ -523,7 +523,7 @@ export async function createOutboundConversation(input: {
   content: string;
   subject?: string | null;
   sender?: string | null;
-  /** Email CC: normalized comma-separated addresses for ConversationDB `CC`. */
+  /** Email CC: normalized semicolon-separated addresses for ConversationDB `CC`. */
   cc?: string | null;
   taskId?: string;
   threadId?: string | null;
@@ -925,7 +925,7 @@ export async function createHumanOutbound(input: {
   content: string;
   subject?: string | null;
   sender?: string | null;
-  /** Email CC: normalized comma-separated addresses. */
+  /** Email CC: normalized semicolon-separated addresses. */
   cc?: string | null;
   existingTaskId?: string;
   threadId?: string | null;
