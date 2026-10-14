@@ -26,9 +26,9 @@ This starter does not use `wrangler.jsonc`.
 
 On portable, `npm run dev` uses `vinext dev` with HMR, starting at port 5173. Vinext records the running server in ignored `.vinext/` state, rejects an ordinary duplicate launch, and recovers stale state after a stopped process; exactly simultaneous starts can race. Pass `--port <port>` or `--hostname <host>` after `npm run dev --` when needed; keep portable previews on loopback.
 
-### Paused follow-up reminders
+### Follow-up due dates
 
-When pausing a brand, a user can record an optional next-contact date. Configure an authenticated scheduler to call `GET` or `POST /api/cron/followup-reminders` at least hourly with `Authorization: Bearer $FOLLOWUP_REMINDER_CRON_SECRET`. When the date arrives, the system creates one deduplicated in-app notification for an active Admin and sends the configured Slack notification. Set `NOTIFY_ON_FOLLOWUP_REMINDER=false` to suppress the Slack delivery while retaining the in-app reminder.
+No production cron is required. When an Account Manager marks an inbound email as read with a reminder date, that email returns to the same Account Manager's `Needs Action` after the due time when they refresh Brands. When an Account Manager pauses a FollowUp with a next-contact date, it remains paused; after the due time, an Admin sees it in the Admin `Needs Action` list on refresh and can review, resume, or reassign it. Neither path sends automatic notifications.
 
 On managed Linux, use `sites-preview start` only for requested browser QA. The project's dev script runs Vite and accepts the supervisor's `--host 0.0.0.0 --port 4173 --strictPort` arguments. The internal browser uses `http://terminal.local:4173/`; it is not a user-facing URL. The supervisor owns the preview lifecycle. The ignored local profile survives the supervisor's cleared process environment.
 

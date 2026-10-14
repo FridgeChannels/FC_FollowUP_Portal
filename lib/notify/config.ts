@@ -9,8 +9,6 @@ type NotifyEnvName =
   | "NOTIFY_ON_PHONE"
   | "NOTIFY_ON_SAMPLE_VISIT"
   | "NOTIFY_ON_ENCOUNTER"
-  | "NOTIFY_ON_FOLLOWUP_REMINDER"
-  | "FOLLOWUP_REMINDER_CRON_SECRET"
   | "NOTIFY_CONTENT_MAX_CHARS"
   | "PORTAL_BASE_URL";
 
@@ -59,14 +57,6 @@ export function shouldNotifySampleVisit() {
   return asBool(raw("NOTIFY_ON_SAMPLE_VISIT"), true);
 }
 
-export function shouldNotifyFollowUpReminder() {
-  return asBool(raw("NOTIFY_ON_FOLLOWUP_REMINDER"), true);
-}
-
-export function getFollowUpReminderCronSecret() {
-  return raw("FOLLOWUP_REMINDER_CRON_SECRET") || "";
-}
-
 export function getNotifyContentMaxChars() {
   const parsed = Number(raw("NOTIFY_CONTENT_MAX_CHARS") || "300");
   if (!Number.isFinite(parsed) || parsed <= 0) return 300;
@@ -96,7 +86,6 @@ export function eventTypeEnabled(
   if (eventType === "reply.received") return shouldNotifyReply();
   if (eventType === "encounter.updated") return asBool(raw("NOTIFY_ON_ENCOUNTER"), true);
   if (eventType === "inbound.received") return shouldNotifyInbound();
-  if (eventType === "followup.resume_due") return shouldNotifyFollowUpReminder();
-  if (eventType === "reply.action_due") return shouldNotifyFollowUpReminder();
+  if (eventType === "followup.resume_due" || eventType === "reply.action_due") return false;
   return shouldNotifySampleVisit();
 }

@@ -1,4 +1,5 @@
 const MARKER = "[FOLLOW_UP_REVIEW]";
+const RESOLUTION_MARKER = "[FOLLOW_UP_REVIEW_RESOLVED]";
 
 export type FollowUpReminder = {
   dueAt: string;
@@ -6,8 +7,19 @@ export type FollowUpReminder = {
   ownerId: string | null;
 };
 
+export type FollowUpReminderResolution = {
+  dueAt: string;
+  resolvedAt: string;
+  resolvedBy: string | null;
+  action: "Resumed" | "Reassigned" | "Extended" | "Completed";
+};
+
 export function encodeFollowUpReminder(reminder: FollowUpReminder) {
   return `${MARKER}${JSON.stringify(reminder)}`;
+}
+
+export function encodeFollowUpReminderResolution(resolution: FollowUpReminderResolution) {
+  return `${RESOLUTION_MARKER}${JSON.stringify(resolution)}`;
 }
 
 /** Reads the most recently saved structured reminder without interpreting free text. */
@@ -28,4 +40,23 @@ export function latestFollowUpReminder(notes?: string | null): FollowUpReminder 
     }
   }
   return null;
+}
+
+/** A resolution is tied to its reminder due date, so a later pause remains actionable. */
+export function hasResolvedFollowUpReminder(notes: string | null | undefined, dueAt: string) {
+  for (const line of (notes || "").split("\n").reverse()) {
+    if (!line.startsWith(RESOLUTION_MARKER)) continue;
+    try {
+      const value = JSON.parse(line.slice(RESOLUTION_MARKER.length)) as Partial<FollowUpReminderResolution>;
+      if (
+        value.dueAt === dueAt &&
+        typeof value.resolvedAt === "string" &&
+        Number.isFinite(Date.parse(value.resolvedAt)) &&
+        (value.action === "Resumed" || value.action === "Reassigned" || value.action === "Extended" || value.action === "Completed")
+      ) return true;
+    } catch {
+      // Ignore malformed historical metadata.
+    }
+  }
+  return false;
 }

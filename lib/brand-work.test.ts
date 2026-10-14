@@ -29,7 +29,7 @@ describe("brand AM work", () => {
         { callId: "phone-3", taskId: "call-2", brandId: "beta", submittedAt: "2026-10-01T06:00:00Z", preview: "Call", priority: null }],
       Date.parse("2026-10-01T12:00:00Z"),
     );
-    assert.deepEqual(result.counts, { myWork: 2, newAssignments: 0, replies: 1, callReview: 2 });
+    assert.deepEqual(result.counts, { myWork: 2, newAssignments: 0, replies: 1, callReview: 2, pauseDue: 0 });
     assert.equal(result.brands[0].brand.id, "alpha");
     assert.equal(result.brands[0].channels.Email?.count, 1);
     assert.equal(result.brands[0].channels.Email?.target.id, "two");

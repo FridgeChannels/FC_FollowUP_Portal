@@ -74,7 +74,7 @@ function asChannel(value?: string | null): Channel | null {
 }
 
 function asClientStatus(value?: string | null): ClientFollowUpStatus | undefined {
-  if (value === "Unassigned" || value === "In Progress" || value === "Completed" || value === "Terminated") {
+  if (value === "Unassigned" || value === "In Progress" || value === "Paused" || value === "Completed" || value === "Terminated") {
     return value;
   }
   if (value === "Ready") return "Not Started";

@@ -6,6 +6,7 @@ import {
   countFollowupClientsForViewer,
   listFollowupClientsForViewerPage,
 } from "@/lib/notion/followup-clients";
+import { reopenDueReplyActionReminders } from "@/lib/notion/conversations";
 import { runWithNotionLimit } from "@/lib/notion/rate-limit";
 import {
   DEFAULT_BRAND_PAGE_SIZE,
@@ -82,6 +83,11 @@ async function getBrands(request: Request) {
       cursor,
       pageSize: DEFAULT_BRAND_PAGE_SIZE,
     };
+    // Deliberately no background cron: a due reminder is re-opened only when
+    // the Account Manager who marked that email read refreshes their list.
+    if (viewer.role === "AccountManager" && viewer.ownerId) {
+      await reopenDueReplyActionReminders(viewer.ownerId);
+    }
     if (countOnly) {
       const totalCount = await countFollowupClientsForViewer(listInput);
       return Response.json({ totalCount });

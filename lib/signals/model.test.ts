@@ -6,6 +6,7 @@ import {
   effectiveFollowup,
   filterQueue,
   filterWorkspaceQueue,
+  pendingSignalIds,
   safeSourceUrl,
   summarize,
   type SignalEvent,
@@ -61,11 +62,43 @@ test("reading one signal clears only that signal's New state", () => {
     1,
   );
 });
-test("workspace New queue is independent from History", () => {
-  const old = aggregateBrand({ ...input, events: [event("old", "sample", "2026-09-01T00:00:00Z")] });
+test("history-only activity does not keep a brand unread once fresh signals are read", () => {
+  const events = [
+    event("first", "sample", "2026-10-09T10:00:00.000Z"),
+    event("second", "sample", "2026-10-09T11:00:00.000Z"),
+    event("third", "sample", "2026-10-09T12:00:00.000Z"),
+  ];
+  const fresh = classifySignalEvents(events)
+    .filter((e) => e.isNewSignal)
+    .map((e) => e.id);
+  assert.deepEqual(fresh, ["first"]);
+  const brand = aggregateBrand({ ...input, events, readIds: fresh });
+  assert.equal(brand.events.length, 3);
+  assert.equal(brand.needsReview, false);
+  assert.equal(brand.unread, false);
+});
+test("reading a signal keeps the brand queued until an explicit review", () => {
   const read = aggregateBrand({ ...input, id: "read", events: [event("done")], readIds: ["done"] });
-  assert.deepEqual(filterWorkspaceQueue([old, read], "review", "all", now).map((b) => b.id), ["a"]);
-  assert.deepEqual(filterWorkspaceQueue([old, read], "history", "all", now).map((b) => b.id), ["read"]);
+  const reviewed = aggregateBrand({
+    ...input,
+    id: "reviewed",
+    events: [event("done")],
+    readIds: ["done"],
+    review: { eventIds: ["done"], status: "Reviewed" },
+  });
+  // Reading clears the dot only: the brand must stay visible to the AM.
+  assert.equal(read.unread, false);
+  assert.deepEqual(pendingSignalIds(read), ["done"]);
+  assert.deepEqual(filterWorkspaceQueue([read], "review", "all", now).map((b) => b.id), ["read"]);
+  assert.deepEqual(filterWorkspaceQueue([read], "history", "all", now), []);
+  // Only an explicit review advances the queue into History.
+  assert.deepEqual(pendingSignalIds(reviewed), []);
+  assert.deepEqual(filterWorkspaceQueue([reviewed], "review", "all", now), []);
+  assert.deepEqual(filterWorkspaceQueue([reviewed], "history", "all", now).map((b) => b.id), ["reviewed"]);
+  assert.deepEqual(
+    filterWorkspaceQueue([read, reviewed], "review", "all", now).map((b) => b.id),
+    ["read"],
+  );
 });
 test("workspace priority ignores read high-priority signals", () => {
   const previouslyImportant = aggregateBrand({
@@ -97,6 +130,52 @@ test("signal cooldowns preserve all history without generating duplicate New sig
   assert.equal(classified.find((item) => item.id === "tap-2")?.signalReadId, "tap-1");
   assert.equal(classified.find((item) => item.id === "email-2")?.signalReadId, "email-1");
   assert.equal(classified.find((item) => item.id === "li-2")?.signalReadId, "li-1");
+});
+test("dev mode disables sample cooldown so every tap is its own signal", () => {
+  const tap = (id: string, occurredAt: string, sampleDeviceId?: string) => ({
+    ...event(id, "sample", occurredAt),
+    sampleId: "P978SGEV0M",
+    sampleDeviceId,
+  });
+  // Same device, taps six minutes apart — would collapse to one signal in prod.
+  const phone = tap("phone-1", "2026-10-12T08:40:21Z", "device-phone");
+  const phoneRepeat = tap("phone-2", "2026-10-12T08:46:02Z", "device-phone");
+  const classified = classifySignalEvents([phone, phoneRepeat], { devMode: true });
+  // Every tap surfaces as a fresh, independent signal in dev mode.
+  assert.deepEqual(
+    classified.filter((item) => item.isNewSignal).map((item) => item.id).sort(),
+    ["phone-1", "phone-2"],
+  );
+  assert.equal(classified.find((item) => item.id === "phone-1")?.signalReadId, "phone-1");
+  assert.equal(classified.find((item) => item.id === "phone-2")?.signalReadId, "phone-2");
+});
+test("sample cooldown is scoped per magnet and device", () => {  const tap = (id: string, occurredAt: string, sampleDeviceId?: string) => ({
+    ...event(id, "sample", occurredAt),
+    sampleId: "P978SGEV0M",
+    sampleDeviceId,
+  });
+  const phone = tap("phone-1", "2026-10-12T08:40:21Z", "device-phone");
+  const phoneRepeat = tap("phone-2", "2026-10-12T08:46:02Z", "device-phone");
+  const laptop = tap("laptop-1", "2026-10-12T09:31:54Z", "device-laptop");
+  const anonymous = tap("anon-1", "2026-10-12T09:40:00Z");
+  const anonymousRepeat = tap("anon-2", "2026-10-12T09:45:00Z");
+  const classified = classifySignalEvents([
+    phone,
+    phoneRepeat,
+    laptop,
+    anonymous,
+    anonymousRepeat,
+  ]);
+  // A different device on the same magnet is a genuinely new signal.
+  assert.deepEqual(
+    classified.filter((item) => item.isNewSignal).map((item) => item.id).sort(),
+    ["anon-1", "laptop-1", "phone-1"],
+  );
+  // Repeat taps from one device stay grouped under their first event.
+  assert.equal(classified.find((item) => item.id === "phone-2")?.signalReadId, "phone-1");
+  assert.equal(classified.find((item) => item.id === "laptop-1")?.signalReadId, "laptop-1");
+  // Unidentifiable devices merge instead of flooding the queue.
+  assert.equal(classified.find((item) => item.id === "anon-2")?.signalReadId, "anon-1");
 });
 test("filters apply immediately and priority precedes recency", () => {
   const ordinary = aggregateBrand({ ...input, events: [event("tap")] });

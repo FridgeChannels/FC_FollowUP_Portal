@@ -32,6 +32,7 @@ import {
 import {
   effectiveFollowup,
   filterWorkspaceQueue,
+  pendingSignalIds,
   summarize,
   safeSourceUrl,
   type SignalBrand,
@@ -184,7 +185,8 @@ export function SignalsPage() {
       .filter((event) => event.isNewSignal && !brand.readEventIds?.includes(event.signalReadId || event.id))
       .map((event) => event.signalReadId || event.id);
     if (!newReadIds.length) return;
-    const snapshot = [...new Set([...(brand.readEventIds || []), ...newReadIds])];
+    const fresh = new Set(brand.newEventIds || brand.events.filter(event=>event.isNewSignal).map(event=>event.id));
+    const snapshot = [...new Set([...(brand.readEventIds || []), ...newReadIds])].filter(id=>fresh.has(id));
     settle(brand.id, snapshot);
     if (showingMock || data?.readOnly) return;
     void fetch(`/api/signals/${encodeURIComponent(brand.id)}`, {
@@ -207,7 +209,7 @@ export function SignalsPage() {
         <p className="mt-1 text-sm text-muted-foreground">{summary.unread} new signal{summary.unread === 1 ? "" : "s"}</p>
       </header>
       <div className="my-5 flex flex-wrap items-center gap-2">
-        <Select value={type} onValueChange={(v) => { setType(v as typeof type); setDeepLinkActive(false); }}>
+        <Select value={type} onValueChange={(v) => { setType(v as typeof type); }}>
           <SelectTrigger aria-label="Signal type" className="w-[150px]">
             <SelectValue />
           </SelectTrigger>
@@ -423,7 +425,8 @@ function BrandReview({
     setExpandedSignalKeys((old) => new Set(old).add(key));
     const readId = anchor.signalReadId || anchor.id;
     if (brand.readEventIds?.includes(readId)) return;
-    const snapshot = [...new Set([...(brand.readEventIds || []), readId])];
+    const fresh = new Set(brand.newEventIds || brand.events.filter(event=>event.isNewSignal).map(event=>event.id));
+    const snapshot = [...new Set([...(brand.readEventIds || []), readId])].filter(id=>fresh.has(id));
     if (mock) {
       settle(brand.id, snapshot);
       return;
@@ -447,10 +450,12 @@ function BrandReview({
     linkedTask?: string,
     activityId?: string,
   ) {
+    const pending = pendingSignalIds(brand);
+    const eventIds = pending.length ? pending : brand.events.filter(event=>event.isNewSignal).map(event=>event.id);
     if (mock) {
       settle(
         brand.id,
-        brand.events.map((event) => event.id),
+        eventIds,
         action === "later" ? "Later" : action === "handled" ? "Handled" : "Reviewed",
         linkedTask,
       );
@@ -472,7 +477,7 @@ function BrandReview({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action,
-          eventIds: brand.events.map((e) => e.id),
+          eventIds,
           taskId: linkedTask,
           activityId,
         }),
@@ -480,7 +485,7 @@ function BrandReview({
       if (!response.ok) throw new Error("Unable to save review");
       settle(
         brand.id,
-        brand.events.map((e) => e.id),
+        eventIds,
         action === "later"
           ? "Later"
           : action === "handled"
@@ -587,6 +592,7 @@ function BrandReview({
         cpAtInteraction: null,
         createdAt: sentAt,
         recordedAt: sentAt,
+        replyStatus: null,
       }, ...current]);
       toast.success("Mock message sent");
       if (later) await complete("later", "mock-follow-up-task");
@@ -652,10 +658,7 @@ function BrandReview({
   const phone = actionContacts.find((c) => dialPhoneOptions(c).length);
   const linkedin = actionContacts.find((c) => c.linkedin);
   const allSignalGroups = groupedSignals(brand.events);
-  const currentSignalGroups = allSignalGroups.filter(({ key, events }) => {
-    const readId = events.find((event) => event.isNewSignal)?.signalReadId || events[0]?.signalReadId || events[0]?.id;
-    return Boolean(readId && (!brand.readEventIds?.includes(readId) || expandedSignalKeys.has(key)));
-  });
+  const currentSignalGroups = allSignalGroups;
   const groupsForView = currentSignalGroups;
   const visibleSignalGroups = signalsExpanded ? groupsForView : groupsForView.slice(0, 3);
   const hasMoreSignals = groupsForView.length > 3;

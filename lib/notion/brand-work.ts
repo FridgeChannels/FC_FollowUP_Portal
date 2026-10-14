@@ -1,4 +1,4 @@
-import { buildBrandWork, WORK_REPLY_CHANNELS, type PendingWorkAssignment, type PendingWorkCall, type PendingWorkReply, type WorkReplyChannel } from "../brand-work";
+import { buildBrandWork, WORK_REPLY_CHANNELS, type PendingWorkAssignment, type PendingWorkCall, type PendingWorkPause, type PendingWorkReply, type WorkReplyChannel } from "../brand-work";
 import { historyFromTask } from "../call-review-history";
 import { firstRelationId, propertyDate, propertyText, queryDatabasePages, retrievePage, type NotionPage } from "./client";
 import { getFollowupConversationDbId, getFollowupTaskDbId } from "./config";
@@ -7,6 +7,7 @@ import { attachBrandInteractionSignals, listBrandInteractionSignals } from "./br
 import { listFollowupConversationsByBrands } from "./conversations";
 import { listFollowupTaskSignalsByBrands } from "./tasks";
 import type { NeedsReplyBrandScope } from "./owner-filter";
+import { hasResolvedFollowUpReminder, latestFollowUpReminder } from "../followup-reminder";
 
 function preview(page: NotionPage) {
   const properties = page.properties || {};
@@ -113,11 +114,21 @@ export async function listBrandWorkForViewer(scope: NeedsReplyBrandScope) {
     );
     return completedByOutbound || completedByTask ? [] : [{ brandId: brand.id, assignedAt }];
   });
+  const pauses: PendingWorkPause[] = scope.ownerPageId === undefined
+    ? ownedMetadata.flatMap(({ page, brand }) => {
+      if (brand.status !== "Paused") return [];
+      const notes = propertyText(page.properties?.Notes);
+      const reminder = latestFollowUpReminder(notes);
+      if (!reminder || Date.parse(reminder.dueAt) > Date.now() || hasResolvedFollowUpReminder(notes, reminder.dueAt)) return [];
+      return [{ brandId: brand.id, dueAt: reminder.dueAt, preview: reminder.note || "Paused FollowUp is ready for review" }];
+    })
+    : [];
 
   const brandIds = [...new Set([
     ...replies.map((item) => item.brandId),
     ...calls.map((item) => item.brandId),
     ...assignments.map((item) => item.brandId),
+    ...pauses.map((item) => item.brandId),
   ].map(key))];
   if (!brandIds.length) return buildBrandWork([], [], []);
   const metadataByKey = new Map(ownedMetadata.map((item) => [key(item.brand.id), item]));
@@ -127,5 +138,5 @@ export async function listBrandWorkForViewer(scope: NeedsReplyBrandScope) {
   });
   const interactionSignals = await listBrandInteractionSignals(metadata.map(({ page }) => page));
   const brands = attachBrandInteractionSignals(metadata.map(({ brand }) => brand), interactionSignals);
-  return buildBrandWork(brands, replies, calls, Date.now(), assignments);
+  return buildBrandWork(brands, replies, calls, Date.now(), assignments, pauses);
 }

@@ -2,7 +2,7 @@ import { supabaseSelect, supabaseUpsert } from "../supabase/client";
 import type { SampleTapVisit } from "../sample/visits";
 import type { SystemNotification } from "../sample/notifications";
 import { getInternalDeviceIds } from "../sample/internal-devices";
-import { signalsWritesEnabled } from "./config";
+import { signalsWritesEnabled, isSignalsDevMode } from "./config";
 import { notificationSignal } from "./events";
 import {
   aggregateBrand,
@@ -69,6 +69,7 @@ export async function loadSignalEvents(brandId?: string) {
       id: `sample:${v.posthog_event_uuid}`,
       brandId: v.brand_id!,
       sampleId: v.sn,
+      sampleDeviceId: v.device_id || undefined,
       tapLocation:
         [v.geo_city, v.geo_country].filter(Boolean).join(", ") || undefined,
       tapDevice: [v.browser, v.os].filter(Boolean).join(" · ") || undefined,
@@ -123,7 +124,7 @@ export function aggregateSignals(
     readIds: Array.isArray(readBody.eventIds) ? readBody.eventIds : [],
     review:
       reviewBody && Array.isArray(reviewBody.eventIds) ? reviewBody : undefined,
-  });
+  }, { devMode: isSignalsDevMode() });
 }
 export async function saveSignalSnapshot(
   brandId: string,

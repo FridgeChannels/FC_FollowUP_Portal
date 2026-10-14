@@ -87,6 +87,10 @@ async function listOwnersForBrandMapping() {
   });
 }
 
+export async function prewarmBrandProjection() {
+  await Promise.all([listOwnersForBrandMapping(), listCheckpoints()]);
+}
+
 function asHandlingMode(value: string): HandlingMode | null {
   return HANDLING_MODES.has(value) ? (value as HandlingMode) : null;
 }
