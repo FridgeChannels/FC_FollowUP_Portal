@@ -768,15 +768,6 @@ export function BrandDetail({customerId}:{customerId:string}){
   const emailSignals=(brandSignals?.events||[]).filter(event=>event.type==="email");
   const requestedSignal=brandSignals?.events.find(event=>event.id===requestedSignalId);
   const requestedSignalType=requestedSignal?.type;
-  useEffect(()=>{
-    if(!requestedSignalType)return;
-    const readId=requestedSignal?.signalReadId||requestedSignal?.id;
-    if(readId) readSignalEvents([readId]);
-    setActiveSignalId(requestedSignal.id);
-    setDetailsTab("signalHistory");
-    const target="brand-important-signals";
-    requestAnimationFrame(()=>document.getElementById(target)?.scrollIntoView({block:"center",behavior:"smooth"}));
-  },[requestedSignalId,requestedSignalType,requestedSignal]);
   function readSignalEvents(eventIds:string[]){
     if(!brandSignals||!eventIds.length)return;
     const requested=new Set(eventIds);
@@ -794,6 +785,15 @@ export function BrandDetail({customerId}:{customerId:string}){
       body:JSON.stringify({action:"read",eventIds:snapshot}),
     }).then(response=>{if(response.ok)settleSignals(customerId,snapshot);}).catch(()=>{});
   }
+  useEffect(()=>{
+    if(!requestedSignalType)return;
+    const readId=requestedSignal?.signalReadId||requestedSignal?.id;
+    if(readId) readSignalEvents([readId]);
+    setActiveSignalId(requestedSignal.id);
+    setDetailsTab("signalHistory");
+    const target="brand-important-signals";
+    requestAnimationFrame(()=>document.getElementById(target)?.scrollIntoView({block:"center",behavior:"smooth"}));
+  },[requestedSignalId,requestedSignalType,requestedSignal]);
   const isAdmin=state.currentRole==="Admin";
   const manager=isAdmin||state.currentRole==="AccountManager";
   const mockCustomer:Customer|undefined=mockDetailPreview?{
