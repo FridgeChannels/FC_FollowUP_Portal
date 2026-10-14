@@ -229,6 +229,18 @@ function responseText(payload: unknown) {
     .trim();
 }
 
+function emptyResponseError(payload: unknown) {
+  if (!payload || typeof payload !== "object") return "AI summary generation returned no content";
+  const response = payload as {
+    status?: unknown;
+    incomplete_details?: { reason?: unknown };
+  };
+  if (response.status === "incomplete" && response.incomplete_details?.reason === "max_output_tokens") {
+    return "AI summary generation ran out of output tokens";
+  }
+  return "AI summary generation returned no content";
+}
+
 export async function generateBrandAiSummary(context: string, promptOverride?: string) {
   const key = readEnv("OPENAI_API_KEY");
   const prompt = promptOverride || summaryPrompt();
@@ -246,13 +258,15 @@ export async function generateBrandAiSummary(context: string, promptOverride?: s
     body: JSON.stringify({
       model: readEnv("AI_BRAND_SUMMARY_MODEL") || "gpt-5-mini",
       input: `${prompt}\n\n---\nBrand data\n${context}`,
-      max_output_tokens: 900,
+      reasoning: { effort: "minimal" },
+      max_output_tokens: 1_800,
     }),
   });
   if (!response.ok) {
     throw new Error(`AI summary generation failed (${response.status})`);
   }
-  const content = responseText(await response.json());
-  if (!content) throw new Error("AI summary generation returned no content");
+  const payload = await response.json();
+  const content = responseText(payload);
+  if (!content) throw new Error(emptyResponseError(payload));
   return content;
 }

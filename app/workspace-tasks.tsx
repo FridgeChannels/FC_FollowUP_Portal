@@ -1,6 +1,8 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
+import { isCpVisible, cpDisplayText } from "@/lib/cp-visibility";
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { enUS } from "date-fns/locale";
@@ -10,7 +12,7 @@ import {
 import { type DateRange } from "react-day-picker";
 import { toast } from "sonner";
 import type { BrandActivity, BrandContact, BrandDetail, BrandTask, CurrentCpOption } from "@/lib/brand-list";
-import { listApplicableCps } from "@/lib/brand-list";
+import { listVisibleApplicableCps as listApplicableCps } from "@/lib/brand-list";
 import { brandHasActiveOmniReach } from "@/lib/notion/reply-inbox";
 import { canSeeTask, compareInteractionSort, dateOnly, isCancelledTaskStatus, isClosedTaskStatus, type Contact, type CPCode, type Customer, type Interaction } from "@/lib/outreach-domain";
 import { buildInteractionCpFallbacks, resolveInteractionDisplayCp } from "@/lib/interaction-cp";
@@ -937,7 +939,7 @@ function TaskDetail({ task, selectedCallId, returnToDashboard = false }: { task:
     {detailError ? <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900"><span>Latest task details could not load. Showing the task link while it reconnects.</span><Button size="sm" variant="outline" onClick={() => setDetailRequest((value) => value + 1)}>Try again</Button></div> : null}
     <main className="min-w-0 overflow-hidden rounded-2xl bg-white">
     <header className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 bg-white px-5 py-4 lg:px-7">
-      <div><div className="flex flex-wrap items-center gap-2"><Badge variant="outline">{reviewedTask.type}</Badge>{isDue(reviewedTask, state.simulatedDate) ? <Status value="Due"/> : <Badge variant="secondary">{reviewedTask.status}</Badge>}<CallReviewBadge review={taskReview}/><span className="text-xs text-slate-400">{dateOnly(reviewedTask.dueAt)}</span></div><h2 className="mt-2 text-xl font-bold">{customer.name}</h2><p className="mt-1 text-xs text-slate-500">{contact.name} · {contact.role} · {customer.cp} · {customer.status}{callerPhoneOnly && <> · Account Manager: {remote?.ownerName || state.users.find(user => user.id === task.assigneeId)?.name || "Unassigned"}</>}</p></div>
+      <div><div className="flex flex-wrap items-center gap-2"><Badge variant="outline">{reviewedTask.type}</Badge>{isDue(reviewedTask, state.simulatedDate) ? <Status value="Due"/> : <Badge variant="secondary">{reviewedTask.status}</Badge>}<CallReviewBadge review={taskReview}/><span className="text-xs text-slate-400">{dateOnly(reviewedTask.dueAt)}</span></div><h2 className="mt-2 text-xl font-bold">{customer.name}</h2><p className="mt-1 text-xs text-slate-500">{contact.name} · {contact.role} · {cpDisplayText(customer.cp)} · {customer.status}{callerPhoneOnly && <> · Account Manager: {remote?.ownerName || state.users.find(user => user.id === task.assigneeId)?.name || "Unassigned"}</>}</p></div>
       {callerPhoneOnly ? null : <Button variant="outline" size="sm" disabled={!customer.id} onClick={() => router.push(`/customers/${encodeURIComponent(customer.id)}`)}>Brand profile</Button>}
     </header>
 
@@ -1016,7 +1018,7 @@ function TaskDetail({ task, selectedCallId, returnToDashboard = false }: { task:
       </div>
 
       {!callerPhoneOnly && <aside className="border-t border-slate-200 bg-white p-5 lg:border-l lg:border-t-0 lg:p-6">
-        <div className="flex items-center gap-3"><Avatar><AvatarFallback className="bg-violet-100 font-bold text-violet-700">{customer.initials}</AvatarFallback></Avatar><div><b className="text-sm">{customer.name}</b><div className="text-xs text-slate-500">{state.cps.find(cp => cp.code === customer.cp)?.goal}</div></div></div>
+        <div className="flex items-center gap-3"><Avatar><AvatarFallback className="bg-violet-100 font-bold text-violet-700">{customer.initials}</AvatarFallback></Avatar><div><b className="text-sm">{customer.name}</b><div className="text-xs text-slate-500">{isCpVisible(customer.cp) ? state.cps.find(cp => cp.code === customer.cp)?.goal : null}</div></div></div>
         {(customer.cp === "CP3" || partnershipContext) && partnershipContext && <section className="mt-5 rounded-xl bg-emerald-50 p-4"><div className="text-[11px] font-semibold tracking-wide text-emerald-700">CP3 · Partnership context</div><div className="mt-2 text-sm font-bold text-emerald-950">{partnershipContext.headline}</div><p className="mt-2 text-xs leading-5 text-emerald-900">{partnershipContext.summary}</p><div className="mt-3 space-y-2">{partnershipContext.signals.map(signal=><div key={signal} className="rounded-lg bg-white/70 px-2.5 py-2 text-xs leading-5 text-slate-700">{signal}</div>)}</div></section>}
         <div className="mt-5 rounded-xl bg-slate-50 p-4"><div className="text-xs font-semibold uppercase tracking-wide text-slate-400">AccountManager</div><div className="mt-2 flex items-center gap-2 text-sm font-semibold"><UserRound className="size-4"/>{remote?.ownerName || state.users.find(user => user.id === task.assigneeId)?.name || "Unassigned"}</div></div>
 

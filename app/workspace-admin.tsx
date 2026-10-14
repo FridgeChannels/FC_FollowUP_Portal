@@ -1,5 +1,7 @@
 "use client";
 
+import { cpHistoryText } from "@/lib/cp-visibility";
+
 import { useState } from "react";
 import { toast } from "sonner";
 import { dateOnly } from "@/lib/outreach-domain";
@@ -33,7 +35,7 @@ export function SettingsPage({ section }: { section?: string }) {
 
       {tab === "permissions" && <section className="rounded-2xl bg-white p-5"><h2 className="font-bold">Role permissions</h2><p className="text-xs text-slate-500">Everyone works from the same Tasks page; role and assignment determine the default queue.</p><Table className="mt-5"><TableHeader><TableRow><TableHead>Role</TableHead><TableHead>Primary access</TableHead><TableHead>Mutation scope</TableHead></TableRow></TableHeader><TableBody>{permissionRows.map(row => <TableRow key={row[0]}><TableCell className="font-semibold">{row[0]}</TableCell><TableCell className="text-sm">{row[1]}</TableCell><TableCell className="text-sm text-slate-500">{row[2]}</TableCell></TableRow>)}</TableBody></Table></section>}
 
-      {tab === "audit" && <section className="overflow-hidden rounded-2xl bg-white"><div className="p-5"><h2 className="font-bold">Audit history</h2><p className="text-xs text-slate-500">Every meaningful change is recorded.</p></div><div className="overflow-x-auto"><Table><TableHeader><TableRow><TableHead className="pl-5">Time</TableHead><TableHead>User</TableHead><TableHead>Action</TableHead><TableHead>Brand</TableHead><TableHead>Change</TableHead></TableRow></TableHeader><TableBody>{state.audit.map(entry => <TableRow key={entry.id}><TableCell className="pl-5 text-xs">{dateOnly(entry.createdAt)}</TableCell><TableCell className="text-xs">{state.users.find(user => user.id === entry.actorId)?.name || entry.actorId}</TableCell><TableCell className="font-medium">{entry.action}</TableCell><TableCell className="text-xs">{state.customers.find(customer => customer.id === entry.customerId)?.name || "—"}</TableCell><TableCell className="max-w-xs truncate text-xs text-slate-500">{entry.previousValue && `${entry.previousValue} → `}{entry.newValue || "—"}</TableCell></TableRow>)}</TableBody></Table></div></section>}
+      {tab === "audit" && <section className="overflow-hidden rounded-2xl bg-white"><div className="p-5"><h2 className="font-bold">Audit history</h2><p className="text-xs text-slate-500">Every meaningful change is recorded.</p></div><div className="overflow-x-auto"><Table><TableHeader><TableRow><TableHead className="pl-5">Time</TableHead><TableHead>User</TableHead><TableHead>Action</TableHead><TableHead>Brand</TableHead><TableHead>Change</TableHead></TableRow></TableHeader><TableBody>{state.audit.map(entry => <TableRow key={entry.id}><TableCell className="pl-5 text-xs">{dateOnly(entry.createdAt)}</TableCell><TableCell className="text-xs">{state.users.find(user => user.id === entry.actorId)?.name || entry.actorId}</TableCell><TableCell className="font-medium">{entry.action}</TableCell><TableCell className="text-xs">{state.customers.find(customer => customer.id === entry.customerId)?.name || "—"}</TableCell><TableCell className="max-w-xs truncate text-xs text-slate-500">{entry.previousValue && `${cpHistoryText(entry.previousValue)} → `}{cpHistoryText(entry.newValue || "—")}</TableCell></TableRow>)}</TableBody></Table></div></section>}
     </div>
   </div>;
 }

@@ -1,6 +1,8 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
+import { isCpVisible } from "@/lib/cp-visibility";
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -32,7 +34,7 @@ import {
 } from "@/lib/brand-list-cache";
 import {
   FOLLOW_UP_STATUSES,
-  listApplicableCps,
+  listVisibleApplicableCps as listApplicableCps,
   type BrandListItem,
 } from "@/lib/brand-list";
 import { Contact, dateOnly } from "@/lib/outreach-domain";
@@ -96,8 +98,9 @@ const cx = (...v: (string | false | undefined | null)[]) =>
 const show = (r: { ok: boolean; message: string }) =>
   r.ok ? toast.success(r.message) : toast.error(r.message);
 export function CP({ value }: { value: string }) {
+  if (!isCpVisible(value)) return null;
   const tone =
-    { NONE: "bg-slate-50 text-slate-600", Nurture: "bg-slate-100 text-slate-700", CP1: "ui-cp-1", CP2: "ui-cp-2", CP3: "ui-cp-3", CP4: "bg-amber-50 text-amber-700", CP5: "bg-sky-50 text-sky-700", CP6: "bg-rose-50 text-rose-700" }[value] ||
+    { NONE: "bg-slate-50 text-slate-600", Nurture: "bg-slate-100 text-slate-700", CP1: "ui-cp-1", CP2: "ui-cp-2", CP3: "ui-cp-3" }[value] ||
     "ui-cp-1";
   return (
     <Badge
@@ -418,7 +421,7 @@ export function Dashboard() {
           </button>
         </div>
         <div className="grid gap-3 md:grid-cols-4">
-          {state.cps.map((cp, i) => {
+          {state.cps.filter(cp => isCpVisible(cp.code)).map((cp, i) => {
             const count = state.customers.filter(
               (c) => c.cp === cp.code && c.status !== "Closed",
             ).length;
@@ -504,6 +507,7 @@ const BRAND_LIST_VISIBLE_SORTS = new Set([
   "nameAsc",
   "nameDesc",
 ]);
+const BRAND_LIST_FILTER_CPS = new Set(["CP1", "CP2", "CP3"]);
 
 type BrandListPagination = {
   cursor: string | null;
@@ -518,6 +522,7 @@ function brandListFiltersFromSearch(
   const requestedView = search.get("view");
   const legacyReplyState = search.get("replyState");
   const requestedAction = search.get("action");
+  const requestedCp = search.get("cp");
   return {
     view: requestedView === "all" || requestedView === "myWork"
       ? requestedView
@@ -526,7 +531,7 @@ function brandListFiltersFromSearch(
     action: requestedAction === "assignments" || requestedAction === "replies" || requestedAction === "callReview" ? requestedAction : requestedView === "replies" || requestedView === "callReview" ? requestedView : legacyReplyState === "needsReply" ? "replies" : legacyReplyState === "qualification" ? "callReview" : "all",
     q: search.get("q") ?? "",
     status: search.get("status") ?? "all",
-    cp: search.get("cp") ?? "all",
+    cp: requestedCp && BRAND_LIST_FILTER_CPS.has(requestedCp) ? requestedCp : "all",
     owner: search.get("owner") ?? "all",
     replyState: search.get("replyState") ?? "all",
     handlingMode: search.get("handlingMode") ?? "all",
@@ -660,6 +665,7 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const cps = listApplicableCps();
+  const filterCps = cps.filter((item) => BRAND_LIST_FILTER_CPS.has(item.name));
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string>();
@@ -1167,26 +1173,32 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
     bodyFor: (brand: BrandListItem) => Record<string, unknown>,
     successMessage: string,
   ) => {
-    if (!ids.length || busy) return;
+    if (!isAdmin || !ids.length || busy) return;
     setBusy(true);
     let ok = 0;
-    let failed = 0;
+    const failed: string[] = [];
+    let failureMessage = "Update failed";
     try {
       for (const id of ids) {
         const brand = brands.find((item) => item.id === id);
-        if (!brand) continue;
+        if (!brand) {
+          failed.push(id);
+          continue;
+        }
         try {
           applyBrandUpdate(await patchBrandListItem(id, bodyFor(brand)));
           ok += 1;
-        } catch {
-          failed += 1;
+        } catch (error) {
+          failed.push(id);
+          failureMessage = error instanceof Error ? error.message : "Update failed";
         }
       }
-      if (ok && !failed) toast.success(successMessage);
-      else if (ok) toast.success(`${ok} updated, ${failed} failed`);
-      else toast.error("Update failed");
+      setSelected(failed);
+      if (ok && !failed.length) toast.success(successMessage);
+      else if (ok) toast.error(`${ok} updated, ${failed.length} failed. Failed brands remain selected. ${failureMessage}`);
+      else toast.error(failureMessage);
       if (ok) {
-        setSelected([]);
+        clearBrandListPageCache();
         setWorkReloadToken((value) => value + 1);
       }
     } finally {
@@ -1255,12 +1267,12 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
         }}
       />
       {isAdmin && selected.length > 0 && (
-        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl bg-violet-50 px-4 py-3">
-          <b className="text-sm text-violet-900">{selected.length} selected</b>
+        <div role="region" aria-label="Bulk brand actions" className="mb-4 flex flex-wrap items-center gap-3 px-4 py-3">
+          <b role="status" className="text-sm text-violet-900">{selected.length} selected</b>
           {can("assignOwner") && (
-            <Select disabled={busy} onValueChange={assignSelected}>
-              <SelectTrigger size="sm" className="bg-white">
-                <SelectValue placeholder="Assign AccountManager" />
+            <Select value="" disabled={busy} onValueChange={assignSelected}>
+              <SelectTrigger aria-label="Assign Account Manager to selected brands" className="h-11 w-fit bg-white">
+                <SelectValue placeholder={busy ? "Assigning…" : "Assign AccountManager"} />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="unassigned">Unassigned</SelectItem>
@@ -1308,7 +1320,7 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All CPs</SelectItem>
-              {cps.map((item) => (
+              {filterCps.map((item) => (
                 <SelectItem key={item.id} value={item.name}>
                   {item.name}
                 </SelectItem>
@@ -1444,18 +1456,20 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
               <TableHeader>
                 <TableRow className="bg-slate-50">
                   {isAdmin && (
-                    <TableHead className="w-10 pl-5">
+                    <TableHead className="w-14 pl-5">
                       <Checkbox
+                        aria-label="Select all brands on this page"
+                        className="size-5 border-slate-400 bg-white/70"
                         checked={
-                          selected.length === filtered.length && filtered.length > 0
+                          filtered.every((item) => selected.includes(item.id)) && filtered.length > 0
                             ? true
-                            : selected.length > 0
+                            : filtered.some((item) => selected.includes(item.id))
                               ? "indeterminate"
                               : false
                         }
-                        disabled={busy}
+                        disabled={busy || brandsBusy}
                         onCheckedChange={(value) =>
-                          setSelected(value ? filtered.map((item) => item.id) : [])
+                          setSelected(value === true ? filtered.map((item) => item.id) : [])
                         }
                       />
                     </TableHead>
@@ -1487,8 +1501,10 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
                       {isAdmin && (
                         <TableCell className="pl-5" onClick={(e) => e.stopPropagation()}>
                           <Checkbox
+                            aria-label={`Select ${c.name}`}
+                            className="size-5 border-slate-400 bg-white/70"
                             checked={selected.includes(c.id)}
-                            disabled={busy}
+                            disabled={busy || brandsBusy}
                             onCheckedChange={(value) =>
                               setSelected((ids) => {
                                 if (value) return ids.includes(c.id) ? ids : [...ids, c.id];
@@ -2232,7 +2248,7 @@ function AddBrandDialog({
                 <SelectContent>
                   <SelectItem value="none">Empty (NONE)</SelectItem>
                   {cps
-                    .filter((item) => item.name && item.name !== "NONE")
+                    .filter((item) => item.name && item.name !== "NONE" && isCpVisible(item.name))
                     .map((item) => (
                       <SelectItem key={item.id || item.name} value={item.name}>
                         {item.name}

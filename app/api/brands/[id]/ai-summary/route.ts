@@ -53,10 +53,11 @@ export async function GET(request: Request, { params }: Params) {
 export async function POST(request: Request, { params }: Params) {
   try {
     const { id } = await params;
-    const body = await request.json() as { scope?: unknown; amId?: unknown };
-    const scope = parseScope(body.scope);
+    const body = await request.json() as { scope?: unknown; scopes?: unknown; amId?: unknown };
+    const requestedScopes = Array.isArray(body.scopes) ? body.scopes : [body.scope];
+    const scopes = [...new Set(requestedScopes.map(parseScope))];
     const amId = typeof body.amId === "string" ? body.amId : null;
-    if (!scope || (scope === "am" && !amId)) {
+    if (!scopes.length || scopes.some((scope) => !scope) || (scopes.includes("am") && !amId)) {
       return Response.json({ error: "Choose an AI summary view" }, { status: 400 });
     }
     const loaded = await loadBrand(request, id);
@@ -65,7 +66,7 @@ export async function POST(request: Request, { params }: Params) {
     if (!canWriteBrand(viewer, brand)) {
       return Response.json({ error: "You do not have permission to generate this summary" }, { status: 403 });
     }
-    if (scope === "am" && (!validAmScopes(brand).some((item) => item.id === amId) || (!viewer.isAdmin && amId !== viewer.ownerId))) {
+    if (scopes.includes("am") && (!validAmScopes(brand).some((item) => item.id === amId) || (!viewer.isAdmin && amId !== viewer.ownerId))) {
       return Response.json({ error: "You do not have permission to generate this AM summary" }, { status: 403 });
     }
     const configuration = brandAiSummaryConfiguration();
@@ -76,21 +77,26 @@ export async function POST(request: Request, { params }: Params) {
       }, { status: 422 });
     }
 
-    const signals = scope === "am"
+    const signals = scopes.includes("am")
       ? classifySignalEvents((await loadSignalEvents(id)).events)
       : [];
-    const source = brandAiSummaryContext({ brand, scope, amId, signals });
     const am = amId ? validAmScopes(brand).find((item) => item.id === amId) : null;
-    const summary = {
-      content: await generateBrandAiSummary(source.text),
-      generatedAt: new Date().toISOString(),
-      generatedBy: viewer.name || viewer.email,
-      dataAsOf: source.dataAsOf,
-      ...(scope === "am" ? { amId, amName: am?.name || null } : {}),
-    };
-    const store = putBrandAiSummary(brand.aiSummaries, scope, summary);
+    const generated = await Promise.all(scopes.map(async (scope) => {
+      const source = brandAiSummaryContext({ brand, scope: scope!, amId, signals });
+      return {
+        scope: scope!,
+        summary: {
+          content: await generateBrandAiSummary(source.text),
+          generatedAt: new Date().toISOString(),
+          generatedBy: viewer.name || viewer.email,
+          dataAsOf: source.dataAsOf,
+          ...(scope === "am" ? { amId, amName: am?.name || null } : {}),
+        },
+      };
+    }));
+    const store = generated.reduce((current, { scope, summary }) => putBrandAiSummary(current, scope, summary), brand.aiSummaries || {});
     await saveBrandAiSummary(id, stringifyBrandAiSummaryStore(store));
-    return Response.json({ summary, summaries: store });
+    return Response.json({ summary: generated.length === 1 ? generated[0]?.summary : undefined, summaries: store });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Unexpected error" }, { status: 500 });
   }

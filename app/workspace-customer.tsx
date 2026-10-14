@@ -1,14 +1,16 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { isCpVisible, visibleCpOptions, cpDisplayText, cpHistoryText } from "@/lib/cp-visibility";
+
+import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, Bomb, CalendarPlus, ChevronRight, CircleAlert, CircleCheck, CirclePause, ContactRound, ExternalLink, FileText, History, Loader2, MessageSquareText, MoreHorizontal, PanelRightClose, Plus, Save, Search, Send, StickyNote, UserCheck } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "./workspace-store";
 import { cacheBrandItem, getCachedBrand, requestBrandListPageRefresh } from "@/lib/brand-list-cache";
-import { currentCpOption, FOLLOW_UP_STATUSES, keyPersonNotionUrl, listCurrentCps, type BrandActivity, type BrandAiMeetingLink, type BrandContact, type BrandDetail, type BrandMeetingNote, type BrandTask, type CurrentCpOption } from "@/lib/brand-list";
+import { currentCpOption, FOLLOW_UP_STATUSES, keyPersonNotionUrl, listVisibleCurrentCps as listCurrentCps, type BrandActivity, type BrandAiMeetingLink, type BrandContact, type BrandDetail, type BrandMeetingNote, type BrandTask, type CurrentCpOption } from "@/lib/brand-list";
 import type { BombDetail, BombListItem, BombScenario } from "@/lib/bomb-list";
 import { ActionStatus, BombInstance, Channel, Contact, CPCode, Customer, dateOnly, Interaction, ScheduledAction, WorkspaceState, compareInteractionSort, interactionCpCode, uid } from "@/lib/outreach-domain";
 import { brandDetailMetadata } from "@/lib/page-metadata";
@@ -578,7 +580,7 @@ export function toInteractions(
 function toCpGoals(cps: CurrentCpOption[] = listCurrentCps()) {
   return Object.fromEntries(
     cps
-      .filter((item) => /^CP[1-6]$/.test(item.name))
+      .filter((item) => /^CP[1-3]$/.test(item.name))
       .map((item) => [item.name, item.fullName]),
   ) as Partial<Record<CPCode, string>>;
 }
@@ -798,7 +800,7 @@ export function BrandDetail({customerId}:{customerId:string}){
         activities: keepActivities ? prev!.activities : brand.activities,
       };
     });
-    setRemoteCps(cps);
+    setRemoteCps(visibleCpOptions(cps));
   };
   const applyActivitiesPage=(payload:{activities?:BrandActivity[];nextCursor?:string|null;hasMore?:boolean},mode:"replace"|"append")=>{
     const items=payload.activities||[];
@@ -1077,7 +1079,7 @@ export function BrandDetail({customerId}:{customerId:string}){
   const partnershipContext=c.partnershipContext;
   const summary=notionBacked
     ? remote?.relationshipSummary || remote?.aiSummaries?.overall?.content || "No saved relationship summary yet."
-    : state.cps.find(x=>x.code===c.cp)?.goal||"—";
+    : (isCpVisible(c.cp)?state.cps.find(x=>x.code===c.cp)?.goal:undefined)||"—";
   const sendBrandMessage = async (
     contactId: string,
     channel: Channel,
@@ -1184,8 +1186,8 @@ export function BrandDetail({customerId}:{customerId:string}){
       <Button type="button" variant="ghost" size="icon" aria-label={backLabel} onClick={returnToList}><ArrowLeft className="size-4"/></Button>
       <Avatar className="size-9"><AvatarFallback className="bg-violet-100 text-xs font-bold text-violet-700">{c.initials}</AvatarFallback></Avatar>
       <div className="flex min-w-0 flex-1 items-center gap-2"><h1 className="min-w-0 truncate text-lg font-semibold text-slate-950">{c.name}</h1>{notionBacked&&remote?.followupExhibition&&(originMeeting?<a href={originMeeting.url} target="_blank" rel="noreferrer" className="hidden shrink-0 rounded-full bg-violet-100 px-2 py-1 text-xs font-medium text-violet-800 hover:bg-violet-200 lg:inline-flex">{remote.followupExhibition}<ExternalLink className="ml-1 size-3"/></a>:<span className="hidden shrink-0 rounded-full bg-violet-100 px-2 py-1 text-xs font-medium text-violet-800 lg:inline-flex">{remote.followupExhibition}</span>)}
-        <Button type="button" size="sm" variant="outline" className="min-w-0 max-w-[22rem] shrink" disabled={!brandReady||!can("changeCP")||latestRound?.status==="Completed"||history.projectionPending} onClick={()=>setCP(true)} aria-label={`Current ${currentCpDetails.name}: ${currentCpDetails.fullName}. Change CP`}>
-          <span className="truncate">{currentCpDetails.name} · {currentCpDetails.fullName}</span><ChevronRight className="ml-1 size-3.5 shrink-0 rotate-90"/>
+        <Button type="button" size="sm" variant="outline" className="min-w-0 max-w-[22rem] shrink" disabled={!brandReady||!can("changeCP")||latestRound?.status==="Completed"||history.projectionPending} onClick={()=>setCP(true)} aria-label={isCpVisible(currentCpDetails.name)?`Current ${currentCpDetails.name}: ${currentCpDetails.fullName}. Change CP`:"Change CP"}>
+          <span className="truncate">{isCpVisible(currentCpDetails.name)?`${currentCpDetails.name} · ${currentCpDetails.fullName}`:"Change CP"}</span><ChevronRight className="ml-1 size-3.5 shrink-0 rotate-90"/>
         </Button>
         {(notionBacked||mockDetailPreview||aiSummaryDemo)&&manager&&<TooltipProvider><Tooltip><TooltipTrigger asChild><span><Button type="button" variant="ghost" size="icon" className="size-9 shrink-0" aria-label="AI progress summary" disabled={!brandReady} onClick={()=>setAiSummaryOpen(true)}><Image src="/ai-summary-icon.svg" alt="" aria-hidden="true" width={16} height={16} className="size-4 object-contain"/></Button></span></TooltipTrigger><TooltipContent>AI progress summary</TooltipContent></Tooltip></TooltipProvider>}</div>
       {hasActiveOmniReach&&<Badge className="bg-blue-100 text-blue-700">OmniReach running</Badge>}
@@ -1391,6 +1393,7 @@ function BrandAiSummaryDialog({
   const [amId, setAmId] = useState("");
   const [generating, setGenerating] = useState(false);
   const [configurationError, setConfigurationError] = useState<string | null>(null);
+  const initialGenerationKey = useRef<string | null>(null);
   const ams = demo ? [{ id: AI_SUMMARY_DEMO_AM_ID, name: "Jamie Chen" }] : (() => {
     const choices = new Map<string, string>();
     if (brand?.ownerId) choices.set(brand.ownerId, brand.ownerName || "Current Account Manager");
@@ -1410,7 +1413,12 @@ function BrandAiSummaryDialog({
     setAmId((current) => current || defaultAmId);
   }, [open, defaultAmId]);
 
-  const summary = summaryForScope(demo ? AI_SUMMARY_DEMO : brand?.aiSummaries, scope, amId);
+  const summaryStore = demo ? AI_SUMMARY_DEMO : brand?.aiSummaries;
+  const summary = summaryForScope(summaryStore, scope, amId);
+  const missingInitialScopeKey = [
+    !summaryStore?.overall ? "overall" : null,
+    defaultAmId && !summaryForScope(summaryStore, "am", defaultAmId) ? "am" : null,
+  ].filter(Boolean).join(",");
   const operationScope = scope === "am" ? amOperationScope(brand, amId) : null;
   const operationRecords = scope === "am" ? (demo ? AI_SUMMARY_DEMO_AM_OPERATIONS : operationScope?.records || []) : [];
   const signalRecords = scope === "am" ? signalFollowUps({
@@ -1419,8 +1427,9 @@ function BrandAiSummaryDialog({
     startAt: operationScope?.startAt,
     endAt: operationScope?.endAt,
   }) : [];
-  const generate = async () => {
-    if (generating || (scope === "am" && !amId)) return;
+  const generate = useCallback(async (requestedScopes: BrandAiSummaryScope[] = [scope]) => {
+    const selectedAmId = amId || defaultAmId;
+    if (generating || (requestedScopes.includes("am") && !selectedAmId)) return;
     if (demo) {
       toast.message("This is a demo result. No AI request was made.");
       return;
@@ -1431,7 +1440,10 @@ function BrandAiSummaryDialog({
       const response = await fetch(`/api/brands/${encodeURIComponent(brandId)}/ai-summary`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scope, amId: scope === "am" ? amId : undefined }),
+        body: JSON.stringify({
+          ...(requestedScopes.length === 1 ? { scope: requestedScopes[0] } : { scopes: requestedScopes }),
+          amId: requestedScopes.includes("am") ? selectedAmId : undefined,
+        }),
       });
       const payload = await response.json() as { error?: string; summaries?: BrandAiSummaryStore };
       if (!response.ok || !payload.summaries) {
@@ -1446,15 +1458,23 @@ function BrandAiSummaryDialog({
     } finally {
       setGenerating(false);
     }
-  };
+  }, [amId, brandId, defaultAmId, demo, generating, onSummariesChange, scope]);
+
+  useEffect(() => {
+    if (!open || demo || !brand || !missingInitialScopeKey || generating) return;
+    const key = `${brandId}:${defaultAmId || "no-am"}:${missingInitialScopeKey}`;
+    if (initialGenerationKey.current === key) return;
+    initialGenerationKey.current = key;
+    void generate(missingInitialScopeKey.split(",") as BrandAiSummaryScope[]);
+  }, [open, demo, brand, missingInitialScopeKey, generating, brandId, defaultAmId, generate]);
 
   const activeAmName = ams.find((item) => item.id === amId)?.name || "Account Manager";
-  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="flex max-h-[85vh] flex-col sm:max-w-xl"><DialogHeader><div className="flex items-center gap-2 pr-8"><DialogTitle>AI progress summary</DialogTitle>{demo&&<Badge className="bg-amber-100 text-amber-800">Demo</Badge>}</div><DialogDescription>Saved summaries appear by default. Generate only refreshes this selected view.</DialogDescription></DialogHeader><div className="min-h-0 space-y-4 overflow-y-auto"><div className="flex flex-wrap items-center gap-2" role="tablist" aria-label="AI summary view"><Button type="button" size="sm" variant={scope==="overall"?"secondary":"ghost"} aria-selected={scope==="overall"} onClick={()=>setScope("overall")}>Overall</Button><Button type="button" size="sm" variant={scope==="am"?"secondary":"ghost"} aria-selected={scope==="am"} onClick={()=>setScope("am")}>AM progress</Button>{scope==="am"&&<span className="text-sm font-medium text-slate-700">AM · {activeAmName}</span>}</div>{scope==="am"&&!ams.length?<p className="py-8 text-sm text-slate-500">No Account Manager has been assigned to this brand yet.</p>:summary?<div className="space-y-4"><AiSummaryContent content={summary.content}/>{scope==="am"&&<AmSignalFollowUps records={signalRecords}/>} {scope==="am"&&<AmOperationRecords records={operationRecords} brand={brand}/>}<p className="text-xs text-slate-500">Data as of {new Date(summary.dataAsOf).toLocaleString()} · Generated {new Date(summary.generatedAt).toLocaleString()}{summary.generatedBy?` by ${summary.generatedBy}`:""}</p></div>:<p className="py-8 text-sm text-slate-500">No saved summary for this view. Generate one when you need an updated readout.</p>}{configurationError&&<p role="status" className="text-sm text-amber-700">{configurationError}</p>}</div><DialogFooter><Button type="button" variant="outline" onClick={()=>onOpenChange(false)}>Close</Button><Button type="button" disabled={!demo&&(generating||(scope==="am"&&!amId)||!brand)} onClick={()=>void generate()}>{generating?<><Loader2 className="mr-2 size-4 animate-spin"/>Generating…</>:summary?"Regenerate":"Generate"}</Button></DialogFooter></DialogContent></Dialog>;
+  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="flex max-h-[85vh] flex-col sm:max-w-xl"><DialogHeader><div className="flex items-center gap-2 pr-8"><DialogTitle>AI progress summary</DialogTitle>{demo&&<Badge className="bg-amber-100 text-amber-800">Demo</Badge>}</div><DialogDescription>Saved summaries appear by default. On first use, available views are generated automatically.</DialogDescription></DialogHeader><div className="min-h-0 space-y-4 overflow-y-auto"><div className="flex flex-wrap items-center gap-2" role="tablist" aria-label="AI summary view"><Button type="button" size="sm" variant={scope==="overall"?"secondary":"ghost"} aria-selected={scope==="overall"} onClick={()=>setScope("overall")}>Overall</Button><Button type="button" size="sm" variant={scope==="am"?"secondary":"ghost"} aria-selected={scope==="am"} onClick={()=>setScope("am")}>AM progress</Button>{scope==="am"&&<span className="text-sm font-medium text-slate-700">AM · {activeAmName}</span>}</div>{scope==="am"&&!ams.length?<p className="py-8 text-sm text-slate-500">No Account Manager has been assigned to this brand yet.</p>:summary?<div className="space-y-4"><AiSummaryContent content={summary.content}/>{scope==="am"&&<AmSignalFollowUps records={signalRecords}/>} {scope==="am"&&<AmOperationRecords records={operationRecords} brand={brand}/>}<p className="text-xs text-slate-500">Data as of {new Date(summary.dataAsOf).toLocaleString()} · Generated {new Date(summary.generatedAt).toLocaleString()}{summary.generatedBy?` by ${summary.generatedBy}`:""}</p></div>:generating?<p className="py-8 text-sm text-slate-500">Generating the initial Overall and AM progress summaries…</p>:<p className="py-8 text-sm text-slate-500">No saved summary for this view. Generate one when you need an updated readout.</p>}{configurationError&&<p role="status" className="text-sm text-amber-700">{configurationError}</p>}</div><DialogFooter><Button type="button" variant="outline" onClick={()=>onOpenChange(false)}>Close</Button><Button type="button" disabled={!demo&&(generating||(scope==="am"&&!amId)||!brand)} onClick={()=>void generate()}>{generating?<><Loader2 className="mr-2 size-4 animate-spin"/>Generating…</>:summary?"Regenerate":"Generate"}</Button></DialogFooter></DialogContent></Dialog>;
 }
 
 function AiSummaryContent({ content }: { content: string }) {
   const headings = new Set(["Current Progress", "Key Progress", "Current Blocker", "Next Step", "Activity Summary｜操作统计与总结", "Engagement & Outcomes｜客户响应及推进成果", "Current Status｜当前状态"]);
-  const sections = content.trim().split(/\n\s*\n/).map((block) => {
+  const sections = cpHistoryText(content).trim().split(/\n\s*\n/).map((block) => {
     const [title, ...body] = block.trim().split("\n");
     return headings.has(title.trim()) ? { title: title.trim(), body: body.join("\n").trim() } : { title: "", body: block.trim() };
   });
@@ -2297,7 +2317,7 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
         if(!response.ok)throw new Error(payload.error||"Failed to load OmniReach");
         return payload;
       })
-      .then(catalog=>{if(!cancelled){setRemoteBombs(catalog.bombs||[]);setRemoteScenarios(catalog.scenarios||[]);setRemoteCps(catalog.cps||[]);}})
+      .then(catalog=>{if(!cancelled){setRemoteBombs(catalog.bombs||[]);setRemoteScenarios(catalog.scenarios||[]);setRemoteCps(visibleCpOptions(catalog.cps||[]));}})
       .catch(()=>{if(!cancelled){setRemoteBombs([]);setRemoteScenarios([]);setRemoteCps([]);}});
     return ()=>{cancelled=true};
   },[open,previewOnly]);
@@ -2398,7 +2418,7 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
       {!launched&&hasActiveOmniReach&&<div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">This Brand already has an active OmniReach. Stop it before launching another.</div>}
       {launched&&<div className="rounded-xl bg-emerald-50 p-4"><div className="text-sm font-semibold text-emerald-900">System assignment complete</div><p className="mt-1 text-xs text-emerald-800">{selected?`${selected.name}${selected.goal?` · ${selected.goal}`:""}`:launchedInstance?`${launchedInstance.templateName} · Version ${launchedInstance.version}`:"The order and timing below are informational only and cannot be edited."}{person?` · ${person.name}`:""}</p><div className="mt-4 rounded-xl border border-emerald-100 bg-white p-4">{resultPlanInstanceId?<BombExecutionPlan state={resultPlanState} instanceId={resultPlanInstanceId} contacts={targets} tone="success"/>:<div className="text-xs text-slate-500">Execution plan is loading…</div>}</div></div>}
       {!launched&&<>
-      <label className="text-sm font-medium">OmniReach<Select value={bombId} onValueChange={setBombId}><SelectTrigger className="mt-2 w-full"><SelectValue placeholder="Select an OmniReach"/></SelectTrigger><SelectContent>{(previewOnly?notionBombs:localBombs).map(b=><SelectItem key={b.id} value={b.id}>{previewOnly?`${b.name}${b.cp?` · ${b.cp}`:""}`:`${b.name} · V${"version" in b ? b.version : ""}`}</SelectItem>)}</SelectContent></Select></label>
+      <label className="text-sm font-medium">OmniReach<Select value={bombId} onValueChange={setBombId}><SelectTrigger className="mt-2 w-full"><SelectValue placeholder="Select an OmniReach"/></SelectTrigger><SelectContent>{(previewOnly?notionBombs:localBombs).map(b=><SelectItem key={b.id} value={b.id}>{previewOnly?`${b.name}${cpDisplayText(b.cp, "")?` · ${cpDisplayText(b.cp, "")}`:""}`:`${b.name} · V${"version" in b ? b.version : ""}`}</SelectItem>)}</SelectContent></Select></label>
       <label className="text-sm font-medium">KeyPerson<Select value={target} onValueChange={setTarget}><SelectTrigger className="mt-2 w-full"><SelectValue placeholder="Select a KeyPerson"/></SelectTrigger><SelectContent>{targets.map(t=><SelectItem key={t.id} value={t.id}>{t.name} · {t.role}</SelectItem>)}</SelectContent></Select></label>
       {selected&&<>
         {person&&<>
@@ -2734,7 +2754,7 @@ export function ReplyDialog({
 export function ChangeCPDialog({customerId,open,onOpenChange,currentCp,cps,onSave}:{customerId:string;open:boolean;onOpenChange:(v:boolean)=>void;currentCp?:string;cps?:CurrentCpOption[];onSave?:(currentCpId:string,evidence:string,note:string)=>Promise<void>}){
   const {state,changeCP}=useWorkspace();
   const c=state.customers.find(x=>x.id===customerId);
-  const options=cps?.length?cps:listCurrentCps();
+  const options=visibleCpOptions(cps?.length?cps:listCurrentCps());
   const currentName=currentCp||c?.cp||"NONE";
   const [cpId,setCP]=useState(options.find(item=>item.name===currentName)?.id||options[0]?.id||"");
   const [note,setNote]=useState("");

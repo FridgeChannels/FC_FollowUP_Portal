@@ -1,6 +1,8 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
+import { visibleCpOptions } from "@/lib/cp-visibility";
+
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -314,7 +316,7 @@ export function BombEditor({ bombId }: { bombId: string }) {
         if (cancelled || !payload.bomb) return;
         setBomb(payload.bomb);
         setScenarios(payload.scenarios || []);
-        setCps(payload.cps || []);
+        setCps(visibleCpOptions(payload.cps || []));
         setDraft(draftFromBomb(payload.bomb, payload.cps || [], payload.scenarios || []));
         setError(undefined);
       })
@@ -490,7 +492,7 @@ export function BombEditor({ bombId }: { bombId: string }) {
                     <SelectValue placeholder="Select a CP" />
                   </SelectTrigger>
                   <SelectContent position="popper">
-                    {cps.map((item) => (
+                    {visibleCpOptions(cps).map((item) => (
                       <SelectItem key={item.id} value={item.id}>
                         {item.fullName ? `${item.name} · ${item.fullName}` : item.name}
                       </SelectItem>

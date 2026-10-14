@@ -883,7 +883,11 @@ export async function createHumanOutbound(input: {
   const baseNotes = isReply
     ? "人工追加回复，尚未实际发送。"
     : "人工发送消息，尚未实际发送。";
-  const taskNotes = linkedIn ? mergeLinkedInNotes(baseNotes, linkedIn) : baseNotes;
+  // Stable marker lets reporting distinguish Send Message tasks from other
+  // manually-created follow-up tasks. Execution is still counted only after
+  // the linked outbound Conversation has an actual Interaction At timestamp.
+  const markedTaskNotes = `${baseNotes}\n[PERFORMANCE_SEND_MESSAGE]`;
+  const taskNotes = linkedIn ? mergeLinkedInNotes(markedTaskNotes, linkedIn) : markedTaskNotes;
   const sender = linkedIn?.senderAccount || input.sender;
 
   try {

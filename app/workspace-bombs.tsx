@@ -1,6 +1,8 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
+import { visibleCpOptions, cpDisplayText } from "@/lib/cp-visibility";
+
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Bomb, CircleAlert, Plus } from "lucide-react";
@@ -164,7 +166,7 @@ export function BombsPage({ active }: { active: boolean }) {
         if (cancelled) return;
         setBombs(payload.bombs || []);
         setScenarios(payload.scenarios || []);
-        setCps(payload.cps || []);
+        setCps(visibleCpOptions(payload.cps || []));
         setError(undefined);
       })
       .catch((err: unknown) => {
@@ -260,7 +262,7 @@ export function BombsPage({ active }: { active: boolean }) {
                     <div className="font-normal text-slate-700">{b.name}</div>
                   </TableCell>
                   <TableCell className="py-4">
-                    {b.cp ? <Badge variant="outline">{b.cp}</Badge> : "—"}
+                    {cpDisplayText(b.cp, "") ? <Badge variant="outline">{cpDisplayText(b.cp)}</Badge> : "—"}
                   </TableCell>
                   <TableCell className="py-4 text-xs">{b.scenarioName || "—"}</TableCell>
                   <TableCell className="py-4 text-xs">{b.targetRole || "—"}</TableCell>
@@ -448,7 +450,7 @@ function NewBombDialog({
               <SelectValue placeholder="Select a CP" />
             </SelectTrigger>
             <SelectContent position="popper">
-              {cps.map((item) => (
+              {visibleCpOptions(cps).map((item) => (
                 <SelectItem key={item.id} value={item.id}>
                   {item.fullName ? `${item.name} · ${item.fullName}` : item.name}
                 </SelectItem>
@@ -511,7 +513,7 @@ export function BombDetailPage({ bombId }: { bombId: string }) {
   usePageMetadata(
     bomb
       ? {
-          title: [bomb.name, bomb.cp, bomb.status].filter(Boolean).join(" · "),
+          title: [bomb.name, cpDisplayText(bomb.cp, ""), bomb.status].filter(Boolean).join(" · "),
           description: bomb.goal || "Follow-up OmniReach details from Notion.",
         }
       : {
@@ -566,9 +568,9 @@ export function BombDetailPage({ bombId }: { bombId: string }) {
             <h2 className="font-bold">Basic settings</h2>
             <div className="mt-5 grid gap-5 md:grid-cols-2">
               <Field label="Applicable CP">
-                {bomb.cps.length ? (
+                {visibleCpOptions(bomb.cps).length ? (
                   <div className="space-y-2">
-                    {bomb.cps.map((cp) => (
+                    {visibleCpOptions(bomb.cps).map((cp) => (
                       <div key={cp.id}>
                         <CP value={cp.name} />
                         {cp.fullName ? (

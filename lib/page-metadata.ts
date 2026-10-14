@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { isCpVisible } from "./cp-visibility.ts";
 import { createSeedState } from "./outreach-domain";
 
 export const APP_NAME = "Super FollowUP";
@@ -59,7 +60,7 @@ export function brandListMetadata(filters: BrandListFilters = {}): PageMeta {
     crumbs.push(`“${query}”`);
     details.push(`search “${query}”`);
   }
-  if (filters.cp && filters.cp !== "all") {
+  if (filters.cp && filters.cp !== "all" && isCpVisible(filters.cp)) {
     crumbs.push(filters.cp);
     details.push(filters.cp);
   }
@@ -104,8 +105,8 @@ export function brandDetailMetadata(
     };
   }
   return {
-    title: [brand.name, brand.cp, brand.status].join(" · "),
-    description: `${brand.name} is in ${brand.cp} with status ${brand.status}${brand.source ? `. Source: ${brand.source}` : ""}.`,
+    title: [brand.name, isCpVisible(brand.cp) ? brand.cp : null, brand.status].filter(Boolean).join(" · "),
+    description: `${brand.name}${isCpVisible(brand.cp) ? ` is in ${brand.cp} with status` : " has status"} ${brand.status}${brand.source ? `. Source: ${brand.source}` : ""}.`,
   };
 }
 

@@ -27,6 +27,32 @@ async function getBrands(request: Request) {
       return Response.json({ error: "Sign in required" }, { status: 401 });
     }
     const url = new URL(request.url);
+    if (url.searchParams.get("view") === "performance") {
+      if (!viewer.isAdmin) return Response.json({ error: "Only Admin can view Performance" }, { status: 403 });
+      const { loadPerformanceSource } = await import("@/lib/performance/load");
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          const send = (event: Record<string, unknown>) => controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
+          void loadPerformanceSource(url.searchParams.get("refresh") === "1", performance => {
+            send({ phase: "core", performance });
+          }).then(performance => {
+            send({ phase: "complete", performance });
+            controller.close();
+          }).catch(error => {
+            send({ phase: "error", error: error instanceof Error ? error.message : "Unable to read performance data" });
+            controller.close();
+          });
+        },
+      });
+      return new Response(stream, {
+        headers: {
+          "Cache-Control": "private, no-store",
+          "Content-Type": "application/x-ndjson; charset=utf-8",
+          "X-Content-Type-Options": "nosniff",
+        },
+      });
+    }
     if (!viewer.isAdmin && !viewer.ownerId) {
       const cps = await listCheckpoints();
       if (url.searchParams.get("count") === "1") {

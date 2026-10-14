@@ -1,5 +1,6 @@
 import type { QuoCallData } from "./quo/types";
 import type { CallReviewRound } from "./call-review-history";
+import { visibleCpOptions } from "./cp-visibility.ts";
 
 export const FOLLOW_UP_STATUSES = [
   "Unassigned",
@@ -97,6 +98,14 @@ export function listCurrentCps(): CurrentCpOption[] {
 
 export function listApplicableCps(): CurrentCpOption[] {
   return APPLICABLE_CPS.map((name) => CURRENT_CP_DICTIONARY[name]);
+}
+
+export function listVisibleCurrentCps(): CurrentCpOption[] {
+  return visibleCpOptions(listCurrentCps());
+}
+
+export function listVisibleApplicableCps(): CurrentCpOption[] {
+  return visibleCpOptions(listApplicableCps());
 }
 
 export function isCurrentCp(value?: string | null): value is CurrentCp {

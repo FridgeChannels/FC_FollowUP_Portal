@@ -1,90 +1,62 @@
 "use client";
 
+import { isCpVisible, cpDisplayText } from "@/lib/cp-visibility";
+
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ArrowDown, ArrowLeft, ArrowUp, ArrowUpDown, ChevronRight, Info } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, ArrowUpDown, ChevronRight, Info, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { usePageMetadata } from "@/app/use-page-metadata";
-import type { BrandListItem } from "@/lib/brand-list";
+import { identity, metrics, snapshot, queryRange, presetRange, validDate, VISIBLE_STAGES, type Stage, type SourceData, type Snapshot, type Range, type Preset, type Opportunity } from "@/lib/performance/data";
 
-type CP = 0 | 1 | 2 | 3;
-type Exhibition = { id: string; name: string };
-type ExhibitionData = Exhibition & { brands: BrandListItem[] };
-type PerformanceData = { brands: BrandListItem[]; exhibitions: ExhibitionData[] };
-type LoadState = { status: "loading" } | { status: "ready"; data: PerformanceData } | { status: "error"; message: string };
-
-const CP_STAGES: CP[] = [0, 1, 2, 3];
-const CP_MEANINGS = ["No current checkpoint", "Current CP1", "Current CP2", "Current CP3"];
-const cpBackground = ["bg-slate-300", "bg-violet-400", "bg-blue-400", "bg-emerald-400"];
-const number = (value: number) => value.toLocaleString("en-US");
-const shortDate = (date: string | null) => date ? new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "Asia/Shanghai" }).format(new Date(date)) : "—";
-const currentCP = (value: string): CP | null => value === "NONE" ? 0 : /^CP[1-3]$/.test(value) ? Number(value.slice(2)) as CP : null;
-const cpCounts = (brands: BrandListItem[]) => CP_STAGES.map((stage) => brands.filter((brand) => currentCP(brand.currentCp) === stage).length);
-
-async function readBrandPage(params: URLSearchParams, signal: AbortSignal) {
-  const response = await fetch(`/api/brands?${params.toString()}`, { signal, cache: "no-store" });
-  const payload = await response.json() as { brands?: BrandListItem[]; nextCursor?: string | null; hasMore?: boolean; error?: string };
-  if (!response.ok) throw new Error(payload.error || "Unable to load brands");
-  return payload;
-}
-
-async function readAllBrands(filters: Record<string, string>, signal: AbortSignal) {
-  const brands: BrandListItem[] = [];
-  let cursor: string | null = null;
-  do {
-    const params = new URLSearchParams(filters);
-    if (cursor) params.set("cursor", cursor);
-    const page = await readBrandPage(params, signal);
-    brands.push(...(page.brands || []));
-    cursor = page.hasMore && page.nextCursor ? page.nextCursor : null;
-  } while (cursor && !signal.aborted);
-  return brands;
-}
-
-async function loadPerformanceData(signal: AbortSignal): Promise<PerformanceData> {
-  const brands = await readAllBrands({}, signal);
-  const exhibitionResponse = await fetch("/api/exhibitions/options", { signal, cache: "no-store" });
-  if (!exhibitionResponse.ok) return { brands, exhibitions: [] };
-  const payload = await exhibitionResponse.json() as { exhibitions?: Exhibition[] };
-  const results = await Promise.allSettled((payload.exhibitions || []).map(async (exhibition) => ({
-    ...exhibition,
-    brands: await readAllBrands({ exhibitionId: exhibition.id }, signal),
-  })));
-  const exhibitions = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
-  return { brands, exhibitions };
-}
-
-function usePerformanceData() {
-  const [state, setState] = useState<LoadState>({ status: "loading" });
-  useEffect(() => {
-    const controller = new AbortController();
-    void loadPerformanceData(controller.signal)
-      .then((data) => { if (!controller.signal.aborted) setState({ status: "ready", data }); })
-      .catch((error: unknown) => {
-        if (!controller.signal.aborted) setState({ status: "error", message: error instanceof Error ? error.message : "Unable to load performance data" });
-      });
-    return () => controller.abort();
-  }, []);
-  return state;
-}
+type LoadState = { status: "loading"; data?: SourceData } | { status: "ready"; data: SourceData } | { status: "error"; message: string };
+type Href = (path: string, updates?: Record<string, string | null>) => string;
+const value = (n: number | null) => n === null ? "—" : n.toLocaleString("en-US");
+const shortDate = (date: string | null) => date && Number.isFinite(Date.parse(date)) ? new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "Asia/Shanghai" }).format(new Date(date)) : "—";
+const missingCost = "The existing records do not contain exhibition or follow-up investment amounts.";
+const currentHint = "Counts brands once at their latest current Round. On an AM page, only active opportunities assigned to that AM are included; if a brand has multiple Rounds, its latest active Round determines its current CP.";
+const communicationHint = "Actual Interaction At records. Saved Round markers use the AM responsible at event time; legacy records without a Round marker use the brand's Owner at the selected cutoff. Historical cutoffs without ownership evidence remain unavailable.";
+const color: Partial<Record<Stage, string>> = { CP1: "bg-violet-400", CP2: "bg-blue-400", CP3: "bg-emerald-400", Nurture: "bg-amber-400" };
 
 function Hint({ text }: { text: string }) {
-  return <Tooltip><TooltipTrigger asChild><button type="button" aria-label={text} className="inline-flex size-6 shrink-0 items-center justify-center rounded-full focus-visible:ring-2 focus-visible:ring-primary"><Info className="size-3.5 text-slate-400" /></button></TooltipTrigger><TooltipContent className="max-w-72 text-sm" sideOffset={6}>{text}</TooltipContent></Tooltip>;
+  return <Tooltip><TooltipTrigger asChild><button type="button" aria-label={text} className="inline-flex size-7 shrink-0 items-center justify-center rounded-full focus-visible:ring-2 focus-visible:ring-primary"><Info className="size-3.5 text-slate-400" /></button></TooltipTrigger><TooltipContent className="max-w-80 text-sm" sideOffset={6}>{text}</TooltipContent></Tooltip>;
 }
-
-function Metrics({ items }: { items: { label: string; value: ReactNode; hint?: string; available?: boolean }[] }) {
-  return <div className="overflow-x-auto pb-2"><div className="grid min-w-[580px] grid-cols-4 gap-4 lg:gap-6">{items.map((item) => <div key={item.label} className="rounded-xl bg-white/45 px-4 py-5 sm:px-5"><div className="flex items-center gap-1 text-sm text-slate-500">{item.label}{item.hint && <Hint text={item.hint} />}</div><div className="mt-2 text-3xl font-semibold tracking-tight tabular-nums text-slate-950">{item.value}</div><div className="mt-2 text-xs text-slate-500">{item.available ? "Current database value" : "Not available in current data"}</div></div>)}</div></div>;
+function Section({ title, children, hint, id }: { title: string; children: ReactNode; hint?: string; id?: string }) {
+  return <section id={id} className="space-y-4"><div className="flex items-center gap-1"><h2 className="text-lg font-semibold tracking-tight text-slate-900">{title}</h2>{hint && <Hint text={hint} />}</div>{children}</section>;
 }
-
+function NoData({ text }: { text: string }) {
+  return <Empty><EmptyHeader><EmptyTitle>No records to show</EmptyTitle><EmptyDescription>{text}</EmptyDescription></EmptyHeader></Empty>;
+}
+function Metrics({ items }: { items: { label: string; count: number | null; hint?: string; period?: boolean }[] }) {
+  return <div className="overflow-x-auto pb-2"><div className={`grid min-w-[580px] ${items.length === 3 ? "grid-cols-3" : "grid-cols-4"} gap-4`}>{items.map(item => <div key={item.label} className="px-2 py-3"><div className="flex items-center gap-1 text-sm text-slate-500">{item.label}{item.hint && <Hint text={item.hint} />}</div><div className="mt-2 text-3xl font-semibold tabular-nums">{value(item.count)}</div><div className="mt-2 text-xs text-slate-500">{item.period ? "In selected period" : "As of end date"}</div></div>)}</div></div>;
+}
+function LoadingPerformance({ section }: { section?: string }) {
+  const sectionTitles = section === "exhibitions"
+    ? ["Follow-up Progress", "Current CP Distribution", "AM Contribution", "Brand List"]
+    : section === "ams" ? ["Current CP Distribution", "Activity & Effort", "Brand List"]
+      : ["Exhibition Performance", "AM Performance"];
+  return <div className="space-y-10" aria-busy="true" aria-label="Loading performance data">
+    <div className="overflow-x-auto pb-2"><div className="grid min-w-[580px] grid-cols-4 gap-4">{Array.from({ length: 4 }, (_, index) => <div key={index} className="space-y-3 px-2 py-3"><div className="h-4 w-28 animate-pulse rounded bg-slate-200/80" /><div className="h-9 w-20 animate-pulse rounded bg-slate-200/80" /><div className="h-3 w-24 animate-pulse rounded bg-slate-200/60" /></div>)}</div></div>
+    {sectionTitles.map(title => <Section key={title} title={title}><div className="space-y-3 overflow-hidden rounded-xl border border-slate-200/70 bg-white/35 p-4"><div className="h-8 w-full animate-pulse rounded bg-slate-200/50" /><div className="h-14 w-full animate-pulse rounded bg-slate-200/40" /><div className="h-14 w-4/5 animate-pulse rounded bg-slate-200/40" /></div></Section>)}
+    <p role="status" className="text-sm text-slate-500">Loading performance data…</p>
+  </div>;
+}
+function DateFilter({ range, preset, change }: { range: Range; preset: Preset; change: (updates: Record<string, string | null>) => void }) {
+  const [custom, setCustom] = useState(preset === "custom");
+  const [error, setError] = useState("");
+  return <div className="flex flex-col gap-2 sm:items-end"><div className="flex flex-wrap items-center gap-3"><span className="text-xs text-slate-500">{shortDate(range.start)} – {shortDate(range.end)}, {range.end.slice(0, 4)}</span><select aria-label="Performance date range" className="h-11 rounded-lg bg-white/60 px-3 text-sm focus-visible:outline-2 focus-visible:outline-primary" value={custom ? "custom" : preset} onChange={event => { const selected = event.target.value; setCustom(selected === "custom"); setError(""); if (selected !== "custom") { const next = presetRange(Number(selected)); change({ range: selected, start: next.start, end: next.end }); } }}><option value="7">Last 7 Days</option><option value="30">Last 30 Days</option><option value="90">Last 90 Days</option><option value="custom">Custom Range</option></select></div>{custom && <form key={range.start + range.end} className="flex flex-wrap items-end gap-2" onSubmit={event => { event.preventDefault(); const data = new FormData(event.currentTarget); const start = String(data.get("start")); const end = String(data.get("end")); if (!validDate(start) || !validDate(end) || start > end) { setError("Choose a valid date range."); return; } change({ range: "custom", start, end }); setError(""); }}><label className="text-xs text-slate-500">From<Input className="mt-1 h-11 w-36" type="date" name="start" aria-label="Start date" defaultValue={range.start} required /></label><label className="text-xs text-slate-500">To<Input className="mt-1 h-11 w-36" type="date" name="end" aria-label="End date" defaultValue={range.end} required /></label><Button variant="secondary" className="h-11" type="submit">Apply</Button>{error && <p role="alert" className="w-full text-xs text-red-700">{error}</p>}</form>}</div>;
+}
 type Column<T> = { key: string; label: string; value: (row: T) => number | string | null; render?: (row: T) => ReactNode; hint?: string; numeric?: boolean };
 function ComparisonTable<T extends { id: string }>({ rows, columns, href, label }: { rows: T[]; columns: Column<T>[]; href: (row: T) => string; label: string }) {
   const router = useRouter();
-  const [sort, setSort] = useState({ key: columns[0].key, desc: false });
+  const [sort, setSort] = useState({ key: columns.find(item => item.key === "brands" || item.key === "assigned")?.key || columns[0].key, desc: columns.some(item => item.key === "brands" || item.key === "assigned") });
+  const [page, setPage] = useState(1);
   const column = columns.find((item) => item.key === sort.key) ?? columns[0];
   const sorted = [...rows].sort((a, b) => {
     const av = column.value(a); const bv = column.value(b);
@@ -93,141 +65,179 @@ function ComparisonTable<T extends { id: string }>({ rows, columns, href, label 
     const result = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv));
     return (sort.desc ? -result : result) || a.id.localeCompare(b.id);
   });
-  return <div className="overflow-x-auto"><Table className="min-w-[600px]" aria-label={label}><TableHeader className="[&_tr]:border-0"><TableRow className="border-0 hover:bg-transparent">{columns.map((item, index) => <TableHead key={item.key} aria-sort={sort.key === item.key ? sort.desc ? "descending" : "ascending" : "none"} className={index ? "text-right" : "pl-4"}><div className={`flex items-center ${index ? "justify-end" : ""}`}><button className="inline-flex min-h-11 items-center gap-1.5 text-xs font-medium text-slate-500 focus-visible:ring-2 focus-visible:ring-primary" onClick={() => setSort({ key: item.key, desc: sort.key === item.key ? !sort.desc : Boolean(item.numeric) })}>{item.label}{sort.key === item.key ? sort.desc ? <ArrowDown className="size-3.5" /> : <ArrowUp className="size-3.5" /> : <ArrowUpDown className="size-3.5 opacity-40" />}</button>{item.hint && <Hint text={item.hint} />}</div></TableHead>)}</TableRow></TableHeader><TableBody>{sorted.map((row) => <TableRow key={row.id} className="cursor-pointer border-0 hover:bg-white/60" onClick={(event) => { if (!(event.target as HTMLElement).closest("a,button")) router.push(href(row)); }}>{columns.map((item, index) => <TableCell key={item.key} className={`h-16 px-4 tabular-nums ${index ? "text-right" : "font-medium"}`}>{index === 0 ? <Link className="flex min-h-11 items-center gap-2 focus-visible:ring-2 focus-visible:ring-primary" href={href(row)}>{item.render ? item.render(row) : item.value(row)}<ChevronRight className="size-3.5 text-slate-400" /></Link> : item.render ? item.render(row) : item.value(row) ?? "—"}</TableCell>)}</TableRow>)}</TableBody></Table></div>;
+  const pageCount = Math.max(1, Math.ceil(sorted.length / 20));
+  const currentPage = Math.min(page, pageCount);
+  const displayed = sorted.slice((currentPage - 1) * 20, currentPage * 20);
+  return <div><div className="overflow-x-auto"><Table className="min-w-[600px]" aria-label={label}><TableHeader className="[&_tr]:border-0"><TableRow className="border-0 hover:bg-transparent">{columns.map((item, index) => <TableHead key={item.key} aria-sort={sort.key === item.key ? sort.desc ? "descending" : "ascending" : "none"} className={index ? "text-right" : "pl-4"}><div className={`flex items-center ${index ? "justify-end" : ""}`}><button className="inline-flex min-h-11 items-center gap-1.5 text-xs font-medium text-slate-500 focus-visible:ring-2 focus-visible:ring-primary" onClick={() => { setPage(1); setSort({ key: item.key, desc: sort.key === item.key ? !sort.desc : Boolean(item.numeric) }); }}>{item.label}{sort.key === item.key ? sort.desc ? <ArrowDown className="size-3.5" /> : <ArrowUp className="size-3.5" /> : <ArrowUpDown className="size-3.5 opacity-40" />}</button>{item.hint && <Hint text={item.hint} />}</div></TableHead>)}</TableRow></TableHeader><TableBody>{displayed.map((row) => <TableRow key={row.id} className="cursor-pointer border-0 hover:bg-white/60" onClick={(event) => { if (!(event.target as HTMLElement).closest("a,button")) router.push(href(row)); }}>{columns.map((item, index) => <TableCell key={item.key} className={`h-16 px-4 tabular-nums ${index ? "text-right" : "font-medium"}`}>{index === 0 ? <Link className="flex min-h-11 items-center gap-2 focus-visible:ring-2 focus-visible:ring-primary" href={href(row)}>{item.render ? item.render(row) : item.value(row)}<ChevronRight className="size-3.5 text-slate-400" /></Link> : item.render ? item.render(row) : item.value(row) ?? "—"}</TableCell>)}</TableRow>)}</TableBody></Table></div>{pageCount > 1 && <div className="flex items-center justify-between gap-3 pt-3 text-xs text-slate-500"><span>{(currentPage - 1) * 20 + 1}–{Math.min(currentPage * 20, sorted.length)} of {sorted.length}</span><div className="flex items-center gap-2"><Button className="h-11" variant="ghost" size="sm" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)} aria-label={"Previous page of " + label}>Previous</Button><span>{currentPage} / {pageCount}</span><Button className="h-11" variant="ghost" size="sm" disabled={currentPage === pageCount} onClick={() => setPage(currentPage + 1)} aria-label={"Next page of " + label}>Next</Button></div></div>}</div>;
 }
 
-function Section({ title, children, hint, id }: { title: string; children: ReactNode; hint?: string; id?: string }) {
-  return <section id={id} className="space-y-4"><div className="flex items-center gap-1"><h2 className="text-lg font-semibold tracking-tight text-slate-900">{title}</h2>{hint && <Hint text={hint} />}</div>{children}</section>;
+
+type PerformanceMetric = ReturnType<typeof metrics>;
+type Entity = { id: string; name: string };
+type MetricRow = Entity & PerformanceMetric;
+function CPCount({ count, href, stage }: { count: number | null; href: string; stage: Stage }) {
+  return count === null ? <span>—</span> : <Link href={href} aria-label={"View brands in " + stage} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md px-2 text-sm font-medium hover:bg-white/60 focus-visible:ring-2 focus-visible:ring-primary">{value(count)}</Link>;
 }
-
-function CPCount({ cp, count, href }: { cp: CP; count: number; href: string }) {
-  return <Link href={href} aria-label={`View ${count} CP${cp} brands`} className={`ui-cp-${cp} inline-flex min-h-9 min-w-11 items-center justify-center rounded-lg px-2 font-medium hover:brightness-95 focus-visible:ring-2 focus-visible:ring-primary`}>{number(count)}</Link>;
+function cpColumns(link: (row: MetricRow, stage: Stage) => string): Column<MetricRow>[] {
+  return VISIBLE_STAGES.map(stage => ({ key: stage, label: stage, numeric: true, value: row => row.cp[stage], render: row => <CPCount count={row.cp[stage]} stage={stage} href={link(row, stage)} /> }));
 }
-
-function CPDistribution({ brands, href, cards = false }: { brands: BrandListItem[]; href: (cp: CP) => string; cards?: boolean }) {
-  const counts = cpCounts(brands); const total = brands.length;
-  return <div className="space-y-5"><div className="grid grid-cols-4 gap-3">{CP_STAGES.map((cp) => <Link key={cp} href={href(cp)} title={CP_MEANINGS[cp]} className={`rounded-lg px-3 py-4 transition-colors hover:bg-white/70 focus-visible:ring-2 focus-visible:ring-primary ${cards ? `ui-cp-${cp}` : "bg-white/35"}`}><span className="text-sm text-slate-500">CP{cp}</span><div className="mt-2 text-2xl font-semibold tabular-nums">{number(counts[cp])}</div><span className="mt-1 block text-xs text-slate-500">{total ? `${(counts[cp] / total * 100).toFixed(1)}%` : "—"}</span></Link>)}</div><div className="flex h-3 overflow-hidden rounded-full bg-slate-200/60" aria-label="Current CP distribution">{CP_STAGES.map((cp) => counts[cp] > 0 && <Link key={cp} href={href(cp)} aria-label={`CP${cp}: ${counts[cp]}`} className={`${cpBackground[cp]} transition-opacity hover:opacity-70 focus-visible:ring-2 focus-visible:ring-primary`} style={{ width: `${counts[cp] / total * 100}%` }} />)}</div></div>;
+function CPDistribution({ metric, link }: { metric: PerformanceMetric; link: (stage: Stage | "unknown") => string }) {
+  const total = VISIBLE_STAGES.reduce((sum, stage) => sum + (metric.cp[stage] || 0), 0);
+  return <div className="space-y-5"><div className="grid grid-cols-4 gap-3 lg:grid-cols-5">{VISIBLE_STAGES.map(stage => <Link key={stage} href={link(stage)} className="min-h-24 px-2 py-3 hover:bg-white/40 focus-visible:ring-2 focus-visible:ring-primary"><span className="text-sm text-slate-500">{stage}</span><div className="mt-2 text-2xl font-semibold tabular-nums">{value(metric.cp[stage])}</div><span className="mt-1 block text-xs text-slate-500">{total && metric.cp[stage] !== null ? (metric.cp[stage]! / total * 100).toFixed(1) + "%" : "—"}</span></Link>)}</div>{metric.unknownCP > 0 && <Link href={link("unknown")} className="inline-flex min-h-11 items-center gap-2 text-sm text-slate-500">Unknown CP · {metric.unknownCP}<Hint text="The saved current stage cannot establish the state at this historical cutoff, or the checkpoint is unrecognized." /></Link>}<div className="flex h-3 overflow-hidden rounded-full bg-slate-200/60" aria-label="Current CP distribution">{VISIBLE_STAGES.map(stage => metric.cp[stage] !== null && metric.cp[stage]! > 0 && <Link key={stage} aria-label={stage + ": " + metric.cp[stage]} href={link(stage)} className={color[stage]} style={{ width: metric.cp[stage]! / total * 100 + "%" }} />)}</div></div>;
 }
-
-function NoBrands({ description = "No brands are available for this view." }: { description?: string }) {
-  return <Empty><EmptyHeader><EmptyTitle>No brands to show</EmptyTitle><EmptyDescription>{description}</EmptyDescription></EmptyHeader></Empty>;
+function amEntities(view: Snapshot) {
+  const groups = new Map<string, Entity>(view.data.owners.map(o => [identity(o.id), o]));
+  (view.data.rounds || []).forEach(r => { if (r.assigned_am_id && r.assigned_am_name) groups.set(identity(r.assigned_am_id), { id: r.assigned_am_id, name: r.assigned_am_name }); });
+  (view.data.assignments || []).forEach(a => {
+    if (a.previous_am_id && a.previous_am_name) groups.set(identity(a.previous_am_id), { id: a.previous_am_id, name: a.previous_am_name });
+    if (a.new_am_id && a.new_am_name) groups.set(identity(a.new_am_id), { id: a.new_am_id, name: a.new_am_name });
+  });
+  return [...groups.values()];
 }
-
-type Href = (path: string, updates?: Record<string, string | null>) => string;
-const cpColumns = <T extends { cp: number[] }>(link: (row: T, cp: CP) => string): Column<T>[] => ([1, 2, 3] as CP[]).map((cp) => ({ key: `cp${cp}`, label: `CP${cp}`, numeric: true, value: (row) => row.cp[cp], render: (row) => <CPCount cp={cp} count={row.cp[cp]} href={link(row, cp)} />, hint: `Current database count for ${CP_MEANINGS[cp]}.` }));
-
-function PerformanceOverview({ data, href }: { data: PerformanceData; href: Href }) {
-  const exhibitions = data.exhibitions.map((exhibition) => ({ ...exhibition, cp: cpCounts(exhibition.brands) }));
-  const ams = useMemo(() => {
-    const groups = new Map<string, { id: string; name: string; brands: BrandListItem[] }>();
-    data.brands.forEach((brand) => {
-      if (!brand.ownerId || !brand.ownerName) return;
-      const current = groups.get(brand.ownerId) || { id: brand.ownerId, name: brand.ownerName, brands: [] };
-      current.brands.push(brand); groups.set(brand.ownerId, current);
-    });
-    return [...groups.values()].map((am) => ({ ...am, cp: cpCounts(am.brands) }));
-  }, [data.brands]);
-  return <>
-    <Metrics items={[
-      { label: "Total Brands", value: number(data.brands.length), available: true, hint: "All visible Follow-up Client records returned by the existing Brands data source." },
-      { label: "New CP3", value: "—", hint: "CP advancement history is not available through the existing list data." },
-      { label: "Total Investment", value: "—", hint: "Exhibition and follow-up cost records are not available through the existing data source." },
-      { label: "Cost / CP3", value: "—", hint: "Requires both cost records and CP3 advancement history." },
-    ]} />
-    <Section title="Exhibition Performance" hint="Current brand and CP values are grouped from existing Exhibition and Brand records. Cost and historical advancement metrics remain blank until a direct source exists.">{exhibitions.length ? <ComparisonTable label="Exhibition performance" rows={exhibitions} href={(exhibition) => href(`/performance/exhibitions/${encodeURIComponent(exhibition.id)}`)} columns={[
-      { key: "name", label: "Exhibition", value: (exhibition) => exhibition.name },
-      { key: "brands", label: "Brands", numeric: true, value: (exhibition) => exhibition.brands.length },
-      ...cpColumns<typeof exhibitions[number]>((exhibition, cp) => href(`/performance/exhibitions/${encodeURIComponent(exhibition.id)}`, { cp: String(cp) })),
-      { key: "cost", label: "Cost / CP3", numeric: true, value: () => null, render: () => "—" },
-    ]} /> : <NoBrands description="No exhibitions are linked to the current brand records." />}</Section>
-    <Section title="AM Performance" hint="Assigned brand and current CP values come from current Owner assignments. Historical advancement is unavailable in the existing data source.">{ams.length ? <ComparisonTable label="AM performance" rows={ams} href={(am) => href(`/performance/ams/${encodeURIComponent(am.id)}`)} columns={[
-      { key: "name", label: "AM", value: (am) => am.name },
-      { key: "brands", label: "Brands", numeric: true, value: (am) => am.brands.length },
-      ...cpColumns<typeof ams[number]>((am, cp) => href(`/performance/ams/${encodeURIComponent(am.id)}`, { cp: String(cp) })),
-      { key: "advanced", label: "Advanced", numeric: true, value: () => null, render: () => "—" },
-    ]} /> : <NoBrands description="No brands currently have an assigned Account Manager." />}</Section>
-  </>;
+function ExhibitionTable({ view, href }: { view: Snapshot; href: Href }) {
+  const rows: MetricRow[] = view.data.exhibitions.filter(e => view.exhibitBrands.has(identity(e.id)) || view.opportunities.some(r => r.sourceId && identity(r.sourceId) === identity(e.id))).map(e => ({ ...e, ...metrics(view, undefined, e.id) }));
+  return <Section title="Exhibition Performance" hint="Brands are deduplicated ClientDB profiles linked to the exhibition. CP1/2/3 counts are distinct brands, using the latest Round for that brand within the exhibition. Historical source changes are not stored, so past exhibition totals are unavailable.">{rows.length ? <ComparisonTable label="Exhibition performance" rows={rows} href={e => href("/performance/exhibitions/" + e.id, { exhibition: null, cp: null })} columns={[
+    { key: "name", label: "Exhibition", value: e => e.name },
+    { key: "brands", label: "Brands", numeric: true, value: e => e.brands },
+    { key: "rounds", label: "Opportunities", numeric: true, value: e => e.assigned },
+    ...cpColumns((e, stage) => href("/performance/exhibitions/" + e.id, { cp: stage, exhibition: null }) + "#brands"),
+    { key: "cost", label: "Cost / CP3", numeric: true, value: () => null, hint: missingCost },
+  ]} /> : <NoData text="No brands or recorded opportunities are linked to an exhibition by this end date." />}</Section>;
 }
-
-function ExhibitionDetail({ exhibition, href, cp }: { exhibition: ExhibitionData; href: Href; cp: CP | null }) {
-  const contributions = useMemo(() => {
-    const groups = new Map<string, { id: string; name: string; brands: BrandListItem[] }>();
-    exhibition.brands.forEach((brand) => {
-      if (!brand.ownerId || !brand.ownerName) return;
-      const current = groups.get(brand.ownerId) || { id: brand.ownerId, name: brand.ownerName, brands: [] };
-      current.brands.push(brand); groups.set(brand.ownerId, current);
-    });
-    return [...groups.values()];
-  }, [exhibition.brands]);
-  const currentCP3 = cpCounts(exhibition.brands)[3];
-  return <>
-    <Metrics items={[
-      { label: "Brands", value: number(exhibition.brands.length), available: true },
-      { label: "Samples Delivered", value: "—" },
-      { label: "New CP3", value: "—" },
-      { label: "Cost / CP3", value: "—" },
-    ]} />
-    <div className="grid gap-10 xl:grid-cols-2">
-      <Section title="Conversion Progress" hint="Only current Brands and Current CP3 can be read directly from the existing records."><div className="space-y-5">{[{ label: "Brands", value: number(exhibition.brands.length) }, { label: "Samples Delivered", value: "—" }, { label: "Replied Brands", value: "—" }, { label: "Engaged Brands", value: "—" }, { label: "Current CP3", value: number(currentCP3) }].map((item) => <div key={item.label} className="grid grid-cols-[145px_1fr_40px] items-center gap-3 text-sm"><span className="text-slate-600">{item.label}</span><div className="h-2 rounded-full bg-slate-200/60">{typeof item.value === "number" && <div className="h-2 rounded-full bg-primary/65" style={{ width: `${exhibition.brands.length ? item.value / exhibition.brands.length * 100 : 0}%` }} />}</div>{item.label === "Current CP3" ? <Link href={href(`/performance/exhibitions/${encodeURIComponent(exhibition.id)}`, { cp: "3" })} className="text-right font-medium tabular-nums hover:text-primary">{item.value}</Link> : <span className="text-right font-medium tabular-nums">{item.value}</span>}</div>)}</div></Section>
-      <Section title="CP Distribution" hint="Current CP is read from each linked Brand record."><CPDistribution brands={exhibition.brands} href={(stage) => href(`/performance/exhibitions/${encodeURIComponent(exhibition.id)}`, { cp: String(stage) })} /></Section>
-    </div>
-    <Section title="AM Contribution" hint="Current assigned brands are available. Historical CP achievement events are not available in the existing data source.">{contributions.length ? <ComparisonTable label="AM contribution" rows={contributions} href={(am) => href(`/performance/ams/${encodeURIComponent(am.id)}`, { exhibition: exhibition.id, cp: null })} columns={[
-      { key: "name", label: "AM", value: (am) => am.name }, { key: "brands", label: "Brands", numeric: true, value: (am) => am.brands.length },
-      ...([1, 2, 3] as const).map((stage) => ({ key: `new${stage}`, label: `New CP${stage}`, numeric: true, value: () => null, render: () => "—" })),
-    ]} /> : <NoBrands description="No brands from this exhibition currently have an assigned Account Manager." />}</Section>
-    {cp !== null && <BrandList brands={exhibition.brands} cp={cp} href={href} filterPath={`/performance/exhibitions/${encodeURIComponent(exhibition.id)}`} />}
-  </>;
+function AMTable({ view, href, exhibition }: { view: Snapshot; href: Href; exhibition?: Entity }) {
+  const rows: MetricRow[] = amEntities(view).map(am => ({ ...am, ...metrics(view, am.id, exhibition?.id) })).filter(am => !exhibition || am.rounds.length || view.events.some(e => e.ownerId && identity(e.ownerId) === identity(am.id) && e.sourceId && identity(e.sourceId) === identity(exhibition.id)));
+  return <Section title={exhibition ? "AM Contribution" : "AM Performance"} hint={currentHint}>{rows.length ? <ComparisonTable label={exhibition ? "AM contribution" : "AM performance"} rows={rows} href={am => href("/performance/ams/" + am.id, { exhibition: exhibition?.id || null, cp: null })} columns={[
+    { key: "name", label: "AM", value: am => am.name },
+    { key: "assigned", label: "Assigned opportunities", numeric: true, value: am => am.assigned, hint: "Saved unfinished Rounds and current Follow-up records assigned to this AM. Completed records are excluded. Historical responsibility without evidence is unavailable." },
+    ...(exhibition ? [1, 2, 3].map(stage => ({ key: "CP" + stage, label: "CP" + stage, numeric: true, value: (am: MetricRow) => am.cp[("CP" + stage) as Stage] })) : cpColumns((am, stage) => href("/performance/ams/" + am.id, { exhibition: null, cp: stage }) + "#brands")),
+  ]} /> : <NoData text="No Account Manager opportunities have a primary source in this exhibition." />}</Section>;
 }
-
-function BrandList({ brands, cp, href, filterPath }: { brands: BrandListItem[]; cp: CP | null; href: Href; filterPath: string }) {
-  const pathname = usePathname(); const filtered = brands.filter((brand) => cp === null || currentCP(brand.currentCp) === cp);
-  return <Section title="Brand List" id="brands"><div className="flex gap-1 overflow-x-auto" role="group" aria-label="Filter brands by CP">{[null, ...CP_STAGES].map((stage) => <Button key={stage ?? "all"} asChild variant={stage === cp ? "secondary" : "ghost"} className={`h-11 min-w-14 ${stage === cp ? "ring-1 ring-primary/30" : ""}`}><Link aria-pressed={stage === cp} href={`${href(filterPath, { cp: stage === null ? null : String(stage) })}#brands`}>{stage === null ? "All" : `CP${stage}`}</Link></Button>)}</div>{filtered.length ? <ComparisonTable label="Assigned brands" rows={filtered} href={(brand) => `/customers/${encodeURIComponent(brand.id)}?returnTo=${encodeURIComponent(href(pathname))}`} columns={[
-    { key: "brand", label: "Brand", value: (brand) => brand.name },
-    { key: "exhibition", label: "Exhibition", value: () => null, render: () => "—" },
-    { key: "cp", label: "Current CP", value: (brand) => brand.currentCp, render: (brand) => <span className={`ui-cp-${currentCP(brand.currentCp) ?? 0} rounded-md px-2 py-1 text-xs font-medium`}>{brand.currentCp === "NONE" ? "CP0" : brand.currentCp}</span> },
-    { key: "advancement", label: "Last Advancement", value: () => null, render: () => "—" },
-    { key: "interaction", label: "Last Interaction", value: (brand) => brand.lastInteractionAt, render: (brand) => shortDate(brand.lastInteractionAt) },
-  ]} /> : <NoBrands description="No brands match this CP filter." />}</Section>;
+function Overview({ view, href }: { view: Snapshot; href: Href }) {
+  const metric = metrics(view);
+  return <><Metrics items={[
+    { label: "Total Brands", count: view.totalBrands, hint: "Non-test Follow-up brands acquired by the cutoff, deduplicated by Parent / Master Record and shared Client ID. Uses the same non-test brand scope as the Brands list." },
+    { label: "Current CP3", count: metric.cp.CP3, hint: "Number of distinct brands whose latest current Round is at CP3." },
+    { label: "Total Investment", count: null, hint: missingCost },
+    { label: "Cost / CP3", count: null, hint: missingCost },
+  ]} /><ExhibitionTable view={view} href={href} /><AMTable view={view} href={href} /></>;
 }
-
-function AMDetail({ am, exhibition, href, cp }: { am: { id: string; name: string; brands: BrandListItem[] }; exhibition?: ExhibitionData; href: Href; cp: CP | null }) {
-  const brands = exhibition ? exhibition.brands.filter((brand) => brand.ownerId === am.id) : am.brands;
-  const activity = ["OmniReach Sends", "Emails Sent", "WhatsApp Sent", "SMS Sent", "LinkedIn Sent", "Caller Calls"];
-  return <>
-    <Metrics items={[
-      { label: "Assigned Brands", value: number(brands.length), available: true },
-      { label: "Replied Brands", value: "—" },
-      { label: "Engaged Brands", value: "—" },
-      { label: "Advanced Brands", value: "—" },
-    ]} />
-    <Section title="Current CP Distribution" hint="Each current CP is read directly from the brand's Current CP field."><CPDistribution brands={brands} cards href={(stage) => `${href(`/performance/ams/${encodeURIComponent(am.id)}`, { exhibition: exhibition?.id || null, cp: String(stage) })}#brands`} /></Section>
-    <Section title="CP Advancement"><div className="grid grid-cols-3 gap-4">{[1, 2, 3].map((stage) => <div key={stage} className="py-2"><div className="text-sm text-slate-500">Reached CP{stage}</div><div className="mt-2 text-2xl font-semibold tabular-nums">—</div></div>)}</div></Section>
-    <Section title="Activity & Effort"><div className="grid grid-cols-2 gap-x-6 gap-y-6 sm:grid-cols-3 lg:grid-cols-6">{activity.map((label) => <div key={label}><div className="text-sm text-slate-500">{label}</div><div className="mt-2 text-2xl font-semibold tabular-nums">—</div></div>)}</div></Section>
-    <BrandList brands={brands} cp={cp} href={href} filterPath={`/performance/ams/${encodeURIComponent(am.id)}`} />
-  </>;
+function BrandList({ view, rounds, href, cp }: { view: Snapshot; rounds: Opportunity[]; href: Href; cp: string | null }) {
+  const pathname = usePathname();
+  const filtered = rounds.filter(r => !cp || (cp === "unknown" ? r.cp === null : r.cp === cp));
+  const name = (r: Opportunity) => view.data.exhibitions.find(e => r.sourceId && identity(e.id) === identity(r.sourceId))?.name || null;
+  return <Section title="Brand List" id="brands" hint="One row per saved Round or an existing current Follow-up record without a saved Round. The row label distinguishes these sources. Links open the existing Brand Detail."><div role="group" aria-label="Filter brands by CP" className="flex gap-1 overflow-x-auto pb-1">{[null, ...VISIBLE_STAGES, ...(rounds.some(r => r.cp === null) ? ["unknown"] : [])].map(stage => <Button key={stage || "all"} asChild variant={cp === stage ? "secondary" : "ghost"} className="h-11 shrink-0"><Link aria-current={cp === stage ? "true" : undefined} href={href(pathname, { cp: stage }) + "#brands"}>{stage === null ? "All" : stage === "unknown" ? "Unknown" : stage}</Link></Button>)}</div>{filtered.length ? <ComparisonTable key={cp || "all"} label="Brand opportunities" rows={filtered} href={r => "/customers/" + encodeURIComponent(r.followupId) + "?returnTo=" + encodeURIComponent(href(pathname))} columns={[
+    { key: "name", label: "Brand", value: r => r.name, render: r => <div>{r.name}<span className="ml-2 text-xs font-normal text-slate-400">{r.roundNumber ? "Round " + r.roundNumber : "Current record"}</span></div> },
+    { key: "exhibition", label: "Primary exhibition", value: name },
+    { key: "cp", label: "Current CP", value: r => r.cp, render: r => r.cp ? cpDisplayText(r.cp) : "Unknown" },
+    { key: "interaction", label: "Last Interaction", value: r => r.lastInteraction, render: r => shortDate(r.lastInteraction) },
+  ]} /> : <NoData text="No recorded opportunities match this CP filter." />}</Section>;
 }
-
-function findAM(brands: BrandListItem[], id: string) {
-  const owned = brands.filter((brand) => brand.ownerId === id);
-  return owned.length ? { id, name: owned[0].ownerName || "Account Manager", brands: owned } : null;
+function ExhibitionDetail({ exhibition, view, href, cp }: { exhibition: Entity; view: Snapshot; href: Href; cp: string | null }) {
+  const metric = metrics(view, undefined, exhibition.id);
+  const link = (stage: string) => href("/performance/exhibitions/" + exhibition.id, { cp: stage }) + "#brands";
+  const progress: { label: string; count: number | null; hint?: string }[] = [
+    { label: "Brands", count: metric.brands },
+    { label: "Samples Delivered", count: metric.samplesDelivered, hint: "Total Sample Links in these brands' details. Each link counts once; a brand can have multiple links." },
+    { label: "Sample Tapped Brands", count: metric.sampleTapped, hint: "Distinct brands with at least one external Sample Tap. Repeated taps by the same brand count once." },
+    { label: "Replied Brands", count: metric.replied, hint: "Distinct brands with an inbound reply in Email, SMS, WhatsApp, LinkedIn, or a connected inbound Phone call." },
+    { label: "Back-and-forth Brands", count: metric.engaged, hint: "Distinct brands with at least one thread containing both an outbound message and an inbound reply, in either order." },
+    { label: "Current CP3", count: metric.cp.CP3, hint: "Brands currently at CP3. CP3 already represents Meeting Confirmed." },
+  ];
+  const max = Math.max(1, ...progress.map(p => p.count || 0));
+  return <><Metrics items={[
+    { label: "Brands", count: metric.brands, hint: "Unique ClientDB brands acquired from this exhibition by the cutoff." },
+    { label: "Samples Delivered", count: metric.samplesDelivered, hint: "Counts each Sample Link listed in the Brand Details for brands from this exhibition. Multiple links under one brand count separately." },
+    { label: "Current CP3", count: metric.cp.CP3, hint: "Number of distinct exhibition brands whose latest current Round is at CP3." },
+    { label: "Cost / CP3", count: null, hint: missingCost },
+  ]} /><div className="grid gap-10 xl:grid-cols-2"><Section title="Conversion Progress" hint="Counts distinct brands linked to this exhibition as of the selected end date, except Samples Delivered, which counts Sample Links. Communication metrics include recorded activity up to that end date. Replies include Email, SMS, WhatsApp, LinkedIn and connected inbound Phone calls."><div className="space-y-5">{progress.map(p => <div key={p.label} className="grid grid-cols-[180px_1fr_40px] items-center gap-3 text-sm"><span className="flex items-center gap-1 text-slate-600">{p.label}{p.hint && <Hint text={p.hint} />}</span><div className="h-2 rounded-full bg-slate-200/60">{p.count !== null && <div className="h-2 rounded-full bg-primary/65" style={{ width: p.count / max * 100 + "%" }} />}</div>{p.label === "Current CP3" && p.count !== null ? <Link href={link("CP3")} className="text-right tabular-nums">{value(p.count)}</Link> : <span className="text-right tabular-nums">{value(p.count)}</span>}</div>)}</div></Section><Section title="CP Distribution" hint={currentHint}><CPDistribution metric={metric} link={link} /></Section></div><AMTable view={view} href={href} exhibition={exhibition} /><BrandList view={view} rounds={metric.rounds} href={href} cp={cp} /></>;
+}
+function AMDetail({ am, exhibition, view, href, cp }: { am: Entity; exhibition?: Entity; view: Snapshot; href: Href; cp: string | null }) {
+  const metric = metrics(view, am.id, exhibition?.id);
+  const activity = [
+    { label: "OmniReach Sends", count: metric.activity.omniReachSends, hint: "Counts each task from an OmniReach run once, across channels, only when its linked outbound message has an actual Interaction At. Grouped by the task's brand and Owner. Queued tasks without an actual send do not count." },
+    { label: "Send Message Sends", count: metric.activity.sendMessageSends, hint: "Counts each task created through the separate Send Message entry once, across channels, only when its linked outbound message has an actual Interaction At. Grouped by the task's brand and Owner." },
+    { label: "OmniReach Runs", count: metric.activity.runs, hint: "Distinct OmniReach Run IDs launched in the selected period, using the first task creation time. Assigned to that task's Owner at launch; saved Round assignment history is the fallback. In an exhibition view, only Runs for its brands count." },
+    { label: "Emails Sent", count: metric.activity.email, hint: "Actual outbound Email Conversation records in the selected period, deduplicated by provider Message ID or record ID; attributed through the Round or brand Owner." },
+    { label: "WhatsApp Sent", count: metric.activity.whatsapp, hint: "Actual outbound WhatsApp Conversation records in the selected period, deduplicated by provider Message ID or record ID; attributed through the Round or brand Owner." },
+    { label: "SMS Sent", count: metric.activity.sms, hint: "Actual outbound SMS Conversation records in the selected period, deduplicated by provider Message ID or record ID; attributed through the Round or brand Owner." },
+    { label: "LinkedIn Sent", count: metric.activity.linkedin, hint: "Actual outbound LinkedIn Conversation records in the selected period, deduplicated by provider Message ID or record ID; attributed through the Round or brand Owner." },
+    { label: "Caller Calls", count: metric.activity.calls, hint: "Phone Conversation records with a Call Result during the selected period, for brands assigned to this AM. Each call record counts once; the count is grouped by the AM responsible for the brand." },
+  ];
+  return <><Metrics items={[
+    { label: "Assigned Brands", count: metric.assignedBrands, hint: "Distinct brands assigned to this AM with an active opportunity. A brand with multiple active Rounds counts once." },
+    { label: "Replied Brands", count: metric.replied, period: true, hint: "Distinct brands with an inbound reply across Email, SMS, WhatsApp, LinkedIn, or connected inbound Phone calls." },
+    { label: "Back-and-forth Brands", count: metric.engaged, period: true, hint: communicationHint + " Requires an outbound message and inbound reply in the same conversation thread, in either order." },
+  ]} /><Section title="Current CP Distribution" hint={currentHint}><CPDistribution metric={metric} link={stage => href("/performance/ams/" + am.id, { cp: stage }) + "#brands"} /></Section><Section title="Activity & Effort" hint={communicationHint + " OmniReach Sends and Send Message Sends are separate entry points; each counts only tasks linked to an actual outbound message with an Interaction At. Scheduled messages and task creation times are not counted as actual sends."}><div className="grid grid-cols-2 gap-x-6 gap-y-6 sm:grid-cols-3 lg:grid-cols-4">{activity.map(item => <div key={item.label}><div className="flex items-center gap-1 text-sm text-slate-500">{item.label}{item.hint && <Hint text={item.hint} />}</div><div className="mt-2 text-2xl font-semibold tabular-nums">{value(item.count)}</div></div>)}</div></Section>{metric.unknownEvents > 0 && <p className="text-xs text-slate-500">{metric.unknownEvents} interactions cannot be attributed to an AM from the available Round or brand Owner records; related metrics are unavailable.</p>}<BrandList view={view} rounds={metric.brandRounds} href={href} cp={cp} /></>;
 }
 
 export function PerformancePages() {
-  const pathname = usePathname(); const search = useSearchParams(); const dataState = usePerformanceData();
-  const [, , section, rawId] = pathname.split("/"); const id = rawId ? decodeURIComponent(rawId) : "";
-  const cpParam = search.get("cp"); const cp = cpParam !== null && /^[0-3]$/.test(cpParam) ? Number(cpParam) as CP : null;
+  const pathname = usePathname(); const search = useSearchParams(); const router = useRouter();
+  const [state, setState] = useState<LoadState>({ status: "loading" });
+  const [reload, setReload] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      const response = await fetch("/api/brands?view=performance" + (reload ? "&refresh=1" : ""), { signal: controller.signal, cache: "no-store" });
+      if (!response.ok) {
+        const payload = await response.json() as { error?: string };
+        throw new Error(payload.error || "Unable to read performance data");
+      }
+      if (!response.body) throw new Error("Performance data stream is unavailable");
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let completed = false;
+      while (!controller.signal.aborted) {
+        const { done, value: chunk } = await reader.read();
+        buffer += decoder.decode(chunk, { stream: !done });
+        let newline = buffer.indexOf("\n");
+        while (newline >= 0) {
+          const line = buffer.slice(0, newline).trim();
+          buffer = buffer.slice(newline + 1);
+          if (line) {
+            const event = JSON.parse(line) as { phase: "core" | "complete" | "error"; performance?: SourceData; error?: string };
+            if (event.phase === "error") throw new Error(event.error || "Unable to load performance data");
+            if (!event.performance) throw new Error("Performance data was empty");
+            if (event.phase === "core") setState({ status: "loading", data: event.performance });
+            else { setState({ status: "ready", data: event.performance }); completed = true; }
+          }
+          newline = buffer.indexOf("\n");
+        }
+        if (done) break;
+      }
+      if (!controller.signal.aborted && !completed) throw new Error("Performance data stream ended early");
+    })().catch((error: unknown) => {
+      if (!controller.signal.aborted) setState({ status: "error", message: error instanceof Error ? error.message : "Unable to load performance data" });
+    });
+    return () => controller.abort();
+  }, [reload]);
+  const refresh = () => { setState(current => { const data = "data" in current ? current.data : undefined; return { status: "loading", ...(data ? { data } : {}) }; }); setReload(n => n + 1); };
+  const { range, preset } = queryRange(search);
+  const sourceData = state.status === "ready" ? state.data : state.status === "loading" ? state.data : undefined;
+  const view = useMemo(() => sourceData ? snapshot(sourceData, range) : null, [sourceData, range.start, range.end]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [, , section, rawId] = pathname.split("/");
+  const id = rawId ? decodeURIComponent(rawId) : "";
+  const context = section === "exhibitions" ? id : search.get("exhibition");
+  const exhibition = view?.data.exhibitions.find(e => context && identity(e.id) === identity(context));
+  const am = view ? amEntities(view).find(o => identity(o.id) === identity(id)) : undefined;
+  const cp = isCpVisible(search.get("cp")) ? search.get("cp") : null;
+  const validRoute = pathname === "/performance" || section === "exhibitions" && !!exhibition || section === "ams" && !!am && (!context || !!exhibition);
+  const title = section === "exhibitions" ? exhibition?.name || "Exhibition Performance" : section === "ams" ? (am?.name || "AM") + " — Performance" : "Exhibition Performance";
+  usePageMetadata({ title, description: "Exhibition, brand, Round and AM performance from the existing business databases." });
   const href: Href = (path, updates = {}) => {
     const params = new URLSearchParams(search.toString());
-    ["range", "start", "end"].forEach((key) => params.delete(key));
-    Object.entries(updates).forEach(([key, value]) => value === null ? params.delete(key) : params.set(key, value));
-    const query = params.toString(); return query ? `${path}?${query}` : path;
+    params.set("range", preset); params.set("start", range.start); params.set("end", range.end);
+    Object.entries(updates).forEach(([key, val]) => val === null ? params.delete(key) : params.set(key, val));
+    return path + "?" + params.toString();
   };
-  const data = dataState.status === "ready" ? dataState.data : null;
-  const exhibition = data?.exhibitions.find((item) => item.id === (section === "exhibitions" ? id : search.get("exhibition"))) ?? undefined;
-  const am = data && section === "ams" ? findAM(data.brands, id) : null;
-  const validRoute = pathname === "/performance" || (section === "exhibitions" && Boolean(exhibition)) || (section === "ams" && Boolean(am));
-  const title = !validRoute ? "Exhibition Performance not found" : section === "exhibitions" ? exhibition!.name : section === "ams" ? `${am!.name} — Exhibition Performance` : "Exhibition Performance";
-  usePageMetadata({ title, description: "Current exhibition and AM data from the existing SFU records." });
-  const back = section === "ams" && exhibition ? href(`/performance/exhibitions/${encodeURIComponent(exhibition.id)}`, { exhibition: null, cp: null }) : href("/performance", { exhibition: null, cp: null });
-  return <TooltipProvider delayDuration={150}><div className="mx-auto max-w-6xl space-y-10 pb-12"><header className="space-y-4">{section && <Link href={back} className="inline-flex min-h-10 items-center gap-2 text-sm text-slate-500 hover:text-primary"><ArrowLeft className="size-4" />{section === "ams" && exhibition ? `Back to ${exhibition.name}` : "Back to Exhibition Performance"}</Link>}<div className="flex items-center gap-2"><SidebarTrigger className="md:hidden" /><h1 className="text-3xl font-bold tracking-[-0.04em] text-slate-950">{title}</h1></div><p className="text-sm text-slate-500">Current database data. Metrics without a direct source are shown as —.</p></header>{dataState.status === "loading" ? <Empty><EmptyHeader><EmptyTitle>Loading performance data</EmptyTitle><EmptyDescription>Reading current Brand and Exhibition records.</EmptyDescription></EmptyHeader></Empty> : dataState.status === "error" ? <Empty><EmptyHeader><EmptyTitle>Performance data is unavailable</EmptyTitle><EmptyDescription>{dataState.message}</EmptyDescription></EmptyHeader><Button asChild variant="secondary"><Link href="/performance">Try again</Link></Button></Empty> : !validRoute ? <Empty><EmptyHeader><EmptyTitle>Exhibition Performance not found</EmptyTitle><EmptyDescription>Select an exhibition or Account Manager from Exhibition Performance.</EmptyDescription></EmptyHeader><Button asChild variant="secondary"><Link href="/performance">Back to Exhibition Performance</Link></Button></Empty> : section === "exhibitions" ? <ExhibitionDetail exhibition={exhibition!} href={href} cp={cp} /> : section === "ams" ? <AMDetail am={am!} exhibition={exhibition} href={href} cp={cp} /> : <PerformanceOverview data={data!} href={href} />}</div></TooltipProvider>;
+  const back = section === "ams" && exhibition ? href("/performance/exhibitions/" + exhibition.id, { exhibition: null, cp: null }) : href("/performance", { exhibition: null, cp: null });
+  const notStored = view ? view.data.followups.filter(f => !(view.data.rounds || []).some(r => identity(r.brand_id) === identity(f.id))).length : 0;
+  const unattributed = view?.opportunities.filter(r => !r.sourceId).length || 0;
+  return <TooltipProvider delayDuration={150}><div className="mx-auto max-w-6xl space-y-10 pb-12"><header className="space-y-4">{section && <Link href={back} className="inline-flex min-h-11 items-center gap-2 text-sm text-slate-500 hover:text-primary"><ArrowLeft className="size-4" />{section === "ams" && exhibition ? "Back to " + exhibition.name : "Back to Exhibition Performance"}</Link>}<div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between"><div className="flex items-center gap-2"><SidebarTrigger className="md:hidden" /><h1 className="text-3xl font-bold tracking-[-0.04em]">{title}</h1></div><DateFilter key={pathname + preset} range={range} preset={preset} change={updates => router.replace(href(pathname, updates), { scroll: false })} /></div>{section === "ams" && exhibition && <div className="flex items-center gap-3 text-sm text-slate-500">{exhibition.name}<Link href={href(pathname, { exhibition: null })} className="underline underline-offset-2">Clear exhibition</Link></div>}</header>
+    {state.status === "loading" && !view ? <LoadingPerformance section={section} /> : state.status === "error" ? <Empty><EmptyHeader><EmptyTitle>Performance data is unavailable</EmptyTitle><EmptyDescription>{state.message}</EmptyDescription></EmptyHeader><Button variant="secondary" onClick={refresh}>Try again</Button></Empty> : !validRoute ? <NoData text="Select an exhibition or Account Manager from Exhibition Performance." /> : view && <>
+      {state.status === "loading" && <p role="status" className="rounded-lg bg-white/50 px-4 py-3 text-sm text-slate-500">Core performance data is ready. Loading communication statistics…</p>}
+      {section === "exhibitions" ? <ExhibitionDetail exhibition={exhibition!} view={view} href={href} cp={cp} /> : section === "ams" ? <AMDetail am={am!} exhibition={exhibition} view={view} href={href} cp={cp} /> : <Overview view={view} href={href} />}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-500"><span>{view.recordedRounds.length} saved Rounds</span>{notStored > 0 && <span>{notStored} current Follow-up records without a saved Round</span>}{unattributed > 0 && <span>{unattributed} tracked opportunities without a primary exhibition</span>}<span>Read {shortDate(view.data.loadedAt)}</span><Button variant="ghost" size="sm" onClick={refresh}><RefreshCw className="mr-1 size-3" />Refresh</Button></div>{view.data.unavailable.map(item => <p key={item} role="status" className="text-xs text-amber-700">{item}</p>)}{view.unresolvedLegacy > 0 && <p className="text-xs text-slate-500">{view.unresolvedLegacy} current Follow-up records have no historical ownership or stage snapshots.</p>}{view.unresolvedStarts > 0 && <p className="text-xs text-slate-500">{view.unresolvedStarts} migrated Rounds have no historical start time. Historical opportunity totals cannot be reconstructed.</p>}
+    </>}
+  </div></TooltipProvider>;
 }

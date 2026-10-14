@@ -26,6 +26,16 @@ test("keeps summaries separated by AM", () => {
   assert.equal(summaryForScope(store, "am", "am-two")?.amName, "Bo");
 });
 
+test("keeps overall and AM progress when initialized together", () => {
+  const store = putBrandAiSummary(
+    putBrandAiSummary({}, "overall", overall),
+    "am",
+    { ...overall, amId: "am-one", amName: "Ada" },
+  );
+  assert.equal(summaryForScope(store, "overall")?.content, "Overall progress");
+  assert.equal(summaryForScope(store, "am", "am-one")?.amName, "Ada");
+});
+
 test("ignores malformed stored values", () => {
   assert.deepEqual(parseBrandAiSummaryStore("not-json"), {});
   assert.deepEqual(parseBrandAiSummaryStore('{"overall":{"content":true}}'), {});

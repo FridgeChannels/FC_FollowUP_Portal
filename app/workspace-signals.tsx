@@ -1,4 +1,6 @@
 "use client";
+
+import { cpDisplayText } from "@/lib/cp-visibility";
 import {
   useEffect,
   useMemo,
@@ -705,7 +707,7 @@ function BrandReview({
             <h2 className="text-xl font-semibold tracking-tight">
               {brand.name}
             </h2>
-            <p className="mt-1 text-xs text-muted-foreground">{detail?.contacts[0]?.name ? `${detail.contacts[0].name} · ` : ""}{detail?.currentCp || brand.currentCp}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{detail?.contacts[0]?.name ? `${detail.contacts[0].name} · ` : ""}{cpDisplayText(detail?.currentCp || brand.currentCp)}</p>
           </div>
           <a href={`/customers/${encodeURIComponent(brand.id)}?returnTo=${encodeURIComponent(mock ? "/signals?mock=1" : "/signals")}&signal=${encodeURIComponent(brand.events[0]?.id||"")}${mock ? "&mock=1" : ""}`} className="inline-flex items-center gap-1.5 rounded-md bg-violet-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2">Take Action Now <ArrowUpRight className="size-4" /></a>
         </div>

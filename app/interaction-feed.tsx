@@ -1,5 +1,7 @@
 "use client";
 
+import { VISIBLE_CP_CODES, isCpVisible, cpHistoryText } from "@/lib/cp-visibility";
+
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useVisibleReply } from "./use-visible-reply";
@@ -8,7 +10,7 @@ import { toast } from "sonner";
 import type { CallReviewRound } from "@/lib/call-review-history";
 import { callerSubmittedPhoneCallIds, callReviewsFromTasks, type CallReviewResolution, type CallReviewStatus } from "@/lib/call-review-metadata";
 import { getDisplayTimeZone } from "@/lib/display-time";
-import { BombInstance, Channel, Contact, CPCode, CP_CODES, Interaction, ScheduledAction, compareInteractionSort, interactionSortAt, interactionSortMs } from "@/lib/outreach-domain";
+import { BombInstance, Channel, Contact, CPCode, Interaction, ScheduledAction, compareInteractionSort, interactionSortAt, interactionSortMs } from "@/lib/outreach-domain";
 import { BombExecutionPlan, formatEasternDateTime } from "./bomb-plan";
 import { BrandReplyBox, ThreadSendBox, inboundNeedsComposer } from "./brand-reply-box";
 import { ChannelIcon } from "./channel-icon";
@@ -37,6 +39,8 @@ import { emailSignalMatchesInteraction } from "@/lib/signals/match";
 import { inboundEmailRecipient } from "@/lib/email-recipient";
 
 const CHANNELS: Channel[] = ["Email", "LinkedIn", "SMS", "WhatsApp", "Phone"];
+const OUTBOUND_EMAIL_SENDER_NAME = "Ella";
+const OUTBOUND_EMAIL_SENDER_ADDRESS = "ella@fridgechannels.com";
 
 function emailEventsFor(item: Interaction, data: SignalsPayload | null): SignalEvent[] {
   return (data?.brands.find(brand=>brand.id===item.customerId)?.events||[]).filter(event=>emailSignalMatchesInteraction(event,item));
@@ -100,7 +104,7 @@ function messagePreviewText(item: Interaction) {
 
 function activityTimelineSummary(item: Interaction) {
   const channel = item.channel || "Message";
-  const title = item.title?.trim();
+  const title = item.type === "CP" ? cpHistoryText(item.title?.trim() || "") : item.title?.trim();
   const subject = emailSubjectLabel(item);
   if (subject) return subject;
   if (channel === "Phone" && item.callResult) return `Call · ${item.callResult}`;
@@ -321,20 +325,21 @@ export function InteractionFeed({
   const customerId = customerIdProp || interactions[0]?.customerId;
   const customer = state.customers.find(item => item.id === customerId);
   const currentCp = currentCpProp || customer?.cp || "CP1";
+  const showAllStageRecords = includeAllCps || !isCpVisible(currentCp);
   const [selectedChannel, setSelectedChannel] = useState<Channel | "All">(callerPhoneOnly ? "Phone" : initialChannel || (showAllChannels ? "All" : "Email"));
   const [bombOpen, setBombOpen] = useState(false);
   const [cancellingBombId, setCancellingBombId] = useState<string | null>(null);
-  const visibleCps = CP_CODES;
+  const visibleCps = VISIBLE_CP_CODES;
   const selectedInitialCp = initialCp || currentCp;
   const selectedCpIsVisible = visibleCps.includes(selectedInitialCp as (typeof visibleCps)[number]);
   const [selectedCp, setSelectedCp] = useState<CPCode>(selectedCpIsVisible ? selectedInitialCp : visibleCps[visibleCps.length - 1]);
   const displayCurrentCp = visibleCps.includes(currentCp as (typeof visibleCps)[number])
     ? currentCp
     : visibleCps[0];
-  const currentIndex = currentCp === "Nurture"
+  const currentIndex = (currentCp === "Nurture" || !isCpVisible(currentCp))
     ? visibleCps.length - 1
     : visibleCps.indexOf(displayCurrentCp as (typeof visibleCps)[number]);
-  const taskIdsForCp = includeAllCps ? new Set(tasks.map(task => task.id)) : phoneTaskIdsForCp(interactions, selectedCp, displayCurrentCp, tasks);
+  const taskIdsForCp = showAllStageRecords ? new Set(tasks.map(task => task.id)) : phoneTaskIdsForCp(interactions, selectedCp, displayCurrentCp, tasks);
   if (activeTaskId) taskIdsForCp.add(activeTaskId);
   const phoneTasks = tasks
     .filter((item) => item.channel === "Phone" && [...taskIdsForCp].some((id) => sameNotionId(id, item.id)))
@@ -352,7 +357,7 @@ export function InteractionFeed({
     }));
   const phoneBoardTaskIds = phoneTasks.map((item) => item.id);
   const cpInteractions = interactions.filter((item) => {
-    if (includeAllCps) return true;
+    if (showAllStageRecords) return true;
     if (!isChannelMessage(item)) return true;
     // Strict: only show messages stamped for this CP tab.
     if (belongsToCp(item, selectedCp, displayCurrentCp)) return true;
@@ -382,7 +387,7 @@ export function InteractionFeed({
     : cpInteractions.filter((item) => isChannelMessage(item) && item.channel === activeChannel);
   // Newest OmniReach launch first (startedAt = creation/launch time).
   const bombsForCp = planState.bombInstances
-    .filter(item => item.customerId === customerId && (includeAllCps || item.cp === selectedCp))
+    .filter(item => item.customerId === customerId && (showAllStageRecords || item.cp === selectedCp))
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt) || b.id.localeCompare(a.id));
   const usePhoneTaskBoard = activeChannel === "Phone" && (callerPhoneOnly || phoneTasks.length > 0 || cpInteractions.some((item) => item.quo));
   const cpLabel = (cp: CPCode) => {
@@ -499,7 +504,7 @@ export function InteractionFeed({
                 <div className="min-w-0">
                   <div className="truncate text-sm font-bold">{instance.templateName} · V{instance.version}</div>
                   <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                    {instance.cp && <Badge variant="outline" className="text-[10px]">{instance.cp}</Badge>}
+                    {instance.cp && isCpVisible(instance.cp) && <Badge variant="outline" className="text-[10px]">{instance.cp}</Badge>}
                     <Badge className={instance.status === "Running" ? "bg-violet-100 text-violet-800" : "bg-slate-100 text-slate-700"}>{instance.status}</Badge>
                     {instance.startedAt ? (
                       <span className="text-[11px] text-slate-500">{formatEasternDateTime(instance.startedAt)}</span>
@@ -1003,8 +1008,10 @@ function ThreadMessages({
       const occurredAt = interactionSortAt(item);
       const sendStatus = outboundStatus(item);
       const emailMessage = itemChannel === "Email";
-      const emailSender = inbound ? itemContact?.name || itemEndpoint || "Unknown sender" : "You";
-      const senderAddress = item.sender?.trim() || (inbound ? itemEndpoint : undefined);
+      const emailSender = inbound ? itemContact?.name || itemEndpoint || "Unknown sender" : OUTBOUND_EMAIL_SENDER_NAME;
+      const senderAddress = inbound
+        ? item.sender?.trim() || itemEndpoint
+        : OUTBOUND_EMAIL_SENDER_ADDRESS;
       const recipientAddress = inbound ? inboundEmailRecipient(item, replyPool) : undefined;
       const toAddress = inbound ? recipientAddress : item.recipient?.trim() || itemEndpoint;
       const emailRecipient = inbound
