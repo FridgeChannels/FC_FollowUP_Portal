@@ -2187,12 +2187,14 @@ type LaunchBombOption = {id:string;name:string;version?:number;goal:string;cp?:s
 function LaunchStepEditor({
   channel,
   copy,
+  contacts,
   disabled,
   onChange,
   onUploadingChange,
 }: {
   channel: Channel;
   copy: LaunchStepCopy;
+  contacts: Contact[];
   disabled?: boolean;
   onChange: (patch: Partial<LaunchStepCopy>) => void;
   onUploadingChange?: (uploading: boolean) => void;
@@ -2224,10 +2226,10 @@ function LaunchStepEditor({
           placeholder="Email subject"
           disabled={disabled}
         />
-        <Input
+        <EmailCcInput
+          contacts={contacts}
           value={copy.cc || ""}
-          onChange={(e) => onChange({ cc: e.target.value })}
-          placeholder="CC email addresses (separate with ;)"
+          onChange={(cc) => onChange({ cc })}
           disabled={disabled}
         />
       </> : null}
@@ -2462,7 +2464,7 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
     }catch(error){toast.error(error instanceof Error?error.message:"Unable to save OmniReach template");}
     finally{setSavingTemplate(false);}
   };
-  return <Dialog open={open} onOpenChange={value=>{if(!value){setLaunchedInstanceId("");setPreviewReady(false);setLaunchPlan(null);setLaunching(false);setSaveAsTemplateOpen(false);}onOpenChange(value)}}><DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-2xl"><DialogHeader><div className="flex items-center gap-2 pr-8"><DialogTitle className="min-w-0 flex-1">{launched?"OmniReach launched · execution plan":"Launch OmniReach"}</DialogTitle>{!launched&&previewOnly&&selected&&person&&<Button type="button" variant="ghost" size="icon" className="size-11 shrink-0" aria-label="Save as OmniReach template" onClick={openSaveAsTemplate}><Save className="size-4"/></Button>}</div><DialogDescription>{launched?"The system assigned this execution order and schedule. This plan is read-only.":"Review and edit each step’s copy for this launch only. The template is not changed. After confirmation, the system assigns timing and order based on channel availability and caller capacity. Any meaningful reply stops the run."}</DialogDescription></DialogHeader>
+  return <Dialog open={open} onOpenChange={value=>{if(!value){setLaunchedInstanceId("");setPreviewReady(false);setLaunchPlan(null);setLaunching(false);setSaveAsTemplateOpen(false);}onOpenChange(value)}}><DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-2xl"><DialogHeader><div className="flex items-center gap-2 pr-8"><DialogTitle className="min-w-0 flex-1">{launched?"OmniReach launched · execution plan":"Launch OmniReach"}</DialogTitle>{!launched&&previewOnly&&selected&&person&&<TooltipProvider delayDuration={150}><Tooltip><TooltipTrigger asChild><Button type="button" variant="ghost" size="icon" className="size-11 shrink-0" aria-label="Save as Template" onClick={openSaveAsTemplate}><Save className="size-4"/></Button></TooltipTrigger><TooltipContent side="top">Save as Template</TooltipContent></Tooltip></TooltipProvider>}</div><DialogDescription>{launched?"The system assigned this execution order and schedule. This plan is read-only.":"Review and edit each step’s copy for this launch only. The template is not changed. After confirmation, the system assigns timing and order based on channel availability and caller capacity. Any meaningful reply stops the run."}</DialogDescription></DialogHeader>
     <div className="min-h-0 space-y-4 overflow-y-auto pr-1">
       {!launched&&hasActiveOmniReach&&<div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">This Brand already has an active OmniReach. Stop it before launching another.</div>}
       {launched&&<div className="rounded-xl bg-emerald-50 p-4"><div className="text-sm font-semibold text-emerald-900">System assignment complete</div><p className="mt-1 text-xs text-emerald-800">{selected?`${selected.name}${selected.goal?` · ${selected.goal}`:""}`:launchedInstance?`${launchedInstance.templateName} · Version ${launchedInstance.version}`:"The order and timing below are informational only and cannot be edited."}{person?` · ${person.name}`:""}</p><div className="mt-4 rounded-xl border border-emerald-100 bg-white p-4">{resultPlanInstanceId?<BombExecutionPlan state={resultPlanState} instanceId={resultPlanInstanceId} contacts={targets} tone="success"/>:<div className="text-xs text-slate-500">Execution plan is loading…</div>}</div></div>}
@@ -2481,6 +2483,7 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
               key={`${s.id}:${target}:${bombId}`}
               channel={s.channel}
               copy={copy}
+              contacts={targets}
               disabled={disabled}
               onChange={(patch)=>updateCopy(s.id,patch)}
               onUploadingChange={(uploading)=>setStepUploading((prev)=>(

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Bomb, ChevronDown, ClipboardCheck, LayoutDashboard, LogOut, RefreshCw,
@@ -234,18 +235,20 @@ function WorkspaceShell({ children }: { children?: ReactNode }) {
     return (
       <SidebarMenuItem key={item.path}>
         <SidebarMenuButton
+          asChild
           tooltip={item.label}
           isActive={screen === item.screen}
-          onClick={() => router.push(item.path)}
           className={`h-10 rounded-lg px-3 text-[13px] font-medium ${activeStyle} data-[active=true]:text-white`}
         >
-          <item.icon />
-          <span>{item.label}</span>
-          {count > 0 && (
-            <span className={`ml-auto rounded-md px-1.5 py-0.5 text-[10px] group-data-[collapsible=icon]:hidden ${item.screen === "Brands" ? "bg-rose-500/15 text-rose-800" : "bg-amber-400/20 text-amber-800"}`}>
-              {count}
-            </span>
-          )}
+          <Link href={item.path} aria-label={item.label}>
+            <item.icon />
+            <span>{item.label}</span>
+            {count > 0 && (
+              <span className={`ml-auto rounded-md px-1.5 py-0.5 text-[10px] group-data-[collapsible=icon]:hidden ${item.screen === "Brands" ? "bg-rose-500/15 text-rose-800" : "bg-amber-400/20 text-amber-800"}`}>
+                {count}
+              </span>
+            )}
+          </Link>
         </SidebarMenuButton>
       </SidebarMenuItem>
     );
