@@ -8,8 +8,10 @@ import {
   queryDatabasePages,
   relationIds,
   retrievePage,
+  richText,
   titleFromProperties,
   type NotionPage,
+  updatePage,
 } from "./client";
 import { getFollowupConversationDbId } from "./config";
 import { listCheckpoints } from "./cps";
@@ -17,10 +19,17 @@ import { isRetryableNotionError } from "./rate-limit";
 import { parseQuoCallData, quoFromMessageId } from "../quo/call-payload";
 import { attachmentsFromProperty } from "../email-attachments";
 import { attachmentsFromExtendedParameters } from "../media-attachments";
-import { REPLY_ACTION_REMINDER_MARKER } from "../reply-action-reminder";
+import {
+  encodeReplyActionReminderActivated,
+  hasActivatedReplyActionReminder,
+  latestReplyActionReminder,
+  REPLY_ACTION_REMINDER_MARKER,
+} from "../reply-action-reminder";
 import { communicationRoundId } from "../followup-history";
+import { invalidateBrandReplySignalCache } from "./brand-reply-signal-cache";
 
 const CONTACT_CONVERSATION_KEYS = ["Interactions", "Conversations", "Conversation Records"];
+const dueReplyReminderActivations = new Map<string, Promise<number>>();
 
 function asDirection(value: string): BrandActivity["direction"] {
   if (value === "Inbound" || value === "Outbound") return value;
@@ -330,6 +339,39 @@ export async function listReplyActionReminderConversations(): Promise<BrandActiv
     rich_text: { contains: REPLY_ACTION_REMINDER_MARKER },
   });
   return pages.map((page) => mapConversation(page));
+}
+
+/** Reopen only this Account Manager's due read reminders during a list refresh. */
+export async function reopenDueReplyActionReminders(ownerId: string, now = Date.now()) {
+  const normalizedOwnerId = ownerId.replace(/-/g, "").toLowerCase();
+  const existing = dueReplyReminderActivations.get(normalizedOwnerId);
+  if (existing) return existing;
+  const activation = reopenDueReplyActionRemindersInternal(normalizedOwnerId, now)
+    .finally(() => { dueReplyReminderActivations.delete(normalizedOwnerId); });
+  dueReplyReminderActivations.set(normalizedOwnerId, activation);
+  return activation;
+}
+
+async function reopenDueReplyActionRemindersInternal(ownerId: string, now: number) {
+  const activities = await listReplyActionReminderConversations();
+  const due = activities.filter((activity) => {
+    const reminder = latestReplyActionReminder(activity.notes);
+    return !!reminder
+      && reminder.ownerId.replace(/-/g, "").toLowerCase() === ownerId
+      && Date.parse(reminder.dueAt) <= now
+      && !hasActivatedReplyActionReminder(activity.notes, reminder.dueAt);
+  });
+  if (!due.length) return 0;
+  const activatedAt = new Date(now).toISOString();
+  await Promise.all(due.map((activity) => {
+    const reminder = latestReplyActionReminder(activity.notes)!;
+    return updatePage(activity.id, {
+      "Reply Status": { select: { name: "Needs Reply" } },
+      Notes: { rich_text: richText([activity.notes, encodeReplyActionReminderActivated({ dueAt: reminder.dueAt, activatedAt })].filter(Boolean).join("\n")) },
+    });
+  }));
+  invalidateBrandReplySignalCache();
+  return due.length;
 }
 
 /** Direct brand-relation query used by the Brands list after historical backfill. */

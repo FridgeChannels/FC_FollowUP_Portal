@@ -147,6 +147,18 @@ test("客户 Completed 时整户进入 Needs Review", () => {
   assert.equal(plan.needsReview[0]?.code, "CLIENT_STATUS_BLOCKED");
 });
 
+test("客户 Paused 时整户进入 Needs Review，不创建新的 OmniReach 或人工排程任务", () => {
+  for (const method of ["Automated", "Manual"] as const) {
+    const plan = previewSchedule(input({
+      method,
+      clients: [client({ clientId: "c-paused", followUpStatus: "Paused" })],
+    }));
+    assert.equal(plan.scheduled.length, 0);
+    assert.equal(plan.needsReview[0]?.code, "CLIENT_STATUS_BLOCKED");
+    assert.match(plan.needsReview[0]?.reason || "", /Paused/);
+  }
+});
+
 test("缺少 Owner 进入 Needs Review", () => {
   const plan = previewSchedule(input({
     clients: [client({ clientId: "c1", ownerId: "   " })],

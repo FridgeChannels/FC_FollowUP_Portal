@@ -1,6 +1,7 @@
 import { canAccessTestBrands, isTestOnlyViewer } from "@/lib/brand-access";
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { listBrandWorkForViewer } from "@/lib/notion/brand-work";
+import { reopenDueReplyActionReminders } from "@/lib/notion/conversations";
 import { runWithNotionLimit } from "@/lib/notion/rate-limit";
 
 export function GET(request: Request) {
@@ -9,7 +10,10 @@ export function GET(request: Request) {
       const viewer = await viewerFromRequest(request);
       if (!viewer.email) return Response.json({ error: "Sign in required" }, { status: 401 });
       if (viewer.role === "Caller") return Response.json({ error: "AM work is unavailable to Callers" }, { status: 403 });
-      if (!viewer.isAdmin && !viewer.ownerId) return Response.json({ brands: [], counts: { myWork: 0, newAssignments: 0, replies: 0, callReview: 0 } });
+      if (!viewer.isAdmin && !viewer.ownerId) return Response.json({ brands: [], counts: { myWork: 0, newAssignments: 0, replies: 0, callReview: 0, pauseDue: 0 } });
+      if (viewer.role === "AccountManager" && viewer.ownerId) {
+        await reopenDueReplyActionReminders(viewer.ownerId);
+      }
       const payload = await listBrandWorkForViewer({
         // Admins distribute work across the whole portfolio, including brands
         // that have not yet been assigned to an AccountManager.

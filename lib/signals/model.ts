@@ -4,6 +4,12 @@ export type SignalEvent = {
   brandId: string;
   contactId?: string;
   sampleId?: string;
+  /**
+   * PostHog device that produced the tap. Sample cooldown is scoped to magnet
+   * *and* device, so a second person tapping the same magnet is still a new
+   * AM-facing signal while one visitor's repeat taps stay grouped.
+   */
+  sampleDeviceId?: string;
   /** Sample Tap context captured with the raw visit. */
   tapLocation?: string;
   tapDevice?: string;
@@ -53,15 +59,18 @@ export type SignalsPayload = {
   sources: Record<SignalType, "Connected" | "Not connected">;
   summary: { today: number; week: number; needsReview: number; unread: number };
 };
-export function aggregateBrand(input: {
-  id: string;
-  name: string;
-  ownerName: string | null;
-  currentCp: string;
-  events: SignalEvent[];
-  readIds: string[];
-  review?: SignalReview;
-}): SignalBrand {
+export function aggregateBrand(
+  input: {
+    id: string;
+    name: string;
+    ownerName: string | null;
+    currentCp: string;
+    events: SignalEvent[];
+    readIds: string[];
+    review?: SignalReview;
+  },
+  opts?: { devMode?: boolean },
+): SignalBrand {
   const events = [
     ...new Map(input.events.map((event) => [event.id, event])).values(),
   ].sort(
@@ -69,13 +78,17 @@ export function aggregateBrand(input: {
       Date.parse(b.occurredAt) - Date.parse(a.occurredAt) ||
       a.id.localeCompare(b.id),
   );
-  const classified = classifySignalEvents(events);
+  const classified = classifySignalEvents(events, opts);
   const read = new Set(input.readIds);
   const reviewed = new Set(input.review?.eventIds || []);
   const newEventIds = classified
     .filter((event) => event.isNewSignal)
     .map((event) => event.id);
-  const needsReview = newEventIds.some((id) => !read.has(id));
+  // A brand row stays "unread" only while a fresh (AM-facing) signal is still
+  // unread. History-only activity must not keep the red dot lit after every
+  // fresh signal has been read.
+  const unread = newEventIds.some((id) => !read.has(id));
+  const needsReview = unread;
   return {
     id: input.id,
     name: input.name,
@@ -85,13 +98,15 @@ export function aggregateBrand(input: {
     readEventIds: [...read],
     newEventIds,
     reviewedEventIds: [...reviewed],
-    unread: events.some((event) => !read.has(event.id)),
+    unread,
     needsReview,
     status: needsReview ? "Needs Review" : input.review?.status || "Reviewed",
     taskId: input.review?.taskId,
   };
 }
 
+/** Per magnet *and* device: repeat taps from one visitor collapse into a single
+ *  signal, but a different device tapping the same magnet is genuinely new. */
 const SAMPLE_SIGNAL_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const LINKEDIN_SIGNAL_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -112,8 +127,16 @@ function normalizedLinkedInSignature(event: SignalEvent) {
 /**
  * Every activity remains available in History. This annotates only the events
  * that should surface as a fresh Signal to an AM.
+ *
+ * Pass `{ devMode: true }` (local/test server) to disable the sample-tap
+ * cooldown so every tap becomes its own Signal; production keeps the 24h
+ * per-device cooldown.
  */
-export function classifySignalEvents(events: SignalEvent[]) {
+export function classifySignalEvents(
+  events: SignalEvent[],
+  opts?: { devMode?: boolean },
+) {
+  const devMode = opts?.devMode === true;
   const ordered = [...events].sort(
     (a, b) => signalTime(a) - signalTime(b) || a.id.localeCompare(b.id),
   );
@@ -124,7 +147,13 @@ export function classifySignalEvents(events: SignalEvent[]) {
   return ordered.map((event) => {
     const at = signalTime(event);
     if (event.type === "sample") {
-      const key = `sample:${event.brandId}:${event.sampleId || "unknown"}`;
+      const key = `sample:${event.brandId}:${event.sampleId || "unknown"}:${event.sampleDeviceId || "unknown"}`;
+      // Local/test mode: every tap is its own AM-facing signal, no cooldown.
+      if (devMode) {
+        return { ...event, signalKey: `${key}:${event.id}`, signalReadId: event.id, isNewSignal: true };
+      }
+      // Scope the cooldown to magnet *and* device. One visitor re-tapping the
+      // same magnet is one signal; a second device on the same magnet is not.
       const previous = sampleState.get(key);
       const isNew = !previous || at - previous.at >= SAMPLE_SIGNAL_COOLDOWN_MS;
       const readId = isNew ? event.id : previous!.readId;
@@ -156,6 +185,20 @@ export function periodStart(period: "today" | "week", now = new Date()) {
   if (period === "week")
     start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
   return start.getTime();
+}
+/**
+ * Fresh signals no explicit review snapshot covers yet.
+ *
+ * Reading a signal only clears its unread dot — the brand stays in the review
+ * queue until an AM records an explicit review (Reviewed / Handled / Later).
+ * That keeps the brand visible while the red dot and the unread counters drop.
+ */
+export function pendingSignalIds(brand: SignalBrand) {
+  const fresh = brand.newEventIds?.length
+    ? brand.newEventIds
+    : brand.events.filter((event) => event.isNewSignal).map((event) => event.id);
+  const reviewed = new Set(brand.reviewedEventIds || []);
+  return fresh.filter((id) => !reviewed.has(id));
 }
 export function filterQueue(
   brands: SignalBrand[],
@@ -194,17 +237,25 @@ export function filterWorkspaceQueue(
   now = new Date(),
 ) {
   const start = view === "today" || view === "week" ? periodStart(view, now) : 0;
+  // The queue is gated on pending review, not on unread: opening a signal drops
+  // its red dot but must not make the brand disappear from under the AM.
   return brands
-    .filter((brand) =>
-      (view !== "review" || brand.unread) &&
-      (view !== "history" || !brand.unread) &&
-      brand.events.some((event) =>
-        (type === "all" || event.type === type) &&
-        (view !== "review" || (event.isNewSignal && !brand.readEventIds?.includes(event.id))) &&
-        (view !== "today" && view !== "week" ||
-          Date.parse(event.occurredAt) >= start && Date.parse(event.occurredAt) <= now.getTime()),
-      ),
-    )
+    .filter((brand) => {
+      const pending = pendingSignalIds(brand).length > 0;
+      return (
+        (view !== "review" || pending) &&
+        (view !== "history" || !pending) &&
+        brand.events.some(
+          (event) =>
+            (type === "all" || event.type === type) &&
+            (view !== "review" ||
+              (event.isNewSignal === true &&
+                !brand.reviewedEventIds?.includes(event.id))) &&
+            (view !== "today" && view !== "week" ||
+              Date.parse(event.occurredAt) >= start && Date.parse(event.occurredAt) <= now.getTime()),
+        )
+      );
+    })
     .sort((a, b) => {
       const matching = (brand: SignalBrand) => {
         const byType = type === "all" ? brand.events : brand.events.filter((event) => event.type === type);

@@ -5,8 +5,8 @@ import { propertyText, retrievePage, type NotionPage } from "@/lib/notion/client
 import { attachBrandReplySignals, listBrandReplySignals } from "@/lib/notion/brand-reply-signals";
 import { listCheckpoints, resolveCheckpoint } from "@/lib/notion/cps";
 import { mapFollowupClientDetail, mapFollowupClientPage } from "@/lib/notion/followup-clients";
-import { updateFollowupClient } from "@/lib/notion/followup-writes";
-import { encodeFollowUpReminder } from "@/lib/followup-reminder";
+import { cancelPendingBrandTasks, updateFollowupClient } from "@/lib/notion/followup-writes";
+import { encodeFollowUpReminder, encodeFollowUpReminderResolution, latestFollowUpReminder } from "@/lib/followup-reminder";
 import { encodeBrandAssignment } from "@/lib/brand-assignment";
 import type { AmazonSampleProduct, ChannelType } from "@/lib/sample-product";
 import { FOLLOW_UP_STATUSES } from "@/lib/brand-list";
@@ -83,6 +83,7 @@ export async function PATCH(request: Request, { params }: Params) {
       assignmentHandled?: boolean;
       expectedVersion?: number;
       expectedRoundId?: string | null;
+      resumePausedFollowUp?: boolean;
     };
     const page = await retrievePage(id);
     const brand = await mapFollowupClientPage(page);
@@ -103,6 +104,19 @@ export async function PATCH(request: Request, { params }: Params) {
     if (body.amazonSampleProduct !== undefined && (body.ownerId !== undefined || body.status !== undefined || body.currentCpId !== undefined)) throw new FollowupError("Save sample product changes separately from follow-up changes");
     if (body.assignmentHandled && viewer.ownerId !== brand.ownerId) {
       return Response.json({ error: "Only the assigned Account Manager can review this assignment" }, { status: 403 });
+    }
+    const isAssignedAccountManager = viewer.role === "AccountManager"
+      && !!viewer.ownerId
+      && !!brand.ownerId
+      && viewer.ownerId.replace(/-/g, "").toLowerCase() === brand.ownerId.replace(/-/g, "").toLowerCase();
+    if ((body.status === "Paused" || body.status === "Completed") && !isAssignedAccountManager) {
+      return Response.json({ error: "Only the assigned Account Manager can pause or complete FollowUp" }, { status: 403 });
+    }
+    if (body.resumePausedFollowUp) {
+      if (!canAssignBrandOwner(viewer)) return Response.json({ error: "Only Admin can resume or reassign a paused FollowUp" }, { status: 403 });
+      if (brand.status !== "Paused" || body.status !== "In Progress" || !body.note?.trim()) return Response.json({ error: "A paused FollowUp requires an Admin note before it can be resumed" }, { status: 400 });
+      const nextOwnerId = body.ownerId === undefined ? brand.ownerId : body.ownerId;
+      if (!nextOwnerId) return Response.json({ error: "Assign an Account Manager before resuming FollowUp" }, { status: 400 });
     }
     if ((body.status === "Paused" || body.status === "Completed") && !body.note?.trim()) {
       return Response.json({ error: "A note is required when pausing or completing FollowUp" }, { status: 400 });
@@ -133,7 +147,18 @@ export async function PATCH(request: Request, { params }: Params) {
       );
     }
     if (body.status === "Paused" && body.followUpAt && body.note?.trim()) {
+      const previousReminder = latestFollowUpReminder(propertyText(page.properties?.Notes));
+      if (brand.status === "Paused" && previousReminder && previousReminder.dueAt !== body.followUpAt) {
+        extras.push(encodeFollowUpReminderResolution({ dueAt: previousReminder.dueAt, resolvedAt: new Date().toISOString(), resolvedBy: viewer.ownerId, action: "Extended" }));
+      }
       extras.push(encodeFollowUpReminder({ dueAt: body.followUpAt, note: body.note.trim(), ownerId: brand.ownerId }));
+    }
+    if (body.resumePausedFollowUp) {
+      const reminder = latestFollowUpReminder(propertyText(page.properties?.Notes));
+      if (reminder) {
+        const nextOwnerId = body.ownerId === undefined ? brand.ownerId : body.ownerId;
+        extras.push(encodeFollowUpReminderResolution({ dueAt: reminder.dueAt, resolvedAt: new Date().toISOString(), resolvedBy: viewer.ownerId, action: nextOwnerId === brand.ownerId ? "Resumed" : "Reassigned" }));
+      }
     }
     if (body.handlingMode && body.handlingMode !== brand.handlingMode) {
       extras.push(`跟进方式更新为 ${body.handlingMode}。`);
@@ -171,24 +196,36 @@ export async function PATCH(request: Request, { params }: Params) {
     if (body.ownerId !== undefined || body.status !== undefined || body.currentCpId !== undefined) {
       // Keep the existing assignment marker and reminders for existing inboxes;
       // the transaction additionally preserves their Round attribution.
-      await mutateFollowup(page, "patch", {
+      const mutation = await mutateFollowup(page, "patch", {
         ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)),
+        ...(body.resumePausedFollowUp ? { status: "Paused" } : {}),
         note: body.note, followUpAt: body.followUpAt,
         changedBy: viewer.name || viewer.email,
         ...(body.expectedVersion !== undefined ? { expectedVersion: body.expectedVersion } : {}),
         ...(body.expectedRoundId !== undefined ? { expectedRoundId: body.expectedRoundId } : {}),
       });
+      if (body.resumePausedFollowUp) {
+        await mutateFollowup(await retrievePage(id), "resume", {
+          expectedVersion: mutation.version,
+          expectedRoundId: mutation.rounds[0]?.id || null,
+          changedBy: viewer.name || viewer.email,
+        });
+      }
     } else await updateFollowupClient(id, patch);
+    const cancelledTasks =
+      (body.status === "Paused" || body.status === "Completed") && body.status !== brand.status
+        ? await cancelPendingBrandTasks({ brandId: id, reason: body.status })
+        : [];
     const updatedPage = await retrievePage(id);
     const [updated, cps] = await Promise.all([
       mapDetailWithReplySignal(updatedPage),
       listCheckpoints(),
     ]);
-    return Response.json({ brand: updated, cps });
+    return Response.json({ brand: updated, cps, cancelledTaskCount: cancelledTasks.length });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
-    const status = error instanceof FollowupError ? error.status : /^(Invalid channel type|Invalid Amazon product details|Enter a valid|Product details are too long|A note is required)/.test(message)
-      ? 400
+    const status = error instanceof FollowupError ? error.status
+      : /^(Invalid channel type|Invalid Amazon product details|Enter a valid|Product details are too long|A note is required)/.test(message) ? 400
       : message.includes("404") ? 404 : 500;
     return Response.json({ error: message }, { status });
   }

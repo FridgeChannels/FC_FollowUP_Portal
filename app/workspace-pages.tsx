@@ -1491,7 +1491,8 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
                   const pendingWork = workByBrandId.get(c.id);
                   const needsQualification = canReviewQualification && Boolean(c.needsQualification);
                   const hasNewAssignment = Boolean(pendingWork?.newAssignment);
-                  const needsAttention = Boolean(c.needsReply) || needsQualification || hasNewAssignment;
+                  const hasPauseDue = Boolean(pendingWork?.pauseDue);
+                  const needsAttention = Boolean(c.needsReply) || needsQualification || hasNewAssignment || hasPauseDue;
                   return (
                     <TableRow
                       key={c.id}
@@ -1521,12 +1522,16 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
                               {needsAttention ? (
                                 <span
                                   className="size-2 shrink-0 rounded-full bg-rose-500"
-                              aria-label={hasNewAssignment ? "New assignment" : needsQualification ? "Call needs qualification" : "Reply needed"}
+                              aria-label={hasPauseDue ? "Paused FollowUp review due" : hasNewAssignment ? "New assignment" : needsQualification ? "Call needs qualification" : "Reply needed"}
                                 />
                               ) : null}
                               <span className="truncate">{c.name}</span>
                             </div>
-                            {hasNewAssignment ? (
+                            {hasPauseDue ? (
+                              <div className="mt-0.5 truncate text-xs font-medium text-amber-800">
+                                Paused FollowUp review due
+                              </div>
+                            ) : hasNewAssignment ? (
                               <div className="mt-0.5 truncate text-xs font-medium text-blue-700">
                                 New assignment
                               </div>
@@ -1554,6 +1559,9 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
                         {state.currentRole !== "Caller" && workLoading ? <span className="text-xs text-slate-500">Loading…</span> : workError ? <span className="text-xs text-rose-700">Unavailable</span> : pendingWork ? <div className="flex flex-wrap items-center gap-1.5">
                           {pendingWork.newAssignment && <button type="button" className="inline-flex min-h-9 items-center gap-1 rounded-md bg-blue-50 px-2 text-xs font-semibold text-blue-700 hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" onClick={() => openBrand(c.id, { assignment: true })}>
                             <UserPlus className="size-3.5 shrink-0" />New Assignment
+                          </button>}
+                          {pendingWork.pauseDue && <button type="button" className="inline-flex min-h-9 items-center gap-1 rounded-md bg-amber-50 px-2 text-xs font-semibold text-amber-800 hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500" onClick={() => openBrand(c.id)}>
+                            <CalendarClock className="size-3.5 shrink-0" />Pause review due
                           </button>}
                           {WORK_REPLY_CHANNELS.map((channel) => {
                             const pending = pendingWork.channels[channel];

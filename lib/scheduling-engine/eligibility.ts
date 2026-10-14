@@ -1,7 +1,7 @@
 import type { Candidate, ClientSelection, ContactSelection, CreationMethod, NeedsReviewItem, Priority } from "./types.ts";
 import { resolveTaskPriority } from "./priority.ts";
 
-const BLOCKED_CLIENT_STATUS = new Set(["Completed", "Terminated"]);
+const BLOCKED_CLIENT_STATUS = new Set(["Paused", "Completed", "Terminated"]);
 const BLOCKED_CONTACT_STATUS = new Set(["Completed", "Terminated"]);
 
 export function evaluateEligibility(
