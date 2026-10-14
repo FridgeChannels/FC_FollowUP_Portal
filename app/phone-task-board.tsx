@@ -961,7 +961,7 @@ function PhoneTaskBlock({
         ) : null}
         {showReviewActions ? (
           <>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex w-full flex-wrap justify-end gap-2">
             <Button size="sm" className="review-qualified-button bg-emerald-600 text-white hover:bg-emerald-700" disabled={reviewing} onClick={() => onReview("Qualified")}>
               <CheckCircle2 className="mr-1.5 size-3.5"/>{reviewing ? "Saving…" : "Mark as Qualified"}
             </Button>

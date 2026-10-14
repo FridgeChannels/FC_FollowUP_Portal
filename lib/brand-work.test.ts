@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildBrandWork, isAutomaticReply, type PendingWorkReply } from "./brand-work.ts";
+import { buildBrandWork, type PendingWorkReply } from "./brand-work.ts";
 import type { BrandListItem } from "./brand-list.ts";
 
 const brand = (id: string): BrandListItem => ({
@@ -15,12 +15,6 @@ const reply = (id: string, brandId: string, channel: PendingWorkReply["channel"]
 });
 
 describe("brand AM work", () => {
-  it("excludes ordinary auto replies and out of office notices", () => {
-    assert.equal(isAutomaticReply("Re: Out of Office", "client@example.com"), true);
-    assert.equal(isAutomaticReply("Auto-reply: away", "client@example.com"), true);
-    assert.equal(isAutomaticReply("Project update", "no-reply@example.com"), true);
-    assert.equal(isAutomaticReply("Re: Project update", "client@example.com"), false);
-  });
   it("counts brands once and pending conversations by channel and thread", () => {
     const result = buildBrandWork(
       [brand("alpha"), brand("beta")],

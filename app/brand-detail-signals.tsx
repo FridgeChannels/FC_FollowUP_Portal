@@ -84,24 +84,17 @@ export function SampleActivity({
 }
 
 export function ImportantSignalsPanel({
-  events, readIds, brandName, ownerName, activeSignalId, onOpenSignal, onRead, onOpenEmailSignal,
+  events, readIds, onOpenSignal, onRead, onOpenEmailSignal,
 }: {
   events: SignalEvent[];
   readIds: string[];
-  brandName?: string;
-  ownerName?: string | null;
-  /** Keeps one just-opened signal stable while its details are being read. */
-  activeSignalId?: string | null;
   onOpenSignal?: (event: SignalEvent) => void;
   /** @deprecated Parents can pass onOpenSignal for coordinated detail panels. */
   onRead?: (ids: string[]) => void;
   onOpenEmailSignal?: (event: SignalEvent) => void;
 }) {
-  const [localActiveSignalId, setLocalActiveSignalId] = useState<string | null>(null);
-  const viewingSignalId = activeSignalId ?? localActiveSignalId;
   const openSignal = (event: SignalEvent) => {
     const readId = event.signalReadId || event.id;
-    setLocalActiveSignalId(readId);
     onRead?.([readId]);
     onOpenSignal?.(event);
     if (event.type === "email") onOpenEmailSignal?.(event);
@@ -118,7 +111,7 @@ export function ImportantSignalsPanel({
     }))
     .filter(({ events: groupedEvents }) => {
       const readId = groupedEvents[0]?.signalReadId || groupedEvents[0]?.id;
-      return Boolean(readId && (!readIds.includes(readId) || readId === viewingSignalId));
+      return Boolean(readId && !readIds.includes(readId));
     })
     .sort((a, b) => Date.parse(b.events[0].detectedAt || b.events[0].occurredAt) - Date.parse(a.events[0].detectedAt || a.events[0].occurredAt));
 
@@ -153,11 +146,9 @@ export function ImportantSignalsPanel({
             <div className="min-w-0 flex-1">
               <p className="line-clamp-2 text-sm font-medium text-slate-800">{title}</p>
               <p className="mt-1 text-xs text-slate-500"><span>{timeLabel} {date(timestamp)}</span>{source ? <> · <span className="text-violet-700">View details</span></> : null}</p>
-              {latest.type === "sample" && (latest.tapLocation || latest.tapDevice) ? <p className="mt-1 truncate text-xs text-slate-500">{[latest.tapDevice, latest.tapLocation].filter(Boolean).join(" · ")}</p> : null}
             </div>
             {isNew ? <span className="shrink-0 rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700">New</span> : null}
           </button>
-          {viewingSignalId === readId && latest.type === "sample" ? <SampleTapDetails event={latest} brandName={brandName} ownerName={ownerName} className="ml-8 mt-3" /> : null}
         </article>;
       })}
     </div>

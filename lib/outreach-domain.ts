@@ -50,8 +50,13 @@ export type Interaction = {
   channel?: Channel; direction?: "Inbound" | "Outbound"; title: string; content: string; createdAt: string; outcome?: CallOutcome; recording?: string;
   /** Email CC (comma-separated), from ConversationDB. */
   cc?: string;
+  /** Actual message sender from ConversationDB, distinct from the linked contact. */
+  sender?: string;
+  /** Explicit email recipient when supplied by the provider. */
+  recipient?: string;
   /** Notion page created_time; preferred for feed ordering/display. */
   recordedAt?: string;
+  replyReviewCompleted?: boolean;
   creationMethod?: "Automated" | "Manual"; threadId?: string; messageId?: string; taskId?: string; replyStatus?: "Needs Reply" | "Replied";
   taskStatus?: string; scheduledAt?: string; callResult?: string;
   quo?: QuoCallData | null;

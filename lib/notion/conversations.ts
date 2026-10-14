@@ -61,6 +61,7 @@ function mapConversation(
     cc,
     content: propertyText(properties.Content) || titleFromProperties(properties),
     sender: propertyText(properties.Sender) || null,
+    recipient: propertyText(properties.Recipient) || null,
     notes,
     callResult: propertyText(properties["Call Result"]) || null,
     sourceUrl: propertyText(properties["Source URL"]) || null,

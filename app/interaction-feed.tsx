@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Bomb, CheckCheck, CheckCircle2, ChevronLeft, MailOpen, Reply, RotateCcw, UserRound } from "lucide-react";
+import { createPortal } from "react-dom";
+import { useVisibleReply } from "./use-visible-reply";
+import { Bomb, CheckCheck, CheckCircle2, ChevronDown, ChevronLeft, MailOpen, Reply, RotateCcw, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import type { CallReviewRound } from "@/lib/call-review-history";
 import { callerSubmittedPhoneCallIds, callReviewsFromTasks, type CallReviewResolution, type CallReviewStatus } from "@/lib/call-review-metadata";
@@ -24,10 +26,13 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useSignals } from "./signals-store";
 import { EmailOpenActivity } from "./brand-detail-signals";
 import type { SignalEvent, SignalsPayload } from "@/lib/signals/model";
 import { emailSignalMatchesInteraction } from "@/lib/signals/match";
+import { inboundEmailRecipient } from "@/lib/email-recipient";
 
 const CHANNELS: Channel[] = ["Email", "LinkedIn", "SMS", "WhatsApp", "Phone"];
 
@@ -735,12 +740,13 @@ function ConversationInbox({
 }) {
   const {data:signalData}=useSignals();
   const visibleThreads = threads.slice(0, 50);
+  const emailInbox = channel === "Email";
   return (
     <section aria-label={`${channel} conversations`} className="w-full min-w-0">
       <div className="px-5 py-3 text-xs text-slate-500">
-        {visibleThreads.length} of {threads.length} conversations
+        {emailInbox ? `${visibleThreads.length} of ${threads.length} threads` : `${visibleThreads.length} of ${threads.length} conversations`}
       </div>
-      <div>
+      <div className={emailInbox ? "border-y border-slate-200" : ""}>
         {visibleThreads.map((thread) => {
           const latest = latestThreadInteraction(thread);
           const contact = contacts.find((item) => item.id === latest.contactId);
@@ -754,20 +760,21 @@ function ConversationInbox({
               key={threadKey(thread[0]!)}
               type="button"
               onClick={() => onOpen(thread)}
-              className={`flex min-h-20 w-full items-start gap-3 px-5 py-4 text-left transition hover:bg-slate-50 ${needsReply ? "bg-violet-50/40" : ""}`}
+              className={emailInbox
+                ? `flex min-h-[72px] w-full items-center gap-3 border-b border-slate-200 px-5 py-3 text-left transition last:border-b-0 hover:bg-slate-50 ${needsReply ? "bg-white" : "bg-slate-50/60"}`
+                : `flex min-h-20 w-full items-start gap-3 px-5 py-4 text-left transition hover:bg-slate-50 ${needsReply ? "bg-violet-50/40" : ""}`}
             >
-              {contact ? <Avatar className="mt-0.5 size-9 shrink-0"><AvatarFallback className="bg-slate-100 text-[10px] font-bold text-slate-700">{initials(contact.name)}</AvatarFallback></Avatar> : <div className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full bg-amber-50 text-amber-700"><UserRound className="size-4" /></div>}
+              {contact ? <Avatar className={`${emailInbox ? "size-9" : "mt-0.5 size-9"} shrink-0`}><AvatarFallback className="bg-slate-100 text-[10px] font-bold text-slate-700">{initials(contact.name)}</AvatarFallback></Avatar> : <div className={`${emailInbox ? "" : "mt-0.5 "}flex size-9 shrink-0 items-center justify-center rounded-full bg-amber-50 text-amber-700`}><UserRound className="size-4" /></div>}
               <div className="min-w-0 flex-1">
-                <div className="flex items-baseline gap-2">
+                <div className="flex min-w-0 items-baseline gap-2">
                   <span className={`truncate text-sm ${needsReply ? "font-bold text-slate-950" : "font-medium text-slate-800"}`}>{sender}, me</span>
-                  {thread.length > 1 ? <span className="shrink-0 text-xs text-slate-500">{thread.length}</span> : null}
+                  {thread.length > 1 ? <span className="shrink-0 text-xs font-medium text-slate-500">({thread.length})</span> : null}
                   <div className="ml-auto flex max-w-[58%] shrink items-center justify-end gap-1.5 text-right">
-                    <SendStatusBadge status={latestSummary.status} />
+                    {!emailInbox && <SendStatusBadge status={latestSummary.status} />}
                     {latestSummary.time ? <span className="min-w-0 text-[10px] leading-4 text-slate-500">{latestSummary.time}</span> : null}
                   </div>
                 </div>
-                <div className={`mt-1 truncate text-sm ${needsReply ? "font-semibold text-slate-900" : "text-slate-700"}`}>{inboxSubject(thread, channel)}</div>
-                <p className="mt-1 truncate text-sm text-slate-500">{preview}</p>
+                {emailInbox ? <p className={`mt-1 truncate text-sm ${needsReply ? "font-semibold text-slate-900" : "text-slate-700"}`}><span>{inboxSubject(thread, channel)}</span><span className="font-normal text-slate-500"> — {preview}</span></p> : <><div className={`mt-1 truncate text-sm ${needsReply ? "font-semibold text-slate-900" : "text-slate-700"}`}>{inboxSubject(thread, channel)}</div><p className="mt-1 truncate text-sm text-slate-500">{preview}</p></>}
                 {opens.length?<p className="mt-1 text-xs">{emailOpenSummary(opens)}</p>:null}
               </div>
             </button>
@@ -814,20 +821,21 @@ function ConversationDetail({
   focusedInteractionId?: string;
 }) {
   const [expandAll, setExpandAll] = useState(false);
+  const emailThread = channel === "Email";
   const endpoint = contact ? contactPoint(contact, channel) : undefined;
   return (
     <section aria-label={`${channel} conversation detail`} className="w-full min-w-0">
       <div className="flex items-center justify-between gap-2 px-5 py-3">
-        <Button variant="ghost" size="sm" className="-ml-2 text-slate-700" onClick={onBack}><ChevronLeft className="mr-1 size-4" />Back</Button>
-        <span className="text-xs text-slate-500">{thread.length} {thread.length === 1 ? "message" : "messages"}</span>
-        <Button variant="ghost" size="sm" className="-mr-2 text-slate-700" onClick={() => setExpandAll((value) => !value)}>{expandAll ? "Collapse all" : "Expand all"}</Button>
+        <Button variant="ghost" size="icon-sm" className="-ml-2 bg-transparent text-slate-700 hover:bg-transparent hover:text-slate-950" onClick={onBack} aria-label="Back to conversations" title="Back to conversations"><ChevronLeft className="size-4" /></Button>
+        <span className="ml-auto text-xs text-slate-500">{thread.length} {thread.length === 1 ? "message" : "messages"}</span>
+        {!emailThread && <Button variant="ghost" size="sm" className="-mr-2 text-slate-700" onClick={() => setExpandAll((value) => !value)}>{expandAll ? "Collapse all" : "Expand all"}</Button>}
       </div>
-      <div className="px-5 pb-5 pt-2">
+      {!emailThread && <div className="px-5 pb-5 pt-2">
         <h3 className="break-words text-base font-semibold text-slate-950">{inboxSubject(thread, channel)}</h3>
         {contact ? <p className="mt-1 truncate text-sm text-slate-500">{contact.name}{endpoint ? ` · ${endpoint}` : ""}</p> : null}
-      </div>
+      </div>}
       <div className="px-5 pb-5">
-        <ThreadMessages thread={thread} replyPool={replyPool} contact={contact} contacts={contacts} channel={channel} endpoint={endpoint} collapseOlder expandAll={expandAll} focusedInteractionId={focusedInteractionId} onSend={onSend} onCancelPending={onCancelPending} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId} resolveReview={resolveReview} canReviewCalls={canReviewCalls} reviewingTaskId={reviewingTaskId} onReviewCall={onReviewCall} onMarkReplyRead={onMarkReplyRead} />
+        <ThreadMessages thread={thread} replyPool={replyPool} contact={contact} contacts={contacts} channel={channel} endpoint={endpoint} collapseOlder expandAll={emailThread ? false : expandAll} focusedInteractionId={focusedInteractionId} onSend={onSend} onCancelPending={onCancelPending} onRefreshQuo={onRefreshQuo} quoRefreshingCallId={quoRefreshingCallId} resolveReview={resolveReview} canReviewCalls={canReviewCalls} reviewingTaskId={reviewingTaskId} onReviewCall={onReviewCall} onMarkReplyRead={onMarkReplyRead} />
       </div>
       {channel === "Email" ? (
         <ThreadSendBox
@@ -949,12 +957,15 @@ function ThreadMessages({
   const [readActionReminderAt, setReadActionReminderAt] = useState("");
   const [replyOpenIds, setReplyOpenIds] = useState<Set<string>>(() => new Set());
   const focusedMessageRef = useRef<HTMLElement | null>(null);
+  const messagesRef = useRef<HTMLDivElement | null>(null);
+  const visibleReplyId = useVisibleReply(messagesRef, thread.map(item => `${item.id}:${item.replyStatus}`).join(","));
   useEffect(() => {
     if (focusedInteractionId) focusedMessageRef.current?.scrollIntoView({block: "center", behavior: "smooth"});
   }, [focusedInteractionId]);
   const latestId = focusedInteractionId || thread.at(-1)?.id;
-  return <div className="space-y-3">
-    {[...thread].reverse().map(item => {
+  const displayThread = [...thread].reverse();
+  return <div ref={messagesRef} className={channel === "Email" ? "divide-y divide-slate-200" : "space-y-3 pb-24 sm:pb-0"}>
+    {displayThread.map(item => {
       const signalBrand=signalData?.brands.find(brand=>brand.id===item.customerId);
       const emailOpens=emailEventsFor(item,signalData);
       const readEmailOpens=(ids:string[])=>{
@@ -969,6 +980,7 @@ function ThreadMessages({
       const inbound = item.direction === "Inbound";
       const source = sourceLabel(item);
       const phoneCall = itemChannel === "Phone";
+      const pendingReply = inbound && !phoneCall && item.replyStatus === "Needs Reply" && !!onMarkReplyRead;
       const itemContact = (item.contactId && contacts?.find((person) => person.id === item.contactId)) || contact;
       const itemEndpoint = itemContact ? contactPoint(itemContact, itemChannel) : endpoint;
       const who = inbound
@@ -985,6 +997,21 @@ function ThreadMessages({
       const emailCc = emailCcLabel(item);
       const occurredAt = interactionSortAt(item);
       const sendStatus = outboundStatus(item);
+      const emailMessage = itemChannel === "Email";
+      const emailSender = inbound ? itemContact?.name || itemEndpoint || "Unknown sender" : "You";
+      const senderAddress = item.sender?.trim() || (inbound ? itemEndpoint : undefined);
+      const recipientAddress = inbound ? inboundEmailRecipient(item, replyPool) : undefined;
+      const toAddress = inbound ? recipientAddress : item.recipient?.trim() || itemEndpoint;
+      const emailRecipient = inbound
+        ? "to you"
+        : `to ${itemContact?.name || toAddress || "Contact"}`;
+      const emailDetails = [
+        { label: "From", value: senderAddress ? `${emailSender} <${senderAddress}>` : emailSender },
+        { label: "To", value: toAddress },
+        { label: "Send", value: occurredAt ? formatEasternDateTime(occurredAt) : undefined },
+        ...(!inbound ? [{ label: "Scheduled Date", value: item.scheduledAt ? formatEasternDateTime(item.scheduledAt) : "—" }] : []),
+        { label: "Cc", value: emailCc },
+      ].filter(detail => !!detail.value);
       const canCancelPending = !inbound && !!item.taskId && sendStatus === "Pending" && !!onCancelPending;
       const cancelPendingButton = canCancelPending ? (
         <div className="mt-3">
@@ -1009,7 +1036,9 @@ function ThreadMessages({
       ) : null;
       const messageBubbleClass = phoneCall
         ? "w-full min-w-0 overflow-hidden rounded-xl bg-slate-50 p-4"
-        : `w-full min-w-0 max-w-[88%] overflow-hidden rounded-2xl p-4 ${inbound ? "rounded-tl-md bg-blue-50" : "rounded-tr-md bg-violet-50"}`;
+        : emailMessage
+          ? "w-full min-w-0 overflow-hidden"
+          : `w-full min-w-0 sm:max-w-[88%] overflow-hidden rounded-2xl p-4 ${inbound ? "rounded-tl-md bg-blue-50" : "rounded-tr-md bg-violet-50"}`;
       const initiallyExpanded = item.id === latestId;
       const expanded = !collapseOlder || expandAll || expandedMessageIds.has(item.id) || (initiallyExpanded && !collapsedLatestIds.has(item.id));
       const toggleExpanded = () => {
@@ -1029,23 +1058,108 @@ function ThreadMessages({
           return next;
         });
       };
-      return <article key={item.id} ref={item.id === focusedInteractionId ? focusedMessageRef : undefined} data-interaction-id={item.id} className={`flex min-w-0 ${phoneCall ? "" : inbound ? "justify-start" : "justify-end"}`}>
+      const replyActionButtons = <TooltipProvider delayDuration={150}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="size-11 shrink-0 text-slate-700"
+              aria-label={markingReadId === item.id ? "Saving…" : "Complete review"}
+              aria-busy={markingReadId === item.id}
+              disabled={markingReadId === item.id}
+              onClick={(event) => {
+                event.stopPropagation();
+                setReadActionId(item.id);
+                setReadActionNote("");
+                setReadActionReminderAt("");
+              }}
+            >
+              <CheckCheck className="size-4" aria-hidden="true" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={6}>{markingReadId === item.id ? "Saving…" : "Complete review"}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="icon"
+              className="size-11 shrink-0 !bg-violet-100 !text-black hover:!bg-violet-200"
+              aria-label="Reply"
+              disabled={!itemContact}
+              aria-controls={`reply-composer-${item.id}`}
+              aria-pressed={replyOpenIds.has(item.id)}
+              onClick={(event) => {
+                event.stopPropagation();
+                setReplyOpenIds((previous) => {
+                  const next = new Set(previous);
+                  if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
+                  return next;
+                });
+              }}
+            >
+              <Reply className="size-4" aria-hidden="true" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={6}>Reply</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>;
+      const floatingActions = !emailMessage && pendingReply && expanded && visibleReplyId === item.id && !replyOpenIds.has(item.id) && !readActionId;
+      return <article key={item.id} ref={item.id === focusedInteractionId ? focusedMessageRef : undefined} data-interaction-id={item.id} data-pending-reply={pendingReply ? "" : undefined} className={`flex min-w-0 flex-col ${phoneCall ? "" : inbound ? "items-start" : "items-end"}`}>
         <div className={messageBubbleClass}>
-        <button type="button" onClick={toggleExpanded} className={`flex w-full flex-wrap items-start justify-between gap-2 text-left ${collapseOlder && !expandAll ? "cursor-pointer" : "cursor-default"}`} aria-expanded={expanded}>
-          <div className="min-w-0 flex flex-wrap items-center gap-2">
-            {showChannelLabel && <span className="inline-flex items-center gap-1 text-xs font-semibold text-slate-600"><ChannelIcon channel={itemChannel} className="size-3.5" alt=""/>{itemChannel}</span>}
-            <div className="break-words text-xs font-semibold text-slate-900">{who}</div>
-            {inbound && !phoneCall ? <Badge className="bg-rose-600 text-[10px] text-white hover:bg-rose-600">This is a reply</Badge> : <Badge variant="secondary" className="text-[10px]">{item.direction || "Outbound"}</Badge>}
-            {source ? <SourceBadge source={source} /> : null}
-            {!inbound && !timing && (sendStatus ? <SendStatusBadge status={sendStatus}/> : <Badge variant="outline" className="text-[10px] text-slate-500">No send status</Badge>)}
-            {phoneCall && item.callResult ? <SendStatusBadge status={item.callResult}/> : null}
-            {callReview ? <Badge className={callReview.status === "Qualified" ? "bg-emerald-100 text-[10px] text-emerald-800 hover:bg-emerald-100" : callReview.status === "Awaiting Review" ? "bg-amber-100 text-[10px] text-amber-900 hover:bg-amber-100" : "bg-rose-100 text-[10px] text-rose-800 hover:bg-rose-100"}>{callReview.status.toLowerCase()}</Badge> : null}
-          </div>
-          {occurredAt ? <time dateTime={occurredAt} className="font-mono text-[11px] text-slate-500">{formatEasternDateTime(occurredAt)}</time> : null}
-        </button>
-        <EmailOpenActivity events={emailOpens} readIds={signalBrand?.readEventIds||[]} expanded={expanded} onRead={readEmailOpens}/>
-        {!expanded ? <>{emailSubject?<p className="mt-2 truncate text-sm font-medium text-slate-800">{emailSubject}</p>:null}<p className="mt-1 truncate text-sm text-slate-500">{messagePreviewText(item)}</p>{timing ? <div className="mt-2 flex min-w-0 items-center gap-2 text-xs text-slate-500"><SendStatusBadge status={timing.label} />{scheduledAt ? <span className="truncate">{scheduledAt}</span> : null}</div> : null}{cancelPendingButton}</> : <>
-        {timing && (
+          {emailMessage && (emailSubject || pendingReply) ? <div className="flex flex-wrap items-center gap-3 px-4 pt-4 sm:flex-nowrap">
+            {emailSubject ? <h3 className="min-w-0 basis-full break-words text-base font-semibold leading-6 text-slate-950 sm:flex-1 sm:basis-auto">{emailSubject}</h3> : null}
+            {pendingReply ? <div role="group" aria-label={`Actions for ${who}`} className="ml-auto flex shrink-0 items-center gap-2">
+              {replyActionButtons}
+            </div> : null}
+          </div> : null}
+          {emailMessage ? <div className="flex w-full items-start gap-3 px-4 py-4">
+              <Avatar className="mt-0.5 size-9 shrink-0"><AvatarFallback className={inbound ? "bg-slate-200 text-[11px] font-semibold text-slate-700" : "bg-violet-100 text-[11px] font-semibold text-violet-700"}>{initials(emailSender)}</AvatarFallback></Avatar>
+              <div className="min-w-0 flex-1">
+                <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                  <button type="button" onClick={toggleExpanded} aria-expanded={expanded} className="min-h-11 min-w-0 max-w-full shrink truncate text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 sm:min-h-0 sm:max-w-[50%]">
+                    <span className="font-semibold text-slate-950">{emailSender}</span>
+                    {senderAddress && senderAddress !== emailSender ? <span className="ml-1 font-normal text-slate-500">&lt;{senderAddress}&gt;</span> : null}
+                  </button>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {inbound ? (item.replyStatus === "Needs Reply" ? <Badge className="bg-rose-100 text-[10px] text-rose-800 hover:bg-rose-100">Reply needed</Badge> : item.replyStatus === "Replied" ? <Badge className="bg-emerald-100 text-[10px] text-emerald-800 hover:bg-emerald-100">{item.replyReviewCompleted ? "Review completed" : "Replied"}</Badge> : <Badge variant="secondary" className="text-[10px]">Received</Badge>) : (sendStatus ? <SendStatusBadge status={sendStatus}/> : <Badge variant="outline" className="text-[10px] text-slate-500">No send status</Badge>)}
+                    {source ? <SourceBadge source={source} /> : null}
+                  </div>
+                  {occurredAt ? <time dateTime={occurredAt} className="ml-auto shrink-0 text-[11px] text-slate-500">{formatEasternDateTime(occurredAt)}</time> : null}
+                </div>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button type="button" aria-label={`Show email details for ${emailSender}`} className="-ml-2 inline-flex min-h-11 max-w-full items-center gap-1 rounded-md px-2 text-left text-xs text-slate-500 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">
+                      <span className="truncate">{emailRecipient}</span>
+                      <ChevronDown className="size-3.5 shrink-0" aria-hidden="true" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent align="start" collisionPadding={16} aria-label="Email details" className="w-[min(32rem,calc(100vw-2rem))] rounded-xl border-0 bg-white p-4 shadow-lg">
+                    <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-3 text-sm">
+                      {emailDetails.map(detail => <div key={detail.label} className="contents">
+                        <dt className="text-right text-slate-500">{detail.label}:</dt>
+                        <dd className="min-w-0 break-words text-slate-900">{detail.value}</dd>
+                      </div>)}
+                    </dl>
+                  </PopoverContent>
+                </Popover>
+              </div>
+            </div> : <button type="button" onClick={toggleExpanded} className={`flex w-full flex-wrap items-start justify-between gap-2 text-left ${collapseOlder && !expandAll ? "cursor-pointer" : "cursor-default"}`} aria-expanded={expanded}>
+              <div className="min-w-0 flex flex-wrap items-center gap-2">
+                {showChannelLabel && <span className="inline-flex items-center gap-1 text-xs font-semibold text-slate-600"><ChannelIcon channel={itemChannel} className="size-3.5" alt=""/>{itemChannel}</span>}
+                <div className="break-words text-xs font-semibold text-slate-900">{who}</div>
+                {inbound && !phoneCall ? (item.replyStatus === "Needs Reply" ? <Badge className="bg-rose-100 text-[10px] text-rose-800 hover:bg-rose-100">Reply needed</Badge> : item.replyStatus === "Replied" ? <Badge className="bg-emerald-100 text-[10px] text-emerald-800 hover:bg-emerald-100">{item.replyReviewCompleted ? "Review completed" : "Replied"}</Badge> : <Badge variant="secondary" className="text-[10px]">Received</Badge>) : <Badge variant="secondary" className="text-[10px]">{item.direction || "Outbound"}</Badge>}
+                {source ? <SourceBadge source={source} /> : null}
+                {!inbound && !timing && (sendStatus ? <SendStatusBadge status={sendStatus}/> : <Badge variant="outline" className="text-[10px] text-slate-500">No send status</Badge>)}
+                {phoneCall && item.callResult ? <SendStatusBadge status={item.callResult}/> : null}
+                {callReview ? <Badge className={callReview.status === "Qualified" ? "bg-emerald-100 text-[10px] text-emerald-800 hover:bg-emerald-100" : callReview.status === "Awaiting Review" ? "bg-amber-100 text-[10px] text-amber-900 hover:bg-amber-100" : "bg-rose-100 text-[10px] text-rose-800 hover:bg-rose-100"}>{callReview.status.toLowerCase()}</Badge> : null}
+              </div>
+              {occurredAt ? <time dateTime={occurredAt} className="font-mono text-[11px] text-slate-500">{formatEasternDateTime(occurredAt)}</time> : null}
+          </button>}
+          <div className={emailMessage ? "px-4 pb-5" : ""}>
+            <EmailOpenActivity events={emailOpens} readIds={signalBrand?.readEventIds||[]} expanded={expanded} onRead={readEmailOpens}/>
+            {!expanded ? <>{emailMessage ? <div className="mt-2 flex min-w-0 items-center gap-2"><p className="min-w-0 flex-1 truncate text-sm leading-5 text-slate-600">{messagePreviewText(item)}</p><button type="button" onClick={(event) => { event.stopPropagation(); toggleExpanded(); }} className="shrink-0 rounded px-1.5 text-lg leading-5 text-slate-500 hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500" aria-label="Show full message">…</button></div> : <>{emailSubject?<p className="mt-2 truncate text-sm font-medium text-slate-800">{emailSubject}</p>:null}<p className="mt-1 truncate text-sm text-slate-500">{messagePreviewText(item)}</p></>}{!emailMessage && timing ? <div className="mt-2 flex min-w-0 items-center gap-2 text-xs text-slate-500"><SendStatusBadge status={timing.label} />{scheduledAt ? <span className="truncate">{scheduledAt}</span> : null}</div> : null}{cancelPendingButton}</> : <>
+        {!emailMessage && timing && (
           <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-slate-500">
             <SendStatusBadge status={timing.label} />
             {scheduledAt ? <time dateTime={item.scheduledAt} className="truncate font-mono text-[11px]">{scheduledAt}</time> : timing.at ? <time dateTime={timing.at} className="font-mono text-[11px]">{formatEasternDateTime(timing.at)}</time> : null}
@@ -1053,12 +1167,12 @@ function ThreadMessages({
         )}
         {!item.quo && (
           <div className="mt-2 space-y-1">
-            {emailSubject && (
+            {!emailMessage && emailSubject && (
               <p className="break-words text-sm text-slate-900">
                 <span className="font-medium text-slate-500">Subject:</span> {emailSubject}
               </p>
             )}
-            {emailCc && (
+            {!emailMessage && emailCc && (
               <p className="break-words text-sm text-slate-900">
                 <span className="font-medium text-slate-500">CC:</span> {emailCc}
               </p>
@@ -1086,83 +1200,8 @@ function ThreadMessages({
           />
         </div> : null}
         {cancelPendingButton}
-        {inbound && !phoneCall && item.replyStatus === "Needs Reply" && onMarkReplyRead ? (
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              className={replyOpenIds.has(item.id)
-                ? "!border-emerald-300 !bg-emerald-200 !text-black shadow-sm ring-2 ring-emerald-200 hover:!bg-emerald-300 hover:!text-black"
-                : "!border-emerald-300 !bg-emerald-100 !text-black hover:!bg-emerald-200 hover:!text-black"}
-              aria-pressed={replyOpenIds.has(item.id)}
-              onClick={(event) => {
-                event.stopPropagation();
-                setReplyOpenIds((previous) => {
-                  const next = new Set(previous);
-                  next.add(item.id);
-                  return next;
-                });
-              }}
-            >
-              <Reply className="mr-1.5 size-3.5" />
-              Reply
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="!border-slate-300 !bg-slate-100 !text-black hover:!bg-slate-200 hover:!text-black"
-              disabled={markingReadId === item.id}
-              onClick={(event) => {
-                event.stopPropagation();
-                setReadActionId(item.id);
-                setReadActionNote("");
-                setReadActionReminderAt("");
-              }}
-            >
-              <CheckCheck className="mr-1.5 size-3.5" />
-              {markingReadId === item.id ? "Saving…" : "Mark as read"}
-            </Button>
-            <Dialog open={readActionId === item.id} onOpenChange={(open) => {
-              if (!open) setReadActionId(null);
-            }}>
-              <DialogContent className="sm:max-w-lg">
-                <DialogHeader>
-                  <DialogTitle>Complete reply review</DialogTitle>
-                  <DialogDescription>Save a handling note and, if needed, set a time for the assigned Account Manager to receive an action reminder.</DialogDescription>
-                </DialogHeader>
-                <div className="space-y-4">
-                  <label className="grid gap-2 text-sm font-medium text-slate-700">
-                    Note
-                    <Textarea value={readActionNote} onChange={(event) => setReadActionNote(event.target.value)} placeholder="What should the Account Manager do next?" className="min-h-28" autoFocus />
-                  </label>
-                  <label className="grid gap-2 text-sm font-medium text-slate-700">
-                    Remind assigned Account Manager <span className="font-normal text-slate-500">(optional)</span>
-                    <Input type="datetime-local" value={readActionReminderAt} onChange={(event) => setReadActionReminderAt(event.target.value)} />
-                  </label>
-                  <p className="text-xs leading-5 text-slate-500">At the chosen time, the system sends this reminder directly to the assigned Account Manager, not to Admin.</p>
-                </div>
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setReadActionId(null)}>Cancel</Button>
-                  <Button disabled={!readActionNote.trim() || markingReadId === item.id} onClick={() => {
-                    setMarkingReadId(item.id);
-                    void onMarkReplyRead(item.id, {
-                      note: readActionNote.trim(),
-                      reminderAt: readActionReminderAt || undefined,
-                    })
-                      .then(() => {
-                        toast.success(readActionReminderAt ? "Reply completed and AM reminder scheduled" : "Reply marked as read");
-                        setReadActionId(null);
-                      })
-                      .catch((error) => toast.error(error instanceof Error ? error.message : "Unable to complete reply review"))
-                      .finally(() => setMarkingReadId(null));
-                  }}>{markingReadId === item.id ? "Saving…" : "Complete review"}</Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-          </div>
-        ) : null}
         {phoneCall && item.quo && canReviewCalls && callReview?.status === "Awaiting Review" ? (
-          <div className="mt-4 flex flex-wrap gap-2">
+          <div className="mt-4 flex w-full flex-wrap justify-end gap-2">
             <Button size="sm" className="review-qualified-button bg-emerald-600 text-white hover:bg-emerald-700" disabled={reviewingTaskId===item.taskId} onClick={() => void onReviewCall(item.id, item.taskId, "Qualified")}>
               <CheckCircle2 className="mr-1.5 size-3.5"/>{reviewingTaskId===item.taskId ? "Saving…" : "Mark as Qualified"}
             </Button>
@@ -1181,23 +1220,75 @@ function ThreadMessages({
             />
           </div>
         ) : null}
-        </>}
-        {/* Keep Needs Reply composer visible even when older bubbles are collapsed
-            (e.g. a newer OmniReach Pending message became the thread "latest"). */}
-        {inbound && !phoneCall && itemContact && (
-          <BrandReplyBox
-            customerId={item.customerId}
-            interaction={item}
-            bombInstanceId={item.bombInstanceId}
-            contacts={[itemContact]}
-            interactions={replyPool}
-            taskId={item.taskId}
-            onSend={onSend}
-            open={replyOpenIds.has(item.id)}
-           
-          />
-        )}
+            </>}
+          </div>
         </div>
+        {pendingReply && <>
+          {!emailMessage && <div role="group" aria-label={`Actions for ${who}`} className={`mt-2 w-full sm:max-w-[88%] ${floatingActions ? "hidden sm:block" : "block"}`}>
+            <div className="flex flex-wrap items-center justify-start gap-2 rounded-xl bg-white px-4 py-2 shadow-sm ring-1 ring-slate-200/80">
+              <div className="flex w-full gap-2 sm:w-auto">{replyActionButtons}</div>
+            </div>
+          </div>}
+          {floatingActions && createPortal(
+            <div data-mobile-reply-actions={item.id} role="group" aria-label={`Actions for ${who}`} className="fixed inset-x-0 bottom-0 z-40 !bg-white px-4 pt-2 pb-[max(12px,env(safe-area-inset-bottom))] shadow-[0_-4px_20px_rgba(0,0,0,0.08)] sm:hidden">
+              <p className="mb-2 truncate text-xs text-slate-600">{itemContact?.name || itemEndpoint || "Contact"} · {itemChannel}{occurredAt ? ` · ${formatEasternDateTime(occurredAt)}` : ""}</p>
+              <div className="flex gap-2">{replyActionButtons}</div>
+            </div>, document.body,
+          )}
+          <Dialog open={readActionId === item.id} onOpenChange={(open) => {
+            if (!open) setReadActionId(null);
+          }}>
+            <DialogContent className="sm:max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Complete reply review</DialogTitle>
+                <DialogDescription>Complete the review of this message without sending a reply. Save a handling note and optionally remind the assigned Account Manager.</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4">
+                <label className="grid gap-2 text-sm font-medium text-slate-700">
+                  Note
+                  <Textarea value={readActionNote} onChange={(event) => setReadActionNote(event.target.value)} placeholder="What should the Account Manager do next?" className="min-h-28" autoFocus />
+                </label>
+                <label className="grid gap-2 text-sm font-medium text-slate-700">
+                  Remind assigned Account Manager <span className="font-normal text-slate-500">(optional)</span>
+                  <Input type="datetime-local" value={readActionReminderAt} onChange={(event) => setReadActionReminderAt(event.target.value)} />
+                </label>
+                <p className="text-xs leading-5 text-slate-500">At the chosen time, the system sends this reminder directly to the assigned Account Manager, not to Admin.</p>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setReadActionId(null)}>Cancel</Button>
+                <Button disabled={!readActionNote.trim() || markingReadId === item.id} onClick={() => {
+                  setMarkingReadId(item.id);
+                  void onMarkReplyRead!(item.id, {
+                    note: readActionNote.trim(),
+                    reminderAt: readActionReminderAt || undefined,
+                  })
+                    .then(() => {
+                      toast.success(readActionReminderAt ? "Review completed and AM reminder scheduled" : "Review completed");
+                      setReadActionId(null);
+                    })
+                    .catch((error) => toast.error(error instanceof Error ? error.message : "Unable to complete reply review"))
+                    .finally(() => setMarkingReadId(null));
+                }}>{markingReadId === item.id ? "Saving…" : "Complete review"}</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </>}
+        {inbound && !phoneCall && itemContact && (
+          <div id={`reply-composer-${item.id}`} className="w-full sm:max-w-[88%]">
+            <BrandReplyBox
+              customerId={item.customerId}
+              interaction={item}
+              bombInstanceId={item.bombInstanceId}
+              contacts={[itemContact]}
+              interactions={replyPool}
+              taskId={item.taskId}
+              onSend={onSend}
+              open={replyOpenIds.has(item.id)}
+              replyToThisMessage
+              onClose={() => setReplyOpenIds(previous => { const next = new Set(previous); next.delete(item.id); return next; })}
+            />
+          </div>
+        )}
       </article>;
     })}
   </div>;

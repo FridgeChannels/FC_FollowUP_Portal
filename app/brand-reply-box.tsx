@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Send } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Send, X } from "lucide-react";
 import { toast } from "sonner";
 import { Channel, Contact, Interaction, ScheduledAction, WorkspaceState } from "@/lib/outreach-domain";
 import { useWorkspace } from "./workspace-store";
@@ -82,6 +82,8 @@ export function BrandReplyBox({
   taskId,
   onSend,
   open = true,
+  replyToThisMessage = false,
+  onClose,
 }: {
   customerId: string;
   interaction: Interaction;
@@ -92,6 +94,8 @@ export function BrandReplyBox({
   taskId?: string;
   onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: DeliveryMode, scheduledAt?: string, attachments?: MediaAttachment[], cc?: string) => Promise<void>;
   open?: boolean;
+  replyToThisMessage?: boolean;
+  onClose?: () => void;
 }) {
   const { state, can, sendHumanReply } = useWorkspace();
   const customer = state.customers.find(item => item.id === customerId);
@@ -108,18 +112,40 @@ export function BrandReplyBox({
   const channel = interaction.channel;
   const media = useMessageMedia(channel);
   const notionBacked = !!onSend;
+  const composerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open || !replyToThisMessage) return;
+    const composer = composerRef.current;
+    if (!composer) return;
+    composer.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    const focusEditor = () => {
+      const editor = composer.querySelector<HTMLElement>('[contenteditable="true"], textarea');
+      editor?.focus({ preventScroll: true });
+      return !!editor;
+    };
+    if (focusEditor()) return;
+    // The email editor mounts after its initial render.
+    const observer = new MutationObserver(() => { if (focusEditor()) observer.disconnect(); });
+    observer.observe(composer, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [open, replyToThisMessage]);
   if (!open) return null;
   if (!can("reply") || !people.length) return null;
   if (!notionBacked && customer?.status === "Closed") return null;
-  if (!inboundNeedsComposer(state, interaction, interactions)) return null;
+  if (replyToThisMessage
+    ? !inboundIsAwaitingReply(interaction, interactions || state.interactions)
+    : !inboundNeedsComposer(state, interaction, interactions)) return null;
   if (!contact || !channel) return null;
   const replyTaskId = interaction.taskId || actions?.find(item => item.bombInstanceId === bombInstanceId && item.channel === channel)?.id || taskId;
   const hasBody = (channel === "Email" ? !emailBodyIsEmpty(content) : !!content.trim()) || media.readyAttachments.length > 0;
   const busy = saving;
   const canSend = hasBody && !(channel === "Email" && !subject.trim()) && !busy && !media.uploading;
   return (
-    <div className="mt-3 rounded-xl bg-slate-50 p-3">
-      <div className="mb-2 text-xs font-medium text-slate-600">{contact.name} · {channel}</div>
+    <div ref={composerRef} data-reply-composer={interaction.id} className="mt-3 min-w-0 space-y-2 py-3">
+      <div className="flex items-center justify-between gap-2 text-xs font-medium text-slate-600">
+        <span>Reply to {contact.name} · {channel}</span>
+        {onClose && <Button type="button" variant="ghost" size="icon" className="size-11 shrink-0" aria-label="Close reply" onClick={onClose}><X className="size-4" /></Button>}
+      </div>
       <div className="min-w-0 space-y-2">
         {channel === "Email" && <Input value={subject} onChange={event => setSubject(event.target.value)} placeholder="Email subject" disabled={busy} />}
         {channel === "Email" && <Input value={cc} onChange={event => setCc(event.target.value)} placeholder="CC (comma-separated)" disabled={busy} />}

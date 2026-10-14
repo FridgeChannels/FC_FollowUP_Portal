@@ -56,7 +56,7 @@ export async function POST(request: Request, { params }: Params) {
     const note = body.note?.trim() || "";
     const reminderAt = body.reminderAt?.trim() || "";
     if (!note) {
-      return Response.json({ error: "A note is required when marking a reply as read" }, { status: 400 });
+      return Response.json({ error: "A handling note is required to complete this reply review" }, { status: 400 });
     }
     if (reminderAt && !Number.isFinite(Date.parse(reminderAt))) {
       return Response.json({ error: "Enter a valid reminder time" }, { status: 400 });
@@ -116,7 +116,7 @@ export async function POST(request: Request, { params }: Params) {
     if (conversationId) {
       const existingNotes = propertyText(conversationPage?.properties?.Notes);
       const record = [
-        `Reply marked as read: ${note}`,
+        `Reply review completed: ${note}`,
         reminderAt && brand.ownerId
           ? encodeReplyActionReminder({ activityId: conversationId, dueAt: reminderAt, note, ownerId: brand.ownerId })
           : "",
@@ -127,11 +127,14 @@ export async function POST(request: Request, { params }: Params) {
       });
     }
 
-    const activities = await listFollowupConversations([contactId]);
-    await markInboundsReplied(
-      { contactId, channel, taskId, threadId },
-      activities,
-    );
+    // A message-level review completes only the selected inbound message.
+    if (!conversationId) {
+      const activities = await listFollowupConversations([contactId]);
+      await markInboundsReplied(
+        { contactId, channel, taskId, threadId },
+        activities,
+      );
+    }
     // markInboundsReplied no-ops (and skips cache bust) when thread/task filters miss.
     invalidateBrandReplySignalCache();
 

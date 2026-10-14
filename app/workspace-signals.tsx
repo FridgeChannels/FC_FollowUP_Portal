@@ -36,7 +36,6 @@ import {
   safeSourceUrl,
   type SignalBrand,
   type SignalEvent,
-  type SignalQueueView,
   type SignalType,
 } from "@/lib/signals/model";
 import type { BrandActivity, BrandDetail as BrandData } from "@/lib/brand-list";
@@ -131,29 +130,32 @@ export function SignalsPage() {
     () => window.matchMedia(desktopQuery).matches,
     () => false,
   );
-  const { data, error, refresh } = useSignals();
+  const { data, error, refresh, settle } = useSignals();
   const router = useRouter();
   const params = useSearchParams();
   const requested = params.get("brand");
   const showingMock =
     process.env.NODE_ENV !== "production" && params.get("mock") === "1";
-  const [view, setView] = useState<SignalQueueView>("review");
   const [type, setType] = useState<SignalType | "all">("all");
   const [selected, setSelected] = useState<string | null>(requested);
-  const [deepLinkActive, setDeepLinkActive] = useState(Boolean(requested));
   const [mobileDetail, setMobileDetail] = useState(Boolean(requested));
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 60000);
     return () => clearInterval(timer);
   }, []);
-  const queue = useMemo(
-    () => filterWorkspaceQueue(data?.brands || [], view, type, now),
-    [data, view, type, now],
-  );
-  useEffect(() => {
-    if (!selected && queue[0]) setSelected(queue[0].id);
-  }, [selected, queue]);
+  const queue = useMemo(() => {
+    const signalTime = (brand: SignalBrand) => Math.max(
+      ...brand.events
+        .filter((event) => type === "all" || event.type === type)
+        .map((event) => Date.parse(event.occurredAt)),
+    );
+    return [...(data?.brands || [])]
+      .filter((brand) => brand.events.some((event) => type === "all" || event.type === type))
+      .sort((left, right) =>
+        Number(right.unread) - Number(left.unread) || signalTime(right) - signalTime(left),
+      );
+  }, [data, type]);
   const summary = summarize(data?.brands || [], now);
   const [lastRequested, setLastRequested] = useState(requested);
   if (lastRequested !== requested) {
@@ -161,10 +163,9 @@ export function SignalsPage() {
     if (requested) {
       setSelected(requested);
       setMobileDetail(true);
-      setDeepLinkActive(true);
     }
   }
-  const selectedBrand = data?.brands.find((b) => b.id === selected);
+  const selectedBrand = data?.brands.find((b) => b.id === (selected || queue[0]?.id));
   // A notification deep link can open a brand outside the current filters.
   // Keep an opened item visible while its read state settles; the queue itself
   // can update immediately without interrupting comprehension.
@@ -172,13 +173,29 @@ export function SignalsPage() {
   const onComplete = () => {
     const next = filterWorkspaceQueue(data?.brands || [], "review", "all", now)
       .find((b) => b.id !== current?.id);
-    setView("review");
     setType("all");
-    setDeepLinkActive(false);
     setSelected(next?.id || null);
     setMobileDetail(Boolean(next));
     if (requested) router.replace("/signals", { scroll: false });
     if (!showingMock) void refresh();
+  };
+  const markBrandRead = (brand: SignalBrand) => {
+    const newReadIds = brand.events
+      .filter((event) => event.isNewSignal && !brand.readEventIds?.includes(event.signalReadId || event.id))
+      .map((event) => event.signalReadId || event.id);
+    if (!newReadIds.length) return;
+    const snapshot = [...new Set([...(brand.readEventIds || []), ...newReadIds])];
+    settle(brand.id, snapshot);
+    if (showingMock || data?.readOnly) return;
+    void fetch(`/api/signals/${encodeURIComponent(brand.id)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "read", eventIds: snapshot }),
+    }).then((response) => {
+      if (!response.ok) void refresh();
+    }).catch(() => {
+      void refresh();
+    });
   };
   return (
     <div className="mx-auto max-w-[1480px] text-foreground">
@@ -245,9 +262,9 @@ export function SignalsPage() {
               <div className="space-y-1">
                 {queue.map((brand) => {
                   const visibleEvents = type === "all" ? brand.events : brand.events.filter((event) => event.type === type);
-                  const latest = (view === "review"
-                    ? visibleEvents.find((event) => event.isNewSignal && !brand.readEventIds?.includes(event.id))
-                    : undefined) || visibleEvents[0];
+                  const latest = visibleEvents.find(
+                    (event) => event.isNewSignal && !brand.readEventIds?.includes(event.signalReadId || event.id),
+                  ) || visibleEvents[0];
                   const isSelected = current?.id === brand.id;
                   const isUnread = brand.unread;
                   return (
@@ -256,7 +273,7 @@ export function SignalsPage() {
                       onClick={() => {
                         setSelected(brand.id);
                         setMobileDetail(true);
-                        setDeepLinkActive(false);
+                        markBrandRead(brand);
                       }}
                       aria-current={isSelected ? "true" : undefined}
                       className={`w-full rounded-md px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${isSelected ? "bg-slate-200/85 shadow-sm" : isUnread ? "bg-slate-100/90 shadow-sm hover:bg-slate-200/75" : "bg-transparent hover:bg-slate-100/60"}`}
@@ -279,7 +296,7 @@ export function SignalsPage() {
                 })}
               </div>
             ) : (
-              <p className="py-12 text-center text-sm text-muted-foreground">{data?.brands.length ? "No brands match this view" : "No signals yet"}</p>
+              <p className="py-12 text-center text-sm text-muted-foreground">{data?.brands.length ? "No brands match this filter" : "No signals yet"}</p>
             )}
           </section>
           <section

@@ -546,6 +546,8 @@ export function toInteractions(
     title: item.subject || item.channel || "Conversation",
     content: item.content,
     cc: item.cc || undefined,
+    sender: item.sender || undefined,
+    recipient: item.recipient || undefined,
     createdAt: item.createdAt || "",
     recordedAt: item.recordedAt || "",
     creationMethod: isManualActivity(item, manualTaskIds)
@@ -557,6 +559,7 @@ export function toInteractions(
     messageId: item.messageId || undefined,
     taskId: item.taskId || undefined,
     replyStatus: item.replyStatus || undefined,
+    replyReviewCompleted: /(?:^|\n)Reply (?:review completed|marked as read):/.test(item.notes || ""),
     cp: resolveInteractionDisplayCp(cp, item, fallbacks),
     taskStatus: (item.taskId ? tasksById.get(item.taskId)?.status : undefined) || undefined,
     // Inbound replies share the outbound Task; do not inherit Task Scheduled At
@@ -604,7 +607,7 @@ type BrandDetailsTab = "followupHistory" | "details" | "contacts" | "notes" | "p
 
 export function BrandDetail({customerId}:{customerId:string}){
   const {state,can,assignBrand,cancelBomb}=useWorkspace();
-  const {data:signalsData,settle:settleSignals}=useSignals();
+  const {data:signalsData,settle:settleSignals,refresh:refreshSignals}=useSignals();
   const router=useRouter();
   const searchParams=useSearchParams();
   const requestedSignalId=searchParams.get("signal");
@@ -746,10 +749,11 @@ export function BrandDetail({customerId}:{customerId:string}){
       return;
     }
     if(signalsData?.readOnly)return;
+    settleSignals(customerId,snapshot);
     void fetch(`/api/signals/${encodeURIComponent(customerId)}`,{
       method:"PATCH",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({action:"read",eventIds:snapshot}),
-    }).then(response=>{if(response.ok)settleSignals(customerId,snapshot);}).catch(()=>{});
+    }).then(response=>{if(!response.ok)void refreshSignals();}).catch(()=>{void refreshSignals();});
   }
   useEffect(()=>{
     if(!requestedSignalType)return;
@@ -1183,7 +1187,7 @@ export function BrandDetail({customerId}:{customerId:string}){
         <Button type="button" size="sm" variant="outline" className="min-w-0 max-w-[22rem] shrink" disabled={!brandReady||!can("changeCP")||latestRound?.status==="Completed"||history.projectionPending} onClick={()=>setCP(true)} aria-label={`Current ${currentCpDetails.name}: ${currentCpDetails.fullName}. Change CP`}>
           <span className="truncate">{currentCpDetails.name} · {currentCpDetails.fullName}</span><ChevronRight className="ml-1 size-3.5 shrink-0 rotate-90"/>
         </Button>
-        {(notionBacked||mockDetailPreview||aiSummaryDemo)&&manager&&<TooltipProvider><Tooltip><TooltipTrigger asChild><span><Button type="button" variant="ghost" size="icon" className="size-11 shrink-0" aria-label="AI progress summary" disabled={!brandReady} onClick={()=>setAiSummaryOpen(true)}><Image src="/ai-summary-icon.svg" alt="" aria-hidden="true" width={40} height={40} className="size-10 object-contain"/></Button></span></TooltipTrigger><TooltipContent>AI progress summary</TooltipContent></Tooltip></TooltipProvider>}</div>
+        {(notionBacked||mockDetailPreview||aiSummaryDemo)&&manager&&<TooltipProvider><Tooltip><TooltipTrigger asChild><span><Button type="button" variant="ghost" size="icon" className="size-9 shrink-0" aria-label="AI progress summary" disabled={!brandReady} onClick={()=>setAiSummaryOpen(true)}><Image src="/ai-summary-icon.svg" alt="" aria-hidden="true" width={16} height={16} className="size-4 object-contain"/></Button></span></TooltipTrigger><TooltipContent>AI progress summary</TooltipContent></Tooltip></TooltipProvider>}</div>
       {hasActiveOmniReach&&<Badge className="bg-blue-100 text-blue-700">OmniReach running</Badge>}
       <div className="ml-auto flex items-center gap-1">
         {can("reply")&&<TooltipProvider><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-9" aria-label="New message" disabled={!brandReady||(notionBacked&&!c.contacts.length)} onClick={()=>setReply(true)}><Send className="size-4"/></Button></TooltipTrigger><TooltipContent>New message</TooltipContent></Tooltip></TooltipProvider>}
@@ -1276,7 +1280,7 @@ export function BrandDetail({customerId}:{customerId:string}){
       </div>
       </section>}
     </aside>
-    <div className="order-1 flex min-w-0 flex-col overflow-hidden bg-white lg:min-h-0"><ImportantSignalsPanel events={brandSignals?.events || []} readIds={signalReadIds} onRead={readSignalEvents} onOpenEmailSignal={openEmailSignal}/><section id="brand-conversations" aria-label="Brand communication" className="flex min-w-0 flex-col overflow-hidden lg:min-h-0 lg:flex-1"><div className="flex items-center justify-between border-b border-slate-100 px-5 py-3"><h2 className="flex items-center gap-2 font-semibold"><MessageSquareText className="size-4 text-violet-600"/>Conversations</h2><span className="text-xs text-slate-500">{visibleInteractions.length} activities</span></div>{conversationRound&&<div className="flex items-center justify-between gap-2 border-b border-violet-100 bg-violet-50 px-5 py-2"><div><p className="text-xs font-semibold text-violet-800">Round {conversationRound.number} · All CPs</p><p className="text-xs text-violet-600">Only conversations with a recorded Round association.</p></div><Button variant="ghost" size="sm" onClick={()=>{setConversationRound(null);setRoundCursor(null);}}>Show all Rounds</Button></div>}<div className="min-h-[50vh] max-h-[calc(100vh-290px)] min-w-0 overflow-y-auto lg:min-h-0 lg:max-h-none lg:flex-1">
+    <div className="order-1 flex min-w-0 flex-col overflow-hidden bg-white lg:min-h-0"><ImportantSignalsPanel events={brandSignals?.events || []} readIds={signalReadIds} onRead={readSignalEvents} onOpenSignal={event=>{if(event.type!=="email"){setActiveSignalId(event.id);setDetailsTab("signalHistory");}}} onOpenEmailSignal={openEmailSignal}/><section id="brand-conversations" aria-label="Brand communication" className="flex min-w-0 flex-col overflow-hidden lg:min-h-0 lg:flex-1"><div className="flex items-center border-b border-slate-100 px-5 py-3"><h2 className="flex items-center gap-2 font-semibold"><MessageSquareText className="size-4 text-violet-600"/>Conversations</h2></div>{conversationRound&&<div className="flex items-center justify-between gap-2 border-b border-violet-100 bg-violet-50 px-5 py-2"><div><p className="text-xs font-semibold text-violet-800">Round {conversationRound.number} · All CPs</p><p className="text-xs text-violet-600">Only conversations with a recorded Round association.</p></div><Button variant="ghost" size="sm" onClick={()=>{setConversationRound(null);setRoundCursor(null);}}>Show all Rounds</Button></div>}<div className="min-h-[50vh] max-h-[calc(100vh-290px)] min-w-0 overflow-y-auto lg:min-h-0 lg:max-h-none lg:flex-1">
     <InteractionFeed key={`${c.id}-${conversationRound?.id||"all"}-${currentCp}-${attentionTarget?.cp||""}-${attentionTarget?.channel||""}-${focusedWork?.id||focusedEmail?.id||""}`} customerId={c.id} currentCp={currentCp} initialCp={focusedWork?.cp||focusedEmail?.cp||attentionTarget?.cp} initialChannel={focusedWork?.channel||(focusedEmail?"Email":attentionTarget?.channel)} focusedInteractionId={focusedWork?.id||focusedEmail?.id} showAllChannels showCpSelector={false} includeAllCps={!!conversationRound} cpGoals={notionBacked?toCpGoals(remoteCps):undefined} interactions={visibleInteractions} contacts={c.contacts} bombInstances={conversationRound?bombPlan?.bombInstances.filter(instance=>roundActivities.some(activity=>bombPlan.activityInstanceIds[activity.id]===instance.id)):bombPlan?.bombInstances} actions={bombPlan?.actions} loading={conversationRound?roundLoading:activityLoading} canReviewCalls={notionBacked&&can("reply")} tasks={conversationRound?(remote?.tasks||[]).filter(t=>t.roundId===conversationRound.id):remote?.tasks||[]} onMarkReplyRead={notionBacked&&can("reply")?markReplyRead:undefined} onRefreshQuo={notionBacked?refreshQuoForBrand:undefined} quoRefreshingCallId={quoRefreshingCallId} onPersistCallReview={notionBacked?async (taskId,status,reviewReason,reviewNote,resolution)=>{
     const response=await fetch(`/api/tasks/${taskId}/call-review`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status,reviewReason,reviewNote,resolution})});
     const payload=await response.json() as {error?:string};

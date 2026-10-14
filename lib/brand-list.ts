@@ -295,6 +295,7 @@ export type BrandActivity = {
   cc?: string | null;
   content: string;
   sender: string | null;
+  recipient?: string | null;
   notes: string | null;
   callResult: string | null;
   sourceUrl: string | null;

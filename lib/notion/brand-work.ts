@@ -1,4 +1,4 @@
-import { buildBrandWork, isAutomaticReply, WORK_REPLY_CHANNELS, type PendingWorkAssignment, type PendingWorkCall, type PendingWorkReply, type WorkReplyChannel } from "../brand-work";
+import { buildBrandWork, WORK_REPLY_CHANNELS, type PendingWorkAssignment, type PendingWorkCall, type PendingWorkReply, type WorkReplyChannel } from "../brand-work";
 import { historyFromTask } from "../call-review-history";
 import { firstRelationId, propertyDate, propertyText, queryDatabasePages, retrievePage, type NotionPage } from "./client";
 import { getFollowupConversationDbId, getFollowupTaskDbId } from "./config";
@@ -51,7 +51,6 @@ export async function listBrandWorkForViewer(scope: NeedsReplyBrandScope) {
 
   const replies: PendingWorkReply[] = conversationPages.flatMap((page) => {
     const properties = page.properties || {};
-    if (isAutomaticReply(propertyText(properties.Subject), propertyText(properties.Sender))) return [];
     const channel = propertyText(properties.Channel);
     if (!WORK_REPLY_CHANNELS.includes(channel as WorkReplyChannel)) return [];
     const contactId = firstRelationId(properties["Follow-up Contact"]) || null;

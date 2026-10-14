@@ -49,11 +49,6 @@ export type BrandWorkPayload = {
 const key = (id: string) => id.replace(/-/g, "").toLowerCase();
 const time = (value: string | null) => value ? Date.parse(value) || 0 : 0;
 
-export function isAutomaticReply(subject: string, sender: string) {
-  return /^(?:\s*(?:re|fw):\s*)*(?:auto(?:matic)?[ -]?(?:reply|response)|out of office|ooo\b|absence notification|vacation reply)\b/i.test(subject)
-    || /^(?:no-?reply|auto-?reply)@/i.test(sender);
-}
-
 /** One pending thread is one AM action, however many inbound messages it contains. */
 export function buildBrandWork(
   brands: BrandListItem[],
