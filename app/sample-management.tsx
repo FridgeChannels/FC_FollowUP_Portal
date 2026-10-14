@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Check, Clock3, Copy, ExternalLink, Loader2, MousePointerClick, UserRound } from "lucide-react";
+import { ArrowLeft, Check, Copy, ExternalLink, Loader2 } from "lucide-react";
 import Image from "next/image";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -128,16 +128,6 @@ const EMPTY_EXPERIENCE_FORM: ExperienceFormState = {
   discountAsin: "",
   price: "",
 };
-
-const formatDate = (value: string) =>
-  new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZoneName: "short",
-  }).format(new Date(value));
 
 function buildExperienceForm(
   param: MagnetParam | null | undefined,
@@ -369,7 +359,6 @@ export function SampleManagementPage({ customerId }: { customerId: string }) {
   const [experienceFormError, setExperienceFormError] = useState("");
   const [logoUploading, setLogoUploading] = useState(false);
   const [productImageUploading, setProductImageUploading] = useState(false);
-  const [markingDeviceId, setMarkingDeviceId] = useState<string | null>(null);
   const [extractingColors, setExtractingColors] = useState(false);
   const [snSwitching, setSnSwitching] = useState(false);
   const [pendingSn, setPendingSn] = useState<string | null>(null);
@@ -476,14 +465,6 @@ export function SampleManagementPage({ customerId }: { customerId: string }) {
   const nfcCardSn = sample?.nfcCardSn || nfcCardSns[0] || null;
   const sampleUrl = sample?.sampleUrl || "";
   const configuredLabel = experienceLabel(sample?.configuredExperience);
-  const clicks = [...(sample?.clicks || [])]
-    .filter((item) => item.sampleType === activeType && !item.isInternal)
-    .sort((a, b) => Date.parse(b.clickedAt) - Date.parse(a.clickedAt));
-  const summary = {
-    totalClicks: clicks.length,
-    uniqueVisitors: new Set(clicks.map((item) => item.deviceId || item.person).filter(Boolean)).size,
-    lastClickedAt: clicks[0]?.clickedAt || null,
-  };
 
   const selectSn = async (nextSn: string) => {
     if (!nextSn || nextSn === nfcCardSn || snSwitching) return;
@@ -533,43 +514,6 @@ export function SampleManagementPage({ customerId }: { customerId: string }) {
       window.setTimeout(() => setCopied(false), 1600);
     } catch {
       toast.error("Unable to copy sample link");
-    }
-  };
-
-  const setDeviceInternal = async (deviceId: string, nextInternal: boolean) => {
-    const id = deviceId.trim();
-    if (!id) {
-      toast.error("This click has no device id");
-      return;
-    }
-    setMarkingDeviceId(id);
-    try {
-      const response = await fetch(
-        `/api/brands/${encodeURIComponent(customerId)}/sample/internal-devices${
-          nextInternal ? "" : `?deviceId=${encodeURIComponent(id)}`
-        }`,
-        {
-          method: nextInternal ? "POST" : "DELETE",
-          headers: nextInternal ? { "Content-Type": "application/json" } : undefined,
-          body: nextInternal ? JSON.stringify({ deviceId: id }) : undefined,
-        },
-      );
-      const payload = (await response.json()) as { error?: string };
-      if (!response.ok) throw new Error(payload.error || "Unable to update internal device");
-      setSample((current) => {
-        if (!current?.clicks) return current;
-        return {
-          ...current,
-          clicks: current.clicks.map((click) =>
-            click.deviceId === id ? { ...click, isInternal: nextInternal } : click,
-          ),
-        };
-      });
-      toast.success(nextInternal ? "Marked as internal device" : "Removed internal mark");
-    } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : "Unable to update internal device");
-    } finally {
-      setMarkingDeviceId(null);
     }
   };
 
@@ -899,96 +843,6 @@ export function SampleManagementPage({ customerId }: { customerId: string }) {
               className={`relative ${snSwitching ? "pointer-events-none opacity-50" : ""}`}
               aria-busy={snSwitching}
             >
-            <section className="mt-8 grid grid-cols-3 gap-3 sm:gap-8" aria-label="Click summary">
-              <SummaryStat label="Total clicks" value={String(summary.totalClicks)} icon={MousePointerClick} />
-              <SummaryStat label="Unique visitors" value={String(summary.uniqueVisitors)} icon={UserRound} />
-              <SummaryStat
-                label="Last clicked"
-                value={summary.lastClickedAt ? formatDate(summary.lastClickedAt) : "—"}
-                icon={Clock3}
-                compact
-              />
-            </section>
-            <section className="mt-10" aria-label="Click activity">
-              <div className="flex items-baseline justify-between gap-3">
-                <h2 className="text-lg font-semibold">Click activity</h2>
-                <span className="text-xs text-slate-500">{clicks.length} records</span>
-              </div>
-              <div className="mt-5 overflow-x-auto rounded-xl border border-slate-200 bg-white">
-                <table className="min-w-[920px] w-full text-left">
-                  <thead>
-                    <tr className="border-b border-slate-200 text-xs font-semibold text-slate-500">
-                      <th className="px-3 py-3">Person</th>
-                      <th className="px-3 py-3">Role</th>
-                      <th className="px-3 py-3">Location</th>
-                      <th className="px-3 py-3">Device</th>
-                      <th className="px-3 py-3">Referrer</th>
-                      <th className="px-3 py-3">Clicked at</th>
-                      <th className="px-3 py-3 text-right">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {clicks.length ? (
-                      clicks.map((click) => (
-                        <tr key={click.id} className="border-b border-slate-100 last:border-0">
-                          <td className="whitespace-nowrap px-3 py-4 text-sm font-semibold">
-                            {click.person}
-                            {click.isInternal ? (
-                              <span className="ml-2 text-[10px] font-medium uppercase tracking-wide text-slate-400">
-                                Internal
-                              </span>
-                            ) : null}
-                          </td>
-                          <td className="whitespace-nowrap px-3 py-4 text-xs text-slate-500">{click.role}</td>
-                          <td className="whitespace-nowrap px-3 py-4 text-xs text-slate-500">{click.location}</td>
-                          <td className="whitespace-nowrap px-3 py-4 text-xs text-slate-500">{click.device}</td>
-                          <td className="whitespace-nowrap px-3 py-4 text-xs text-slate-500">{click.referrer}</td>
-                          <td className="whitespace-nowrap px-3 py-4 text-xs text-slate-500">
-                            <time dateTime={click.clickedAt}>{formatDate(click.clickedAt)}</time>
-                          </td>
-                          <td className="whitespace-nowrap px-3 py-4 text-right">
-                            {click.deviceId ? (
-                              click.isInternal ? (
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="xs"
-                                  className="text-slate-500"
-                                  disabled={markingDeviceId === click.deviceId}
-                                  onClick={() => void setDeviceInternal(click.deviceId!, false)}
-                                >
-                                  {markingDeviceId === click.deviceId ? "Saving…" : "Unmark internal"}
-                                </Button>
-                              ) : (
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="xs"
-                                  disabled={markingDeviceId === click.deviceId}
-                                  onClick={() => void setDeviceInternal(click.deviceId!, true)}
-                                >
-                                  {markingDeviceId === click.deviceId ? "Saving…" : "Mark internal"}
-                                </Button>
-                              )
-                            ) : (
-                              <span className="text-xs text-slate-400">No device id</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan={7} className="px-3 py-8 text-center text-sm text-slate-500">
-                          {configuredLabel && configuredLabel !== activeType
-                            ? `No ${activeType} tap activity. Current magnet experience is ${configuredLabel}.`
-                            : "No tap activity synced yet."}
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </section>
             </div>
               </>
             ) : (
@@ -1185,34 +1039,6 @@ export function SampleManagementPage({ customerId }: { customerId: string }) {
           </Dialog>
         </>
       )}
-    </div>
-  );
-}
-
-function SummaryStat({
-  label,
-  value,
-  icon: Icon,
-  compact,
-}: {
-  label: string;
-  value: string;
-  icon: typeof Clock3;
-  compact?: boolean;
-}) {
-  return (
-    <div className="min-w-0 rounded-xl border border-slate-200 bg-white p-4">
-      <div className="flex items-center gap-1 text-[11px] text-slate-500">
-        <Icon className="size-3.5 shrink-0 text-violet-600" />
-        <span className="truncate">{label}</span>
-      </div>
-      <p
-        className={`mt-2 break-words font-semibold tracking-tight ${
-          compact ? "text-xs leading-5 sm:text-sm" : "text-2xl"
-        }`}
-      >
-        {value}
-      </p>
     </div>
   );
 }
