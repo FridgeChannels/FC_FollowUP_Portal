@@ -22,7 +22,7 @@ export default function Preview() {
           try {
             const report = await registerCallerReport({ ...body, callerId: "fixture-caller", callerName: "Julio Rodriguez" }, {
               readPage: async (id) => ({ title: id.startsWith("f") ? "Someone Else 10-06-2026" : `Julio Rodriguez ${titleDate}` }),
-              append: async (_caller, report) => { reports = [...reports.filter((item) => item.date !== report.date), report]; },
+              save: async (value) => { reports = [...reports.filter((item) => item.date !== value.date), value]; },
             });
             return Response.json({ report });
           } catch (error) { return Response.json({ error: (error as Error).message }, { status: 400 }); }

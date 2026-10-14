@@ -106,7 +106,7 @@ export async function registerCallerReport(
   input: { callerId: string; callerName: string; date: string; url: string },
   store: {
     readPage: (id: string) => Promise<{ title: string; archived?: boolean }>;
-    append: (callerId: string, report: CallerNotionReport) => Promise<void>;
+    save: (report: CallerNotionReport) => Promise<CallerNotionReport | void>;
     now?: () => Date;
   },
 ) {
@@ -119,6 +119,5 @@ export async function registerCallerReport(
     callerId: input.callerId, callerName: input.callerName, date: input.date,
     pageId, title: page.title, url: `https://www.notion.so/${pageId}`, updatedAt: (store.now?.() || new Date()).toISOString(),
   };
-  await store.append(input.callerId, report);
-  return report;
+  return (await store.save(report)) || report;
 }

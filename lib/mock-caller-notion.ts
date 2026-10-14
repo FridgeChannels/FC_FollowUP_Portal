@@ -34,9 +34,9 @@ function store() {
   return root.__fcMockCallerNotion;
 }
 
-/** Development-only link state. It never calls Notion and is shared by Caller and Brand views. */
+/** Opt-in memory store. Local and production both persist to Supabase unless this is set. */
 export function mockCallerNotionEnabled() {
-  return process.env.NODE_ENV !== "production" || process.env.MOCK_CALLER_NOTION === "1";
+  return process.env.MOCK_CALLER_NOTION === "1";
 }
 
 export function mockCallerNotionReports() {

@@ -47,27 +47,26 @@ describe("Daily Notion matching", () => {
     assert.deepEqual(reportsFromBookmarks([block(newer), block(report), block(previousDay)], input.callerId), [newer, previousDay]);
   });
   it("registers once and makes the same caller/date link usable for any brand", async () => {
-    const stored: ReportBookmark[] = [];
+    const stored: CallerNotionReport[] = [];
     const result = await registerCallerReport(input, {
       readPage: async (pageId) => { assert.equal(pageId, id); return { title: report.title }; },
-      append: async (callerId, value) => { assert.equal(callerId, input.callerId); stored.push(block(value)); },
+      save: async (value) => { assert.equal(value.callerId, input.callerId); stored.push(value); },
       now: () => new Date(report.updatedAt),
     });
     assert.equal(stored.length, 1);
     assert.equal(result.date, input.date);
-    const forBrand = (date: string) => reportsFromBookmarks(stored, input.callerId).find((item) => item.date === date);
-    assert.deepEqual(forBrand(input.date), result);
-    assert.equal(forBrand("2026-10-07"), undefined);
+    assert.deepEqual(stored[0], result);
+    assert.equal(stored.find((item) => item.date === "2026-10-07"), undefined);
   });
   it("does not write on wrong title, deleted page, denied access, or invalid URL", async () => {
     let writes = 0;
     for (const page of [{ title: "Peter 10-06-2026" }, { title: "Julio Rodriguez 10-07-2026" }, { title: report.title, archived: true }]) {
-      await assert.rejects(registerCallerReport(input, { readPage: async () => page, append: async () => { writes++; } }));
+      await assert.rejects(registerCallerReport(input, { readPage: async () => page, save: async () => { writes++; } }));
     }
-    await assert.rejects(registerCallerReport(input, { readPage: async () => { throw new Error("Access denied"); }, append: async () => { writes++; } }), /Access denied/);
+    await assert.rejects(registerCallerReport(input, { readPage: async () => { throw new Error("Access denied"); }, save: async () => { writes++; } }), /Access denied/);
     assert.equal(writes, 0);
   });
   it("does not claim success if persistence fails", async () => {
-    await assert.rejects(registerCallerReport(input, { readPage: async () => ({ title: report.title }), append: async () => { throw new Error("Notion unavailable"); } }), /unavailable/);
+    await assert.rejects(registerCallerReport(input, { readPage: async () => ({ title: report.title }), save: async () => { throw new Error("storage unavailable"); } }), /unavailable/);
   });
 });

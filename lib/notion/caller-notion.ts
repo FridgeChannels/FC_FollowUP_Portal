@@ -1,26 +1,14 @@
-import { CallerNotionError, registerCallerReport, reportCaption, reportsFromBookmarks, type ReportBookmark } from "../caller-notion";
-import { notionFetch, retrievePage, richText, titleFromProperties } from "./client";
+import { CallerNotionError, registerCallerReport } from "../caller-notion";
+import { listCallerDailyNotionReports, saveCallerDailyNotionReport } from "../caller-notion-data";
+import { retrievePage, titleFromProperties } from "./client";
 import { queryOwnerPages, type FollowupOwner } from "./owners";
 import { isTestOnlyViewer } from "../brand-access";
 
-async function bookmarks(callerId: string) {
-  const blocks: ReportBookmark[] = [];
-  let cursor: string | undefined;
-  do {
-    const query = new URLSearchParams({ page_size: "100" });
-    if (cursor) query.set("start_cursor", cursor);
-    const result = await notionFetch<{ results: ReportBookmark[]; has_more?: boolean; next_cursor?: string }>(`/blocks/${callerId}/children?${query}`);
-    blocks.push(...result.results);
-    cursor = result.has_more ? result.next_cursor : undefined;
-  } while (cursor);
-  return blocks;
-}
-
 export async function listCallerNotionReports(callerId: string) {
-  return reportsFromBookmarks(await bookmarks(callerId), callerId);
+  return listCallerDailyNotionReports(callerId);
 }
 
-/** No database or schema changes: registrations live in the existing Caller page body. */
+/** Validate the Notion page title, then upsert the link in Supabase (one row per caller × day). */
 export async function saveCallerNotionReport(input: { callerId: string; callerName: string; date: string; url: string }) {
   return registerCallerReport(input, {
     readPage: async (pageId) => {
@@ -36,14 +24,7 @@ export async function saveCallerNotionReport(input: { callerId: string; callerNa
         throw error;
       }
     },
-    append: async (callerId, report) => {
-      // Append-only avoids lost updates across worker instances. The reader projects
-      // one latest link per day, preserving old links and unrelated page content.
-      await notionFetch(`/blocks/${callerId}/children`, {
-        method: "PATCH",
-        body: JSON.stringify({ children: [{ object: "block", type: "bookmark", bookmark: { url: report.url, caption: richText(reportCaption(report)) } }] }),
-      });
-    },
+    save: (report) => saveCallerDailyNotionReport(report),
   });
 }
 
