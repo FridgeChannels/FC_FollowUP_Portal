@@ -631,7 +631,7 @@ export function BrandDetail({customerId}:{customerId:string}){
     router.replace(backPath);
   };
   const [launch,setLaunch]=useState(false); const [reply,setReply]=useState(false); const [cp,setCP]=useState(false); const [contact,setContact]=useState(false); const [ownerDraft,setOwnerDraft]=useState<string>(); const [aiSummaryOpen,setAiSummaryOpen]=useState(false);
-  const [detailsTab,setDetailsTab]=useState<BrandDetailsTab|null>(requestedFollowupHistory?"followupHistory":requestedSignalId||requestedNewAssignment?"details":requestedSignalHistory?"signalHistory":null);
+  const [detailsTab,setDetailsTab]=useState<BrandDetailsTab|null>(requestedFollowupHistory?"followupHistory":requestedSignalId||requestedNewAssignment?"details":requestedSignalHistory?"signalHistory":"details");
   const [sampleProfiles,setSampleProfiles]=useState<Array<{sn:string;profile:MagnetBrandParam|null}>>([]);
   const [attentionTarget,setAttentionTarget]=useState<{cp:CPCode;channel:Channel}|null>(null);
   const [creatingMeeting,setCreatingMeeting]=useState(false);
