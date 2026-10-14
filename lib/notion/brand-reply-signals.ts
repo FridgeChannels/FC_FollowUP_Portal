@@ -1,4 +1,4 @@
-import { lastReplyAtFromActivities, type BrandActivity, type BrandListItem } from "../brand-list";
+import { lastReplyAtFromActivities, summarizePendingOutboundTasks, type BrandActivity, type BrandListItem } from "../brand-list";
 import {
   firstRelationId,
   propertyDate,
@@ -31,6 +31,8 @@ export type BrandInteractionSignal = Pick<
   | "lastInteractionDirection"
   | "lastInteractionStatus"
   | "lastInteractionCallResult"
+  | "pendingOutboundChannels"
+  | "pendingOutboundAt"
   | "lastReplyAt"
   | "needsQualification"
   | "qualificationTaskCount"
@@ -241,6 +243,8 @@ export async function listBrandInteractionSignals(
         lastInteractionDirection: null,
         lastInteractionStatus: null,
         lastInteractionCallResult: null,
+        pendingOutboundChannels: [],
+        pendingOutboundAt: null,
         lastReplyAt: null,
         needsQualification: false,
         qualificationTaskCount: 0,
@@ -285,6 +289,7 @@ export async function listBrandInteractionSignals(
           task.channel === "Phone" &&
           task.callReviewStatus === "Awaiting Review",
       ).length;
+      const pendingOutbound = summarizePendingOutboundTasks(tasks);
       const latest = conversations.find((item) =>
         isCompletedInteraction(item, taskStatusById),
       );
@@ -297,6 +302,8 @@ export async function listBrandInteractionSignals(
           ? interactionStatusLabel(latest, taskStatusById)
           : null,
         lastInteractionCallResult: latest?.callResult ?? null,
+        pendingOutboundChannels: pendingOutbound.channels,
+        pendingOutboundAt: pendingOutbound.nextAt,
         lastReplyAt,
         needsQualification: qualificationTaskCount > 0,
         qualificationTaskCount,

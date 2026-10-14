@@ -81,4 +81,19 @@ describe("brand AM work", () => {
     assert.equal(result.brands[0].channels.Email?.count, 1);
     assert.equal(result.brands[0].callReview?.count, 1);
   });
+
+  it("includes an expired no-reply deadline in Need Reply and counts the brand once", () => {
+    const result = buildBrandWork(
+      [brand("alpha")],
+      [],
+      [],
+      Date.parse("2026-10-14T12:00:00Z"),
+      [],
+      [],
+      [{ brandId: "alpha", dueAt: "2026-10-13T23:59:59.999Z" }],
+    );
+    assert.equal(result.counts.replies, 1);
+    assert.equal(result.brands[0].replyDeadline?.target.dueAt, "2026-10-13T23:59:59.999Z");
+    assert.equal(result.brands[0].preview, "No reply by deadline");
+  });
 });

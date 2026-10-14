@@ -214,6 +214,7 @@ export async function mapFollowupClientPage(
     lastInteractionStatus: null,
     lastInteractionCallResult: null,
     lastReplyAt: notionDate(properties["Last Reply At"]),
+    replyDeadline: notionDate(properties.replyDeadline),
     ownerId: owner?.id || ownerId || null,
     ownerName: owner?.name || null,
     ownerEmail: owner?.account || null,

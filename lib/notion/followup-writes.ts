@@ -219,6 +219,7 @@ export async function updateFollowupClient(
     handlingMode?: string | null;
     notes?: string | null;
     humanNotes?: string | null;
+    replyDeadline?: string | null;
     channelType?: ChannelType;
     amazonSampleProduct?: AmazonSampleProduct;
   },
@@ -263,6 +264,10 @@ export async function updateFollowupClient(
 
   if (patch.humanNotes !== undefined) {
     properties["Human Notes"] = { rich_text: richText(patch.humanNotes || "") };
+  }
+
+  if (patch.replyDeadline !== undefined) {
+    properties.replyDeadline = { date: patch.replyDeadline ? { start: patch.replyDeadline } : null };
   }
 
   if (patch.channelType !== undefined) {

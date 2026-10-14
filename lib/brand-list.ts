@@ -189,7 +189,11 @@ export type BrandListItem = {
   lastInteractionDirection: "Inbound" | "Outbound" | null;
   lastInteractionStatus: string | null;
   lastInteractionCallResult: string | null;
+  pendingOutboundChannels?: string[];
+  pendingOutboundAt?: string | null;
   lastReplyAt: string | null;
+  /** Date by which the brand should reply before appearing in Need Actions. */
+  replyDeadline?: string | null;
   ownerId: string | null;
   ownerName: string | null;
   ownerEmail: string | null;
@@ -322,6 +326,26 @@ export type BrandActivity = {
   quo?: QuoCallData | null;
   attachments?: import("./media-attachments").MediaAttachment[];
 };
+
+/** Pending non-phone tasks are queued work, not completed interactions. */
+export function summarizePendingOutboundTasks(
+  tasks: Array<{
+    channel: string | null;
+    status: string | null;
+    scheduledAt?: string | null;
+    createdAt?: string | null;
+  }>,
+) {
+  const channels = new Set<string>();
+  let nextAt: string | null = null;
+  for (const task of tasks) {
+    if (task.status !== "Pending" || !task.channel || task.channel === "Phone") continue;
+    channels.add(task.channel);
+    const at = task.createdAt || task.scheduledAt || null;
+    if (at && (!nextAt || at < nextAt)) nextAt = at;
+  }
+  return { channels: [...channels].sort(), nextAt };
+}
 
 export function lastReplyAtFromActivities(
   items: Array<Pick<BrandActivity, "direction" | "createdAt" | "recordedAt" | "scheduledAt">>,

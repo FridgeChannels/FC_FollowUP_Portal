@@ -6,7 +6,7 @@ import { isCpVisible, visibleCpOptions, cpDisplayText, cpHistoryText } from "@/l
 import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, Bomb, CalendarPlus, ChevronRight, CircleAlert, CircleCheck, CirclePause, ContactRound, ExternalLink, FileText, History, Loader2, MessageSquareText, MoreHorizontal, PanelRightClose, Plus, Save, Search, Send, StickyNote, UserCheck } from "lucide-react";
+import { ArrowLeft, Bomb, CalendarClock, CalendarPlus, ChevronRight, CircleAlert, CircleCheck, CirclePause, ContactRound, ExternalLink, FileText, History, Loader2, MessageSquareText, MoreHorizontal, PanelRightClose, Plus, Save, Search, Send, StickyNote, UserCheck } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "./workspace-store";
 import { cacheBrandItem, getCachedBrand, requestBrandListPageRefresh } from "@/lib/brand-list-cache";
@@ -677,6 +677,8 @@ export function BrandDetail({customerId}:{customerId:string}){
     tasks:[],
     activities:[],
   }:null);
+  const [replyDeadlineDraft,setReplyDeadlineDraft]=useState<string|null>(null);
+  const [replyDeadlineDialogOpen,setReplyDeadlineDialogOpen]=useState(false);
   const [remoteCps,setRemoteCps]=useState<CurrentCpOption[]>([]);
   const [owners,setOwners]=useState<Array<{id:string;name:string}>>([]);
   const [remoteLoading,setRemoteLoading]=useState(false);
@@ -967,6 +969,7 @@ export function BrandDetail({customerId}:{customerId:string}){
     updatedAt: remote.lastEditedAt || "",
   } : undefined);
   const notionBacked=!local&&!!remote;
+  const canManageReplyDeadline=notionBacked&&!!remote&&(isAdmin||state.currentRole==="AccountManager"&&!!remote.ownerId&&remote.ownerId.replace(/-/g,"").toLowerCase()===state.currentUserId.replace(/-/g,"").toLowerCase());
   const contactsLoading=notionBacked&&!brandReady;
   const activityLoading=notionBacked&&(!brandReady||!activitiesReady||activitiesLoading);
   const visible=!!c&&(aiSummaryDemo||(local?(manager||c.ownerId===state.currentUserId):!!remote));
@@ -1062,7 +1065,7 @@ export function BrandDetail({customerId}:{customerId:string}){
   const followUpMeeting=remote?.aiMeetingLinks?.[0];
   const bombPlan=notionBacked?toBombPlan(c.id,remote?.tasks||[],remote?.activities||[]):undefined;
   const hasActiveOmniReach=notionBacked?brandHasActiveOmniReach(remote?.tasks||[]):!!(c.activeBombId||c.status==="Bomb Running");
-  const canManageFollowUpStatus=sessionUser?.role==="AccountManager"&&!!remote?.ownerEmail&&remote.ownerEmail.trim().toLowerCase()===sessionUser.email.trim().toLowerCase();
+  const canManageFollowUpStatus=sessionUser?.role==="Admin"||sessionUser?.role==="AccountManager"&&!!remote?.ownerEmail&&remote.ownerEmail.trim().toLowerCase()===sessionUser.email.trim().toLowerCase();
   const mockEmailInteraction:Interaction|undefined=mockDetailPreview&&emailSignals.length?{
     id:emailSignals[0].conversationId||"mock-test-peter-email-thread",
     customerId:c.id,
@@ -1210,7 +1213,7 @@ export function BrandDetail({customerId}:{customerId:string}){
         {can("reply")&&<TooltipProvider><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-9" aria-label="New message" disabled={!brandReady||(notionBacked&&!c.contacts.length)} onClick={()=>setReply(true)}><Send className="size-4"/></Button></TooltipTrigger><TooltipContent>New message</TooltipContent></Tooltip></TooltipProvider>}
         {can("launch")&&<LaunchOmniReachButton iconOnly className="size-9" disabled={!brandReady||hasActiveOmniReach} disabledReason={!brandReady?"Loading brand…":ACTIVE_OMNIREACH_BLOCK_REASON} onClick={()=>setLaunch(true)}/>}
         {(notionBacked||mockDetailPreview)&&<TooltipProvider><Tooltip><TooltipTrigger asChild><span>{followUpMeeting?<Button asChild variant="ghost" size="icon" className="size-9" aria-label={`Open FollowUp Meeting: ${followUpMeeting.title}`}><a href={followUpMeeting.url} target="_blank" rel="noreferrer" title={followUpMeeting.title}><ExternalLink className="size-4"/></a></Button>:<Button type="button" variant="ghost" size="icon" className="size-9" disabled={!notionBacked||!brandReady||!can("editBrand")||creatingMeeting} onClick={()=>void createMeeting()} aria-label="Create FollowUp Meeting">{creatingMeeting?<Loader2 className="size-4 animate-spin"/>:<CalendarPlus className="size-4"/>}</Button>}</span></TooltipTrigger><TooltipContent>{followUpMeeting?"Open FollowUp Meeting":creatingMeeting?"Creating FollowUp Meeting…":"Create FollowUp Meeting"}</TooltipContent></Tooltip></TooltipProvider>}
-        {(notionBacked||mockDetailPreview)&&can("editBrand")&&(notionBacked?<DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="size-9" aria-label="More follow-up actions" title="More follow-up actions" disabled={saving}><MoreHorizontal className="size-4"/></Button></DropdownMenuTrigger><DropdownMenuContent align="end">{remote?.status==="Paused"&&can("assignOwner")&&<DropdownMenuItem disabled={saving||!brandReady} onSelect={openPausedFollowUpReview}><UserCheck className="mr-2 size-4"/>Review paused FollowUp</DropdownMenuItem>}{remote?.status==="Paused"&&canManageFollowUpStatus&&<DropdownMenuItem disabled={saving||!brandReady} onSelect={()=>openFollowUpAction("Paused")}><CirclePause className="mr-2 size-4"/>Extend pause</DropdownMenuItem>}{canManageFollowUpStatus&&<DropdownMenuItem disabled={saving||remote?.status==="Paused"||remote?.status==="Completed"} onSelect={()=>openFollowUpAction("Paused")}><CirclePause className="mr-2 size-4"/>Pause FollowUp</DropdownMenuItem>}{canManageFollowUpStatus&&<DropdownMenuItem disabled={saving||remote?.status==="Completed"} onSelect={()=>openFollowUpAction("Completed")}><CircleCheck className="mr-2 size-4"/>Complete FollowUp</DropdownMenuItem>}</DropdownMenuContent></DropdownMenu>:<TooltipProvider><Tooltip><TooltipTrigger asChild><span><Button variant="ghost" size="icon" className="size-9" aria-label="More follow-up actions" disabled><MoreHorizontal className="size-4"/></Button></span></TooltipTrigger><TooltipContent>Unavailable in mock preview</TooltipContent></Tooltip></TooltipProvider>)}
+        {(notionBacked||mockDetailPreview)&&can("editBrand")&&(notionBacked?<DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="size-9" aria-label="More follow-up actions" title="More follow-up actions" disabled={saving}><MoreHorizontal className="size-4"/></Button></DropdownMenuTrigger><DropdownMenuContent align="end">{canManageReplyDeadline&&<DropdownMenuItem disabled={saving||!brandReady} onSelect={()=>{setReplyDeadlineDraft(remote?.replyDeadline?.slice(0,10)??"");setReplyDeadlineDialogOpen(true);}}><CalendarClock className="mr-2 size-4"/>{remote?.replyDeadline?"Edit reply deadline":"Set reply deadline"}</DropdownMenuItem>}{remote?.status==="Paused"&&can("assignOwner")&&<DropdownMenuItem disabled={saving||!brandReady} onSelect={openPausedFollowUpReview}><UserCheck className="mr-2 size-4"/>Review paused FollowUp</DropdownMenuItem>}{remote?.status==="Paused"&&canManageFollowUpStatus&&<DropdownMenuItem disabled={saving||!brandReady} onSelect={()=>openFollowUpAction("Paused")}><CirclePause className="mr-2 size-4"/>Extend pause</DropdownMenuItem>}{canManageFollowUpStatus&&<DropdownMenuItem disabled={saving||remote?.status==="Paused"||remote?.status==="Completed"} onSelect={()=>openFollowUpAction("Paused")}><CirclePause className="mr-2 size-4"/>Pause FollowUp</DropdownMenuItem>}{canManageFollowUpStatus&&<DropdownMenuItem disabled={saving||remote?.status==="Completed"} onSelect={()=>openFollowUpAction("Completed")}><CircleCheck className="mr-2 size-4"/>Complete FollowUp</DropdownMenuItem>}</DropdownMenuContent></DropdownMenu>:<TooltipProvider><Tooltip><TooltipTrigger asChild><span><Button variant="ghost" size="icon" className="size-9" aria-label="More follow-up actions" disabled><MoreHorizontal className="size-4"/></Button></span></TooltipTrigger><TooltipContent>Unavailable in mock preview</TooltipContent></Tooltip></TooltipProvider>)}
       </div>
     </header>
     {(needsReplyCount>0||callReviewCount>0||overdueCount>0)&&<div role="status" className="flex flex-wrap items-center gap-2 border-b border-rose-200 bg-rose-50 px-4 py-2.5 text-xs font-semibold text-rose-800">
@@ -1307,6 +1310,7 @@ export function BrandDetail({customerId}:{customerId:string}){
   {conversationRound&&roundCursor?<div className="border-t border-slate-100 p-3"><Button variant="outline" size="sm" className="w-full" disabled={roundLoading} onClick={()=>void openRoundConversations(conversationRound.id,conversationRound.number,roundCursor)}>Load more Round conversations</Button></div>:notionBacked&&!conversationRound&&activitiesHasMore&&activitiesCursor?<div className="border-t border-slate-100 p-3"><Button variant="outline" size="sm" className="w-full" disabled={activitiesLoadingMore||activitiesLoading} onClick={loadMoreActivities}>{activitiesLoadingMore?<span className="inline-flex items-center gap-2"><Spinner className="size-3.5"/>Loading…</span>:"Load more activity"}</Button></div>:null}
   </div>
   </section></div></div>
+  <Dialog open={replyDeadlineDialogOpen} onOpenChange={setReplyDeadlineDialogOpen}><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>{remote?.replyDeadline?"Edit reply deadline":"Set reply deadline"}</DialogTitle><DialogDescription>After this date, the brand appears in Need Actions → Need Reply if there has been no reply across any of the five channels since the most recent successful outbound message. Incoming calls count as replies; outgoing calls do not.</DialogDescription></DialogHeader><div className="space-y-2"><label htmlFor="reply-deadline" className="text-sm font-medium text-slate-700">Reply deadline</label><Input id="reply-deadline" type="date" value={replyDeadlineDraft??""} disabled={saving||!brandReady} onChange={event=>setReplyDeadlineDraft(event.target.value)}/></div><DialogFooter><Button type="button" variant="outline" onClick={()=>setReplyDeadlineDialogOpen(false)}>Cancel</Button>{remote?.replyDeadline&&<Button type="button" variant="ghost" disabled={saving||!brandReady} onClick={()=>{setSaving(true);void patchBrand({replyDeadline:null}).then(()=>{setReplyDeadlineDraft("");setReplyDeadlineDialogOpen(false);toast.success("Reply deadline cleared");}).catch(error=>toast.error(error instanceof Error?error.message:"Unable to clear reply deadline")).finally(()=>setSaving(false));}}>Clear</Button>}<Button type="button" disabled={saving||!brandReady||!replyDeadlineDraft||(replyDeadlineDraft===(remote?.replyDeadline?.slice(0,10)??""))} onClick={()=>{const next=replyDeadlineDraft??"";setSaving(true);void patchBrand({replyDeadline:next||null}).then(updated=>{setReplyDeadlineDraft(updated.replyDeadline?.slice(0,10)??"");setReplyDeadlineDialogOpen(false);toast.success("Reply deadline saved");}).catch(error=>toast.error(error instanceof Error?error.message:"Unable to save reply deadline")).finally(()=>setSaving(false));}}>Save date</Button></DialogFooter></DialogContent></Dialog>
   <Dialog open={resumePausedFollowUp} onOpenChange={setResumePausedFollowUp}><DialogContent><DialogHeader><DialogTitle>Review paused FollowUp</DialogTitle><DialogDescription>Assign an Account Manager and record why follow-up is resuming.</DialogDescription></DialogHeader><Select value={resumeOwnerId} onValueChange={setResumeOwnerId}><SelectTrigger><SelectValue placeholder="Account Manager"/></SelectTrigger><SelectContent>{ownerChoices.map(owner=><SelectItem key={owner.id} value={owner.id}>{owner.name}</SelectItem>)}</SelectContent></Select><Textarea value={followUpNote} onChange={event=>setFollowUpNote(event.target.value)} placeholder="Reason for resuming"/><DialogFooter><Button disabled={saving||!resumeOwnerId||!followUpNote.trim()} onClick={()=>void resumePausedBrand().then(saved=>{if(saved)setResumePausedFollowUp(false);})}>Resume FollowUp</Button></DialogFooter></DialogContent></Dialog>
   <Dialog open={newRoundOpen} onOpenChange={setNewRoundOpen}><DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle>{latestRound?"Start new follow-up Round":"Start follow-up"}</DialogTitle><DialogDescription>Start a new cooperation cycle. The new Round begins at NONE. Brand profile, relationship context, previous conversations and tasks are retained.</DialogDescription></DialogHeader>{can("assignOwner")&&<div className="space-y-2"><label className="text-sm font-medium">Account Manager</label><Select value={newRoundOwner} onValueChange={setNewRoundOwner}><SelectTrigger aria-label="New Round Account Manager"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="unassigned">Unassigned</SelectItem>{ownerChoices.map(owner=><SelectItem key={owner.id} value={owner.id}>{owner.name}</SelectItem>)}</SelectContent></Select></div>}{history.encounters.some(e=>!e.round_id)&&<div className="space-y-2"><label className="text-sm font-medium">Origin Encounter</label><Select value={newRoundOrigin} onValueChange={setNewRoundOrigin}><SelectTrigger aria-label="New Round origin Encounter"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="none">No specific Encounter</SelectItem>{history.encounters.filter(e=>!e.round_id).map(e=><SelectItem key={e.id} value={e.id}>{e.exhibition_name} · {dateOnly(e.meeting_at)}</SelectItem>)}</SelectContent></Select></div>}<DialogFooter><Button variant="outline" onClick={()=>setNewRoundOpen(false)}>Cancel</Button><Button disabled={saving} onClick={()=>void runRoundAction("start")}>{saving?"Starting…":"Start Round"}</Button></DialogFooter></DialogContent></Dialog>
   <BrandAiSummaryDialog open={aiSummaryOpen} onOpenChange={setAiSummaryOpen} brandId={c.id} brand={remote} signals={brandSignals?.events || []} demo={mockDetailPreview||aiSummaryDemo} onSummariesChange={summaries=>setRemote(previous=>previous?{...previous,aiSummaries:summaries}:previous)}/>
@@ -1929,9 +1933,6 @@ function BrandContactList({
         <div className="mt-3 grid gap-y-4">
           {contacts.map((contact) => {
             const expanded = open.has(contact.id);
-            const meta = [contact.contactOrder, contact.role, contact.followupStatus]
-              .filter(Boolean)
-              .join(" · ");
             const previewNote = previews[contact.id]?.note;
             return (
               <div key={contact.id} className="min-w-0">
@@ -1941,6 +1942,7 @@ function BrandContactList({
                       type="button"
                       onClick={() => toggle(contact.id)}
                       className="flex min-w-0 items-center gap-x-1.5 text-left"
+                      aria-expanded={expanded}
                     >
                       <ChevronRight
                         className={`size-3.5 shrink-0 text-slate-400 transition-transform ${expanded ? "rotate-90" : ""}`}
@@ -1960,13 +1962,6 @@ function BrandContactList({
                         <ExternalLink className="size-2.5" />
                       </a>
                     ) : null}
-                    <button
-                      type="button"
-                      onClick={() => toggle(contact.id)}
-                      className="min-w-0 flex-1 truncate text-left text-xs text-slate-500"
-                    >
-                      {meta || contact.role}
-                    </button>
                   </div>
                   {canEnrich && (
                     <Button
@@ -1992,6 +1987,11 @@ function BrandContactList({
                 <LinkedInUpdates events={linkedinEvents.filter(event=>event.contactId===contact.id||event.contactId===contact.keyPersonId)} readIds={signalReadIds} onRead={onReadSignals} id={`contact-linkedin-${contact.id}`}/>
                 {expanded && (
                   <div className="mt-2 grid gap-1.5">
+                    <dl className="grid min-w-0 grid-cols-[7rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-xs">
+                      {contact.contactOrder && <><dt className="text-slate-400">Contact order</dt><dd className="min-w-0 break-words text-slate-700">{contact.contactOrder}</dd></>}
+                      <dt className="text-slate-400">Role</dt><dd className="min-w-0 break-words text-slate-700">{contact.role || "—"}</dd>
+                      {contact.followupStatus && <><dt className="text-slate-400">Follow-up status</dt><dd className="min-w-0 break-words text-slate-700">{contact.followupStatus}</dd></>}
+                    </dl>
                     {contact.title && <div className="text-xs text-slate-500">{contact.title}</div>}
                     {contact.followupMode && (
                       <div className="text-xs text-slate-500">Mode: {contact.followupMode}</div>

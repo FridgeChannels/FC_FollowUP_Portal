@@ -44,13 +44,15 @@ function fixture({ role = "AccountManager", ownerId = "am", status = "In Progres
   };
 }
 
-test("Pause and Complete retain Owner-only permission after the merge", async () => {
+test("Admin and the assigned Account Manager can Pause and Complete; other Account Managers cannot", async () => {
   for (const status of ["Paused", "Completed"]) {
-    for (const viewer of [{ role: "Admin" }, { ownerId: "other-am" }]) {
-      const f = fixture(viewer);
-      assert.equal((await f.request({ status, note: "Customer decision" })).status, 403);
-      assert.equal(f.calls.length, 0);
-    }
+    const admin = fixture({ role: "Admin" });
+    assert.equal((await admin.request({ status, note: "Customer decision" })).status, 200);
+    assert.deepEqual(admin.calls.map(call => call.action), ["patch", "cancel"]);
+
+    const otherAm = fixture({ ownerId: "other-am" });
+    assert.equal((await otherAm.request({ status, note: "Customer decision" })).status, 403);
+    assert.equal(otherAm.calls.length, 0);
   }
 });
 

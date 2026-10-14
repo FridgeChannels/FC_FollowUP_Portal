@@ -35,6 +35,7 @@ export type PendingWorkPause = {
   dueAt: string;
   preview: string;
 };
+export type PendingWorkDeadline = { brandId: string; dueAt: string };
 
 export type WorkTarget = { id: string; at: string | null; dueAt?: string | null };
 export type WorkBrand = {
@@ -43,6 +44,7 @@ export type WorkBrand = {
   channels: Partial<Record<WorkReplyChannel, { count: number; target: WorkTarget }>>;
   callReview: { count: number; target: WorkTarget } | null;
   pauseDue: { target: WorkTarget; preview: string } | null;
+  replyDeadline: { target: WorkTarget } | null;
   preview: string;
   waitingSince: string | null;
   overdue: boolean;
@@ -65,35 +67,44 @@ export function buildBrandWork(
   nowMs = Date.now(),
   assignments: PendingWorkAssignment[] = [],
   pauses: PendingWorkPause[] = [],
+  replyDeadlines: PendingWorkDeadline[] = [],
 ): BrandWorkPayload {
   const visible = new Map(brands.map((brand) => [key(brand.id), brand]));
-  const grouped = new Map<string, { replies: PendingWorkReply[]; calls: PendingWorkCall[]; assignments: PendingWorkAssignment[]; pauses: PendingWorkPause[] }>();
+  const grouped = new Map<string, { replies: PendingWorkReply[]; calls: PendingWorkCall[]; assignments: PendingWorkAssignment[]; pauses: PendingWorkPause[]; replyDeadlines: PendingWorkDeadline[] }>();
+  const emptyGroup = () => ({ replies: [], calls: [], assignments: [], pauses: [], replyDeadlines: [] });
   for (const reply of replies) {
     const id = key(reply.brandId);
     if (!visible.has(id)) continue;
-    const group = grouped.get(id) || { replies: [], calls: [], assignments: [], pauses: [] };
+    const group = grouped.get(id) || emptyGroup();
     group.replies.push(reply);
     grouped.set(id, group);
   }
   for (const call of calls) {
     const id = key(call.brandId);
     if (!visible.has(id)) continue;
-    const group = grouped.get(id) || { replies: [], calls: [], assignments: [], pauses: [] };
+    const group = grouped.get(id) || emptyGroup();
     group.calls.push(call);
     grouped.set(id, group);
   }
   for (const assignment of assignments) {
     const id = key(assignment.brandId);
     if (!visible.has(id)) continue;
-    const group = grouped.get(id) || { replies: [], calls: [], assignments: [], pauses: [] };
+    const group = grouped.get(id) || emptyGroup();
     group.assignments.push(assignment);
     grouped.set(id, group);
   }
   for (const pause of pauses) {
     const id = key(pause.brandId);
     if (!visible.has(id)) continue;
-    const group = grouped.get(id) || { replies: [], calls: [], assignments: [], pauses: [] };
+    const group = grouped.get(id) || emptyGroup();
     group.pauses.push(pause);
+    grouped.set(id, group);
+  }
+  for (const deadline of replyDeadlines) {
+    const id = key(deadline.brandId);
+    if (!visible.has(id)) continue;
+    const group = grouped.get(id) || emptyGroup();
+    group.replyDeadlines.push(deadline);
     grouped.set(id, group);
   }
   const rows: WorkBrand[] = [];
@@ -138,13 +149,16 @@ export function buildBrandWork(
       .sort((a, b) => b.assignedAt.localeCompare(a.assignedAt))[0];
     const pause = group.pauses
       .sort((a, b) => a.dueAt.localeCompare(b.dueAt))[0];
+    const replyDeadline = group.replyDeadlines.sort((a, b) => a.dueAt.localeCompare(b.dueAt))[0];
     const latestReply = pendingThreads.map((thread) => thread.latest).sort((a, b) => (b.receivedAt || "").localeCompare(a.receivedAt || ""))[0];
     const latestCall = [...uniqueCalls].sort((a, b) => b.submittedAt.localeCompare(a.submittedAt))[0];
-    const preview = pause?.preview || (latestReply && (!latestCall || (latestReply.receivedAt || "") >= latestCall.submittedAt)
+    const preview = pause?.preview || (replyDeadline ? "No reply by deadline" : latestReply && (!latestCall || (latestReply.receivedAt || "") >= latestCall.submittedAt)
       ? latestReply.preview : latestCall?.preview || (assignment ? "New assignment" : ""));
-    const priority = pause || overdue ? 0 : assignment ? 1 : pendingThreads.length ? 2 : 3;
+    const priority = pause || replyDeadline || overdue ? 0 : assignment ? 1 : pendingThreads.length ? 2 : 3;
     const priorityAt = pause
       ? pause.dueAt
+      : replyDeadline
+      ? replyDeadline.dueAt
       : priority === 1
       ? assignment!.assignedAt
       : priority === 3
@@ -157,6 +171,7 @@ export function buildBrandWork(
       channels,
       callReview: uniqueCalls.length ? { count: uniqueCalls.length, target: { id: uniqueCalls[0].taskId, at: uniqueCalls[0].submittedAt } } : null,
       pauseDue: pause ? { target: { id: pause.brandId, at: pause.dueAt, dueAt: pause.dueAt }, preview: pause.preview } : null,
+      replyDeadline: replyDeadline ? { target: { id: replyDeadline.brandId, at: replyDeadline.dueAt, dueAt: replyDeadline.dueAt } } : null,
       preview,
       waitingSince: priorityAt,
       overdue,
@@ -170,7 +185,7 @@ export function buildBrandWork(
     counts: {
       myWork: rows.length,
       newAssignments: rows.filter((row) => !!row.newAssignment).length,
-      replies: rows.filter((row) => WORK_REPLY_CHANNELS.some((channel) => !!row.channels[channel])).length,
+      replies: rows.filter((row) => WORK_REPLY_CHANNELS.some((channel) => !!row.channels[channel]) || !!row.replyDeadline).length,
       callReview: rows.filter((row) => !!row.callReview).length,
       pauseDue: rows.filter((row) => !!row.pauseDue).length,
     },

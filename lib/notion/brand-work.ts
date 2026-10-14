@@ -1,4 +1,4 @@
-import { buildBrandWork, WORK_REPLY_CHANNELS, type PendingWorkAssignment, type PendingWorkCall, type PendingWorkPause, type PendingWorkReply, type WorkReplyChannel } from "../brand-work";
+import { buildBrandWork, WORK_REPLY_CHANNELS, type PendingWorkAssignment, type PendingWorkCall, type PendingWorkDeadline, type PendingWorkPause, type PendingWorkReply, type WorkReplyChannel } from "../brand-work";
 import { historyFromTask } from "../call-review-history";
 import { firstRelationId, propertyDate, propertyText, queryDatabasePages, retrievePage, type NotionPage } from "./client";
 import { getFollowupConversationDbId, getFollowupTaskDbId } from "./config";
@@ -16,6 +16,7 @@ function preview(page: NotionPage) {
 }
 
 const key = (id: string) => id.replace(/-/g, "").toLowerCase();
+const REPLY_DEADLINE_CHANNELS = new Set(["Email", "SMS", "WhatsApp", "LinkedIn", "Phone"]);
 
 export async function listBrandWorkForViewer(scope: NeedsReplyBrandScope) {
   const [conversationPages, taskPages, ownedMetadata] = await Promise.all([
@@ -124,11 +125,36 @@ export async function listBrandWorkForViewer(scope: NeedsReplyBrandScope) {
     })
     : [];
 
+  const now = Date.now();
+  const deadlineCandidates = ownedMetadata.flatMap(({ brand }) => {
+    const date = brand.replyDeadline?.slice(0, 10);
+    if (!date || brand.status !== "In Progress") return [];
+    const dueAt = `${date}T23:59:59.999Z`;
+    return Date.parse(dueAt) <= now ? [{ brand, dueAt }] : [];
+  });
+  const deadlineActivities = deadlineCandidates.length
+    ? await listFollowupConversationsByBrands(deadlineCandidates.map(({ brand }) => brand.id))
+    : [];
+  const replyDeadlines: PendingWorkDeadline[] = deadlineCandidates.flatMap(({ brand, dueAt }) => {
+    const interactions = deadlineActivities.filter((activity) => key(activity.brandId || "") === key(brand.id)
+      && REPLY_DEADLINE_CHANNELS.has(activity.channel || "")
+      && !!activity.recordedAt);
+    const latestOutboundAt = interactions
+      .filter((activity) => activity.direction === "Outbound" && Date.parse(activity.recordedAt!) <= Date.parse(dueAt))
+      .map((activity) => activity.recordedAt!)
+      .sort()
+      .at(-1);
+    if (!latestOutboundAt) return [];
+    const answered = interactions.some((activity) => activity.direction === "Inbound" && activity.recordedAt! > latestOutboundAt);
+    return answered ? [] : [{ brandId: brand.id, dueAt }];
+  });
+
   const brandIds = [...new Set([
     ...replies.map((item) => item.brandId),
     ...calls.map((item) => item.brandId),
     ...assignments.map((item) => item.brandId),
     ...pauses.map((item) => item.brandId),
+    ...replyDeadlines.map((item) => item.brandId),
   ].map(key))];
   if (!brandIds.length) return buildBrandWork([], [], []);
   const metadataByKey = new Map(ownedMetadata.map((item) => [key(item.brand.id), item]));
@@ -138,5 +164,5 @@ export async function listBrandWorkForViewer(scope: NeedsReplyBrandScope) {
   });
   const interactionSignals = await listBrandInteractionSignals(metadata.map(({ page }) => page));
   const brands = attachBrandInteractionSignals(metadata.map(({ brand }) => brand), interactionSignals);
-  return buildBrandWork(brands, replies, calls, Date.now(), assignments, pauses);
+  return buildBrandWork(brands, replies, calls, Date.now(), assignments, pauses, replyDeadlines);
 }

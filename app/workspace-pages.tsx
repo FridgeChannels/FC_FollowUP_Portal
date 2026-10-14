@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   ChevronRight,
   CircleAlert,
+  Clock3,
   MessageCircle,
   PhoneCall,
   Plus,
@@ -481,7 +482,7 @@ function HandlingMode({ value }: { value: BrandListItem["handlingMode"] }) {
 type BrandListFilters = {
   view: "myWork" | "all";
   workQ: string;
-  action: "all" | "assignments" | "replies" | "callReview";
+  action: "all" | "assignments" | "replies" | "callReview" | "pauseDue";
   q: string;
   status: string;
   cp: string;
@@ -528,7 +529,7 @@ function brandListFiltersFromSearch(
       ? requestedView
       : defaultView,
     workQ: search.get("workQ") ?? "",
-    action: requestedAction === "assignments" || requestedAction === "replies" || requestedAction === "callReview" ? requestedAction : requestedView === "replies" || requestedView === "callReview" ? requestedView : legacyReplyState === "needsReply" ? "replies" : legacyReplyState === "qualification" ? "callReview" : "all",
+    action: requestedAction === "assignments" || requestedAction === "replies" || requestedAction === "callReview" || requestedAction === "pauseDue" ? requestedAction : requestedView === "replies" || requestedView === "callReview" ? requestedView : legacyReplyState === "needsReply" ? "replies" : legacyReplyState === "qualification" ? "callReview" : "all",
     q: search.get("q") ?? "",
     status: search.get("status") ?? "all",
     cp: requestedCp && BRAND_LIST_FILTER_CPS.has(requestedCp) ? requestedCp : "all",
@@ -646,7 +647,7 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
   const [filters, setFilters] = useState<BrandListFilters>(() =>
     brandListFiltersFromSearch(searchParams, isAdmin ? "all" : "myWork"),
   );
-  const workView = isAdmin || state.currentRole === "Caller" ? "all" : filters.view;
+  const workView = state.currentRole === "Caller" ? "all" : filters.view;
   const { q: query, status, cp, owner, replyState, handlingMode, exhibitionId, sort, replyFrom, replyTo } = filters;
   const [exhibitionOptions, setExhibitionOptions] = useState<ExhibitionOption[]>([]);
   const [exhibitionOptionsLoading, setExhibitionOptionsLoading] = useState(false);
@@ -695,6 +696,13 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
       .finally(() => { if (!controller.signal.aborted) setWorkLoading(false); });
     return () => controller.abort();
   }, [active, state.currentUserId, state.currentRole, listEpoch, listReloadToken, workReloadToken]);
+  useEffect(() => {
+    if (!active || state.currentRole === "Caller") return;
+    const now = new Date();
+    const nextUtcDay = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1) + 100;
+    const timer = window.setTimeout(() => setWorkReloadToken((value) => value + 1), Math.max(1_000, nextUtcDay - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [active, state.currentRole, workReloadToken]);
   const paginationStorageKey = brandListPaginationStorageKey(filters, state.currentUserId);
   const initialPaginationStorageKey = useRef(paginationStorageKey);
 
@@ -774,14 +782,6 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
       return next;
     });
   };
-  useEffect(() => {
-    if (!isAdmin || filters.view === "all") return;
-    setFilters((previous) => {
-      const next = { ...previous, view: "all" as const };
-      window.history.replaceState(window.history.state, "", brandListPath(next, { cursor, page: pageNumber }));
-      return next;
-    });
-  }, [cursor, filters.view, isAdmin, pageNumber]);
   const setWorkFilter = (patch: Partial<BrandListFilters>) => {
     setFilters((previous) => {
       const next = { ...previous, ...patch };
@@ -973,6 +973,8 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
                     | "lastInteractionDirection"
                     | "lastInteractionStatus"
                     | "lastInteractionCallResult"
+                    | "pendingOutboundChannels"
+                    | "pendingOutboundAt"
                     | "lastReplyAt"
                     | "needsQualification"
                     | "qualificationTaskCount"
@@ -1121,8 +1123,9 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
   const workRows = (work?.brands || [])
     .filter((row) => filters.action === "all"
       || filters.action === "assignments" && !!row.newAssignment
-      || filters.action === "replies" && WORK_REPLY_CHANNELS.some((channel) => !!row.channels[channel])
-      || filters.action === "callReview" && !!row.callReview)
+      || filters.action === "replies" && (WORK_REPLY_CHANNELS.some((channel) => !!row.channels[channel]) || !!row.replyDeadline)
+      || filters.action === "callReview" && !!row.callReview
+      || isAdmin && filters.action === "pauseDue" && !!row.pauseDue)
     .filter((row) => !workSearch || row.brand.name.toLowerCase().includes(workSearch))
     .sort((a, b) => compareBrandListItems(a.brand, b.brand, "ownerAssignedNewest"));
   const workByBrandId = new Map((work?.brands || []).map((row) => [row.brand.id, row]));
@@ -1180,7 +1183,7 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
     let failureMessage = "Update failed";
     try {
       for (const id of ids) {
-        const brand = brands.find((item) => item.id === id);
+        const brand = filtered.find((item) => item.id === id);
         if (!brand) {
           failed.push(id);
           continue;
@@ -1240,7 +1243,7 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
   return (
     <div className="mx-auto max-w-[1480px]">
       <PageHeader title="Brands">
-        {!isAdmin && state.currentRole !== "Caller" && <nav aria-label="Brand views" className="inline-flex max-w-full gap-1 overflow-x-auto rounded-lg bg-slate-100 p-1">
+        {state.currentRole !== "Caller" && <nav aria-label="Brand views" className="inline-flex max-w-full gap-1 overflow-x-auto rounded-lg bg-slate-100 p-1">
           {([
             { view: "myWork", label: "Needs Action", count: work?.counts.myWork },
             { view: "all", label: "All Brands", count: undefined },
@@ -1418,8 +1421,9 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
             <SelectContent>
               <SelectItem value="all">All Actions</SelectItem>
               <SelectItem value="assignments">New Assignments</SelectItem>
-              <SelectItem value="replies">Replies</SelectItem>
+              <SelectItem value="replies">Need Reply</SelectItem>
               <SelectItem value="callReview">Call Review</SelectItem>
+              {isAdmin && <SelectItem value="pauseDue">Pause review due</SelectItem>}
             </SelectContent>
           </Select>
         </div>
@@ -1492,7 +1496,8 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
                   const needsQualification = canReviewQualification && Boolean(c.needsQualification);
                   const hasNewAssignment = Boolean(pendingWork?.newAssignment);
                   const hasPauseDue = Boolean(pendingWork?.pauseDue);
-                  const needsAttention = Boolean(c.needsReply) || needsQualification || hasNewAssignment || hasPauseDue;
+                  const hasReplyDeadline = Boolean(pendingWork?.replyDeadline);
+                  const needsAttention = Boolean(c.needsReply) || needsQualification || hasNewAssignment || hasPauseDue || hasReplyDeadline;
                   return (
                     <TableRow
                       key={c.id}
@@ -1522,7 +1527,7 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
                               {needsAttention ? (
                                 <span
                                   className="size-2 shrink-0 rounded-full bg-rose-500"
-                              aria-label={hasPauseDue ? "Paused FollowUp review due" : hasNewAssignment ? "New assignment" : needsQualification ? "Call needs qualification" : "Reply needed"}
+                              aria-label={hasPauseDue ? "Paused FollowUp review due" : hasReplyDeadline ? "No reply by deadline" : hasNewAssignment ? "New assignment" : needsQualification ? "Call needs qualification" : "Reply needed"}
                                 />
                               ) : null}
                               <span className="truncate">{c.name}</span>
@@ -1546,7 +1551,7 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
                                   ? ` · ${formatEasternDateTime(c.replyDueAt || c.replyUpdatedAt || "")}`
                                   : ""}
                               </div>
-                            ) : null}
+                            ) : hasReplyDeadline ? <div className="mt-0.5 truncate text-xs font-medium text-rose-700">No reply by deadline · {pendingWork?.replyDeadline?.target.dueAt?.slice(0,10)}</div> : null}
                             {isAdmin && c.status === "Paused" && c.lastAssignedOwnerName ? (
                               <div className="mt-0.5 truncate text-xs text-slate-500" title={`Last assigned to ${c.lastAssignedOwnerName}`}>
                                 Last assigned: {c.lastAssignedOwnerName}{c.lastAssignedAt ? ` · ${formatEasternDateTime(c.lastAssignedAt)}` : ""}
@@ -1562,6 +1567,9 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
                           </button>}
                           {pendingWork.pauseDue && <button type="button" className="inline-flex min-h-9 items-center gap-1 rounded-md bg-amber-50 px-2 text-xs font-semibold text-amber-800 hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500" onClick={() => openBrand(c.id)}>
                             <CalendarClock className="size-3.5 shrink-0" />Pause review due
+                          </button>}
+                          {pendingWork.replyDeadline && <button type="button" className="inline-flex min-h-9 items-center gap-1 rounded-md bg-rose-50 px-2 text-xs font-semibold text-rose-800 hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500" onClick={() => openBrand(c.id)}>
+                            <CalendarClock className="size-3.5 shrink-0" />Need Reply · {pendingWork.replyDeadline.target.dueAt?.slice(0,10)}
                           </button>}
                           {WORK_REPLY_CHANNELS.map((channel) => {
                             const pending = pendingWork.channels[channel];
@@ -1604,8 +1612,9 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
                         />
                       </TableCell>
                       {workView === "all" && <TableCell className="max-w-60 text-xs text-slate-500">
+                        <div className="min-w-44 space-y-1">
                         {c.lastInteractionAt ? (
-                          <div className="min-w-44">
+                          <>
                             <div className="flex min-w-0 items-center gap-1.5">
                               <span className="truncate font-semibold text-slate-700" title={lastInteractionLabel(c)}>
                                 {lastInteractionLabel(c)}
@@ -1625,10 +1634,18 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
                             <time dateTime={c.lastInteractionAt} className="mt-0.5 block truncate font-mono text-[11px] text-slate-500">
                               {formatEasternDateTime(c.lastInteractionAt)}
                             </time>
-                          </div>
+                          </>
                         ) : (
-                          "No interaction"
+                          <span className="text-slate-400">No interaction</span>
                         )}
+                        {!!c.pendingOutboundChannels?.length && <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5" title={`Pending outbound tasks: ${c.pendingOutboundChannels.join(", ")}`}>
+                          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                            <Clock3 className="size-3" aria-hidden="true" />Pending
+                          </span>
+                          <span className="min-w-0 truncate text-[11px] text-slate-600">{c.pendingOutboundChannels.join(", ")}</span>
+                          {c.pendingOutboundAt && <time dateTime={c.pendingOutboundAt} className="w-full truncate font-mono text-[10px] text-slate-500">Queued {formatEasternDateTime(c.pendingOutboundAt)}</time>}
+                        </div>}
+                        </div>
                       </TableCell>}
                       <TableCell className="text-xs tabular-nums text-slate-600">
                         {daysSince(c.lastInteractionAt)}

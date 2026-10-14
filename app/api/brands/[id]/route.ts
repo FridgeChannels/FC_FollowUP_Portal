@@ -78,6 +78,7 @@ export async function PATCH(request: Request, { params }: Params) {
       note?: string;
       followUpAt?: string;
       humanNotes?: string | null;
+      replyDeadline?: string | null;
       channelType?: ChannelType;
       amazonSampleProduct?: AmazonSampleProduct;
       assignmentHandled?: boolean;
@@ -109,7 +110,18 @@ export async function PATCH(request: Request, { params }: Params) {
       && !!viewer.ownerId
       && !!brand.ownerId
       && viewer.ownerId.replace(/-/g, "").toLowerCase() === brand.ownerId.replace(/-/g, "").toLowerCase();
-    if ((body.status === "Paused" || body.status === "Completed") && !isAssignedAccountManager) {
+    if (body.replyDeadline !== undefined) {
+      if (viewer.role !== "Admin" && !isAssignedAccountManager) {
+        return Response.json({ error: "Only the assigned Account Manager can set the reply deadline" }, { status: 403 });
+      }
+      const deadlineTimestamp = typeof body.replyDeadline === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.replyDeadline)
+        ? Date.parse(`${body.replyDeadline}T00:00:00.000Z`)
+        : Number.NaN;
+      if (body.replyDeadline !== null && (!Number.isFinite(deadlineTimestamp) || new Date(deadlineTimestamp).toISOString().slice(0, 10) !== body.replyDeadline)) {
+        throw new FollowupError("Enter a valid reply deadline date");
+      }
+    }
+    if ((body.status === "Paused" || body.status === "Completed") && viewer.role !== "Admin" && !isAssignedAccountManager) {
       return Response.json({ error: "Only the assigned Account Manager can pause or complete FollowUp" }, { status: 403 });
     }
     if (body.resumePausedFollowUp) {
@@ -190,6 +202,7 @@ export async function PATCH(request: Request, { params }: Params) {
       handlingMode: body.handlingMode,
       notes,
       humanNotes: body.humanNotes,
+      replyDeadline: body.replyDeadline,
       channelType: body.channelType,
       amazonSampleProduct: body.amazonSampleProduct,
     };
@@ -212,6 +225,9 @@ export async function PATCH(request: Request, { params }: Params) {
         });
       }
     } else await updateFollowupClient(id, patch);
+    if (body.replyDeadline !== undefined && (body.status !== undefined || body.ownerId !== undefined || body.currentCpId !== undefined)) {
+      await updateFollowupClient(id, { replyDeadline: body.replyDeadline });
+    }
     const cancelledTasks =
       (body.status === "Paused" || body.status === "Completed") && body.status !== brand.status
         ? await cancelPendingBrandTasks({ brandId: id, reason: body.status })
