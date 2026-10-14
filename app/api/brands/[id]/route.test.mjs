@@ -8,9 +8,9 @@ const compiled = ts.transpileModule(readFileSync(new URL("./route.ts", import.me
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 
-function fixture({ role = "AccountManager", ownerId = "am", status = "In Progress", conflict = false } = {}) {
+function fixture({ role = "AccountManager", ownerId = "am", brandOwnerId = "am", brandOwnerEmail = ownerId === "am" ? "test@example.com" : "other@example.com", status = "In Progress", conflict = false } = {}) {
   const calls = [];
-  const brand = { id: "brand", ownerId: "am", status };
+  const brand = { id: "brand", ownerId: brandOwnerId, ownerEmail: brandOwnerEmail, status };
   class FollowupError extends Error { constructor(message, status = 400) { super(message); this.status = status; } }
   const mocks = {
     viewerFromRequest: async () => ({ email: "test@example.com", role, ownerId }),
@@ -21,6 +21,7 @@ function fixture({ role = "AccountManager", ownerId = "am", status = "In Progres
     retrievePage: async () => ({ id: "brand", properties: { Notes: "" } }),
     mapFollowupClientPage: async () => brand,
     mapFollowupClientDetail: async () => brand,
+    updateFollowupClient: async (...args) => { calls.push({ action: "updateBrand", args }); },
     propertyText: value => value || "",
     listBrandReplySignals: async () => new Map(),
     attachBrandReplySignals: brands => brands,
@@ -71,6 +72,20 @@ test("a version conflict remains HTTP 409 and does not cancel tasks", async () =
   const f = fixture({ conflict: true });
   assert.equal((await f.request({ status: "Paused", note: "Customer decision" })).status, 409);
   assert.equal(f.calls.length, 0);
+});
+
+test("the assigned Account Manager can set a Reply Deadline by owner ID or account email", async () => {
+  const ownerIdMatch = fixture();
+  assert.equal((await ownerIdMatch.request({ replyDeadline: "2026-10-20" })).status, 200);
+  assert.equal(ownerIdMatch.calls[0].action, "updateBrand");
+
+  const emailMatch = fixture({ ownerId: "different-notion-id", brandOwnerId: "legacy-owner-id", brandOwnerEmail: "test@example.com" });
+  assert.equal((await emailMatch.request({ replyDeadline: "2026-10-20" })).status, 200);
+  assert.equal(emailMatch.calls[0].action, "updateBrand");
+
+  const unassigned = fixture({ ownerId: "different-notion-id", brandOwnerId: "legacy-owner-id", brandOwnerEmail: "someone-else@example.com" });
+  assert.equal((await unassigned.request({ replyDeadline: "2026-10-20" })).status, 403);
+  assert.equal(unassigned.calls.length, 0);
 });
 
 test("Admin resume uses the Round resume action after saving assignment and note", async () => {

@@ -107,9 +107,10 @@ export async function PATCH(request: Request, { params }: Params) {
       return Response.json({ error: "Only the assigned Account Manager can review this assignment" }, { status: 403 });
     }
     const isAssignedAccountManager = viewer.role === "AccountManager"
-      && !!viewer.ownerId
-      && !!brand.ownerId
-      && viewer.ownerId.replace(/-/g, "").toLowerCase() === brand.ownerId.replace(/-/g, "").toLowerCase();
+      && (
+        (!!viewer.ownerId && !!brand.ownerId && viewer.ownerId.replace(/-/g, "").toLowerCase() === brand.ownerId.replace(/-/g, "").toLowerCase())
+        || (!!viewer.email && !!brand.ownerEmail && viewer.email.trim().toLowerCase() === brand.ownerEmail.trim().toLowerCase())
+      );
     if (body.replyDeadline !== undefined) {
       if (viewer.role !== "Admin" && !isAssignedAccountManager) {
         return Response.json({ error: "Only the assigned Account Manager can set the reply deadline" }, { status: 403 });

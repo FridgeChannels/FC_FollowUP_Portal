@@ -970,7 +970,10 @@ export function BrandDetail({customerId}:{customerId:string}){
     updatedAt: remote.lastEditedAt || "",
   } : undefined);
   const notionBacked=!local&&!!remote;
-  const canManageReplyDeadline=notionBacked&&!!remote&&(isAdmin||state.currentRole==="AccountManager"&&!!remote.ownerId&&remote.ownerId.replace(/-/g,"").toLowerCase()===state.currentUserId.replace(/-/g,"").toLowerCase());
+  const canManageReplyDeadline=notionBacked&&!!remote&&(isAdmin||state.currentRole==="AccountManager"&&(
+    (!!remote.ownerId&&remote.ownerId.replace(/-/g,"").toLowerCase()===state.currentUserId.replace(/-/g,"").toLowerCase())||
+    (sessionUser?.role==="AccountManager"&&!!sessionUser.email&&sessionUser.email.trim().toLowerCase()===remote.ownerEmail?.trim().toLowerCase())
+  ));
   const contactsLoading=notionBacked&&!brandReady;
   const activityLoading=notionBacked&&(!brandReady||!activitiesReady||activitiesLoading);
   const visible=!!c&&(aiSummaryDemo||(local?(manager||c.ownerId===state.currentUserId):!!remote));

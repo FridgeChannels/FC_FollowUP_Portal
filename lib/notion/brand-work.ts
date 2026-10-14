@@ -8,6 +8,7 @@ import { listFollowupConversationsByBrands } from "./conversations";
 import { listFollowupTaskSignalsByBrands } from "./tasks";
 import type { NeedsReplyBrandScope } from "./owner-filter";
 import { hasResolvedFollowUpReminder, latestFollowUpReminder } from "../followup-reminder";
+import { expiredUnansweredReplyDeadline } from "../reply-deadline";
 
 function preview(page: NotionPage) {
   const properties = page.properties || {};
@@ -16,7 +17,6 @@ function preview(page: NotionPage) {
 }
 
 const key = (id: string) => id.replace(/-/g, "").toLowerCase();
-const REPLY_DEADLINE_CHANNELS = new Set(["Email", "SMS", "WhatsApp", "LinkedIn", "Phone"]);
 
 export async function listBrandWorkForViewer(scope: NeedsReplyBrandScope) {
   const [conversationPages, taskPages, ownedMetadata] = await Promise.all([
@@ -126,27 +126,26 @@ export async function listBrandWorkForViewer(scope: NeedsReplyBrandScope) {
     : [];
 
   const now = Date.now();
-  const deadlineCandidates = ownedMetadata.flatMap(({ brand }) => {
-    const date = brand.replyDeadline?.slice(0, 10);
-    if (!date || brand.status !== "In Progress") return [];
-    const dueAt = `${date}T23:59:59.999Z`;
-    return Date.parse(dueAt) <= now ? [{ brand, dueAt }] : [];
-  });
+  const deadlineCandidates = ownedMetadata.flatMap(({ page, brand }) =>
+    brand.replyDeadline && brand.status !== "Paused" && brand.status !== "Completed" ? [{ page, brand }] : [],
+  );
   const deadlineActivities = deadlineCandidates.length
     ? await listFollowupConversationsByBrands(deadlineCandidates.map(({ brand }) => brand.id))
     : [];
-  const replyDeadlines: PendingWorkDeadline[] = deadlineCandidates.flatMap(({ brand, dueAt }) => {
-    const interactions = deadlineActivities.filter((activity) => key(activity.brandId || "") === key(brand.id)
-      && REPLY_DEADLINE_CHANNELS.has(activity.channel || "")
-      && !!activity.recordedAt);
-    const latestOutboundAt = interactions
-      .filter((activity) => activity.direction === "Outbound" && Date.parse(activity.recordedAt!) <= Date.parse(dueAt))
-      .map((activity) => activity.recordedAt!)
-      .sort()
-      .at(-1);
-    if (!latestOutboundAt) return [];
-    const answered = interactions.some((activity) => activity.direction === "Inbound" && activity.recordedAt! > latestOutboundAt);
-    return answered ? [] : [{ brandId: brand.id, dueAt }];
+  const deadlineSignals = deadlineCandidates.length
+    ? await listBrandInteractionSignals(deadlineCandidates.map(({ page }) => page))
+    : new Map();
+  const replyDeadlines: PendingWorkDeadline[] = deadlineCandidates.flatMap(({ brand }) => {
+    const signal = deadlineSignals.get(brand.id);
+    const dueAt = expiredUnansweredReplyDeadline({
+      deadline: brand.replyDeadline,
+      status: brand.status,
+      activities: deadlineActivities.filter((activity) => key(activity.brandId || "") === key(brand.id)),
+      lastSuccessfulOutboundAt: signal?.lastInteractionDirection === "Outbound" ? signal.lastInteractionAt : null,
+      lastReplyAt: signal?.lastReplyAt,
+      nowMs: now,
+    });
+    return dueAt ? [{ brandId: brand.id, dueAt }] : [];
   });
 
   const brandIds = [...new Set([
@@ -162,7 +161,12 @@ export async function listBrandWorkForViewer(scope: NeedsReplyBrandScope) {
     const item = metadataByKey.get(id);
     return item ? [item] : [];
   });
-  const interactionSignals = await listBrandInteractionSignals(metadata.map(({ page }) => page));
+  const interactionSignals = new Map(deadlineSignals);
+  const missingSignalMetadata = metadata.filter(({ brand }) => !interactionSignals.has(brand.id));
+  if (missingSignalMetadata.length) {
+    const additionalSignals = await listBrandInteractionSignals(missingSignalMetadata.map(({ page }) => page));
+    for (const [id, signal] of additionalSignals) interactionSignals.set(id, signal);
+  }
   const brands = attachBrandInteractionSignals(metadata.map(({ brand }) => brand), interactionSignals);
   return buildBrandWork(brands, replies, calls, Date.now(), assignments, pauses, replyDeadlines);
 }
