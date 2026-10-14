@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronDown, ExternalLink, MailOpen, SmartphoneNfc } from "lucide-react";
 import type { SignalEvent } from "@/lib/signals/model";
 import { safeSourceUrl } from "@/lib/signals/model";
@@ -206,6 +206,11 @@ export function SignalHistoryPanel({ events, readIds, brandName, ownerName, acti
   onOpenSignal?: (event: SignalEvent) => void;
 }) {
   const [type, setType] = useState<"all" | SignalEvent["type"]>("all");
+  useEffect(() => {
+    if (!activeSignalId) return;
+    const record = document.getElementById(`signal-history-${encodeURIComponent(activeSignalId)}`);
+    record?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [activeSignalId]);
   const allRecords = [...new Map(events.map((event) => [event.id, event])).values()]
     .sort((left, right) => Date.parse(signalHistoryTime(right)) - Date.parse(signalHistoryTime(left)));
   const records = allRecords.filter((event) => type === "all" || event.type === type);
@@ -231,7 +236,7 @@ export function SignalHistoryPanel({ events, readIds, brandName, ownerName, acti
         const source = safeSourceUrl(event.sourceUrl);
         const readId = event.signalReadId || event.id;
         const read = readIds.includes(readId);
-        return <article key={event.id} className="min-w-0 py-4 first:pt-0 last:pb-0">
+        return <article id={`signal-history-${encodeURIComponent(event.id)}`} key={event.id} className={`min-w-0 scroll-m-4 py-4 transition-colors first:pt-0 last:pb-0 ${activeSignalId === event.id ? "-mx-2 rounded-lg bg-violet-50 px-2" : ""}`}>
           <div className="flex items-start justify-between gap-3">
             <SignalHistoryType type={event.type} />
             <time dateTime={occurredAt} className="shrink-0 text-[11px] text-slate-500">{date(occurredAt)}</time>
