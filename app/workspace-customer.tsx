@@ -621,11 +621,11 @@ export function BrandDetail({customerId}:{customerId:string}){
   const mockDetailPreview=process.env.NODE_ENV!=="production"&&searchParams.get("mock")==="1"&&customerId===MOCK_PETER_SIGNAL_BRAND_ID;
   const aiSummaryDemo=customerId==="ai-summary-demo"&&searchParams.get("aiSummaryDemo")==="1";
   const requestedReturnTo=searchParams.get("returnTo");
-  const brandListReturnTo=requestedReturnTo==="/customers"||requestedReturnTo?.startsWith("/customers?")||requestedReturnTo==="/signals"||requestedReturnTo?.startsWith("/signals?")
-    ? requestedReturnTo
+  const brandListReturnTo=requestedReturnTo==="/customers"||requestedReturnTo?.startsWith("/customers?")||requestedReturnTo==="/signals"||requestedReturnTo?.startsWith("/signals?")||/^\/performance(?:\/(?:ams|exhibitions)\/[a-z0-9-]+)?(?:\?|$)/.test(requestedReturnTo||"")
+    ? requestedReturnTo || "/customers"
     : "/customers";
   const backPath=can("customers")?brandListReturnTo:"/tasks";
-  const backLabel=backPath.startsWith("/signals")?"Back to Signals":can("customers")?"Back to Brands":"Back to tasks";
+  const backLabel=backPath.startsWith("/performance")?"Back to Performance":backPath.startsWith("/signals")?"Back to Signals":can("customers")?"Back to Brands":"Back to tasks";
   const returnToList=()=>{
     if(can("customers")&&backPath.startsWith("/customers")){
       requestBrandListPageRefresh();
