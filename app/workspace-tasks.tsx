@@ -382,13 +382,13 @@ export function TasksPage({ selectedId, selectedCallId, returnToDashboard = fals
   return <div className="mx-auto max-w-[1540px]">
     {isCaller ? <TodaysNotion /> : null}
     <div className="mb-5">
-      <h1 className="text-2xl font-bold tracking-tight">ReplyTask</h1>
+      <h1 className="text-2xl font-bold tracking-tight">Reply Tasks</h1>
     </div>
 
     <div className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-2 py-1">
       <div className="relative w-44 shrink-0"><Search className="absolute left-0 top-1/2 size-3.5 -translate-y-1/2 text-slate-400"/><Input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search brand or task…" className="h-8 rounded-none border-0 bg-transparent px-0 pl-6 text-xs shadow-none focus-visible:ring-2"/></div>
-      {state.currentRole !== "Caller" && <Select value={type} onValueChange={value => setType(value as TaskType | "All")}><SelectTrigger className="h-8 w-auto border-0 bg-transparent px-0 text-xs shadow-none hover:bg-transparent focus-visible:ring-2"><SelectValue/></SelectTrigger><SelectContent>{["All", "Call", "Reply"].map(value => <SelectItem key={value} value={value}>{value === "All" ? "All types" : value}</SelectItem>)}</SelectContent></Select>}
-      {manager && <Select value={assignee} onValueChange={setAssignee}><SelectTrigger className="h-8 w-auto border-0 bg-transparent px-0 text-xs shadow-none hover:bg-transparent focus-visible:ring-2"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">All AccountManagers</SelectItem><SelectItem value="unassigned">Unassigned</SelectItem>{ownerOptions.map(user => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}</SelectContent></Select>}
+      {state.currentRole !== "Caller" && <Select value={type} onValueChange={value => setType(value as TaskType | "All")}><SelectTrigger className="inline-flex h-8 w-fit shrink-0 border-0 bg-transparent px-0 text-xs shadow-none hover:bg-transparent focus-visible:ring-2"><SelectValue/></SelectTrigger><SelectContent>{["All", "Call", "Reply"].map(value => <SelectItem key={value} value={value}>{value === "All" ? "All types" : value}</SelectItem>)}</SelectContent></Select>}
+      {manager && <Select value={assignee} onValueChange={setAssignee}><SelectTrigger className="inline-flex h-8 w-fit shrink-0 border-0 bg-transparent px-0 text-xs shadow-none hover:bg-transparent focus-visible:ring-2"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="all">All AccountManagers</SelectItem><SelectItem value="unassigned">Unassigned</SelectItem>{ownerOptions.map(user => <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>)}</SelectContent></Select>}
       {isCaller && <div className="flex items-center gap-3">
         <Popover>
           <PopoverTrigger asChild>
@@ -431,7 +431,7 @@ export function TasksPage({ selectedId, selectedCallId, returnToDashboard = fals
           </Button>
         ) : null}
       </div>}
-      {!isCaller && <Select value={status} onValueChange={value => setStatus(value as typeof status)}><SelectTrigger className="h-8 w-auto border-0 bg-transparent px-0 text-xs shadow-none hover:bg-transparent focus-visible:ring-2"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="Open">Open</SelectItem><SelectItem value="Completed">Completed</SelectItem><SelectItem value="All">All statuses</SelectItem></SelectContent></Select>}
+      {!isCaller && <Select value={status} onValueChange={value => setStatus(value as typeof status)}><SelectTrigger className="inline-flex h-8 w-fit shrink-0 border-0 bg-transparent px-0 text-xs shadow-none hover:bg-transparent focus-visible:ring-2"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="Open">Open</SelectItem><SelectItem value="Completed">Completed</SelectItem><SelectItem value="All">All statuses</SelectItem></SelectContent></Select>}
     </div>
 
     <div className="overflow-hidden rounded-2xl bg-white">
@@ -802,7 +802,7 @@ function TaskDetail({ task, selectedCallId, returnToDashboard = false }: { task:
   }, [task.remote, liveTask.callReviewStatus, remote?.timeline]);
   if (task.remote && !detailHydrated) {
     return <div className="mx-auto max-w-[1540px]">
-      <button onClick={() => router.push(returnToDashboard ? "/dashboard" : "/tasks")} className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900"><ArrowLeft className="size-4"/>{returnToDashboard ? "Caller Dashboard" : "ReplyTask"}</button>
+      <button onClick={() => router.push(returnToDashboard ? "/dashboard" : "/tasks")} className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900"><ArrowLeft className="size-4"/>{returnToDashboard ? "Caller Performance" : "Reply Tasks"}</button>
       <main className="grid min-h-[55vh] place-items-center bg-white px-6 text-center">
         <div className="flex flex-col items-center gap-3 text-sm text-slate-500"><Spinner className="size-5"/><p>Loading the selected task and call record…</p></div>
       </main>
@@ -933,7 +933,7 @@ function TaskDetail({ task, selectedCallId, returnToDashboard = false }: { task:
   ) as Partial<Record<CPCode, string>>;
 
   return <div className="mx-auto max-w-[1540px]">
-    <button onClick={() => router.push(returnToDashboard ? "/dashboard" : "/tasks")} className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900"><ArrowLeft className="size-4"/>{returnToDashboard ? "Caller Dashboard" : "ReplyTask"}</button>
+    <button onClick={() => router.push(returnToDashboard ? "/dashboard" : "/tasks")} className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900"><ArrowLeft className="size-4"/>{returnToDashboard ? "Caller Performance" : "Reply Tasks"}</button>
     {detailError ? <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900"><span>Latest task details could not load. Showing the task link while it reconnects.</span><Button size="sm" variant="outline" onClick={() => setDetailRequest((value) => value + 1)}>Try again</Button></div> : null}
     <main className="min-w-0 overflow-hidden rounded-2xl bg-white">
     <header className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 bg-white px-5 py-4 lg:px-7">

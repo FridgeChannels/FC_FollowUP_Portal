@@ -4,7 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Bomb, ChevronDown, ClipboardCheck, LayoutDashboard, LogOut, RefreshCw,
-  Users, Radio,
+  Users, Radio, ChartNoAxesCombined,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Role } from "@/lib/outreach-domain";
@@ -28,14 +28,22 @@ import { TasksPage } from "./workspace-tasks";
 import { BombEditor, BombsPage } from "./workspace-bombs";
 import { useSession } from "./use-session";
 import { QualifiedCallsDashboard } from "./qualified-calls-dashboard";
+import { PerformancePages } from "./performance/performance-pages";
 
-type Screen = "Dashboard" | "Caller Dashboard" | "Brands" | "Signals" | "ReplyTask" | "OmniReach";
-const nav: { label: Screen; path: string; icon: typeof Users; cap: string; badge?: boolean }[] = [
-  { label: "Caller Dashboard", path: "/dashboard", icon: LayoutDashboard, cap: "dashboard" },
-  { label: "Brands", path: "/customers", icon: Users, cap: "customers" },
-  { label: "Signals", path: "/signals", icon: Radio, cap: "customers" },
-  { label: "ReplyTask", path: "/tasks", icon: ClipboardCheck, cap: "tasks", badge: true },
-  { label: "OmniReach", path: "/omnireach", icon: Bomb, cap: "bombs" },
+type Screen = "Dashboard" | "Caller Dashboard" | "Performance" | "Brands" | "Signals" | "ReplyTask" | "OmniReach";
+type NavigationItem = { label: string; screen: Screen; path: string; icon: typeof Users; cap: string; badge?: boolean; adminOnly?: boolean };
+
+const performanceNav: NavigationItem[] = [
+  { label: "Exhibition Performance", screen: "Performance", path: "/performance", icon: ChartNoAxesCombined, cap: "dashboard", adminOnly: true },
+  { label: "Caller Performance", screen: "Dashboard", path: "/dashboard", icon: LayoutDashboard, cap: "dashboard" },
+];
+const followUpNav: NavigationItem[] = [
+  { label: "Brands", screen: "Brands", path: "/customers", icon: Users, cap: "customers" },
+  { label: "Signals", screen: "Signals", path: "/signals", icon: Radio, cap: "customers" },
+  { label: "Reply Tasks", screen: "ReplyTask", path: "/tasks", icon: ClipboardCheck, cap: "tasks", badge: true },
+];
+const resourceNav: NavigationItem[] = [
+  { label: "OmniReach Templates", screen: "OmniReach", path: "/omnireach", icon: Bomb, cap: "bombs" },
 ];
 const roleHome: Record<Role, string> = {
   Admin: "/dashboard",
@@ -43,7 +51,7 @@ const roleHome: Record<Role, string> = {
   Caller: "/dashboard",
 };
 const isOmniReachPath = (path: string) => /^\/(omnireach|bombs)(\/|$)/i.test(path);
-const routeScreen = (path: string): Screen => path.startsWith("/signals") ? "Signals" : path.startsWith("/dashboard") ? "Dashboard" : path.startsWith("/customers") ? "Brands" : isOmniReachPath(path) ? "OmniReach" : "ReplyTask";
+const routeScreen = (path: string): Screen => path.startsWith("/performance") ? "Performance" : path.startsWith("/signals") ? "Signals" : path.startsWith("/dashboard") ? "Dashboard" : path.startsWith("/customers") ? "Brands" : isOmniReachPath(path) ? "OmniReach" : "ReplyTask";
 const accountInitials = (name?: string | null, email?: string | null) => {
   const source = name?.trim() || email?.split("@")[0] || "?";
   const parts = source.split(/[\s._-]+/).filter(Boolean);
@@ -150,6 +158,10 @@ function WorkspaceShell({ children }: { children?: ReactNode }) {
       return;
     }
     const brandDetail = /^\/customers\/[^/]+/.test(pathname);
+    if (screen === "Performance") {
+      if (user.role !== "Admin") router.replace(roleHome[state.currentRole]);
+      return;
+    }
     if (brandDetail) {
       if (!can("customers")) router.replace(roleHome[state.currentRole]);
       return;
@@ -167,7 +179,7 @@ function WorkspaceShell({ children }: { children?: ReactNode }) {
         name: "navigate_outreach_workspace",
         title: "Navigate workspace",
         description: "Open a primary Super FollowUP workspace.",
-        inputSchema: { type: "object", properties: { path: { type: "string", enum: ["/dashboard", "/customers", "/signals", "/tasks", "/omnireach"] } }, required: ["path"], additionalProperties: false },
+        inputSchema: { type: "object", properties: { path: { type: "string", enum: ["/dashboard", "/performance", "/customers", "/signals", "/tasks", "/omnireach"] } }, required: ["path"], additionalProperties: false },
         annotations: { readOnlyHint: true, untrustedContentHint: false },
         execute(input: unknown) {
           const path = (input as { path?: string }).path;
@@ -197,6 +209,47 @@ function WorkspaceShell({ children }: { children?: ReactNode }) {
     );
   }
   const displayName = user.name || user.email;
+  const visibleItems = (items: NavigationItem[]) => items.filter((item) => can(item.cap) && (!item.adminOnly || user.role === "Admin"));
+  const navigationItem = (item: NavigationItem) => {
+    const count =
+      item.screen === "Signals"
+        ? (process.env.NODE_ENV !== "production" && pathname === "/signals" && searchParams.get("mock") === "1" ? 0 : signalsData?.brands.filter(brand => brand.needsReview).length || 0)
+        : item.screen === "Brands"
+          ? brandReplyCount
+          : item.badge
+            ? taskCount
+            : 0;
+    const activeStyle =
+      item.screen === "Signals"
+        ? "data-[active=true]:bg-white/10 data-[active=true]:text-white"
+        : item.screen === "Brands"
+          ? "data-[active=true]:bg-blue-500"
+          : item.screen === "ReplyTask"
+            ? "data-[active=true]:bg-violet-500"
+            : item.screen === "Performance"
+              ? "data-[active=true]:bg-violet-500/15"
+              : item.screen === "Dashboard"
+                ? "data-[active=true]:bg-emerald-500"
+                : "data-[active=true]:bg-amber-500";
+    return (
+      <SidebarMenuItem key={item.path}>
+        <SidebarMenuButton
+          tooltip={item.label}
+          isActive={screen === item.screen}
+          onClick={() => router.push(item.path)}
+          className={`h-10 rounded-lg px-3 text-[13px] font-medium ${activeStyle} data-[active=true]:text-white`}
+        >
+          <item.icon />
+          <span>{item.label}</span>
+          {count > 0 && (
+            <span className={`ml-auto rounded-md px-1.5 py-0.5 text-[10px] group-data-[collapsible=icon]:hidden ${item.screen === "Brands" ? "bg-rose-500/15 text-rose-800" : "bg-amber-400/20 text-amber-800"}`}>
+              {count}
+            </span>
+          )}
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+    );
+  };
 
   return (
     <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen}>
@@ -221,61 +274,18 @@ function WorkspaceShell({ children }: { children?: ReactNode }) {
           </button>
         </SidebarHeader>
         <SidebarContent className="px-2 py-3">
-          <SidebarGroup>
-            <SidebarGroupLabel className="text-[10px] uppercase tracking-[.16em] text-slate-500">
-              Workspace
-            </SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {nav.filter((item) => can(item.cap)).map((item) => {
-                  // Brands badge: full Needs Reply brand count (role-scoped).
-                  // ReplyTask badge: open reply/phone tasks.
-                  const count =
-                    item.label === "Signals"
-                      ? (process.env.NODE_ENV !== "production" && pathname === "/signals" && searchParams.get("mock") === "1" ? 0 : signalsData?.brands.filter(brand => brand.needsReview).length || 0)
-                      : item.label === "Brands"
-                      ? brandReplyCount
-                      : item.badge
-                        ? taskCount
-                        : 0;
-                  return (
-                    <SidebarMenuItem key={item.path}>
-                      <SidebarMenuButton
-                        tooltip={item.label}
-                        isActive={screen === item.label}
-                        onClick={() => router.push(item.path)}
-                        className={`h-10 rounded-lg px-3 text-[13px] font-medium ${
-                          item.label === "Signals"
-                            ? "data-[active=true]:bg-white/10 data-[active=true]:text-white"
-                            : item.label === "Brands"
-                            ? "data-[active=true]:bg-blue-500"
-                            : item.label === "ReplyTask"
-                              ? "data-[active=true]:bg-violet-500"
-                              : item.label === "Dashboard"
-                                ? "data-[active=true]:bg-emerald-500"
-                              : "data-[active=true]:bg-amber-500"
-                        } data-[active=true]:text-white`}
-                      >
-                        <item.icon />
-                        <span>{item.label}</span>
-                        {count > 0 && (
-                          <span
-                            className={`ml-auto rounded-md px-1.5 py-0.5 text-[10px] group-data-[collapsible=icon]:hidden ${
-                              item.label === "Brands"
-                                ? "bg-rose-500/15 text-rose-800"
-                                : "bg-amber-400/20 text-amber-800"
-                            }`}
-                          >
-                            {count}
-                          </span>
-                        )}
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
+          {visibleItems(performanceNav).length > 0 && <SidebarGroup className="pt-1">
+            <SidebarGroupLabel className="text-[10px] tracking-[.16em] text-slate-500">Performance</SidebarGroupLabel>
+            <SidebarGroupContent><SidebarMenu>{visibleItems(performanceNav).map(navigationItem)}</SidebarMenu></SidebarGroupContent>
+          </SidebarGroup>}
+          {visibleItems(followUpNav).length > 0 && <SidebarGroup>
+            <SidebarGroupLabel className="text-[10px] tracking-[.16em] text-slate-500">Follow-up</SidebarGroupLabel>
+            <SidebarGroupContent><SidebarMenu>{visibleItems(followUpNav).map(navigationItem)}</SidebarMenu></SidebarGroupContent>
+          </SidebarGroup>}
+          {visibleItems(resourceNav).length > 0 && <SidebarGroup>
+            <SidebarGroupLabel className="text-[10px] tracking-[.16em] text-slate-500">Resources</SidebarGroupLabel>
+            <SidebarGroupContent><SidebarMenu>{visibleItems(resourceNav).map(navigationItem)}</SidebarMenu></SidebarGroupContent>
+          </SidebarGroup>}
         </SidebarContent>
         <SidebarFooter className="border-t border-slate-300/45 p-3 group-data-[collapsible=icon]:p-0">
           <DropdownMenu>
@@ -355,12 +365,13 @@ export function WorkspaceRouteContent() {
   const brandDetailId = section === "customers" ? parts[1] : undefined;
   const sampleRoute = section === "customers" && parts[2]?.toLowerCase() === "sample";
   const dashboardRoute = section === "dashboard";
+  const performanceRoute = section === "performance";
   const omniReachRoute = /^(omnireach|bombs)$/i.test(section);
   const taskRoute =
     section === "tasks" ||
     section === "inbox" ||
     section === "call-tasks" ||
-    (!dashboardRoute && section !== "customers" && section !== "signals" && !omniReachRoute);
+    (!dashboardRoute && !performanceRoute && section !== "customers" && section !== "signals" && !omniReachRoute);
   const bombDetailId = omniReachRoute ? parts[1] : undefined;
   const activeRoot =
     dashboardRoute
@@ -387,6 +398,7 @@ export function WorkspaceRouteContent() {
   return (
     <>
       {section === "signals" ? <SignalsPage /> : null}
+      {performanceRoute ? <PerformancePages /> : null}
       {mountedRoots.includes("dashboard") ? (
         <div hidden={activeRoot !== "dashboard"}>
           <CallerDashboard />

@@ -155,7 +155,7 @@ export function QualifiedCallsDashboard() {
   if (error) {
     return (
       <div className="mx-auto flex min-h-[60vh] max-w-3xl flex-col items-start justify-center px-1">
-        <h1 className="text-3xl font-bold tracking-[-0.04em] text-slate-950">Caller Dashboard</h1>
+        <h1 className="text-3xl font-bold tracking-[-0.04em] text-slate-950">Caller Performance</h1>
         <p className="mt-3 text-sm text-slate-500">{error}</p>
         <Button className="mt-6" onClick={load}><RotateCw className="mr-2 size-4" />Try again</Button>
       </div>
@@ -175,7 +175,7 @@ export function QualifiedCallsDashboard() {
 
   return (
     <div className="mx-auto max-w-3xl px-1 pb-10">
-      <h1 className="text-3xl font-bold tracking-[-0.04em] text-slate-950">Caller Dashboard</h1>
+      <h1 className="text-3xl font-bold tracking-[-0.04em] text-slate-950">Caller Performance</h1>
 
       {weeks.length ? (
         <div className="mt-5 flex items-center justify-between gap-3">

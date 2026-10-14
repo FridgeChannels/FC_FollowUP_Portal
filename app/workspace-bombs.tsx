@@ -200,7 +200,7 @@ export function BombsPage({ active }: { active: boolean }) {
     <div className="mx-auto max-w-[1480px]">
       <PageHeader
         eyebrow={loading ? "Loading" : `${bombs.length} records`}
-        title="OmniReach"
+        title="OmniReach Templates"
       >
         <Select
           value={tab}
