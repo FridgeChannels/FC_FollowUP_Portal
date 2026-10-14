@@ -97,8 +97,25 @@ function asAttachment(value: unknown): MediaAttachment | null {
 
 function attachmentFromMediaFields(parsed: Record<string, unknown>): MediaAttachment | null {
   const mediaUrl = typeof parsed.mediaUrl === "string" ? parsed.mediaUrl.trim() : "";
-  const mediaType = parsed.mediaType === "video" ? "video" : parsed.mediaType === "image" ? "image" : null;
+  const rawType = typeof parsed.mediaType === "string" ? parsed.mediaType.trim().toLowerCase() : "";
+  const mediaType = rawType === "video"
+    ? "video"
+    : rawType === "image"
+      ? "image"
+      : rawType === "audio" || rawType === "ptt" || rawType === "voice"
+        ? "audio"
+        : null;
   if (!mediaUrl || !mediaType) return null;
+  if (mediaType === "audio") {
+    return {
+      id: mediaUrl,
+      kind: "file",
+      name: "Voice message",
+      mimeType: "audio/ogg",
+      size: 0,
+      url: mediaUrl,
+    };
+  }
   return {
     id: mediaUrl,
     kind: mediaType,
