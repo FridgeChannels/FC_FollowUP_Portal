@@ -9,6 +9,7 @@ export type ClientFollowUpStatus =
   | "Unassigned"
   | "Not Started"
   | "In Progress"
+  | "Paused"
   | "Completed"
   | "Terminated";
 

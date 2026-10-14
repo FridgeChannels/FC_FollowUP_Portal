@@ -35,6 +35,7 @@ import { encodeBrandAssignment } from "../brand-assignment";
 import { invalidateExhibitionOptionsCache } from "./exhibition-options-cache";
 import { listChannelCapacityConfig } from "./capacity";
 import { chooseConversationThreadId } from "./conversation-thread";
+import { listFollowupContactIds } from "./contacts";
 import { listFollowupConversations } from "./conversations";
 import { asExtendedParameters, parseExtendedParametersObject } from "./extended-parameters";
 import {
@@ -80,7 +81,7 @@ function asScheduleChannel(value?: string | null): ScheduleChannel | null {
 }
 
 function asClientStatus(value?: string | null): ClientFollowUpStatus | undefined {
-  if (value === "Unassigned" || value === "In Progress" || value === "Completed" || value === "Terminated") {
+  if (value === "Unassigned" || value === "In Progress" || value === "Paused" || value === "Completed" || value === "Terminated") {
     return value;
   }
   if (value === "Ready" || value === "Not Started") return "Not Started";
@@ -638,6 +639,39 @@ export async function cancelScheduledBombTasks(bombId: string) {
     ),
   );
   return scheduled;
+}
+
+/**
+ * Stops work that has not started when a Brand's follow-up is paused or completed.
+ * In-progress work is deliberately retained: it may already be with an external
+ * provider and must be resolved by the operator rather than silently discarded.
+ */
+export async function cancelPendingBrandTasks(input: {
+  brandId: string;
+  reason: "Paused" | "Completed";
+}) {
+  const contactIds = await listFollowupContactIds(input.brandId);
+  if (!contactIds.length) return [];
+
+  const pending = (await listFollowupTasks(contactIds)).filter(
+    (task) => task.brandId === input.brandId && task.status === "Pending",
+  );
+  if (!pending.length) return [];
+
+  const endedAt = new Date().toISOString();
+  const note = input.reason === "Paused"
+    ? "FollowUp 已暂停，未执行任务已取消。"
+    : "FollowUp 已完成，未执行任务已取消。";
+  await Promise.all(
+    pending.map((task) =>
+      updateFollowupTask(task.id, {
+        status: "Cancelled",
+        endedAt,
+        notes: [task.notes, note].filter(Boolean).join("\n"),
+      }),
+    ),
+  );
+  return pending;
 }
 
 export async function cancelOpenBombTasks(input: {
