@@ -1635,9 +1635,9 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
                               {formatEasternDateTime(c.lastInteractionAt)}
                             </time>
                           </>
-                        ) : (
+                        ) : !c.pendingOutboundChannels?.length ? (
                           <span className="text-slate-400">No interaction</span>
-                        )}
+                        ) : null}
                         {!!c.pendingOutboundChannels?.length && <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5" title={`Pending outbound tasks: ${c.pendingOutboundChannels.join(", ")}`}>
                           <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
                             <Clock3 className="size-3" aria-hidden="true" />Pending
