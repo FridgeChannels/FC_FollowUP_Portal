@@ -618,6 +618,7 @@ export function BrandDetail({customerId}:{customerId:string}){
   const requestedSignalId=searchParams.get("signal");
   const requestedWorkReply=searchParams.get("workReply");
   const requestedWorkTask=searchParams.get("workTask");
+  const acknowledgeReplyDeadline=searchParams.get("acknowledgeReplyDeadline")==="1";
   const requestedNewAssignment=searchParams.get("newAssignment")==="1";
   const requestedSignalHistory=searchParams.get("tab")==="signalHistory";
   const requestedFollowupHistory=searchParams.get("followupHistory")==="1";
@@ -680,6 +681,7 @@ export function BrandDetail({customerId}:{customerId:string}){
   }:null);
   const [replyDeadlineDraft,setReplyDeadlineDraft]=useState<string|null>(null);
   const [replyDeadlineDialogOpen,setReplyDeadlineDialogOpen]=useState(false);
+  const replyDeadlineAcknowledgeStarted=useRef<string|null>(null);
   const [remoteCps,setRemoteCps]=useState<CurrentCpOption[]>([]);
   const [owners,setOwners]=useState<Array<{id:string;name:string}>>([]);
   const [remoteLoading,setRemoteLoading]=useState(false);
@@ -974,6 +976,32 @@ export function BrandDetail({customerId}:{customerId:string}){
     (!!remote.ownerId&&remote.ownerId.replace(/-/g,"").toLowerCase()===state.currentUserId.replace(/-/g,"").toLowerCase())||
     (sessionUser?.role==="AccountManager"&&!!sessionUser.email&&sessionUser.email.trim().toLowerCase()===remote.ownerEmail?.trim().toLowerCase())
   ));
+  useEffect(()=>{
+    if(!acknowledgeReplyDeadline||!brandReady||!remote?.replyDeadline||!canManageReplyDeadline)return;
+    const requestKey=`${customerId}:${remote.replyDeadline}`;
+    if(replyDeadlineAcknowledgeStarted.current===requestKey)return;
+    replyDeadlineAcknowledgeStarted.current=requestKey;
+    setSaving(true);
+    void fetch(`/api/brands/${encodeURIComponent(customerId)}`,{
+      method:"PATCH",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({replyDeadline:null}),
+    }).then(async response=>{
+      const payload=await response.json() as {brand?:BrandDetail;cps?:CurrentCpOption[];error?:string};
+      if(!response.ok||!payload.brand)throw new Error(payload.error||"Unable to clear reply deadline");
+      cacheBrandItem(payload.brand);
+      setRemote(previous=>previous?{...payload.brand!,activities:payload.brand!.activities.length?payload.brand!.activities:previous.activities}:payload.brand!);
+      setRemoteCps(visibleCpOptions(payload.cps||remoteCps));
+      toast.success("Reply deadline cleared");
+      const params=new URLSearchParams(window.location.search);
+      params.delete("acknowledgeReplyDeadline");
+      router.replace(`${window.location.pathname}${params.size?`?${params.toString()}`:""}`,{scroll:false});
+    }).catch(error=>{
+      toast.error(error instanceof Error?error.message:"Unable to clear reply deadline");
+    }).finally(()=>{
+      setSaving(false);
+    });
+  },[acknowledgeReplyDeadline,brandReady,canManageReplyDeadline,customerId,remote?.replyDeadline,remoteCps,router]);
   const contactsLoading=notionBacked&&!brandReady;
   const activityLoading=notionBacked&&(!brandReady||!activitiesReady||activitiesLoading);
   const visible=!!c&&(aiSummaryDemo||(local?(manager||c.ownerId===state.currentUserId):!!remote));

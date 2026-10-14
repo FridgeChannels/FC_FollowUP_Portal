@@ -1131,15 +1131,16 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
   const workByBrandId = new Map((work?.brands || []).map((row) => [row.brand.id, row]));
   const filtered = workView === "all" ? brands : workRows.map((row) => row.brand);
   const currentListPath = brandListPath(filters, { cursor, page: pageNumber });
-  const brandDetailPath = (brandId: string, target?: { replyId?: string; taskId?: string; assignment?: boolean }) => {
+  const brandDetailPath = (brandId: string, target?: { replyId?: string; taskId?: string; assignment?: boolean; acknowledgeReplyDeadline?: boolean }) => {
     const params = new URLSearchParams({ returnTo: currentListPath });
     if (target?.replyId) params.set("workReply", target.replyId);
     if (target?.taskId) params.set("workTask", target.taskId);
     if (target?.assignment) params.set("newAssignment", "1");
+    if (target?.acknowledgeReplyDeadline) params.set("acknowledgeReplyDeadline", "1");
     return `/customers/${encodeURIComponent(brandId)}?${params}`;
   };
   const listScrollKey = `brands-list-scroll:${state.currentUserId}:${workView}`;
-  const openBrand = (brandId: string, target?: { replyId?: string; taskId?: string; assignment?: boolean }) => {
+  const openBrand = (brandId: string, target?: { replyId?: string; taskId?: string; assignment?: boolean; acknowledgeReplyDeadline?: boolean }) => {
     try { window.sessionStorage.setItem(listScrollKey, String(window.scrollY)); } catch { /* Navigation still works. */ }
     router.push(brandDetailPath(brandId, target));
   };
@@ -1497,12 +1498,13 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
                   const hasNewAssignment = Boolean(pendingWork?.newAssignment);
                   const hasPauseDue = Boolean(pendingWork?.pauseDue);
                   const hasReplyDeadline = Boolean(pendingWork?.replyDeadline);
+                  const acknowledgeReplyDeadline = filters.action === "replies" && hasReplyDeadline;
                   const needsAttention = Boolean(c.needsReply) || needsQualification || hasNewAssignment || hasPauseDue || hasReplyDeadline;
                   return (
                     <TableRow
                       key={c.id}
                       className={`cursor-pointer hover:bg-violet-50/30 ${needsAttention ? "bg-rose-50/40" : ""}`}
-                      onClick={() => openBrand(c.id)}
+                      onClick={() => openBrand(c.id, acknowledgeReplyDeadline ? { acknowledgeReplyDeadline: true } : undefined)}
                     >
                       {isAdmin && (
                         <TableCell className="pl-5" onClick={(e) => e.stopPropagation()}>
@@ -1568,7 +1570,7 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
                           {pendingWork.pauseDue && <button type="button" className="inline-flex min-h-9 items-center gap-1 rounded-md bg-amber-50 px-2 text-xs font-semibold text-amber-800 hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500" onClick={() => openBrand(c.id)}>
                             <CalendarClock className="size-3.5 shrink-0" />Pause review due
                           </button>}
-                          {pendingWork.replyDeadline && <button type="button" className="inline-flex min-h-9 items-center gap-1 rounded-md bg-rose-50 px-2 text-xs font-semibold text-rose-800 hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500" onClick={() => openBrand(c.id)}>
+                          {pendingWork.replyDeadline && <button type="button" className="inline-flex min-h-9 items-center gap-1 rounded-md bg-rose-50 px-2 text-xs font-semibold text-rose-800 hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500" onClick={() => openBrand(c.id, { acknowledgeReplyDeadline: true })}>
                             <CalendarClock className="size-3.5 shrink-0" />Need Reply · {pendingWork.replyDeadline.target.dueAt?.slice(0,10)}
                           </button>}
                           {WORK_REPLY_CHANNELS.map((channel) => {
