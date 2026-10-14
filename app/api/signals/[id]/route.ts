@@ -15,14 +15,6 @@ export async function PATCH(request: Request, { params }: Params) {
     const viewer = await viewerFromRequest(request);
     if (!viewer.email)
       return Response.json({ error: "Sign in required" }, { status: 401 });
-    if (!signalsWritesEnabled())
-      return Response.json(
-        {
-          error:
-            "Signals is in read-only preview. Review updates are disabled.",
-        },
-        { status: 423 },
-      );
     const { id } = await params;
     const page = await retrievePage(id);
     const brand = await mapFollowupClientPage(page);
@@ -37,6 +29,14 @@ export async function PATCH(request: Request, { params }: Params) {
       taskId?: string;
       activityId?: string;
     };
+    if (body.action !== "read" && !signalsWritesEnabled())
+      return Response.json(
+        {
+          error:
+            "Signals is in read-only preview. Review updates are disabled.",
+        },
+        { status: 423 },
+      );
     if (
       !["read", "review", "later", "handled"].includes(body.action || "") ||
       !Array.isArray(body.eventIds) ||

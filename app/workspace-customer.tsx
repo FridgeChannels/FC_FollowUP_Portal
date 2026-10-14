@@ -761,7 +761,6 @@ export function BrandDetail({customerId}:{customerId:string}){
       settleSignals(customerId,snapshot);
       return;
     }
-    if(signalsData?.readOnly)return;
     settleSignals(customerId,snapshot);
     void fetch(`/api/signals/${encodeURIComponent(customerId)}`,{
       method:"PATCH",headers:{"Content-Type":"application/json"},

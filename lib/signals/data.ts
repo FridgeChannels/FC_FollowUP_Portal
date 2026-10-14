@@ -133,7 +133,7 @@ export async function saveSignalSnapshot(
   kind: "read" | "review",
   review?: Omit<SignalReview, "eventIds">,
 ) {
-  if (!signalsWritesEnabled())
+  if (kind !== "read" && !signalsWritesEnabled())
     throw new Error("Signals review writes are disabled");
   // Each AM has one compact read snapshot per brand; raw signal history is never mutated.
   await supabaseUpsert(

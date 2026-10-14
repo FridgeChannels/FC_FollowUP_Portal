@@ -30,7 +30,7 @@ The current source labels indicate whether the store has received usable events.
 
 ## Read-only preview
 
-Writes are disabled by default. The Signals API rejects review updates, and the workspace does not write unread markers or send messages. Email drafts can be previewed. `SIGNALS_REVIEW_WRITES_ENABLED=true` is a server-only opt-in for a later deployment after write access is approved. Existing CRM screens are unchanged.
+Review updates and message sending are disabled by default. Reading a signal is always saved as a compact read snapshot so its unread marker stays cleared across refreshes. The Signals API rejects review updates and sending while read-only mode is active. `SIGNALS_REVIEW_WRITES_ENABLED=true` is a server-only opt-in for those additional actions after write access is approved. Email drafts can be previewed. Existing CRM screens are unchanged.
 
 ## State and follow-up
 

@@ -155,9 +155,7 @@ export function SignalsPage() {
     );
     return [...(data?.brands || [])]
       .filter((brand) => brand.events.some((event) => type === "all" || event.type === type))
-      .sort((left, right) =>
-        Number(right.unread) - Number(left.unread) || signalTime(right) - signalTime(left),
-      );
+      .sort((left, right) => signalTime(right) - signalTime(left));
   }, [data, type]);
   const summary = summarize(data?.brands || [], now);
   const [lastRequested, setLastRequested] = useState(requested);
@@ -168,10 +166,7 @@ export function SignalsPage() {
       setMobileDetail(true);
     }
   }
-  const selectedBrand = data?.brands.find((b) => b.id === (selected || queue[0]?.id));
-  // A notification deep link can open a brand outside the current filters.
-  // Keep an opened item visible while its read state settles; the queue itself
-  // can update immediately without interrupting comprehension.
+  const selectedBrand = data?.brands.find((brand) => brand.id === (selected || queue[0]?.id));
   const current = selectedBrand || queue[0];
   const onComplete = () => {
     const next = filterWorkspaceQueue(data?.brands || [], "review", "all", now)
@@ -190,7 +185,7 @@ export function SignalsPage() {
     const fresh = new Set(brand.newEventIds || brand.events.filter(event=>event.isNewSignal).map(event=>event.id));
     const snapshot = [...new Set([...(brand.readEventIds || []), ...newReadIds])].filter(id=>fresh.has(id));
     settle(brand.id, snapshot);
-    if (showingMock || data?.readOnly) return;
+    if (showingMock) return;
     void fetch(`/api/signals/${encodeURIComponent(brand.id)}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -433,7 +428,6 @@ function BrandReview({
       settle(brand.id, snapshot);
       return;
     }
-    if (readOnly) return;
     try {
       const response = await fetch(`/api/signals/${brand.id}`, {
         method: "PATCH",
