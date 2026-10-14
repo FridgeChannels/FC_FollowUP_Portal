@@ -57,7 +57,7 @@ export async function loadSignalEvents(brandId?: string) {
       "system_notifications",
       {
         ...scope,
-        type: "in.(email.opened,linkedin.updated,signals.read,signals.review)",
+        type: "in.(email.opened,linkedin.updated,signals.read,signals.brand_read,signals.review)",
       },
       "id.asc",
     ),
@@ -104,10 +104,16 @@ export function aggregateSignals(
   const read = notifications.find(
     (n) => n.brand_id === brand.id && n.type === "signals.read" && n.owner_id === (viewerId || null),
   );
+  const brandRead = notifications.find(
+    (n) => n.brand_id === brand.id && n.type === "signals.brand_read" && n.owner_id === (viewerId || null),
+  );
   const review = notifications.find(
     (n) => n.brand_id === brand.id && n.type === "signals.review",
   );
   const readBody = jsonBody<{ eventIds?: unknown }>(read?.body || null, {});
+  const brandReadBody = brandRead
+    ? jsonBody<{ eventIds?: unknown }>(brandRead.body || null, {})
+    : null;
   const reviewBody = jsonBody<SignalReview | undefined>(
     review?.body || null,
     undefined,
@@ -122,6 +128,9 @@ export function aggregateSignals(
         tapOwnerName: brand.ownerName || undefined,
       } : event),
     readIds: Array.isArray(readBody.eventIds) ? readBody.eventIds : [],
+    brandReadIds: brandReadBody && Array.isArray(brandReadBody.eventIds)
+      ? brandReadBody.eventIds
+      : undefined,
     review:
       reviewBody && Array.isArray(reviewBody.eventIds) ? reviewBody : undefined,
   }, { devMode: isSignalsDevMode() });
@@ -130,12 +139,11 @@ export async function saveSignalSnapshot(
   brandId: string,
   ownerId: string | null,
   eventIds: string[],
-  kind: "read" | "review",
+  kind: "review",
   review?: Omit<SignalReview, "eventIds">,
 ) {
-  if (kind !== "read" && !signalsWritesEnabled())
+  if (!signalsWritesEnabled())
     throw new Error("Signals review writes are disabled");
-  // Each AM has one compact read snapshot per brand; raw signal history is never mutated.
   await supabaseUpsert(
     "system_notifications",
     [
@@ -152,4 +160,44 @@ export async function saveSignalSnapshot(
     ],
     "dedupe_key",
   );
+}
+
+/** Persist the Signals queue read state and Brand-detail Sample Tap state separately. */
+export async function saveSignalReadState(input: {
+  brandId: string;
+  ownerId: string | null;
+  signalsEventIds?: string[];
+  brandSampleEventIds?: string[];
+  initializeBrandSampleEventIds?: string[];
+}) {
+  const rows: Array<Record<string, unknown>> = [];
+  const { brandId, ownerId } = input;
+  const ownerKey = ownerId || "unassigned";
+  if (input.signalsEventIds) {
+    rows.push({
+      type: "signals.read",
+      brand_id: brandId,
+      owner_id: ownerId,
+      title: "Signals read",
+      body: JSON.stringify({ eventIds: input.signalsEventIds }),
+      deep_link: `/signals?brand=${encodeURIComponent(brandId)}`,
+      dedupe_key: `signals.read:${ownerKey}:${brandId}`,
+      read_at: new Date().toISOString(),
+    });
+  }
+  const brandSampleEventIds = input.brandSampleEventIds ?? input.initializeBrandSampleEventIds;
+  if (brandSampleEventIds) {
+    rows.push({
+      type: "signals.brand_read",
+      brand_id: brandId,
+      owner_id: ownerId,
+      title: "Brand Sample Taps read",
+      body: JSON.stringify({ eventIds: brandSampleEventIds }),
+      deep_link: `/customers/${encodeURIComponent(brandId)}`,
+      dedupe_key: `signals.brand_read:${ownerKey}:${brandId}`,
+      read_at: new Date().toISOString(),
+    });
+  }
+  if (!rows.length) return;
+  await supabaseUpsert("system_notifications", rows, "dedupe_key");
 }

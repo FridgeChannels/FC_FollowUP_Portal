@@ -5,7 +5,7 @@ import {
   mapFollowupClientDetail,
   mapFollowupClientPage,
 } from "@/lib/notion/followup-clients";
-import { loadSignalEvents, saveSignalSnapshot } from "@/lib/signals/data";
+import { loadSignalEvents, saveSignalReadState, saveSignalSnapshot } from "@/lib/signals/data";
 import { signalsWritesEnabled, isSignalsDevMode } from "@/lib/signals/config";
 import { classifySignalEvents, effectiveFollowup, type SignalReview } from "@/lib/signals/model";
 
@@ -28,6 +28,8 @@ export async function PATCH(request: Request, { params }: Params) {
       eventIds?: string[];
       taskId?: string;
       activityId?: string;
+      surface?: "signals" | "brand";
+      sampleEventIds?: string[];
     };
     if (body.action !== "read" && !signalsWritesEnabled())
       return Response.json(
@@ -39,17 +41,23 @@ export async function PATCH(request: Request, { params }: Params) {
       );
     if (
       !["read", "review", "later", "handled"].includes(body.action || "") ||
+      (body.surface !== undefined && body.surface !== "signals" && body.surface !== "brand") ||
+      (body.sampleEventIds !== undefined && body.surface !== "brand") ||
       !Array.isArray(body.eventIds) ||
-      !body.eventIds.length ||
-      !body.eventIds.every((id) => typeof id === "string")
+      !body.eventIds.every((id) => typeof id === "string") ||
+      (body.surface === "brand" && body.sampleEventIds !== undefined &&
+        (!Array.isArray(body.sampleEventIds) || !body.sampleEventIds.every((id) => typeof id === "string"))) ||
+      !(body.eventIds.length || (body.surface === "brand" && body.sampleEventIds?.length))
     )
       return Response.json(
         { error: "A valid action and event snapshot are required" },
         { status: 400 },
       );
-    const { events } = await loadSignalEvents(id);
-    const allowed = new Set(classifySignalEvents(events, { devMode: isSignalsDevMode() }).filter((e) => e.isNewSignal).map((e) => e.id));
-    if (body.eventIds.some((id) => !allowed.has(id)))
+    const { events, notifications } = await loadSignalEvents(id);
+    const freshEvents = classifySignalEvents(events, { devMode: isSignalsDevMode() }).filter((e) => e.isNewSignal);
+    const allowed = new Set(freshEvents.map((e) => e.id));
+    const requestedIds = [...body.eventIds, ...(body.surface === "brand" ? body.sampleEventIds || [] : [])];
+    if (requestedIds.some((id) => !allowed.has(id)))
       return Response.json(
         { error: "Signal snapshot is no longer available. Refresh and retry." },
         { status: 409 },
@@ -97,16 +105,60 @@ export async function PATCH(request: Request, { params }: Params) {
     console.info("[signals] snapshot write", {
       brandId: id,
       action: body.action,
-      events: body.eventIds.length,
+      surface: body.surface || "signals",
+      events: body.eventIds.length + (body.surface === "brand" ? body.sampleEventIds?.length || 0 : 0),
       owner: viewer.ownerId || viewer.email,
     });
-    await saveSignalSnapshot(
-      id,
-      viewer.ownerId || viewer.email,
-      body.eventIds,
-      body.action === "read" ? "read" : "review",
-      body.action === "read" ? undefined : review,
-    );
+    if (body.action === "read") {
+      const ownerId = viewer.ownerId || viewer.email;
+      const snapshot = (type: string) => {
+        const row = notifications.find((item) =>
+          item.brand_id === id && item.type === type && item.owner_id === ownerId,
+        );
+        try {
+          const value = row?.body ? JSON.parse(row.body) as { eventIds?: unknown } : null;
+          return value && Array.isArray(value.eventIds)
+            ? value.eventIds.filter((eventId): eventId is string => typeof eventId === "string")
+            : [];
+        } catch {
+          return [];
+        }
+      };
+      const previousSignalsRead = snapshot("signals.read");
+      const previousBrandRead = notifications.some((item) =>
+        item.brand_id === id && item.type === "signals.brand_read" && item.owner_id === ownerId,
+      );
+      const eventsById = new Map(events.map((event) => [event.id, event]));
+      if (body.surface === "brand") {
+        const sampleIds = body.sampleEventIds || [];
+        const sharedIds = body.eventIds;
+        const legacySampleIds = previousSignalsRead.filter((eventId) => eventsById.get(eventId)?.type === "sample");
+        await saveSignalReadState({
+          brandId: id,
+          ownerId,
+          ...(sharedIds.length ? { signalsEventIds: [...new Set([...previousSignalsRead, ...sharedIds])] } : {}),
+          brandSampleEventIds: [...new Set([...(previousBrandRead ? snapshot("signals.brand_read") : legacySampleIds), ...sampleIds])],
+        });
+      } else {
+        const nextSignalsRead = body.eventIds;
+        await saveSignalReadState({
+          brandId: id,
+          ownerId,
+          signalsEventIds: nextSignalsRead,
+          ...(!previousBrandRead
+            ? { initializeBrandSampleEventIds: previousSignalsRead.filter((eventId) => eventsById.get(eventId)?.type === "sample") }
+            : {}),
+        });
+      }
+    } else {
+      await saveSignalSnapshot(
+        id,
+        viewer.ownerId || viewer.email,
+        body.eventIds,
+        "review",
+        review,
+      );
+    }
     return Response.json({ ok: true });
   } catch (error) {
     return Response.json(

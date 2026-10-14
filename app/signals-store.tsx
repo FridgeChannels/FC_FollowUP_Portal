@@ -34,6 +34,7 @@ const Context = createContext<{
     eventIds: string[],
     status?: SignalReview["status"],
     taskId?: string,
+    surface?: "signals" | "brand",
   ) => void;
 } | null>(null);
 function isMockPreviewPath(pathname: string | null, searchParams: URLSearchParams) {
@@ -206,12 +207,30 @@ function SessionSignalsProvider({
       eventIds: string[],
       status?: SignalReview["status"],
       taskId?: string,
+      surface: "signals" | "brand" = "signals",
     ) => {
       setData((current) => {
         if (!current) return current;
         const brands = current.brands.map((brand) => {
           if (brand.id !== brandId) return brand;
-          const readIds = [...new Set([...(brand.readEventIds || []), ...eventIds])];
+          const requested = new Set(eventIds);
+          const related = brand.events.filter((event) =>
+            requested.has(event.id) || requested.has(event.signalReadId || ""),
+          );
+          const sampleReadIds = related
+            .filter((event) => event.type === "sample")
+            .map((event) => event.signalReadId || event.id);
+          const sharedReadIds = related
+            .filter((event) => event.type !== "sample")
+            .map((event) => event.signalReadId || event.id);
+          const readIds = [...new Set([
+            ...(brand.readEventIds || []),
+            ...(surface === "signals" ? eventIds : sharedReadIds),
+          ])];
+          const brandReadEventIds = [...new Set([
+            ...(brand.brandReadEventIds || []),
+            ...(surface === "brand" ? sampleReadIds : []),
+          ])];
           const fresh =
             brand.newEventIds?.length
               ? brand.newEventIds
@@ -223,6 +242,7 @@ function SessionSignalsProvider({
           const next: typeof brand = {
             ...brand,
             readEventIds: readIds,
+            brandReadEventIds,
             unread,
             needsReview: unread,
           };

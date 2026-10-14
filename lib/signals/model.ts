@@ -46,6 +46,8 @@ export type SignalBrand = {
   currentCp: string;
   events: SignalEvent[];
   readEventIds?: string[];
+  /** Sample Tap reads in Brand detail; undefined means legacy shared state. */
+  brandReadEventIds?: string[];
   newEventIds?: string[];
   reviewedEventIds?: string[];
   unread: boolean;
@@ -67,6 +69,7 @@ export function aggregateBrand(
     currentCp: string;
     events: SignalEvent[];
     readIds: string[];
+    brandReadIds?: string[];
     review?: SignalReview;
   },
   opts?: { devMode?: boolean },
@@ -80,6 +83,7 @@ export function aggregateBrand(
   );
   const classified = classifySignalEvents(events, opts);
   const read = new Set(input.readIds);
+  const brandRead = input.brandReadIds == null ? read : new Set(input.brandReadIds);
   const reviewed = new Set(input.review?.eventIds || []);
   const newEventIds = classified
     .filter((event) => event.isNewSignal)
@@ -89,6 +93,9 @@ export function aggregateBrand(
   // fresh signal has been read.
   const unread = newEventIds.some((id) => !read.has(id));
   const needsReview = unread;
+  const brandReadEventIds = events
+    .filter((event) => (event.type === "sample" ? brandRead : read).has(event.signalReadId || event.id))
+    .map((event) => event.signalReadId || event.id);
   return {
     id: input.id,
     name: input.name,
@@ -96,6 +103,7 @@ export function aggregateBrand(
     currentCp: input.currentCp,
     events: classified,
     readEventIds: [...read],
+    brandReadEventIds: [...new Set(brandReadEventIds)],
     newEventIds,
     reviewedEventIds: [...reviewed],
     unread,

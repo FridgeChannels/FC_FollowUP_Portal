@@ -744,7 +744,7 @@ export function BrandDetail({customerId}:{customerId:string}){
     return ()=>{cancelled=true;};
   },[customerId,remote?.id,detailsTab]);
   const brandSignals=signalsData?.brands.find(brand=>brand.id===customerId);
-  const signalReadIds=brandSignals?.readEventIds??(brandSignals?.unread?[]:brandSignals?.events.map(event=>event.id)||[]);
+  const signalReadIds=brandSignals?.brandReadEventIds??brandSignals?.readEventIds??(brandSignals?.unread?[]:brandSignals?.events.map(event=>event.id)||[]);
   const emailSignals=(brandSignals?.events||[]).filter(event=>event.type==="email");
   const requestedSignal=brandSignals?.events.find(event=>event.id===requestedSignalId);
   const requestedSignalType=requestedSignal?.type;
@@ -755,16 +755,24 @@ export function BrandDetail({customerId}:{customerId:string}){
       .map(event=>event.signalReadId||event.id);
     if(!readIds.length)return;
     const fresh=new Set(brandSignals.newEventIds||brandSignals.events.filter(event=>event.isNewSignal).map(event=>event.id));
-    const snapshot=[...new Set([...(brandSignals.readEventIds||[]),...readIds])].filter(id=>fresh.has(id));
+    const sampleSnapshot=[...new Set([
+      ...(brandSignals.brandReadEventIds||[]).filter(id=>brandSignals.events.some(event=>event.type==="sample"&&(event.id===id||event.signalReadId===id))),
+      ...brandSignals.events.filter(event=>event.type==="sample"&&(requested.has(event.id)||requested.has(event.signalReadId||""))).map(event=>event.signalReadId||event.id),
+    ])].filter(id=>fresh.has(id));
+    const sharedSnapshot=[...new Set([
+      ...(brandSignals.readEventIds||[]).filter(id=>brandSignals.events.some(event=>event.type!=="sample"&&(event.id===id||event.signalReadId===id))),
+      ...brandSignals.events.filter(event=>event.type!=="sample"&&(requested.has(event.id)||requested.has(event.signalReadId||""))).map(event=>event.signalReadId||event.id),
+    ])].filter(id=>fresh.has(id));
+    const snapshot=[...new Set([...sampleSnapshot,...sharedSnapshot])];
     if(!snapshot.length)return;
     if(process.env.NODE_ENV!=="production"&&searchParams.get("mock")==="1"){
-      settleSignals(customerId,snapshot);
+      settleSignals(customerId,snapshot,undefined,undefined,"brand");
       return;
     }
-    settleSignals(customerId,snapshot);
+    settleSignals(customerId,snapshot,undefined,undefined,"brand");
     void fetch(`/api/signals/${encodeURIComponent(customerId)}`,{
       method:"PATCH",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({action:"read",eventIds:snapshot}),
+      body:JSON.stringify({action:"read",surface:"brand",eventIds:sharedSnapshot,sampleEventIds:sampleSnapshot}),
     }).then(response=>{if(!response.ok)void refreshSignals();}).catch(()=>{void refreshSignals();});
   }
   useEffect(()=>{
