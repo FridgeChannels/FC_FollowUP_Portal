@@ -331,7 +331,8 @@ export async function countFollowupClientsForViewer(
       // rebuilding a directional ordering for every pagination page.
       sort: "priority",
       cursor,
-      pageSize: DEFAULT_BRAND_PAGE_SIZE,
+      // Larger count pages reduce sequential Notion requests for the total.
+      pageSize: 100,
     });
     total += result.brands.length;
     if (!result.nextCursor || !result.hasMore || seen.has(result.nextCursor)) break;
@@ -656,7 +657,7 @@ export async function listFollowupClientsForViewerPage(
 ): Promise<ListFollowupClientsPageResult> {
   const pageSize = Math.min(
     Math.max(input.pageSize ?? DEFAULT_BRAND_PAGE_SIZE, 1),
-    DEFAULT_BRAND_PAGE_SIZE,
+    100,
   );
   const replyState = normalizeBrandReplyState(input.replyState);
   const sort = normalizeBrandListSort(input.sort);
