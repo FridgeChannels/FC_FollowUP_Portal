@@ -1112,7 +1112,6 @@ export function BrandDetail({customerId}:{customerId:string}){
   const latestRound=history.rounds[0];
   const brandTasks=remote?.tasks||[];
   const brandActivities=remote?.activities||[];
-  const originMeeting=remote?.meetingNotes?.[0];
   const followUpMeeting=remote?.aiMeetingLinks?.[0];
   const relationshipMeetingLinks=[
     ...(remote?.meetingNotes||[]),
@@ -1282,7 +1281,7 @@ export function BrandDetail({customerId}:{customerId:string}){
     <header className="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-white px-4 py-3">
       <Button type="button" variant="ghost" size="icon" aria-label={backLabel} onClick={returnToList}><ArrowLeft className="size-4"/></Button>
       <Avatar className="size-9"><AvatarFallback className="bg-violet-100 text-xs font-bold text-violet-700">{c.initials}</AvatarFallback></Avatar>
-      <div className="flex min-w-0 flex-1 items-center gap-2"><h1 className="min-w-0 truncate text-lg font-semibold text-slate-950">{c.name}</h1>{notionBacked&&remote?.followupExhibition&&(originMeeting?<a href={originMeeting.url} target="_blank" rel="noreferrer" className="hidden shrink-0 rounded-full bg-violet-100 px-2 py-1 text-xs font-medium text-violet-800 hover:bg-violet-200 lg:inline-flex">{remote.followupExhibition}<ExternalLink className="ml-1 size-3"/></a>:<span className="hidden shrink-0 rounded-full bg-violet-100 px-2 py-1 text-xs font-medium text-violet-800 lg:inline-flex">{remote.followupExhibition}</span>)}
+      <div className="flex min-w-0 flex-1 items-center gap-2"><h1 className="min-w-0 truncate text-lg font-semibold text-slate-950">{c.name}</h1>
         <Button type="button" size="sm" variant="outline" className="min-w-0 max-w-[22rem] shrink" disabled={!brandReady||!can("changeCP")||latestRound?.status==="Completed"||history.projectionPending} onClick={()=>setCP(true)} aria-label={isCpVisible(currentCpDetails.name)?`Current ${currentCpDetails.name}: ${currentCpDetails.fullName}. Change CP`:"Change CP"}>
           <span className="truncate">{isCpVisible(currentCpDetails.name)?`${currentCpDetails.name} · ${currentCpDetails.fullName}`:"Change CP"}</span><ChevronRight className="ml-1 size-3.5 shrink-0 rotate-90"/>
         </Button>
