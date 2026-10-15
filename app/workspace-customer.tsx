@@ -4,7 +4,7 @@
 import { formatBusinessDate } from "@/lib/display-time";
 import { isCpVisible, visibleCpOptions, cpDisplayText, cpHistoryText } from "@/lib/cp-visibility";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, Bomb, CalendarClock, CalendarPlus, ChevronRight, CircleAlert, CircleCheck, CirclePause, ContactRound, ExternalLink, FileText, History, Loader2, MessageSquareText, MoreHorizontal, PanelRightClose, Plus, Save, Search, Send, StickyNote, UserCheck } from "lucide-react";
@@ -52,6 +52,7 @@ import type { MagnetBrandParam } from "@/lib/sample/magnet";
 import type { SignalEvent } from "@/lib/signals/model";
 import { emailSignalMatchesInteraction } from "@/lib/signals/match";
 import { withoutBrandAssignmentRecords } from "@/lib/brand-assignment";
+import { isForwardCpTransition } from "@/lib/cp-visibility";
 import type { BrandAiSummaryStore } from "@/lib/brand-ai-summary";
 import { FollowupHistoryPanel, RoundStatusBadge } from "./followup-history-panel";
 import { emptyFollowupHistory, hasFollowupHistory } from "@/lib/followup-history";
@@ -2422,7 +2423,7 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
       </>}
       </>}
     </div>
-    <DialogFooter>{launched?<Button onClick={()=>onOpenChange(false)}>Done</Button>:<><Button variant="outline" onClick={()=>onOpenChange(false)}>Cancel</Button><Button disabled={launching||anyStepUploading||!selected||!person||!hasReachableStep||incomplete||!!hasActiveOmniReach||(!previewOnly&&(!!c?.activeBombId||c?.status==="Bomb Running"))} onClick={()=>{if(!selected||!person)return;if(previewOnly){if(!customerId)return;void (async ()=>{setLaunching(true);try{const response=await fetch(`/api/brands/${customerId}/launch`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({bombId:selected.id,contactId:person.id,copies})});const payload=await response.json() as {message?:string;error?:string;omniReachRunId?:string;bombId?:string;bombName?:string;contactId?:string;steps?:Array<{taskId:string;channel:string;scheduledAt:string;templateId?:string;content:string;attachments?:MediaAttachment[]}>};if(!response.ok)throw new Error(payload.error||"Launch failed");if(!payload.omniReachRunId||!payload.steps?.length)throw new Error("Launch succeeded but no execution plan steps were returned");const plan=launchPlanFromApiSteps({customerId,bombId:payload.bombId||selected.id,bombName:payload.bombName||selected.name,contactId:payload.contactId||person.id,omniReachRunId:payload.omniReachRunId,steps:payload.steps});setLaunchPlan(plan);setPreviewReady(true);toast.success(payload.message||"OmniReach launched");onLaunched?.();}catch(error){toast.error(error instanceof Error?error.message:"Launch failed");}finally{setLaunching(false);}})();return;}if(!c)return;const r=launchBomb(c.id,selected.id,person.id,copies);show(r);if(r.ok&&r.id)setLaunchedInstanceId(r.id);}}>Launch OmniReach</Button></>}</DialogFooter>
+    <DialogFooter>{launched?<Button onClick={()=>onOpenChange(false)}>Done</Button>:<><Button variant="outline" onClick={()=>{toast.message("OmniReach launch cancelled");onOpenChange(false);}}>Cancel</Button><Button disabled={launching||anyStepUploading||!selected||!person||!hasReachableStep||incomplete||!!hasActiveOmniReach||(!previewOnly&&(!!c?.activeBombId||c?.status==="Bomb Running"))} onClick={()=>{if(!selected||!person)return;if(previewOnly){if(!customerId)return;void (async ()=>{setLaunching(true);try{const response=await fetch(`/api/brands/${customerId}/launch`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({bombId:selected.id,contactId:person.id,copies})});const payload=await response.json() as {message?:string;error?:string;omniReachRunId?:string;bombId?:string;bombName?:string;contactId?:string;steps?:Array<{taskId:string;channel:string;scheduledAt:string;templateId?:string;content:string;attachments?:MediaAttachment[]}>};if(!response.ok)throw new Error(payload.error||"Launch failed");if(!payload.omniReachRunId||!payload.steps?.length)throw new Error("Launch succeeded but no execution plan steps were returned");const plan=launchPlanFromApiSteps({customerId,bombId:payload.bombId||selected.id,bombName:payload.bombName||selected.name,contactId:payload.contactId||person.id,omniReachRunId:payload.omniReachRunId,steps:payload.steps});setLaunchPlan(plan);setPreviewReady(true);toast.success(payload.message||"OmniReach launched");onLaunched?.();}catch(error){toast.error(error instanceof Error?error.message:"Launch failed");}finally{setLaunching(false);}})();return;}if(!c)return;const r=launchBomb(c.id,selected.id,person.id,copies);show(r);if(r.ok&&r.id)setLaunchedInstanceId(r.id);}}>{launching?<><Spinner className="size-4"/>Launching…</> : "Launch OmniReach"}</Button></>}</DialogFooter>
     <Dialog open={saveAsTemplateOpen} onOpenChange={setSaveAsTemplateOpen}><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>Save as OmniReach template</DialogTitle><DialogDescription>This saves the edited steps as a new reusable OmniReach. The original is unchanged.</DialogDescription></DialogHeader><label className="grid gap-2 text-sm font-medium">Name<Input autoFocus value={saveAsTemplateName} onChange={event=>setSaveAsTemplateName(event.target.value)} placeholder="OmniReach name"/></label><label className="grid gap-2 text-sm font-medium">Scenario<Select value={saveAsTemplateScenarioId||undefined} onValueChange={setSaveAsTemplateScenarioId}><SelectTrigger className="w-full"><SelectValue placeholder="Select a scenario"/></SelectTrigger><SelectContent position="popper">{remoteScenarios.map((item)=><SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectContent></Select></label><label className="grid gap-2 text-sm font-medium">Applicable CP<Select value={saveAsTemplateCpId||undefined} onValueChange={setSaveAsTemplateCpId}><SelectTrigger className="w-full"><SelectValue placeholder="Select a CP"/></SelectTrigger><SelectContent position="popper">{remoteCps.map((item)=><SelectItem key={item.id} value={item.id}>{item.fullName?`${item.name} · ${item.fullName}`:item.name}</SelectItem>)}</SelectContent></Select></label><DialogFooter><Button type="button" variant="outline" onClick={()=>setSaveAsTemplateOpen(false)}>Cancel</Button><Button type="button" disabled={savingTemplate||!saveAsTemplateName.trim()||!saveAsTemplateScenarioId||!saveAsTemplateCpId} onClick={()=>void saveAsTemplate()}>{savingTemplate?"Saving…":"Save template"}</Button></DialogFooter></DialogContent></Dialog>
   </DialogContent></Dialog>;
 }
@@ -2663,11 +2664,12 @@ export function ReplyDialog({
           <SendTimingToggle value={deliveryMode} onValueChange={setDeliveryMode} scheduledAt={scheduledAt} onScheduledAtChange={setScheduledAt} />
         </div>
         <DialogFooter className="shrink-0">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={() => { toast.message("Message composer closed"); onOpenChange(false); }}>
             Cancel
           </Button>
           <Button
             disabled={readOnly || !canSubmit}
+            aria-busy={saving}
             onClick={() => {
               void (async () => {
                 if (!contact || !effective) return;
@@ -2719,8 +2721,7 @@ export function ReplyDialog({
               })();
             }}
           >
-            <Send className="mr-2 size-4" />
-            Send
+            {saving ? <><Spinner className="size-4" />{deliveryMode === "immediate" ? "Sending…" : deliveryMode === "scheduled" ? "Scheduling…" : "Queuing…"}</> : <><Send className="mr-2 size-4" />Send</>}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -2729,24 +2730,28 @@ export function ReplyDialog({
 }
 
 
-export function ChangeCPDialog({customerId,open,onOpenChange,currentCp,cps,onSave}:{customerId:string;open:boolean;onOpenChange:(v:boolean)=>void;currentCp?:string;cps?:CurrentCpOption[];onSave?:(currentCpId:string,evidence:string,note:string)=>Promise<void>}){
+export function ChangeCPDialog({customerId,open,onOpenChange,currentCp,cps,onSave}:{customerId:string;open:boolean;onOpenChange:(v:boolean)=>void;currentCp?:string;cps?:CurrentCpOption[];onSave?:(currentCpId:string|null,evidence:string,note:string)=>Promise<void>}){
   const {state,changeCP}=useWorkspace();
   const c=state.customers.find(x=>x.id===customerId);
-  const options=visibleCpOptions(cps?.length?cps:listCurrentCps()).filter(option=>option.name!=="NONE");
-  const currentName=currentCp||c?.cp||"NONE";
-  const [cpId,setCP]=useState(options.find(item=>item.name===currentName)?.id||options[0]?.id||"");
+  const allOptions=useMemo(()=>visibleCpOptions(cps?.length?cps:listCurrentCps()).filter(option=>["CP1","CP2","CP3"].includes(option.name)),[cps]);
+  const neutralOption=useMemo(()=>listCurrentCps().find(option=>option.name==="NONE")!,[]);
+  const currentName=currentCpOption(currentCp||c?.cp||"NONE").name;
+  const options=useMemo(()=>[...allOptions,...(currentName!=="NONE"?[neutralOption]:[])],[allOptions,currentName,neutralOption]);
+  const initialCp=options.find(item=>item.name==="CP1"&&isForwardCpTransition(currentName,item.name))||options.find(item=>item.name===currentName)||options.find(item=>isForwardCpTransition(currentName,item.name));
+  const [cpId,setCP]=useState(initialCp?.id||"");
   const [note,setNote]=useState("");
   const [saving,setSaving]=useState(false);
   useEffect(()=>{
     if(!open)return;
-    setCP(options.find(item=>item.name===currentName)?.id||options[0]?.id||"");
+    const next=options.find(item=>currentName==="NONE"&&item.name==="CP1")||options.find(item=>item.name===currentName)||options.find(item=>isForwardCpTransition(currentName,item.name));
+    setCP(next?.id||"");
     setNote("");
-  },[open,currentName,customerId]);
+  },[open,currentName,customerId,options]);
   const selected=options.find(item=>item.id===cpId);
   const stage=currentCpOption(selected?.name).criteria||state.cps.find(item=>item.code===selected?.name)?.criteria;
   const criteriaItems=(stage||"").split("\n").map(item=>item.trim()).filter(Boolean);
   const evidence="Manually confirmed CP update";
-  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent><DialogHeader><DialogTitle>Change Brand CP</DialogTitle><DialogDescription>CP never changes automatically. Review the completion criteria and confirm.</DialogDescription></DialogHeader><Select value={cpId} onValueChange={setCP}><SelectTrigger className="w-full"><SelectValue/></SelectTrigger><SelectContent>{options.map(x=><SelectItem key={x.id} value={x.id}>{x.name} · {x.fullName||x.name}</SelectItem>)}</SelectContent></Select><div className="rounded-xl bg-violet-50 p-4 text-sm text-violet-900"><b>Completion Criteria</b><ol className="mt-2 list-decimal space-y-1 pl-5">{criteriaItems.map(item=><li key={item}>{item}</li>)}</ol></div><Textarea value={note} onChange={e=>setNote(e.target.value)} placeholder="Optional note"/><DialogFooter><Button variant="outline" onClick={()=>onOpenChange(false)}>Cancel</Button><Button disabled={!selected||selected.name===currentName||saving} onClick={()=>{void (async ()=>{if(!selected)return;if(onSave){setSaving(true);try{await onSave(selected.id,evidence,note);toast.success(`Brand moved to ${selected.name}`);onOpenChange(false);}catch(error){toast.error(error instanceof Error?error.message:"Update failed");}finally{setSaving(false);}return;}const r=changeCP(customerId,selected.name as CPCode,evidence,note);show(r);if(r.ok)onOpenChange(false);})()}}>Move to {selected?.name||"CP"}</Button></DialogFooter></DialogContent></Dialog>;
+  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent><DialogHeader><DialogTitle>Change Brand CP</DialogTitle><DialogDescription>CP can only move forward: CP1 → CP2 → CP3. Earlier CPs remain visible but cannot be selected. Any CP can be moved to Neutre.</DialogDescription></DialogHeader><Select value={cpId} onValueChange={setCP}><SelectTrigger className="w-full"><SelectValue/></SelectTrigger><SelectContent>{options.map(x=><SelectItem key={x.id} value={x.id} disabled={x.name!=="NONE"&&!isForwardCpTransition(currentName,x.name)}>{x.name==="NONE"?"Neutre":`${x.name} · ${x.fullName||x.name}`}</SelectItem>)}</SelectContent></Select><div className="rounded-xl bg-violet-50 p-4 text-sm text-violet-900"><b>Completion Criteria</b><ol className="mt-2 list-decimal space-y-1 pl-5">{criteriaItems.map(item=><li key={item}>{item}</li>)}</ol></div><Textarea value={note} onChange={e=>setNote(e.target.value)} placeholder="Optional note"/><DialogFooter><Button variant="outline" onClick={()=>onOpenChange(false)}>Cancel</Button><Button disabled={!selected||selected.name===currentName||saving} onClick={()=>{void (async ()=>{if(!selected)return;if(onSave){setSaving(true);try{await onSave(selected.name==="NONE"?null:selected.id,evidence,note);toast.success(`Brand moved to ${selected.name==="NONE"?"Neutre":selected.name}`);onOpenChange(false);}catch(error){toast.error(error instanceof Error?error.message:"Update failed");}finally{setSaving(false);}return;}const r=changeCP(customerId,selected.name as CPCode,evidence,note);show(r);if(r.ok)onOpenChange(false);})()}}>Move to {selected?.name==="NONE"?"Neutre":selected?.name||"CP"}</Button></DialogFooter></DialogContent></Dialog>;
 }
 
 export function FollowUpDialog({customerId,open,onOpenChange}:{customerId:string;open:boolean;onOpenChange:(v:boolean)=>void}){const {state,createFollowUp}=useWorkspace();const [days,setDays]=useState("3");const [reason,setReason]=useState("");const [note,setNote]=useState("");return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent><DialogHeader><DialogTitle>Schedule follow-up</DialogTitle><DialogDescription>This creates a human reminder. Nothing is sent automatically.</DialogDescription></DialogHeader><Select value={days} onValueChange={setDays}><SelectTrigger className="w-full"><SelectValue/></SelectTrigger><SelectContent>{[["1","Tomorrow"],["3","In 3 days"],["5","In 5 days"],["7","In 7 days"]].map(x=><SelectItem key={x[0]} value={x[0]}>{x[1]}</SelectItem>)}</SelectContent></Select><Input value={reason} onChange={e=>setReason(e.target.value)} placeholder="Reason"/><Textarea value={note} onChange={e=>setNote(e.target.value)} placeholder="Note"/><DialogFooter><Button variant="outline" onClick={()=>onOpenChange(false)}>Cancel</Button><Button disabled={!reason.trim()} onClick={()=>{const r=createFollowUp(customerId,addDays(state.simulatedDate,Number(days)),reason,note);show(r);if(r.ok)onOpenChange(false)}}>Schedule</Button></DialogFooter></DialogContent></Dialog>}

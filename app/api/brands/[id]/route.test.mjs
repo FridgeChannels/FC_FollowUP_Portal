@@ -8,9 +8,9 @@ const compiled = ts.transpileModule(readFileSync(new URL("./route.ts", import.me
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 
-function fixture({ role = "AccountManager", ownerId = "am", brandOwnerId = "am", brandOwnerEmail = ownerId === "am" ? "test@example.com" : "other@example.com", status = "In Progress", conflict = false, reminder = null } = {}) {
+function fixture({ role = "AccountManager", ownerId = "am", brandOwnerId = "am", brandOwnerEmail = ownerId === "am" ? "test@example.com" : "other@example.com", status = "In Progress", currentCp = "CP2", conflict = false, reminder = null } = {}) {
   const calls = [];
-  const brand = { id: "brand", ownerId: brandOwnerId, ownerEmail: brandOwnerEmail, status };
+  const brand = { id: "brand", ownerId: brandOwnerId, ownerEmail: brandOwnerEmail, status, currentCp };
   class FollowupError extends Error { constructor(message, status = 400) { super(message); this.status = status; } }
   const mocks = {
     viewerFromRequest: async () => ({ email: "test@example.com", role, ownerId }),
@@ -26,6 +26,16 @@ function fixture({ role = "AccountManager", ownerId = "am", brandOwnerId = "am",
     listBrandReplySignals: async () => new Map(),
     attachBrandReplySignals: brands => brands,
     listCheckpoints: async () => [],
+    resolveCheckpoint: async value => {
+      const name = ({ "cp1-id": "CP1", "cp2-id": "CP2", "cp3-id": "CP3", "cp4-id": "CP4" })[value] || value;
+      return ["CP1", "CP2", "CP3", "CP4"].includes(name) ? { id: `${name.toLowerCase()}-id`, name } : null;
+    },
+    currentCpOption: name => ({ name }),
+    isForwardCpTransition: (current, target) => {
+      if (target === "NONE") return true;
+      const order = ["CP1", "CP2", "CP3"];
+      return target === current || current === "NONE" && order.includes(target) || order.indexOf(current) >= 0 && order.indexOf(target) >= order.indexOf(current);
+    },
     latestFollowUpReminder: () => reminder,
     encodeFollowUpReminderResolution: value => JSON.stringify(value),
     encodeBrandAssignment: () => "assignment",
@@ -88,6 +98,25 @@ test("Admin can change the Brand Owner directly without changing follow-up histo
   const accountManager = fixture({ brandOwnerId: "old-am" });
   assert.equal((await accountManager.request({ ownerId: "new-am" })).status, 403);
   assert.equal(accountManager.calls.length, 0);
+});
+
+test("CP cannot move backward; it can move forward or to Neutre", async () => {
+  const backward = fixture({ currentCp: "CP2" });
+  assert.equal((await backward.request({ currentCpId: "cp1-id", evidence: "Confirmed" })).status, 400);
+  assert.equal(backward.calls.length, 0);
+
+  const forward = fixture({ currentCp: "CP2" });
+  assert.equal((await forward.request({ currentCpId: "cp3-id", evidence: "Confirmed" })).status, 200);
+  assert.equal(forward.calls[0].currentCpId, "cp3-id");
+
+  const neutral = fixture({ currentCp: "CP3" });
+  assert.equal((await neutral.request({ currentCpId: null })).status, 200);
+  assert.equal(neutral.calls[0].currentCpId, null);
+  assert.match(neutral.calls[0].notes, /Neutre/);
+
+  const unsupported = fixture({ currentCp: "CP2" });
+  assert.equal((await unsupported.request({ currentCpId: "cp4-id" })).status, 400);
+  assert.equal(unsupported.calls.length, 0);
 });
 
 test("the assigned Account Manager can set a Reply Deadline by owner ID or account email", async () => {

@@ -1,12 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cpDisplayText, cpHistoryText, isCpVisible, visibleCpOptions, VISIBLE_CP_CODES } from "./cp-visibility.ts";
+import { cpDisplayText, cpHistoryText, isCpVisible, isForwardCpTransition, visibleCpOptions, VISIBLE_CP_CODES } from "./cp-visibility.ts";
 import { listVisibleCurrentCps, listVisibleApplicableCps, parseCurrentCp, currentCpSelect } from "./brand-list.ts";
 import { VISIBLE_STAGES } from "./performance/data.ts";
 
 test("all UI stage catalogs omit later CPs while retaining the visible stages", () => {
   assert.deepEqual(VISIBLE_CP_CODES, ["CP1", "CP2", "CP3"]);
-  assert.deepEqual(VISIBLE_STAGES, ["CP0", "CP1", "CP2", "CP3", "Nurture"]);
+  assert.deepEqual(VISIBLE_STAGES, ["CP1", "CP2", "CP3", "Nurture"]);
   assert.deepEqual(listVisibleCurrentCps().map(cp => cp.name), ["NONE", "CP1", "CP2", "CP3", "Nurture"]);
   assert.deepEqual(listVisibleApplicableCps().map(cp => cp.name), ["CP1", "CP2", "CP3"]);
 });
@@ -31,4 +31,17 @@ test("presentation filtering does not rewrite historical data or backend stage v
     assert.equal(parseCurrentCp(cp), cp);
     assert.deepEqual(currentCpSelect(cp), { select: { name: cp } });
   }
+});
+
+test("CP changes never move backward and every CP can move to neutral", () => {
+  assert.equal(isForwardCpTransition("CP2", "CP1"), false);
+  assert.equal(isForwardCpTransition("CP3", "CP1"), false);
+  assert.equal(isForwardCpTransition("CP2", "CP2"), true);
+  assert.equal(isForwardCpTransition("CP2", "CP3"), true);
+  assert.equal(isForwardCpTransition("CP1", "CP3"), true);
+  for (const cp of ["NONE", "CP1", "CP2", "CP3"]) {
+    assert.equal(isForwardCpTransition(cp, "NONE"), true);
+  }
+  assert.equal(isForwardCpTransition("CP4", "NONE"), true);
+  assert.equal(isForwardCpTransition("CP2", "CP4"), false);
 });

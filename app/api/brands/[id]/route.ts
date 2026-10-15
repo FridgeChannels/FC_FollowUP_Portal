@@ -10,6 +10,7 @@ import { encodeFollowUpReminder, encodeFollowUpReminderResolution, latestFollowU
 import { encodeBrandAssignment } from "@/lib/brand-assignment";
 import type { AmazonSampleProduct, ChannelType } from "@/lib/sample-product";
 import { FOLLOW_UP_STATUSES } from "@/lib/brand-list";
+import { isForwardCpTransition } from "@/lib/cp-visibility";
 import { followupHistory, mutateFollowup, projectFollowupState, seedFollowupHistory } from "@/lib/followup-data";
 import { FollowupError } from "@/lib/followup-history";
 
@@ -102,6 +103,26 @@ export async function PATCH(request: Request, { params }: Params) {
     if (body.currentCpId !== undefined && body.currentCpId !== null && typeof body.currentCpId !== "string") throw new FollowupError("Invalid Current CP");
     if (body.expectedVersion !== undefined && (!Number.isInteger(body.expectedVersion)||body.expectedVersion<0)) throw new FollowupError("Invalid history version");
     if (body.expectedRoundId !== undefined && body.expectedRoundId !== null && typeof body.expectedRoundId !== "string") throw new FollowupError("Invalid Round ID");
+    const currentCpName = currentCpOption(brand.currentCp).name;
+    let requestedCpName: string | undefined;
+    let normalizedCurrentCpId = body.currentCpId;
+    if (body.currentCpId !== undefined) {
+      const requestedCp = body.currentCpId?.trim() || "";
+      const target = !requestedCp || requestedCp.toUpperCase() === "NONE" || requestedCp.toLowerCase() === "neutre"
+        ? null
+        : await resolveCheckpoint(requestedCp);
+      if (requestedCp && requestedCp.toUpperCase() !== "NONE" && requestedCp.toLowerCase() !== "neutre" && !target) {
+        throw new FollowupError("Choose a valid CP");
+      }
+      requestedCpName = target?.name || "NONE";
+      normalizedCurrentCpId = requestedCpName === "NONE" ? null : target!.id;
+      if (!["NONE", "CP1", "CP2", "CP3"].includes(requestedCpName)) {
+        throw new FollowupError("Only CP1, CP2, CP3, or Neutre can be selected");
+      }
+      if (!isForwardCpTransition(currentCpName, requestedCpName)) {
+        throw new FollowupError("Brand CP cannot move backwards. Choose a later CP or Neutre");
+      }
+    }
     if (body.amazonSampleProduct !== undefined && (body.ownerId !== undefined || body.status !== undefined || body.currentCpId !== undefined)) throw new FollowupError("Save sample product changes separately from follow-up changes");
     if (body.assignmentHandled && viewer.ownerId !== brand.ownerId) {
       return Response.json({ error: "Only the assigned Account Manager can review this assignment" }, { status: 403 });
@@ -139,12 +160,11 @@ export async function PATCH(request: Request, { params }: Params) {
     }
 
     const extras: string[] = [];
-    if (body.currentCpId && (body.evidence?.trim() || body.note?.trim())) {
-      const next =
-        (await resolveCheckpoint(body.currentCpId)) || currentCpOption(body.currentCpId);
+    if (requestedCpName !== undefined && requestedCpName !== currentCpName) {
+      const next = currentCpOption(requestedCpName);
       extras.push(
         [
-          `CP 更新为 ${next.name}。`,
+          `CP 更新为 ${next.name === "NONE" ? "Neutre" : next.name}。`,
           body.evidence?.trim() ? `证据：${body.evidence.trim()}。` : "",
           body.note?.trim() || "",
         ]
@@ -197,7 +217,7 @@ export async function PATCH(request: Request, { params }: Params) {
       : undefined;
 
     const patch = {
-      currentCpId: body.currentCpId,
+      currentCpId: normalizedCurrentCpId,
       ownerId: body.ownerId,
       status: body.status,
       handlingMode: body.handlingMode,

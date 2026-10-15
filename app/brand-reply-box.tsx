@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Channel, Contact, Interaction, ScheduledAction, WorkspaceState } from "@/lib/outreach-domain";
 import { useWorkspace } from "./workspace-store";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
@@ -160,7 +161,7 @@ export function BrandReplyBox({
         <div className="flex items-center justify-end gap-2">
           <div className="flex items-center gap-2">
           <SendTimingToggle value={deliveryMode} onValueChange={setDeliveryMode} scheduledAt={scheduledAt} onScheduledAtChange={setScheduledAt} />
-          <Button className="h-9 px-3" disabled={!canSend} onClick={() => {
+          <Button className="h-9 px-3" disabled={!canSend} aria-busy={saving} onClick={() => {
           if (onSend) {
             setSaving(true);
             void onSend(contact.id, channel, content, replyTaskId, interaction.threadId, subject, deliveryMode, scheduledAt ? easternDateTimeLocalToIso(scheduledAt) : undefined, media.readyAttachments, channel === "Email" ? cc : undefined)
@@ -173,7 +174,7 @@ export function BrandReplyBox({
           const result = sendHumanReply(customer.id, contact.id, channel, content, bombInstanceId || interaction.bombInstanceId);
           show(result);
           if (result.ok) { setContent(""); media.reset(); }
-          }}><Send className="size-4"/></Button>
+          }}>{saving ? <><Spinner className="size-4"/>{deliveryMode === "immediate" ? "Sending…" : deliveryMode === "scheduled" ? "Scheduling…" : "Queuing…"}</> : <><Send className="size-4"/>Send</>}</Button>
           </div>
         </div>
       </div>
@@ -299,6 +300,9 @@ export function ThreadSendBox({
               <Button
                 className="h-9 px-3"
                 disabled={!canSend}
+                aria-busy={saving}
+                aria-label={saving ? `${deliveryMode === "queue" ? "Queuing" : deliveryMode === "scheduled" ? "Scheduling" : "Sending"} message` : "Send message"}
+                title={saving ? `${deliveryMode === "queue" ? "Queuing" : deliveryMode === "scheduled" ? "Scheduling" : "Sending"}…` : "Send message"}
                 onClick={() => {
                   if (!contact) return;
                   if (onSend) {
@@ -333,7 +337,7 @@ export function ThreadSendBox({
                   }
                 }}
               >
-                <Send className="size-4" />
+                {saving ? <Spinner className="size-4" /> : <Send className="size-4" />}
               </Button>
             </div>
           </div>
@@ -411,7 +415,7 @@ export function ChannelSendBox({
           <div className="flex items-center justify-end gap-2">
             <div className="flex items-center gap-2">
             <SendTimingToggle value={deliveryMode} onValueChange={setDeliveryMode} scheduledAt={scheduledAt} onScheduledAtChange={setScheduledAt} />
-            <Button className="h-9 px-3" disabled={!contact || (!content.trim() && !media.readyAttachments.length) || saving || media.uploading} onClick={() => {
+            <Button className="h-9 px-3" disabled={!contact || (!content.trim() && !media.readyAttachments.length) || saving || media.uploading} aria-busy={saving} onClick={() => {
             if (!contact) return;
             if (onSend) {
               setSaving(true);
@@ -424,7 +428,7 @@ export function ChannelSendBox({
             const result = sendHumanReply(customerId, contact.id, channel, content, latestOutbound?.bombInstanceId);
             show(result);
             if (result.ok) { setContent(""); media.reset(); }
-            }}><Send className="size-4"/></Button>
+            }} aria-label={saving ? `${deliveryMode === "queue" ? "Queuing" : deliveryMode === "scheduled" ? "Scheduling" : "Sending"} message` : "Send message"} title={saving ? `${deliveryMode === "queue" ? "Queuing" : deliveryMode === "scheduled" ? "Scheduling" : "Sending"}…` : "Send message"}>{saving ? <Spinner className="size-4"/> : <Send className="size-4"/>}</Button>
             </div>
           </div>
         </div>
