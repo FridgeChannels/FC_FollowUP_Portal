@@ -1,3 +1,5 @@
+import { easternDayBounds } from "./scheduling-engine/calendar.ts";
+
 export type ReplyDeadlineActivity = {
   brandId?: string | null;
   channel?: string | null;
@@ -18,8 +20,9 @@ export function expiredUnansweredReplyDeadline(input: {
 }): string | null {
   const date = input.deadline?.slice(0, 10);
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date) || input.status === "Paused" || input.status === "Completed") return null;
-  const dueAt = `${date}T23:59:59.999Z`;
-  const dueTimestamp = Date.parse(dueAt);
+  let dueTimestamp: number;
+  try { dueTimestamp = easternDayBounds(date).end; } catch { return null; }
+  const dueAt = new Date(dueTimestamp).toISOString();
   if (!Number.isFinite(dueTimestamp) || dueTimestamp > (input.nowMs ?? Date.now())) return null;
 
   const interactions = input.activities.filter(activity =>

@@ -1,8 +1,9 @@
-import { canViewBrand, type BrandViewer } from "../brand-access";
+import { canViewBrand, isBrandAssignedToViewer, type BrandViewer } from "../brand-access";
 import { prewarmBrandProjection } from "../notion/followup-clients";
 import { supabaseSelect } from "../supabase/client";
 import { isSupabaseConfigured } from "../supabase/config";
 import { signalBrands } from "./brands";
+import { resolveSignalsAssignment } from "./assignment";
 import { signalsWritesEnabled } from "./config";
 import { aggregateSignals, loadSignalEvents } from "./data";
 import { summarize, type SignalsPayload } from "./model";
@@ -42,8 +43,9 @@ export async function computeSignals(viewer: BrandViewer): Promise<SignalsPayloa
   const startedAt = Date.now();
   // The Notion lookups the projection needs are warmed while Supabase streams
   // the events, so their latency overlaps instead of stacking after the fan-out.
-  const [signals] = await Promise.all([
+  const [signals, assignment] = await Promise.all([
     loadSignalEvents(),
+    resolveSignalsAssignment(viewer),
     prewarmBrandProjection().catch(() => undefined),
   ]);
   const { events, notifications } = signals;
@@ -59,6 +61,7 @@ export async function computeSignals(viewer: BrandViewer): Promise<SignalsPayloa
   // Re-evaluate viewer access on every response, including cached CRM projections.
   const brands = candidates
     .filter((brand) => canViewBrand(viewer, brand))
+    .filter((brand) => !viewer.isAdmin || isBrandAssignedToViewer(assignment, brand))
     .map((brand) =>
       aggregateSignals(brand, events, notifications, viewer.ownerId || viewer.email),
     );

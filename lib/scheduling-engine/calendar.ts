@@ -1,3 +1,5 @@
+import { BUSINESS_TIME_ZONE, businessDateOnly } from "../time-zone.ts";
+
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 export const DEFAULT_MAX_HORIZON_DAYS = 90;
@@ -7,7 +9,7 @@ export const DEFAULT_MAX_HORIZON_DAYS = 90;
  * so Monday → Friday when n = 5. Capacity overflow continues from day 6+.
  */
 export const PHONE_SCHEDULE_BUSINESS_DAY = 5;
-export const SCHEDULE_TIME_ZONE = "America/New_York";
+export const SCHEDULE_TIME_ZONE = BUSINESS_TIME_ZONE;
 export const WORK_WINDOW_START_MINUTES = 9 * 60;
 export const WORK_WINDOW_END_MINUTES = 17 * 60;
 export const DEFAULT_TIME_INTERVAL_MINUTES = 5;
@@ -95,20 +97,15 @@ function zonedParts(date: Date, timeZone: string): ZonedParts {
 }
 
 export function easternDateOnly(value: string | Date = new Date()): string {
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) {
+  const day = businessDateOnly(value);
+  if (!day) {
     throw new Error(`Invalid datetime for easternDateOnly: ${String(value)}`);
   }
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: SCHEDULE_TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(date);
+  return day;
 }
 
 export function easternMinuteOfDayCeil(value: string | Date = new Date()): number {
-  const date = value instanceof Date ? value : new Date(value);
+  const date = value instanceof Date ? value : new Date(parseTimelineMs(value));
   if (Number.isNaN(date.getTime())) {
     throw new Error(`Invalid datetime for easternMinuteOfDayCeil: ${String(value)}`);
   }
@@ -118,9 +115,24 @@ export function easternMinuteOfDayCeil(value: string | Date = new Date()): numbe
   return minute;
 }
 
+export function easternTimeParts(value: string | Date) {
+  const date = value instanceof Date ? value : new Date(parseTimelineMs(value));
+  if (Number.isNaN(date.getTime())) throw new Error("Invalid Eastern datetime");
+  const { hour, minute, second } = zonedParts(date, SCHEDULE_TIME_ZONE);
+  return { hour, minute, second };
+}
+
+export function easternDayBounds(start: string, end = start) {
+  assertDateOnly(end, "end");
+  return {
+    start: Date.parse(easternDateTimeIso(start, 0)),
+    end: Date.parse(easternDateTimeIso(addCalendarDays(end, 1), 0)) - 1,
+  };
+}
+
 /** `YYYY-MM-DDTHH:mm` in America/New_York wall time (datetime-local style). */
 export function formatEasternDateTimeLocal(value: string | Date = new Date()): string {
-  const date = value instanceof Date ? value : new Date(value);
+  const date = value instanceof Date ? value : new Date(parseTimelineMs(value));
   if (Number.isNaN(date.getTime())) {
     throw new Error(`Invalid datetime for formatEasternDateTimeLocal: ${String(value)}`);
   }
@@ -143,20 +155,21 @@ export function easternDateTimeLocalToIso(local: string): string {
 }
 
 /** Build ISO instant for an America/New_York local date + minute-of-day. */
-export function easternDateTimeIso(dateOnly: string, minuteOfDay: number): string {
+export function easternDateTimeIso(dateOnly: string, minuteOfDay: number, second = 0): string {
   assertDateOnly(dateOnly, "dateOnly");
   if (!Number.isFinite(minuteOfDay) || minuteOfDay < 0 || minuteOfDay >= 24 * 60) {
     throw new Error(`minuteOfDay out of range: ${minuteOfDay}`);
   }
   const hour = Math.floor(minuteOfDay / 60);
   const minute = minuteOfDay % 60;
+  if (!Number.isInteger(second) || second < 0 || second > 59) throw new Error("second out of range");
   const year = Number(dateOnly.slice(0, 4));
   const month = Number(dateOnly.slice(5, 7));
   const day = Number(dateOnly.slice(8, 10));
-  const wantAsUtcFields = Date.UTC(year, month - 1, day, hour, minute, 0);
+  const wantAsUtcFields = Date.UTC(year, month - 1, day, hour, minute, second);
 
   // Start near EST (UTC−5); iterate to absorb EDT and exact offset.
-  let utcMs = Date.UTC(year, month - 1, day, hour + 5, minute, 0);
+  let utcMs = Date.UTC(year, month - 1, day, hour + 5, minute, second);
   for (let i = 0; i < 4; i += 1) {
     const parts = zonedParts(new Date(utcMs), SCHEDULE_TIME_ZONE);
     const gotAsUtcFields = Date.UTC(
@@ -306,7 +319,7 @@ export function parseScheduledAt(value: string): { dateOnly: string; minuteOfDay
     assertDateOnly(value, "scheduledAt");
     return { dateOnly: value, minuteOfDay: DATE_ONLY_PLACEHOLDER_MINUTES };
   }
-  const date = new Date(value);
+  const date = new Date(parseTimelineMs(value));
   if (Number.isNaN(date.getTime())) {
     throw new Error(`Invalid scheduledAt datetime: ${value}`);
   }

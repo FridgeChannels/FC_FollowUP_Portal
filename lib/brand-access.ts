@@ -90,6 +90,17 @@ export function canViewBrand(viewer: BrandViewer, brand: BrandListItem, tasks?: 
   return false;
 }
 
+export function isBrandAssignedToViewer(
+  viewer: Pick<BrandViewer, "ownerId" | "email">,
+  brand: Pick<BrandListItem, "ownerId" | "ownerEmail">,
+) {
+  const viewerEmail = normalizeEmail(viewer.email);
+  return Boolean(
+    (viewer.ownerId && brand.ownerId === viewer.ownerId) ||
+      (viewerEmail && normalizeEmail(brand.ownerEmail) === viewerEmail),
+  );
+}
+
 export function canWriteBrand(
   viewer: BrandViewer,
   brand: Pick<BrandListItem, "isTest" | "ownerId" | "ownerEmail">,

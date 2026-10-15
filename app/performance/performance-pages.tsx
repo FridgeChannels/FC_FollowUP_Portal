@@ -1,5 +1,6 @@
 "use client";
 
+import { formatBusinessDate } from "@/lib/display-time";
 import { isCpVisible, cpDisplayText } from "@/lib/cp-visibility";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -18,7 +19,7 @@ import { identity, metrics, snapshot, queryRange, presetRange, validDate, VISIBL
 type LoadState = { status: "loading"; data?: SourceData } | { status: "ready"; data: SourceData } | { status: "error"; message: string };
 type Href = (path: string, updates?: Record<string, string | null>) => string;
 const value = (n: number | null) => n === null ? "—" : n.toLocaleString("en-US");
-const shortDate = (date: string | null) => date && Number.isFinite(Date.parse(date)) ? new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "Asia/Shanghai" }).format(new Date(date)) : "—";
+const shortDate = (date: string | null) => date && Number.isFinite(Date.parse(date)) ? formatBusinessDate(date, { month: "short", day: "numeric" }) : "—";
 const missingCost = "The existing records do not contain exhibition or follow-up investment amounts.";
 const currentHint = "Counts brands once at their latest current Round. On an AM page, only active opportunities assigned to that AM are included; if a brand has multiple Rounds, its latest active Round determines its current CP.";
 const communicationHint = "Actual Interaction At records. Saved Round markers use the AM responsible at event time; legacy records without a Round marker use the brand's Owner at the selected cutoff. Historical cutoffs without ownership evidence remain unavailable.";

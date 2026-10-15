@@ -3,6 +3,9 @@ import {
   compareDateOnly,
   firstWorkingDayOnOrAfter,
   isWorkingDay,
+  easternDateOnly,
+  easternTimeParts,
+  easternDateTimeIso,
 } from "../scheduling-engine/calendar.ts";
 import {
   availableOn,
@@ -21,48 +24,6 @@ export type ReplyDueReservation = {
   date: string;
   channel: Channel;
 };
-
-/** Asia/Shanghai calendar date YYYY-MM-DD from an instant. */
-export function shanghaiDateOnly(value: string | Date): string {
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    throw new Error("Invalid datetime for Reply Due At");
-  }
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Shanghai",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(date);
-}
-
-/** Wall-clock H:M:S in Asia/Shanghai. */
-export function shanghaiTimeParts(value: string | Date): { hour: number; minute: number; second: number } {
-  const date = value instanceof Date ? value : new Date(value);
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Asia/Shanghai",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(date);
-  const num = (type: string) => Number(parts.find((part) => part.type === type)?.value || "0");
-  return { hour: num("hour"), minute: num("minute"), second: num("second") };
-}
-
-/** Build ISO instant for a Shanghai local date + time-of-day. */
-export function shanghaiDateTimeIso(
-  dateOnly: string,
-  time: { hour: number; minute: number; second: number },
-): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const local = `${dateOnly}T${pad(time.hour)}:${pad(time.minute)}:${pad(time.second)}+08:00`;
-  const parsed = new Date(local);
-  if (Number.isNaN(parsed.getTime())) {
-    throw new Error(`Invalid Shanghai datetime: ${local}`);
-  }
-  return parsed.toISOString();
-}
 
 export function findEarliestChannelDay(
   board: CapacityBoard,
@@ -116,8 +77,8 @@ export function resolveReplyDueAt(input: {
 
   const hours = input.defaultHours ?? REPLY_DUE_DEFAULT_HOURS;
   const candidate = new Date(occurred.getTime() + hours * 60 * 60 * 1000);
-  const time = shanghaiTimeParts(candidate);
-  const preferredDay = firstWorkingDayOnOrAfter(shanghaiDateOnly(candidate));
+  const time = easternTimeParts(candidate);
+  const preferredDay = firstWorkingDayOnOrAfter(easternDateOnly(candidate));
   const horizonEnd = addCalendarDays(preferredDay, input.horizonDays ?? REPLY_DUE_HORIZON_DAYS);
 
   const board = createCapacityBoard(input.dailyMax, input.existingTasks);
@@ -127,7 +88,7 @@ export function resolveReplyDueAt(input: {
   }
 
   if (dailyMaxFor(board.dailyMax, channel) === 0) {
-    return shanghaiDateTimeIso(preferredDay, time);
+    return easternDateTimeIso(preferredDay, time.hour * 60 + time.minute, time.second);
   }
 
   const dueDay =
@@ -136,5 +97,5 @@ export function resolveReplyDueAt(input: {
       : findEarliestChannelDay(board, channel, addCalendarDays(preferredDay, 1), horizonEnd)
         || preferredDay;
 
-  return shanghaiDateTimeIso(dueDay, time);
+  return easternDateTimeIso(dueDay, time.hour * 60 + time.minute, time.second);
 }

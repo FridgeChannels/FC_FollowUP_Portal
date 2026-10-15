@@ -1,5 +1,5 @@
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
-import { canWriteBrand } from "@/lib/brand-access";
+import { canWriteBrand, isBrandAssignedToViewer } from "@/lib/brand-access";
 import { retrievePage } from "@/lib/notion/client";
 import {
   mapFollowupClientDetail,
@@ -7,6 +7,7 @@ import {
 } from "@/lib/notion/followup-clients";
 import { loadSignalEvents, saveSignalReadState, saveSignalSnapshot } from "@/lib/signals/data";
 import { signalsWritesEnabled, isSignalsDevMode } from "@/lib/signals/config";
+import { resolveSignalsAssignment } from "@/lib/signals/assignment";
 import { classifySignalEvents, effectiveFollowup, type SignalReview } from "@/lib/signals/model";
 
 type Params = { params: Promise<{ id: string }> };
@@ -53,6 +54,11 @@ export async function PATCH(request: Request, { params }: Params) {
         { error: "A valid action and event snapshot are required" },
         { status: 400 },
       );
+    if (
+      viewer.isAdmin && body.surface !== "brand" &&
+      !isBrandAssignedToViewer(await resolveSignalsAssignment(viewer), brand)
+    )
+      return Response.json({ error: "This brand is outside your Signals feed" }, { status: 403 });
     const { events, notifications } = await loadSignalEvents(id);
     const freshEvents = classifySignalEvents(events, { devMode: isSignalsDevMode() }).filter((e) => e.isNewSignal);
     const allowed = new Set(freshEvents.map((e) => e.id));

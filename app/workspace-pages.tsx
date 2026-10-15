@@ -1,6 +1,8 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
+import { businessDateOnly } from "@/lib/time-zone";
+import { easternDayBounds, parseDateOnly as parseBusinessDay } from "@/lib/scheduling-engine/calendar";
 import { isCpVisible } from "@/lib/cp-visibility";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -21,7 +23,6 @@ import {
   PhoneCall,
   Plus,
   Search,
-  Upload,
   UserPlus,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -628,13 +629,9 @@ function daysSince(value: string | null) {
   if (!value) return "—";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
-  const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
-  const startOfEventDay = new Date(date);
-  startOfEventDay.setHours(0, 0, 0, 0);
-  return String(
-    Math.max(0, Math.round((startOfToday.getTime() - startOfEventDay.getTime()) / 86_400_000)),
-  );
+  return String(Math.max(0, Math.round(
+    (parseBusinessDay(businessDateOnly()).getTime() - parseBusinessDay(businessDateOnly(date)).getTime()) / 86_400_000,
+  )));
 }
 
 export function BrandsPage({ active = true }: { active?: boolean }) {
@@ -698,9 +695,8 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
   }, [active, state.currentUserId, state.currentRole, listEpoch, listReloadToken, workReloadToken]);
   useEffect(() => {
     if (!active || state.currentRole === "Caller") return;
-    const now = new Date();
-    const nextUtcDay = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1) + 100;
-    const timer = window.setTimeout(() => setWorkReloadToken((value) => value + 1), Math.max(1_000, nextUtcDay - Date.now()));
+    const nextBusinessDay = easternDayBounds(businessDateOnly()).end + 101;
+    const timer = window.setTimeout(() => setWorkReloadToken((value) => value + 1), Math.max(1_000, nextBusinessDay - Date.now()));
     return () => window.clearTimeout(timer);
   }, [active, state.currentRole, workReloadToken]);
   const paginationStorageKey = brandListPaginationStorageKey(filters, state.currentUserId);
@@ -1553,7 +1549,7 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
                                   ? ` · ${formatEasternDateTime(c.replyDueAt || c.replyUpdatedAt || "")}`
                                   : ""}
                               </div>
-                            ) : hasReplyDeadline ? <div className="mt-0.5 truncate text-xs font-medium text-rose-700">No reply by deadline · {pendingWork?.replyDeadline?.target.dueAt?.slice(0,10)}</div> : null}
+                            ) : hasReplyDeadline ? <div className="mt-0.5 truncate text-xs font-medium text-rose-700">No reply by deadline · {dateOnly(pendingWork?.replyDeadline?.target.dueAt || "")}</div> : null}
                             {isAdmin && c.status === "Paused" && c.lastAssignedOwnerName ? (
                               <div className="mt-0.5 truncate text-xs text-slate-500" title={`Last assigned to ${c.lastAssignedOwnerName}`}>
                                 Last assigned: {c.lastAssignedOwnerName}{c.lastAssignedAt ? ` · ${formatEasternDateTime(c.lastAssignedAt)}` : ""}
@@ -1571,7 +1567,7 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
                             <CalendarClock className="size-3.5 shrink-0" />Pause review due
                           </button>}
                           {pendingWork.replyDeadline && <button type="button" className="inline-flex min-h-9 items-center gap-1 rounded-md bg-rose-50 px-2 text-xs font-semibold text-rose-800 hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500" onClick={() => openBrand(c.id, { acknowledgeReplyDeadline: true })}>
-                            <CalendarClock className="size-3.5 shrink-0" />Need Reply · {pendingWork.replyDeadline.target.dueAt?.slice(0,10)}
+                            <CalendarClock className="size-3.5 shrink-0" />Need Reply · {dateOnly(pendingWork.replyDeadline.target.dueAt || "")}
                           </button>}
                           {WORK_REPLY_CHANNELS.map((channel) => {
                             const pending = pendingWork.channels[channel];
@@ -1700,126 +1696,6 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
       </div>
     </div>
   );
-}
-
-type ImportField =
-  | "brand"
-  | "contact"
-  | "role"
-  | "email"
-  | "phone"
-  | "whatsapp"
-  | "linkedin"
-  | "source"
-  | "skip";
-type ImportDraft = {
-  name: string;
-  contactName: string;
-  role: Contact["role"];
-  email: string;
-  phone: string;
-  whatsapp: string;
-  linkedin: string;
-  source: string;
-  keep: boolean;
-};
-const IMPORT_FIELDS: { id: ImportField; label: string }[] = [
-  { id: "skip", label: "Ignore" },
-  { id: "brand", label: "Brand" },
-  { id: "contact", label: "Contact name" },
-  { id: "role", label: "Role" },
-  { id: "email", label: "Email" },
-  { id: "phone", label: "Phone" },
-  { id: "whatsapp", label: "WhatsApp" },
-  { id: "linkedin", label: "LinkedIn" },
-  { id: "source", label: "Source" },
-];
-const FIELD_ALIASES: Record<string, ImportField> = {
-  brand: "brand",
-  company: "brand",
-  "brand name": "brand",
-  "company name": "brand",
-  name: "brand",
-  contact: "contact",
-  "contact name": "contact",
-  keyperson: "contact",
-  "key person": "contact",
-  person: "contact",
-  role: "role",
-  "contact role": "role",
-  email: "email",
-  "e-mail": "email",
-  phone: "phone",
-  mobile: "phone",
-  tel: "phone",
-  telephone: "phone",
-  whatsapp: "whatsapp",
-  linkedin: "linkedin",
-  source: "source",
-};
-const guessField = (header: string): ImportField =>
-  FIELD_ALIASES[header.trim().toLowerCase().replace(/[_-]+/g, " ")] || "skip";
-const normalizeRole = (value: string): Contact["role"] => {
-  const key = value.trim().toLowerCase();
-  if (key === "owner") return "Owner";
-  if (key === "other") return "Other";
-  return "Connector";
-};
-function parseCsv(text: string): string[][] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let cell = "";
-  let quoted = false;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (quoted) {
-      if (ch === '"' && text[i + 1] === '"') {
-        cell += '"';
-        i++;
-      } else if (ch === '"') quoted = false;
-      else cell += ch;
-    } else if (ch === '"') quoted = true;
-    else if (ch === ",") {
-      row.push(cell.trim());
-      cell = "";
-    } else if (ch === "\n" || ch === "\r") {
-      if (ch === "\r" && text[i + 1] === "\n") i++;
-      row.push(cell.trim());
-      cell = "";
-      if (row.some(Boolean)) rows.push(row);
-      row = [];
-    } else cell += ch;
-  }
-  if (cell || row.length) {
-    row.push(cell.trim());
-    if (row.some(Boolean)) rows.push(row);
-  }
-  return rows;
-}
-function applyMapping(
-  headers: string[],
-  rows: string[][],
-  mapping: ImportField[],
-): ImportDraft[] {
-  const index = (field: ImportField) =>
-    mapping.findIndex((item) => item === field);
-  return rows.map((row) => {
-    const value = (field: ImportField) => {
-      const at = index(field);
-      return at >= 0 ? (row[at] || "").trim() : "";
-    };
-    return {
-      name: value("brand"),
-      contactName: value("contact"),
-      role: normalizeRole(value("role")),
-      email: value("email"),
-      phone: value("phone"),
-      whatsapp: value("whatsapp"),
-      linkedin: value("linkedin"),
-      source: value("source"),
-      keep: true,
-    };
-  });
 }
 
 type ClientSearchHit = {
@@ -2358,348 +2234,6 @@ function AddBrandDialog({
           </Button>
           <Button disabled={!ready} onClick={() => void submit()}>
             {saving ? "Creating…" : "Add Brand"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function ImportCsvDialog({
-  open,
-  onOpenChange,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-}) {
-  const { importBrands } = useWorkspace();
-  const [headers, setHeaders] = useState<string[]>([]);
-  const [rawRows, setRawRows] = useState<string[][]>([]);
-  const [mapping, setMapping] = useState<ImportField[]>([]);
-  const [drafts, setDrafts] = useState<ImportDraft[]>([]);
-  const [fileName, setFileName] = useState("");
-  const reset = () => {
-    setHeaders([]);
-    setRawRows([]);
-    setMapping([]);
-    setDrafts([]);
-    setFileName("");
-  };
-  const remap = (next: ImportField[], rows = rawRows) => {
-    const used = new Set<ImportField>();
-    const unique = next.map((field) => {
-      if (field === "skip") return field;
-      if (used.has(field)) return "skip" as ImportField;
-      used.add(field);
-      return field;
-    });
-    setMapping(unique);
-    setDrafts(applyMapping(headers, rows, unique));
-  };
-  const onFile = (file?: File) => {
-    if (!file) return;
-    file
-      .text()
-      .then((text) => {
-        const parsed = parseCsv(text.replace(/^\uFEFF/, ""));
-        if (parsed.length < 2) {
-          toast.error("CSV needs a header row and at least one data row");
-          return;
-        }
-        const nextHeaders = parsed[0];
-        const nextRows = parsed.slice(1);
-        const guessed = nextHeaders.map(guessField);
-        setFileName(file.name);
-        setHeaders(nextHeaders);
-        setRawRows(nextRows);
-        remap(guessed, nextRows);
-      })
-      .catch(() => toast.error("Could not read this file"));
-  };
-  const ready = drafts.filter(
-    (row) => row.keep && row.name.trim() && row.contactName.trim(),
-  );
-  const submit = () => {
-    const result = importBrands(ready);
-    show(result);
-    if (result.ok) {
-      reset();
-      onOpenChange(false);
-    }
-  };
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(value) => {
-        if (!value) reset();
-        onOpenChange(value);
-      }}
-    >
-      <DialogContent className="flex max-h-[85vh] flex-col overflow-hidden sm:max-w-4xl">
-        <DialogHeader>
-          <DialogTitle>Import brands from CSV</DialogTitle>
-          <DialogDescription>
-            Use one row per contact. Rows with the same Brand are grouped into
-            one brand with multiple contacts. Imported brands start at CP1 and
-            remain unassigned until an Admin selects an AccountManager.
-          </DialogDescription>
-        </DialogHeader>
-        {!headers.length ? (
-          <label className="grid min-h-48 cursor-pointer place-items-center rounded-xl border border-dashed bg-slate-50 text-sm text-slate-500 hover:bg-slate-100">
-            <span className="text-center">
-              <Upload className="mx-auto mb-2 size-5" />
-              <span className="block font-medium text-slate-700">
-                Choose a CSV file
-              </span>
-              <span className="mt-1 block text-xs">
-                Expected columns: Brand, Contact name, Role, Email, Phone/SMS,
-                WhatsApp, LinkedIn, Source
-              </span>
-            </span>
-            <input
-              type="file"
-              accept=".csv,text/csv"
-              className="sr-only"
-              onChange={(event) => onFile(event.target.files?.[0])}
-            />
-          </label>
-        ) : (
-          <div className="min-h-0 space-y-4 overflow-y-auto pr-1">
-            <div className="flex items-center justify-between text-xs text-slate-500">
-              <span>
-                {fileName} · {rawRows.length} rows
-              </span>
-              <Button variant="ghost" size="sm" onClick={reset}>
-                Choose another file
-              </Button>
-            </div>
-            <div>
-              <div className="mb-2 text-sm font-medium">Column mapping</div>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {headers.map((header, index) => (
-                  <label
-                    key={`${header}-${index}`}
-                    className="rounded-lg bg-slate-50 p-3 text-xs"
-                  >
-                    <span className="font-semibold text-slate-700">
-                      {header || `Column ${index + 1}`}
-                    </span>
-                    <Select
-                      value={mapping[index] || "skip"}
-                      onValueChange={(value) =>
-                        remap(
-                          mapping.map((field, at) =>
-                            at === index ? (value as ImportField) : field,
-                          ),
-                        )
-                      }
-                    >
-                      <SelectTrigger className="mt-2 w-full bg-white">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {IMPORT_FIELDS.map((field) => (
-                          <SelectItem key={field.id} value={field.id}>
-                            {field.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </label>
-                ))}
-              </div>
-            </div>
-            <div>
-              <div className="mb-2 text-sm font-medium">Confirm rows</div>
-              <div className="overflow-x-auto rounded-xl border">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-slate-50">
-                      <TableHead className="w-10"></TableHead>
-                      <TableHead>Brand</TableHead>
-                      <TableHead>Contact name</TableHead>
-                      <TableHead>Contact role</TableHead>
-                      <TableHead>Email</TableHead>
-                      <TableHead>Phone / SMS</TableHead>
-                      <TableHead>WhatsApp</TableHead>
-                      <TableHead>LinkedIn</TableHead>
-                      <TableHead>Source</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {drafts.map((row, index) => (
-                      <TableRow
-                        key={index}
-                        className={row.keep ? "" : "opacity-50"}
-                      >
-                        <TableCell>
-                          <Checkbox
-                            checked={row.keep}
-                            onCheckedChange={(value) =>
-                              setDrafts(
-                                drafts.map((item, at) =>
-                                  at === index
-                                    ? { ...item, keep: !!value }
-                                    : item,
-                                ),
-                              )
-                            }
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            value={row.name}
-                            onChange={(event) =>
-                              setDrafts(
-                                drafts.map((item, at) =>
-                                  at === index
-                                    ? { ...item, name: event.target.value }
-                                    : item,
-                                ),
-                              )
-                            }
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            value={row.contactName}
-                            onChange={(event) =>
-                              setDrafts(
-                                drafts.map((item, at) =>
-                                  at === index
-                                    ? {
-                                        ...item,
-                                        contactName: event.target.value,
-                                      }
-                                    : item,
-                                ),
-                              )
-                            }
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Select
-                            value={row.role}
-                            onValueChange={(value) =>
-                              setDrafts(
-                                drafts.map((item, at) =>
-                                  at === index
-                                    ? {
-                                        ...item,
-                                        role: value as Contact["role"],
-                                      }
-                                    : item,
-                                ),
-                              )
-                            }
-                          >
-                            <SelectTrigger className="w-28">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="Connector">
-                                Connector
-                              </SelectItem>
-                              <SelectItem value="Owner">Owner</SelectItem>
-                              <SelectItem value="Other">Other</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            value={row.email}
-                            onChange={(event) =>
-                              setDrafts(
-                                drafts.map((item, at) =>
-                                  at === index
-                                    ? { ...item, email: event.target.value }
-                                    : item,
-                                ),
-                              )
-                            }
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            value={row.phone}
-                            onChange={(event) =>
-                              setDrafts(
-                                drafts.map((item, at) =>
-                                  at === index
-                                    ? { ...item, phone: event.target.value }
-                                    : item,
-                                ),
-                              )
-                            }
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            value={row.whatsapp}
-                            onChange={(event) =>
-                              setDrafts(
-                                drafts.map((item, at) =>
-                                  at === index
-                                    ? { ...item, whatsapp: event.target.value }
-                                    : item,
-                                ),
-                              )
-                            }
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            value={row.linkedin}
-                            onChange={(event) =>
-                              setDrafts(
-                                drafts.map((item, at) =>
-                                  at === index
-                                    ? { ...item, linkedin: event.target.value }
-                                    : item,
-                                ),
-                              )
-                            }
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            value={row.source}
-                            onChange={(event) =>
-                              setDrafts(
-                                drafts.map((item, at) =>
-                                  at === index
-                                    ? { ...item, source: event.target.value }
-                                    : item,
-                                ),
-                              )
-                            }
-                          />
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-              <p className="mt-2 text-xs text-slate-500">
-                {ready.length} of {drafts.length} rows are ready. Same-brand
-                rows become multiple contacts on one brand. Brand and Contact
-                name are required.
-              </p>
-            </div>
-          </div>
-        )}
-        <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => {
-              reset();
-              onOpenChange(false);
-            }}
-          >
-            Cancel
-          </Button>
-          <Button disabled={!ready.length} onClick={submit}>
-            Import {ready.length || ""} rows
           </Button>
         </DialogFooter>
       </DialogContent>

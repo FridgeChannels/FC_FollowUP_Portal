@@ -10,6 +10,7 @@ import {
   parseDateOnlyParam,
   parseTaskStatusScope,
   scheduledAtRangeFilters,
+  scheduledAtInRange,
   taskListFilter,
   taskQueryForViewer,
   taskStatusFilter,
@@ -200,7 +201,7 @@ describe("taskListFilter", () => {
         and: [
           { property: "Channel", select: { equals: "Phone" } },
           { property: "Scheduled At", date: { on_or_after: "2026-09-18" } },
-          { property: "Scheduled At", date: { before: "2026-09-21" } },
+          { property: "Scheduled At", date: { before: "2026-09-21T04:00:00.000Z" } },
         ],
       },
     );
@@ -220,6 +221,18 @@ describe("taskListFilter", () => {
 });
 
 describe("scheduledAtRangeFilters", () => {
+  it("matches Eastern dates across UTC midnight and preserves legacy date-only rows", () => {
+    assert.equal(scheduledAtInRange("2026-09-19T02:00:00Z", "2026-09-18", "2026-09-18"), true);
+    assert.equal(scheduledAtInRange("2026-09-18T02:00:00Z", "2026-09-18", "2026-09-18"), false);
+    assert.equal(scheduledAtInRange("2026-09-19T04:00:00Z", "2026-09-18", "2026-09-18"), false);
+    assert.equal(scheduledAtInRange("2026-09-18", "2026-09-18", "2026-09-18"), true);
+  });
+
+  it("uses the correct exclusive end through the autumn DST transition", () => {
+    assert.deepEqual(scheduledAtRangeFilters(null, "2026-11-01"), [
+      { property: "Scheduled At", date: { before: "2026-11-02T05:00:00.000Z" } },
+    ]);
+  });
   it("returns nothing without valid dates", () => {
     assert.deepEqual(scheduledAtRangeFilters(), []);
     assert.deepEqual(scheduledAtRangeFilters("nope", "also-nope"), []);
@@ -229,14 +242,14 @@ describe("scheduledAtRangeFilters", () => {
   it("swaps inverted ranges and uses next-day exclusive end", () => {
     assert.deepEqual(scheduledAtRangeFilters("2026-09-20", "2026-09-18"), [
       { property: "Scheduled At", date: { on_or_after: "2026-09-18" } },
-      { property: "Scheduled At", date: { before: "2026-09-21" } },
+      { property: "Scheduled At", date: { before: "2026-09-21T04:00:00.000Z" } },
     ]);
   });
 
   it("filters a single day inclusively", () => {
     assert.deepEqual(scheduledAtRangeFilters("2026-09-18", "2026-09-18"), [
       { property: "Scheduled At", date: { on_or_after: "2026-09-18" } },
-      { property: "Scheduled At", date: { before: "2026-09-19" } },
+      { property: "Scheduled At", date: { before: "2026-09-19T04:00:00.000Z" } },
     ]);
   });
 });

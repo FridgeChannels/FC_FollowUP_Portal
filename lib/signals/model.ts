@@ -1,3 +1,5 @@
+import { easternDateOnly, easternDateTimeIso, addCalendarDays, parseDateOnly } from "../scheduling-engine/calendar.ts";
+
 export type SignalType = "sample" | "email" | "linkedin";
 export type SignalEvent = {
   id: string;
@@ -188,11 +190,9 @@ export function classifySignalEvents(
   );
 }
 export function periodStart(period: "today" | "week", now = new Date()) {
-  const start = new Date(now);
-  start.setHours(0, 0, 0, 0);
-  if (period === "week")
-    start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
-  return start.getTime();
+  let day = easternDateOnly(now);
+  if (period === "week") day = addCalendarDays(day, -((parseDateOnly(day).getUTCDay() + 6) % 7));
+  return Date.parse(easternDateTimeIso(day, 0));
 }
 /**
  * Fresh signals no explicit review snapshot covers yet.

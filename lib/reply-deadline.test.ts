@@ -6,13 +6,18 @@ const nowMs = Date.parse("2026-10-15T12:00:00.000Z");
 const deadline = "2026-10-14";
 
 describe("expiredUnansweredReplyDeadline", () => {
+  it("does not expire a deadline until the end of its Eastern calendar day", () => {
+    const input = { deadline, activities: [{ channel: "Email", direction: "Outbound", recordedAt: "2026-10-13T10:00:00Z" }] };
+    assert.equal(expiredUnansweredReplyDeadline({ ...input, nowMs: Date.parse("2026-10-15T01:00:00Z") }), null);
+    assert.equal(expiredUnansweredReplyDeadline({ ...input, nowMs: Date.parse("2026-10-15T04:00:00Z") }), "2026-10-15T03:59:59.999Z");
+  });
   it("includes a Ready brand after the deadline when the latest outbound has no reply", () => {
     assert.equal(expiredUnansweredReplyDeadline({
       deadline,
       status: "Ready",
       activities: [{ channel: "Email", direction: "Outbound", recordedAt: "2026-10-15T10:00:00.000Z" }],
       nowMs,
-    }), "2026-10-14T23:59:59.999Z");
+    }), "2026-10-15T03:59:59.999Z");
   });
 
   it("uses all five channels to detect a reply after the latest outbound", () => {
@@ -40,7 +45,7 @@ describe("expiredUnansweredReplyDeadline", () => {
       lastSuccessfulOutboundAt: "2026-10-07T13:25:00.000Z",
       lastReplyAt: "2026-10-02T20:56:00.000Z",
       nowMs,
-    }), "2026-10-13T23:59:59.999Z");
+    }), "2026-10-14T03:59:59.999Z");
 
     assert.equal(expiredUnansweredReplyDeadline({
       deadline: "2026-10-13",

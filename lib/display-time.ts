@@ -1,21 +1,15 @@
-declare global {
-  interface ImportMetaEnv {
-    readonly DISPLAY_TIME_ZONE?: string;
-  }
+import { BUSINESS_TIME_ZONE } from "./time-zone.ts";
+import { parseTimelineMs } from "./scheduling-engine/calendar.ts";
+
+/** Operational displays always use the shared Eastern business timezone. */
+export function getDisplayTimeZone() {
+  return BUSINESS_TIME_ZONE;
 }
 
-const DEFAULT_DISPLAY_TIME_ZONE = "America/New_York";
-
-/** UI datetime zone from `.env` (`DISPLAY_TIME_ZONE`), default America/New_York. */
-export function getDisplayTimeZone() {
-  const fromImportMeta =
-    typeof import.meta !== "undefined"
-      ? (import.meta.env?.DISPLAY_TIME_ZONE as string | undefined)
-      : undefined;
-  const fromProcess =
-    typeof process !== "undefined" ? process.env.DISPLAY_TIME_ZONE : undefined;
-  const raw = (fromImportMeta || fromProcess || "").trim();
-  return raw || DEFAULT_DISPLAY_TIME_ZONE;
+export function formatBusinessDate(value: string, options: Intl.DateTimeFormatOptions = { dateStyle: "medium" }) {
+  const date = new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T12:00:00Z` : parseTimelineMs(value));
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-US", { ...options, timeZone: BUSINESS_TIME_ZONE }).format(date);
 }
 
 /**
@@ -28,7 +22,7 @@ export function formatScheduledDateTime(iso: string, timeZone = getDisplayTimeZo
   // Date-only Notion values: show civil day in the display zone (noon UTC anchor).
   const date = /^\d{4}-\d{2}-\d{2}$/.test(raw)
     ? new Date(`${raw}T12:00:00.000Z`)
-    : new Date(raw);
+    : new Date(parseTimelineMs(raw));
   if (Number.isNaN(date.getTime())) return raw;
 
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {

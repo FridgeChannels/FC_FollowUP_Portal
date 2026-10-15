@@ -8,9 +8,8 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { mockSignals } from "@/lib/signals/mock";
 import type { SignalsPayload, SignalReview } from "@/lib/signals/model";
 import { summarize } from "@/lib/signals/model";
 import type { SessionUser } from "@/lib/auth-session";
@@ -37,19 +36,11 @@ const Context = createContext<{
     surface?: "signals" | "brand",
   ) => void;
 } | null>(null);
-function isMockPreviewPath(pathname: string | null, searchParams: URLSearchParams) {
-  return process.env.NODE_ENV !== "production" &&
-    searchParams.get("mock") === "1" &&
-    (pathname === "/signals" || /^\/customers\/[^/]+(?:\/sample)?$/.test(pathname || ""));
-}
 export function SignalsProvider({ children }: { children: ReactNode }) {
   const { user, loading } = useSession();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const preview = isMockPreviewPath(pathname, searchParams);
   return (
     <SessionSignalsProvider
-      key={`${user?.email || "anonymous"}:${user?.role || ""}:${preview ? "mock" : "live"}`}
+      key={`${user?.email || "anonymous"}:${user?.role || ""}`}
       user={user}
       loading={loading}
     >
@@ -67,23 +58,12 @@ function SessionSignalsProvider({
   loading: boolean;
 }) {
   const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const mock = isMockPreviewPath(pathname, searchParams);
   const [data, setData] = useState<SignalsPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const previous = useRef<SignalsPayload | null>(null);
   const busy = useRef(false);
   /** Last change token the UI has already rendered. */
   const seenVersion = useRef<string | null>(null);
-  const stillOnSameMode = useCallback(
-    (isMock: boolean) =>
-      isMockPreviewPath(
-        window.location.pathname,
-        new URLSearchParams(window.location.search),
-      ) === isMock,
-    [],
-  );
   /** Swap in a fresh payload, surfacing first-of-its-kind activity to the AM. */
   const applyPayload = useCallback(
     (payload: SignalsPayload) => {
@@ -131,13 +111,6 @@ function SessionSignalsProvider({
     [router],
   );
   const refresh = useCallback(async () => {
-    if (mock) {
-      const payload = mockSignals();
-      previous.current = payload;
-      setData(payload);
-      setError(null);
-      return;
-    }
     if (busy.current || loading || !user || user.role === "Caller") return;
     busy.current = true;
     try {
@@ -145,23 +118,18 @@ function SessionSignalsProvider({
       const payload = (await response.json()) as SignalsPayload & {
         error?: string;
       };
-      // Ignore a live response that began before the user switched to mock data.
-      if (!stillOnSameMode(mock)) return;
       if (!response.ok) throw new Error("Unable to load signals");
       applyPayload(payload);
     } catch {
-      if (!stillOnSameMode(mock)) return;
       setError("Unable to load signals");
     } finally {
       busy.current = false;
     }
-  }, [applyPayload, loading, mock, stillOnSameMode, user]);
+  }, [applyPayload, loading, user]);
   useEffect(() => {
     if (loading || !user || user.role === "Caller") return;
     // Initial load, deferred so state lands in a callback rather than inline.
-    // refresh() owns the mock branch, so preview paths stop here.
     const initial = window.setTimeout(() => void refresh(), 0);
-    if (mock) return () => window.clearTimeout(initial);
     let stopped = false;
     // Poll the cheap token first; only pull the full payload when it moves, so
     // a new tap lands without the user reloading and without hammering Notion.
@@ -200,7 +168,7 @@ function SessionSignalsProvider({
       window.clearInterval(safety);
       window.removeEventListener("focus", onFocus);
     };
-  }, [loading, mock, refresh, user]);
+  }, [loading, refresh, user]);
   const settle = useCallback(
     (
       brandId: string,

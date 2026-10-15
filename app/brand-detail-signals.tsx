@@ -1,17 +1,17 @@
 "use client";
 
+import { formatScheduledDateTime } from "@/lib/display-time";
 import { useEffect, useState } from "react";
 import { ChevronDown, ExternalLink, MailOpen, SmartphoneNfc } from "lucide-react";
 import type { SignalEvent } from "@/lib/signals/model";
 import { safeSourceUrl } from "@/lib/signals/model";
+import { buildSignalNotifications, signalNotificationTime } from "@/lib/signals/notifications";
 import type { MagnetBrandParam } from "@/lib/sample/magnet";
 import type { AmazonSampleProduct, ChannelType } from "@/lib/sample-product";
 import { ChannelIcon } from "./channel-icon";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-const date = (value: string) => new Intl.DateTimeFormat("en-US", {
-  month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
-}).format(new Date(value));
+const date = (value: string) => formatScheduledDateTime(value);
 
 export function BrandProfileFields({
   profiles, channelType, amazon,
@@ -99,55 +99,29 @@ export function ImportantSignalsPanel({
     onOpenSignal?.(event);
     if (event.type === "email") onOpenEmailSignal?.(event);
   };
-  const groups = new Map<string, SignalEvent[]>();
-  for (const event of [...new Map(events.map((item) => [item.id, item])).values()]) {
-    const key = event.signalKey || event.id;
-    groups.set(key, [...(groups.get(key) || []), event]);
-  }
-  const notifications = [...groups.entries()]
-    .map(([key, groupedEvents]) => ({
-      key,
-      events: groupedEvents.sort((a, b) => Date.parse(b.detectedAt || b.occurredAt) - Date.parse(a.detectedAt || a.occurredAt)),
-    }))
-    .filter(({ events: groupedEvents }) => {
-      const readId = groupedEvents[0]?.signalReadId || groupedEvents[0]?.id;
-      return Boolean(readId && !readIds.includes(readId));
-    })
-    .sort((a, b) => Date.parse(b.events[0].detectedAt || b.events[0].occurredAt) - Date.parse(a.events[0].detectedAt || a.events[0].occurredAt));
+  const notifications = buildSignalNotifications(events, readIds);
 
   if (!notifications.length) return null;
   return <section id="brand-important-signals" aria-label="Brand signals" className="mx-5 mt-4 pb-1">
     <div className="mb-1 flex items-center justify-between">
-      <h2 className="text-sm font-semibold text-slate-900">New Signals</h2>
+      <h2 className="text-sm font-semibold text-slate-900">Signals</h2>
       <span className="text-xs text-slate-500">{notifications.length} signal{notifications.length === 1 ? "" : "s"}</span>
     </div>
     <div>
-      {notifications.map(({ key, events: groupedEvents }) => {
-        const latest = groupedEvents[0];
-        const readId = latest.signalReadId || latest.id;
-        const isNew = !readIds.includes(readId);
-        const isEmail = latest.type === "email";
-        const title = latest.type === "sample"
-          ? `Sample ${latest.sampleId || ""} visited ${groupedEvents.length} time${groupedEvents.length === 1 ? "" : "s"}`
-          : isEmail
-            ? `${latest.subject && latest.subject !== "Subject unavailable" ? latest.subject : "Email"} · ${groupedEvents.length} open${groupedEvents.length === 1 ? "" : "s"} detected`
-            : latest.summary;
-        const timestamp = latest.type === "email" ? latest.detectedAt : latest.type === "linkedin" ? latest.publishedAt || latest.occurredAt : latest.occurredAt;
-        const timeLabel = latest.type === "sample" ? "Last activity" : latest.type === "email" ? "Last detected" : "Published";
+      {notifications.map(({ key, latest, title, timestamp, timeLabel, typeLabel, unread }) => {
         const icon = latest.type === "email"
           ? <MailOpen className="size-4 text-[#B45309]" aria-hidden="true" />
           : latest.type === "sample"
             ? <SmartphoneNfc className="size-4 text-[#7C3AED]" aria-hidden="true" />
             : <ChannelIcon channel="LinkedIn" className="size-4" alt="" />;
-        const source = safeSourceUrl(latest.sourceUrl);
         return <article key={key} className="min-w-0 py-3">
           <button type="button" className="flex w-full min-w-0 items-start gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400" onClick={() => openSignal(latest)}>
             <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center">{icon}</span>
             <div className="min-w-0 flex-1">
-              <p className="line-clamp-2 text-sm font-medium text-slate-800">{title}</p>
-              <p className="mt-1 text-xs text-slate-500"><span>{timeLabel} {date(timestamp)}</span>{source ? <> · <span className="text-violet-700">View details</span></> : null}</p>
+              <p className="break-words text-sm font-medium text-slate-800">{title}</p>
+              <p className="mt-1 text-xs text-slate-500">{typeLabel} · <span>{timeLabel} <time dateTime={timestamp}>{date(timestamp)}</time></span> · <span className="text-violet-700">View details</span></p>
             </div>
-            {isNew ? <span className="shrink-0 rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700">New</span> : null}
+            {unread ? <span className="mt-1.5 size-2 shrink-0 rounded-full bg-rose-500" role="img" aria-label="Unread" /> : null}
           </button>
         </article>;
       })}
@@ -155,11 +129,7 @@ export function ImportantSignalsPanel({
   </section>;
 }
 
-const signalHistoryTime = (event: SignalEvent) => event.type === "email"
-  ? event.detectedAt
-  : event.type === "linkedin"
-    ? event.publishedAt || event.occurredAt
-    : event.occurredAt;
+const signalHistoryTime = signalNotificationTime;
 
 function SignalHistoryType({ type }: { type: SignalEvent["type"] }) {
   if (type === "sample") return <span className="inline-flex items-center gap-1 text-xs font-medium text-[#7C3AED]"><SmartphoneNfc className="size-3.5" aria-hidden="true" />Sample Tap</span>;

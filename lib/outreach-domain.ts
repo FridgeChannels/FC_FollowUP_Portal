@@ -1,5 +1,6 @@
+import { businessDateOnly } from "./time-zone.ts";
 import type { QuoCallData } from "./quo/types";
-import { timelineInstantIso } from "./scheduling-engine/calendar.ts";
+import { timelineInstantIso, addCalendarDays, easternDateTimeIso, easternTimeParts } from "./scheduling-engine/calendar.ts";
 
 export type Role = "Admin" | "AccountManager" | "Caller";
 export type Channel = "Email" | "SMS" | "WhatsApp" | "LinkedIn" | "Phone";
@@ -152,8 +153,14 @@ export const roleCapabilities: Record<Role, string[]> = {
 export const normalizeRole = (value: unknown): Role => value === "Admin" || value === "Caller" || value === "AccountManager" ? value : "AccountManager";
 
 const at = (day: string, time = "09:00:00") => `${day}T${time.length === 5 ? `${time}:00` : time}.000Z`;
-export const addDays = (iso: string, days: number) => { const d = new Date(iso); d.setUTCDate(d.getUTCDate()+days); return d.toISOString(); };
-export const dateOnly = (iso: string) => iso.slice(0,10);
+export const addDays = (iso: string, days: number) => {
+  const date = new Date(/^\d{4}-\d{2}-\d{2}$/.test(iso) ? easternDateTimeIso(iso, 0) : timelineInstantIso(iso));
+  if (!Number.isInteger(days)) { date.setUTCDate(date.getUTCDate() + days); return date.toISOString(); }
+  const time = easternTimeParts(date);
+  const instant = easternDateTimeIso(addCalendarDays(businessDateOnly(iso), days), time.hour * 60 + time.minute, time.second);
+  return new Date(Date.parse(instant) + date.getUTCMilliseconds()).toISOString();
+};
+export const dateOnly = (iso: string) => businessDateOnly(iso);
 export const uid = (prefix: string) => `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,7)}`;
 
 const contacts: Record<string, Contact[]> = {

@@ -1,6 +1,7 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
+import { formatScheduledDateTime } from "@/lib/display-time";
 import { visibleCpOptions, cpDisplayText } from "@/lib/cp-visibility";
 
 import { useEffect, useState } from "react";
@@ -74,14 +75,7 @@ function bombPath(id: string) {
 }
 
 function formatWhen(value: string | null) {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("en-CA", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "UTC",
-  }).format(date);
+  return value ? formatScheduledDateTime(value) : "—";
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

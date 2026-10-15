@@ -1,3 +1,4 @@
+import { businessDateOnly } from "../time-zone";
 import { propertyDate, propertyText, queryDatabasePages } from "./client";
 import { getFollowupConversationDbId } from "./config";
 import { listChannelDailyMax } from "./capacity";
@@ -5,7 +6,6 @@ import { listExistingTasksForSchedule } from "./tasks";
 import {
   REPLY_DUE_PROPERTY,
   resolveReplyDueAt,
-  shanghaiDateOnly,
   type ReplyDueReservation,
 } from "../scheduling-engine/reply-due";
 import { CHANNELS, type Channel } from "../scheduling-engine/types";
@@ -37,7 +37,7 @@ export async function listOpenReplyDueReservations(
     if (!pageChannel || !CHANNELS.includes(pageChannel as Channel) || !due) continue;
     reservations.push({
       channel: pageChannel as Channel,
-      date: shanghaiDateOnly(due),
+      date: businessDateOnly(due),
     });
   }
   return reservations;

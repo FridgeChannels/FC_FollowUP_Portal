@@ -236,13 +236,13 @@ function WorkspaceShell({ children }: { children?: ReactNode }) {
       <SidebarMenuItem key={item.path}>
         <SidebarMenuButton
           asChild
-          tooltip={item.label}
+          tooltip={item.screen === "ReplyTask" && user.role !== "AccountManager" ? "Caller Task" : item.label}
           isActive={screen === item.screen}
           className={`h-10 rounded-lg px-3 text-[13px] font-medium ${activeStyle} data-[active=true]:text-white`}
         >
-          <Link href={item.path} aria-label={item.label}>
+          <Link href={item.path} aria-label={item.screen === "ReplyTask" && user.role !== "AccountManager" ? "Caller Task" : item.label}>
             <item.icon />
-            <span>{item.label}</span>
+            <span>{item.screen === "ReplyTask" && user.role !== "AccountManager" ? "Caller Task" : item.label}</span>
             {count > 0 && (
               <span className={`ml-auto rounded-md px-1.5 py-0.5 text-[10px] group-data-[collapsible=icon]:hidden ${item.screen === "Brands" ? "bg-rose-500/15 text-rose-800" : "bg-amber-400/20 text-amber-800"}`}>
                 {count}

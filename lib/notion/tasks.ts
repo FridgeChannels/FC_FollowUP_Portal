@@ -15,7 +15,7 @@ import {
   type NotionPage,
 } from "./client";
 import { getFollowupTaskDbId } from "./config";
-import { taskListFilter, type TaskListQuery, DEFAULT_TASK_PAGE_SIZE } from "./owner-filter";
+import { scheduledAtInRange, taskListFilter, type TaskListQuery, DEFAULT_TASK_PAGE_SIZE } from "./owner-filter";
 import { retrieveOwner, type FollowupOwner } from "./owners";
 import { historyFromTask } from "../call-review-history";
 import { listNeedsReplyConversations } from "./conversations";
@@ -346,7 +346,7 @@ export async function listOpenPhoneTaskStubsForViewer(
   } catch {
     return [];
   }
-  pages = await scopeTestBrandTaskPages(pages, options);
+  pages = await scopeTestBrandTaskPages(pages.filter((page) => taskPageInDateRange(page, query)), options);
   return pages.map(stubTaskFromPage);
 }
 
@@ -414,7 +414,7 @@ export async function countOpenPhoneBrandsForViewer(
     } catch {
       return 0;
     }
-    pages = await scopeTestBrandTaskPages(pages, options);
+    pages = await scopeTestBrandTaskPages(pages.filter((page) => taskPageInDateRange(page, query)), options);
     if (!pages.length) return 0;
 
     const brandByTask = await brandIdsByTaskPage(pages);
@@ -473,24 +473,8 @@ export async function listOpenReplyTaskStubsForViewer(
   return pages.map(stubTaskFromPage);
 }
 
-function scheduledAtInRange(
-  scheduledAt: string | null | undefined,
-  dueFrom?: string | null,
-  dueTo?: string | null,
-) {
-  if (!dueFrom && !dueTo) return true;
-  const day = (scheduledAt || "").slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return false;
-  let start = dueFrom || "";
-  let end = dueTo || "";
-  if (start && end && start > end) {
-    const swap = start;
-    start = end;
-    end = swap;
-  }
-  if (start && day < start) return false;
-  if (end && day > end) return false;
-  return true;
+function taskPageInDateRange(page: NotionPage, query: TaskListQuery) {
+  return scheduledAtInRange(propertyDate(page.properties?.["Scheduled At"]), query.dueFrom, query.dueTo);
 }
 
 function taskPageMatchesManagerReplyQuery(page: NotionPage, query: TaskListQuery) {
@@ -1194,7 +1178,7 @@ export async function listFollowupTasksForViewer(
 ) {
   let pages: NotionPage[] = [];
   try {
-    pages = await queryTaskPages(taskListFilter(query));
+    pages = (await queryTaskPages(taskListFilter(query))).filter((page) => taskPageInDateRange(page, query));
   } catch {
     pages = [];
   }
@@ -1252,7 +1236,7 @@ async function takeCallerBrandTaskPages(
 
   async function enqueuePages(pages: NotionPage[]) {
     if (!pages.length) return;
-    const scoped = await scopeTestBrandTaskPages(pages, options);
+    const scoped = await scopeTestBrandTaskPages(pages.filter((page) => taskPageInDateRange(page, query)), options);
     const brands = await brandIdsByTaskPage(scoped);
     for (const page of scoped) {
       pageQueue.push(page);
@@ -1282,6 +1266,7 @@ async function takeCallerBrandTaskPages(
   while (selected.length < pageSize) {
     while (pageQueue.length && selected.length < pageSize) {
       const page = pageQueue.shift()!;
+      if (!taskPageInDateRange(page, query)) continue;
       const contactId =
         firstRelationId(page.properties?.["Follow-up Contact"]) || null;
       const key = callerBrandKey({
@@ -1354,7 +1339,7 @@ export async function listFollowupTasksForViewerPage(
     if (options.onlyTest) {
       let pages: NotionPage[] = [];
       try {
-        pages = await queryTaskPages(taskListFilter(query));
+        pages = (await queryTaskPages(taskListFilter(query))).filter((page) => taskPageInDateRange(page, query));
       } catch {
         pages = [];
       }
@@ -1442,7 +1427,7 @@ export async function listFollowupTasksForViewerPage(
   } catch {
     batch = { pages: [], nextCursor: null, hasMore: false };
   }
-  const mapped = await mapPages(batch.pages);
+  const mapped = await mapPages(batch.pages.filter((page) => taskPageInDateRange(page, query)));
   const tasks = scopeTestBrandTasks(mapped, options);
   return {
     tasks,

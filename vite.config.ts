@@ -3,6 +3,7 @@ import { defineConfig, loadEnv } from "vite";
 import hostingConfig from "./.openai/hosting.json";
 import { readExecutionProfile } from "./scripts/execution-profile.mjs";
 import { sites } from "./build/sites-vite-plugin";
+import { BUSINESS_TIME_ZONE } from "./lib/time-zone";
 
 const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
   "00000000-0000-4000-8000-000000000000";
@@ -58,10 +59,7 @@ export default defineConfig(async ({ mode }) => {
     process.env.QUO_WEBHOOK_SIGNING_SECRET || loadedEnv.QUO_WEBHOOK_SIGNING_SECRET;
   const quoWebhookSigningSecrets =
     process.env.QUO_WEBHOOK_SIGNING_SECRETS || loadedEnv.QUO_WEBHOOK_SIGNING_SECRETS;
-  const displayTimeZone =
-    process.env.DISPLAY_TIME_ZONE ||
-    loadedEnv.DISPLAY_TIME_ZONE ||
-    "America/New_York";
+  const displayTimeZone = BUSINESS_TIME_ZONE;
   const senderName = process.env.SENDER_NAME || loadedEnv.SENDER_NAME || "";
   const icypeasApiKey = process.env.ICYPEAS_API_KEY || loadedEnv.ICYPEAS_API_KEY;
   const icypeasAccountEmail =

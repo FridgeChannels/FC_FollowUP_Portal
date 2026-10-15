@@ -11,7 +11,7 @@ import {
   summarize,
   type SignalEvent,
 } from "./model.ts";
-const now = new Date("2026-10-09T12:00:00");
+const now = new Date("2026-10-09T12:00:00Z");
 function event(
   id: string,
   type: SignalEvent["type"] = "sample",

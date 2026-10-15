@@ -24,7 +24,6 @@ type Store = {
   resolveInbox: (inboxId: string) => Result; pauseBrand: (customerId: string) => Result;
   assignBrand: (customerId: string, ownerId: string) => Result; createCallTask: (customerId: string, contactId: string, date: string, note: string) => Result;
   createBrand: (input: { name: string; source?: string; ownerId?: string; contacts: { name: string; role?: Contact["role"]; email?: string; phone?: string; whatsapp?: string; linkedin?: string }[] }) => Result;
-  importBrands: (rows: { name: string; contactName: string; role?: Contact["role"]; email?: string; phone?: string; whatsapp?: string; linkedin?: string; source?: string }[]) => Result;
   updateContact: (customerId: string, contact: Contact) => Result; closeBrand: (customerId: string, reason: string) => Result;
   reassignCall: (taskId: string, callerId: string, date?: string) => Result; updateCallerCapacity: (callerId: string, capacity: number) => Result;
   saveBomb: (bomb: BombTemplate) => Result; createBomb: (bomb: Omit<BombTemplate,"id"|"version"|"launches"|"updatedAt">) => Result;
@@ -51,7 +50,7 @@ function stopBomb(draft: WorkspaceState, customerId: string, reason: string) {
 function chooseCallSlot(draft: WorkspaceState, earliest: string) {
   const callers=draft.users.filter(u=>u.role==="Caller"); let date=earliest;
   for(let tries=0;tries<30;tries++){
-    const weekday=new Date(date).getUTCDay();
+    const weekday=new Date(`${dateOnly(date)}T12:00:00Z`).getUTCDay();
     const eligible=callers.filter(c=>(c.workingDays||[1,2,3,4,5]).includes(weekday)).map(c=>({caller:c,count:draft.callTasks.filter(t=>t.callerId===c.id&&dateOnly(t.scheduledDate)===dateOnly(date)&&t.status!=="Cancelled").length})).filter(x=>x.count<(x.caller.dailyCapacity||30)).sort((a,b)=>a.count-b.count);
     if(eligible.length) return {callerId:eligible[0].caller.id,date};
     date=addDays(date,1);
@@ -167,29 +166,6 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     });
     return{ok:true,message:`Brand created with ${contacts.length} contact${contacts.length>1?"s":""}`,id};
   };
-  const importBrands=(rows:{name:string;contactName:string;role?:Contact["role"];email?:string;phone?:string;whatsapp?:string;linkedin?:string;source?:string}[]):Result=>{
-    if(state.currentRole!=="Admin")return{ok:false,message:"Only Admin can import brands"};
-    const valid=rows.filter(r=>r.name.trim()&&r.contactName.trim());
-    if(!valid.length)return{ok:false,message:"No valid rows to import"};
-    let count=0;
-    mutate(d=>{
-      const grouped=new Map<string,typeof valid>();
-      valid.forEach(row=>{const key=row.name.trim().toLowerCase();const current=grouped.get(key)||[];current.push(row);grouped.set(key,current);});
-      grouped.forEach(group=>{
-        const first=group[0];
-        const id=uid("c");
-        const contacts=group.map(r=>{
-          const role=(["Connector","Owner","Other"] as const).includes(r.role as Contact["role"])?r.role as Contact["role"]:"Connector";
-          const preferredChannel: Channel=r.email?"Email":r.phone?"Phone":r.whatsapp?"WhatsApp":r.linkedin?"LinkedIn":"Email";
-          return {id:uid("ct"),name:r.contactName.trim(),role,email:r.email||undefined,phone:r.phone||undefined,whatsapp:r.whatsapp||undefined,linkedin:r.linkedin||undefined,preferredChannel,emailValid:!!r.email,phoneValid:!!r.phone};
-        });
-        d.customers.unshift({id,name:first.name.trim(),initials:first.name.split(/\s+/).map(x=>x[0]).join("").slice(0,2).toUpperCase(),cp:"CP1",status:"Ready",source:group.find(r=>r.source?.trim())?.source?.trim()||"CSV import",ownerId:undefined,contacts,createdAt:d.simulatedDate,updatedAt:d.simulatedDate});
-        count++;
-      });
-      addAudit(d,"Brands imported from CSV",undefined,undefined,`${count} brands; ${valid.length} contacts`);
-    });
-    return{ok:true,message:`Imported ${count} brand${count>1?"s":""} with ${valid.length} contact${valid.length>1?"s":""}`};
-  };
   const updateContact=(customerId:string,contact:Contact):Result=>{let result:Result={ok:false,message:"Brand not found"};mutate(d=>{const c=d.customers.find(c=>c.id===customerId);if(!c)return;const i=c.contacts.findIndex(x=>x.id===contact.id);if(i>=0)c.contacts[i]=contact;else c.contacts.push(contact);c.updatedAt=d.simulatedDate;addAudit(d,"Contact updated",customerId,undefined,contact.name);result={ok:true,message:"Contact saved"};});return result;};
   const closeBrand=(customerId:string,reason:string):Result=>{let result:Result={ok:false,message:"Brand not found"};mutate(d=>{const c=d.customers.find(c=>c.id===customerId);if(!c)return;stopBomb(d,customerId,"Brand closed");c.status="Closed";c.closedReason=reason;c.updatedAt=d.simulatedDate;d.inbox.filter(i=>i.customerId===customerId&&i.status!=="Resolved").forEach(i=>i.status="Resolved");addAudit(d,"Brand closed",customerId,undefined,reason);result={ok:true,message:"Brand closed"};});return result;};
   const reassignCall=(taskId:string,callerId:string,date?:string):Result=>{let result:Result={ok:false,message:"Call task not found"};mutate(d=>{const t=d.callTasks.find(t=>t.id===taskId);if(!t)return;const previous=t.callerId;t.callerId=callerId;if(date)t.scheduledDate=date;addAudit(d,"Call task reassigned",t.customerId,previous,callerId);result={ok:true,message:"Call reassigned"};});return result;};
@@ -203,7 +179,7 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const fillTodayCapacity=()=>mutate(d=>{const callers=d.users.filter(u=>u.role==="Caller");callers.forEach(caller=>{const count=d.callTasks.filter(t=>t.callerId===caller.id&&dateOnly(t.scheduledDate)===dateOnly(d.simulatedDate)&&t.status!=="Cancelled").length;for(let i=count;i<(caller.dailyCapacity||6);i++){const c=d.customers[i%d.customers.length];const contact=c.contacts.find(x=>x.phoneValid&&x.phone);if(contact)d.callTasks.push({id:uid("call"),customerId:c.id,contactId:contact.id,callerId:caller.id,scheduledDate:d.simulatedDate,priority:"Normal",goal:"Follow-up call",script:"Follow up with the KeyPerson.",status:"Scheduled"});}});addAudit(d,"Today call capacity filled");});
   const simulateFailure=()=>mutate(d=>{const action=d.actions.find(a=>a.status==="Scheduled"&&a.channel!=="Phone");if(action){action.status="Failed";action.note="Provider rejected the send";d.interactions.unshift({id:uid("int"),customerId:action.customerId,type:"System",title:`${action.channel} action failed`,content:action.note,createdAt:d.simulatedDate});addAudit(d,"Channel action failed",action.customerId,action.channel,"Failed");}});
 
-  const value:Store={state,hydrated,can,reset,setRole,advanceDay,launchBomb,cancelBomb,receiveReply,sendHumanReply,markReplyHandled,changeCP,createFollowUp,resolveInbox,pauseBrand,assignBrand,createCallTask,createBrand,importBrands,updateContact,closeBrand,reassignCall,updateCallerCapacity,saveBomb,createBomb,setBombStatus,updateCPStage,updateIntegration,fillTodayCapacity,simulateFailure};
+  const value:Store={state,hydrated,can,reset,setRole,advanceDay,launchBomb,cancelBomb,receiveReply,sendHumanReply,markReplyHandled,changeCP,createFollowUp,resolveInbox,pauseBrand,assignBrand,createCallTask,createBrand,updateContact,closeBrand,reassignCall,updateCallerCapacity,saveBomb,createBomb,setBombStatus,updateCPStage,updateIntegration,fillTodayCapacity,simulateFailure};
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
 }
 

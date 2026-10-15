@@ -13,6 +13,7 @@ import {
 } from "react-day-picker"
 
 import { cn } from "@/lib/utils"
+import { businessDateOnly } from "@/lib/time-zone"
 import { Button, buttonVariants } from "@/components/ui/button"
 
 function Calendar({
@@ -28,9 +29,11 @@ function Calendar({
   buttonVariant?: React.ComponentProps<typeof Button>["variant"]
 }) {
   const defaultClassNames = getDefaultClassNames()
+  const [year, month, day] = businessDateOnly().split("-").map(Number)
 
   return (
     <DayPicker
+      today={new Date(year, month - 1, day)}
       showOutsideDays={showOutsideDays}
       className={cn(
         "group/calendar bg-background p-3 [--cell-size:--spacing(8)] [[data-slot=card-content]_&]:bg-transparent [[data-slot=popover-content]_&]:bg-transparent",

@@ -1,5 +1,6 @@
 "use client";
 
+import { formatBusinessDate } from "@/lib/display-time";
 import { ArrowLeft, ArrowUpRight, ChevronDown, MessageSquareText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { BrandDetail, BrandMeetingNote } from "@/lib/brand-list";
@@ -7,7 +8,7 @@ import type { ExhibitionEncounter, FollowupHistory } from "@/lib/followup-histor
 
 function date(value: string | null) {
   return value && Number.isFinite(Date.parse(value))
-    ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeZone: "Asia/Shanghai" }).format(new Date(value)) : "Not recorded";
+    ? formatBusinessDate(value) : "Not recorded";
 }
 export function RoundStatusBadge({ status }: { status: string }) {
   return <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${status === "Active" ? "bg-emerald-50 text-emerald-700" : status === "Paused" ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-600"}`}>{status}</span>;

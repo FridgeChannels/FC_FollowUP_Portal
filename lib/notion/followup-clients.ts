@@ -1,3 +1,4 @@
+import { businessDateOnly } from "../time-zone";
 import {
   brandInitials,
   currentCpOption,
@@ -251,7 +252,7 @@ export async function mapFollowupClientPages(pages: NotionPage[]) {
 }
 
 function replyDueDay(value?: string | null) {
-  return value?.trim().slice(0, 10) || "";
+  return value ? businessDateOnly(value.trim()) : "";
 }
 
 function replyDueInRange(dueAt: string | null | undefined, from?: string | null, to?: string | null) {

@@ -1,35 +1,39 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import {
-  resolveReplyDueAt,
-  shanghaiDateOnly,
-  shanghaiDateTimeIso,
-  shanghaiTimeParts,
-} from "./reply-due.ts";
+import { resolveReplyDueAt } from "./reply-due.ts";
+import { easternDateOnly, easternDateTimeIso, easternTimeParts } from "./calendar.ts";
 import type { ExistingTask } from "./types.ts";
 
 describe("resolveReplyDueAt", () => {
+  it("preserves Eastern wall time and seconds when capacity moves a reply across DST weekends", () => {
+    for (const [occurredAt, expected] of [
+      ["2026-03-06T15:30:45Z", "2026-03-09T14:30:45.000Z"],
+      ["2026-10-30T14:30:45Z", "2026-11-02T15:30:45.000Z"],
+    ]) {
+      assert.equal(resolveReplyDueAt({ occurredAt, channel: "Email", dailyMax: { Email: 10 }, existingTasks: [] }), expected);
+    }
+  });
   it("defaults to occurredAt + 24h on a working day", () => {
-    // Thursday 10:00 +08 → Friday 10:00 +08
+    // Thursday 10:00 EDT → Friday 10:00 EDT
     const due = resolveReplyDueAt({
-      occurredAt: "2026-09-10T02:00:00.000Z",
+      occurredAt: "2026-09-10T14:00:00.000Z",
       channel: "Email",
       dailyMax: { Email: 10 },
       existingTasks: [],
     });
-    assert.equal(shanghaiDateOnly(due), "2026-09-11");
-    assert.equal(shanghaiTimeParts(due).hour, 10);
+    assert.equal(easternDateOnly(due), "2026-09-11");
+    assert.equal(easternTimeParts(due).hour, 10);
   });
 
   it("skips weekend to the next working day", () => {
-    // Friday 10:00 +08 → Sat 10:00 → Monday
+    // Friday 10:00 EDT → Sat 10:00 → Monday
     const due = resolveReplyDueAt({
-      occurredAt: "2026-09-11T02:00:00.000Z",
+      occurredAt: "2026-09-11T14:00:00.000Z",
       channel: "Email",
       dailyMax: { Email: 10 },
       existingTasks: [],
     });
-    assert.equal(shanghaiDateOnly(due), "2026-09-14");
+    assert.equal(easternDateOnly(due), "2026-09-14");
   });
 
   it("defers to the next day with remaining channel capacity", () => {
@@ -40,40 +44,40 @@ describe("resolveReplyDueAt", () => {
       status: "Pending" as const,
     }));
     const due = resolveReplyDueAt({
-      occurredAt: "2026-09-10T02:00:00.000Z",
+      occurredAt: "2026-09-10T14:00:00.000Z",
       channel: "Email",
       dailyMax: { Email: 2 },
       existingTasks,
     });
-    assert.equal(shanghaiDateOnly(due), "2026-09-14");
+    assert.equal(easternDateOnly(due), "2026-09-14");
   });
 
   it("counts open Needs Reply reservations toward capacity", () => {
     const due = resolveReplyDueAt({
-      occurredAt: "2026-09-10T02:00:00.000Z",
+      occurredAt: "2026-09-10T14:00:00.000Z",
       channel: "SMS",
       dailyMax: { SMS: 1 },
       existingTasks: [],
       openReplyReservations: [{ date: "2026-09-11", channel: "SMS" }],
     });
-    assert.equal(shanghaiDateOnly(due), "2026-09-14");
+    assert.equal(easternDateOnly(due), "2026-09-14");
   });
 
   it("falls back to +24h working day when Daily Max is 0", () => {
     const due = resolveReplyDueAt({
-      occurredAt: "2026-09-10T02:00:00.000Z",
+      occurredAt: "2026-09-10T14:00:00.000Z",
       channel: "Email",
       dailyMax: { Email: 0 },
       existingTasks: [],
     });
-    assert.equal(shanghaiDateOnly(due), "2026-09-11");
+    assert.equal(easternDateOnly(due), "2026-09-11");
   });
 });
 
-describe("shanghaiDateTimeIso", () => {
-  it("round-trips Shanghai local wall time", () => {
-    const iso = shanghaiDateTimeIso("2026-09-11", { hour: 10, minute: 30, second: 0 });
-    assert.equal(shanghaiDateOnly(iso), "2026-09-11");
-    assert.deepEqual(shanghaiTimeParts(iso), { hour: 10, minute: 30, second: 0 });
+describe("easternDateTimeIso", () => {
+  it("round-trips Eastern local wall time", () => {
+    const iso = easternDateTimeIso("2026-09-11", 10 * 60 + 30);
+    assert.equal(easternDateOnly(iso), "2026-09-11");
+    assert.deepEqual(easternTimeParts(iso), { hour: 10, minute: 30, second: 0 });
   });
 });

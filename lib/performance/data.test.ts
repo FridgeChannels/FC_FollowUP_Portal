@@ -59,7 +59,9 @@ test("master profiles resolve identity without adding brands outside Follow-up",
   assert.equal(metrics(view, undefined, "expo1").brands, 1);
 });
 test("acquisition cutoff uses real dates", () => {
-  assert.equal(snapshot(data(), { start: "2026-08-01", end: "2026-08-31" }).totalBrands, 0);
+  assert.equal(snapshot(data(), { start: "2026-08-01", end: "2026-08-30" }).totalBrands, 0);
+  // September 1 at midnight UTC is still August 31 in Eastern time.
+  assert.equal(snapshot(data(), { start: "2026-08-01", end: "2026-08-31" }).totalBrands, 1);
 });
 test("AM transfers preserve historical communication attribution", () => {
   const view = snapshot(data(), range);

@@ -1,3 +1,5 @@
+import { easternDateTimeIso } from "../scheduling-engine/calendar.ts";
+import { businessDateOnly } from "../time-zone.ts";
 import type { PortalRole } from "./owner-role";
 
 /** Follow-up ClientDB checkbox — Portal hides these clients and their tasks. */
@@ -206,7 +208,19 @@ function nextDateOnly(value: string) {
   return date.toISOString().slice(0, 10);
 }
 
-/** Inclusive YYYY-MM-DD range on Task `Scheduled At` (datetime-safe via next-day exclusive end). */
+/** Exact Eastern day filter, including legacy civil date values. */
+export function scheduledAtInRange(value: string | null | undefined, from?: string | null, to?: string | null) {
+  const startRaw = parseDateOnlyParam(from);
+  const endRaw = parseDateOnlyParam(to);
+  if (!startRaw && !endRaw) return true;
+  const day = value ? businessDateOnly(value) : "";
+  if (!day) return false;
+  const start = startRaw && endRaw && startRaw > endRaw ? endRaw : startRaw;
+  const end = startRaw && endRaw && startRaw > endRaw ? startRaw : endRaw;
+  return (!start || day >= start) && (!end || day <= end);
+}
+
+/** Coarse range including legacy date-only rows; task readers apply the exact Eastern day filter. */
 export function scheduledAtRangeFilters(from?: string | null, to?: string | null) {
   const startRaw = parseDateOnlyParam(from);
   const endRaw = parseDateOnlyParam(to);
@@ -215,7 +229,7 @@ export function scheduledAtRangeFilters(from?: string | null, to?: string | null
   const end = startRaw && endRaw && startRaw > endRaw ? startRaw : endRaw;
   const filters: Record<string, unknown>[] = [];
   if (start) filters.push({ property: "Scheduled At", date: { on_or_after: start } });
-  if (end) filters.push({ property: "Scheduled At", date: { before: nextDateOnly(end) } });
+  if (end) filters.push({ property: "Scheduled At", date: { before: easternDateTimeIso(nextDateOnly(end), 0) } });
   return filters;
 }
 

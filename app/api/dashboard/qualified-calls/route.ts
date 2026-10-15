@@ -1,23 +1,10 @@
+import { businessDateOnly } from "@/lib/time-zone";
 import { canAccessTestBrands, isTestOnlyViewer } from "@/lib/brand-access";
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { getDisplayTimeZone } from "@/lib/display-time";
 import { listCurrentQualifiedPhoneTasks } from "@/lib/notion/tasks";
 import { buildQualifiedCallDashboard } from "@/lib/qualified-call-dashboard";
 import { runWithNotionLimit } from "@/lib/notion/rate-limit";
-
-function businessToday() {
-  // Weekly reports follow the team's operating calendar, rather than the
-  // North American display timezone used for call timestamps.
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Shanghai",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date());
-  const part = (type: Intl.DateTimeFormatPartTypes) =>
-    parts.find((item) => item.type === type)?.value || "";
-  return `${part("year")}-${part("month")}-${part("day")}`;
-}
 
 async function getQualifiedCalls(request: Request) {
   try {
@@ -51,7 +38,7 @@ async function getQualifiedCalls(request: Request) {
       : dashboard;
     return Response.json({
       timeZone,
-      today: businessToday(),
+      today: businessDateOnly(),
       days,
     });
   } catch (error) {

@@ -28,6 +28,8 @@ On portable, `npm run dev` uses `vinext dev` with HMR, starting at port 5173. Vi
 
 ### Follow-up due dates
 
+Operational displays, reporting dates, date filters, reply deadlines and scheduling use `America/New_York` (EST/EDT). Date-only fields keep their selected calendar date; persisted timestamp instants remain UTC. AI summary timestamps and existing local hover hints retain the browser timezone. Pause-follow-up and reminder datetime inputs continue to interpret the user's browser-local time.
+
 No production cron is required. When an Account Manager marks an inbound email as read with a reminder date, that email returns to the same Account Manager's `Needs Action` after the due time when they refresh Brands. When an Account Manager pauses a FollowUp with a next-contact date, it remains paused; after the due time, an Admin sees it in the Admin `Needs Action` list on refresh and can review, resume, or reassign it. Neither path sends automatic notifications.
 
 On managed Linux, use `sites-preview start` only for requested browser QA. The project's dev script runs Vite and accepts the supervisor's `--host 0.0.0.0 --port 4173 --strictPort` arguments. The internal browser uses `http://terminal.local:4173/`; it is not a user-facing URL. The supervisor owns the preview lifecycle. The ignored local profile survives the supervisor's cleared process environment.

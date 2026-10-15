@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowUpRight, Check, SmartphoneNfc } from "lucide-react";
+import { ArrowUpRight, SmartphoneNfc } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { SidebarTrigger } from "@/components/ui/sidebar";
@@ -24,6 +23,8 @@ import {
 import { ChannelIcon } from "./channel-icon";
 import { usePageMetadata } from "./use-page-metadata";
 import { useSignals } from "./signals-store";
+import { formatScheduledDateTime } from "@/lib/display-time";
+import { buildSignalQueue } from "@/lib/signals/queue";
 
 const types = {
   sample: {
@@ -40,7 +41,7 @@ const types = {
   },
 };
 
-function SignalLabel({ type }: { type: SignalType }) {
+function SignalLabel({ type, muted = false }: { type: SignalType; muted?: boolean }) {
   const { label, style } = types[type];
   const icon = type === "email"
     ? <ChannelIcon channel="Email" className="size-3.5" alt="" />
@@ -48,35 +49,15 @@ function SignalLabel({ type }: { type: SignalType }) {
       ? <ChannelIcon channel="LinkedIn" className="size-3.5" alt="" />
       : <SmartphoneNfc className="size-3.5" />;
   return (
-    <span className={`inline-flex items-center gap-1 text-[11px] font-medium ${style}`}>
+    <span className={`inline-flex items-center gap-1 text-[11px] font-medium ${muted ? "text-slate-400 grayscale" : style}`}>
       {icon}
       {label}
     </span>
   );
 }
 
-function relativeTime(value: string, now: Date) {
-  const timestamp = Date.parse(value);
-  if (!Number.isFinite(timestamp)) return "—";
-  const minutes = Math.max(0, Math.floor((now.getTime() - timestamp) / 60000));
-  if (minutes < 1) return "Just now";
-  if (minutes < 60) return `${minutes} min ago`;
-  if (minutes < 24 * 60) return `${Math.floor(minutes / 60)}h ago`;
-  if (minutes < 48 * 60) return "Yesterday";
-  if (minutes < 7 * 24 * 60) return `${Math.floor(minutes / (24 * 60))}d ago`;
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(new Date(value));
-}
-
-function latestVisibleEvent(brand: SignalBrand, type: SignalType | "all") {
-  const visibleEvents = brand.events.filter((event) => type === "all" || event.type === type);
-  return visibleEvents.find(
-    (event) => event.isNewSignal && !brand.readEventIds?.includes(event.signalReadId || event.id),
-  ) || visibleEvents[0];
-}
-
-function brandDetailHref(brand: SignalBrand, event: SignalEvent, mock: boolean) {
-  const returnTo = mock ? "/signals?mock=1" : "/signals";
-  return `/customers/${encodeURIComponent(brand.id)}?returnTo=${encodeURIComponent(returnTo)}&signal=${encodeURIComponent(event.id)}${mock ? "&mock=1" : ""}`;
+function brandDetailHref(brand: SignalBrand, event: SignalEvent) {
+  return `/customers/${encodeURIComponent(brand.id)}?returnTo=%2Fsignals&signal=${encodeURIComponent(event.id)}`;
 }
 
 export function SignalsPage() {
@@ -85,28 +66,9 @@ export function SignalsPage() {
     description: "Review customer signals and follow up in one workspace.",
   });
   const { data, error, refresh, settle } = useSignals();
-  const router = useRouter();
-  const params = useSearchParams();
-  const showingMock = process.env.NODE_ENV !== "production" && params.get("mock") === "1";
   const [type, setType] = useState<SignalType | "all">("all");
-  const [now, setNow] = useState(() => new Date());
-
-  useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 60000);
-    return () => clearInterval(timer);
-  }, []);
-
-  const queue = useMemo(() => {
-    const signalTime = (brand: SignalBrand) => Math.max(
-      ...brand.events
-        .filter((event) => type === "all" || event.type === type)
-        .map((event) => Date.parse(event.occurredAt)),
-    );
-    return [...(data?.brands || [])]
-      .filter((brand) => brand.events.some((event) => type === "all" || event.type === type))
-      .sort((left, right) => signalTime(right) - signalTime(left));
-  }, [data, type]);
-  const summary = summarize(data?.brands || [], now);
+  const queue = useMemo(() => buildSignalQueue(data?.brands || [], type), [data, type]);
+  const summary = summarize(data?.brands || []);
 
   const markBrandRead = (brand: SignalBrand) => {
     const newReadIds = brand.events
@@ -116,7 +78,6 @@ export function SignalsPage() {
     const fresh = new Set(brand.newEventIds || brand.events.filter((event) => event.isNewSignal).map((event) => event.id));
     const snapshot = [...new Set([...(brand.readEventIds || []), ...newReadIds])].filter((id) => fresh.has(id));
     settle(brand.id, snapshot);
-    if (showingMock) return;
     void fetch(`/api/signals/${encodeURIComponent(brand.id)}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -153,17 +114,7 @@ export function SignalsPage() {
             ))}
           </SelectContent>
         </Select>
-        {process.env.NODE_ENV !== "production" ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => router.replace(showingMock ? "/signals" : "/signals?mock=1")}
-          >
-            {showingMock ? "Exit mock preview" : "Mock preview"}
-          </Button>
-        ) : null}
       </div>
-      {showingMock ? <p className="-mt-3 mb-6 text-xs text-muted-foreground">Mock preview · local actions only</p> : null}
       {error ? (
         <div role="alert" className="mb-6 text-sm text-muted-foreground">
           Unable to refresh signals.{" "}
@@ -181,46 +132,35 @@ export function SignalsPage() {
           </div>
           {queue.length ? (
             <div className="space-y-2">
-              {queue.map((brand) => {
-                const latest = latestVisibleEvent(brand, type);
-                if (!latest) return null;
+              {queue.map(({ brand, latest }) => {
                 const isUnread = brand.unread;
                 return (
                   <article
                     key={brand.id}
-                    className={`grid w-full gap-4 rounded-md px-4 py-4 transition-colors sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center ${isUnread ? "bg-slate-100/90" : "bg-transparent hover:bg-slate-100/60"}`}
+                    className={`relative grid w-full gap-4 rounded-md px-4 py-4 transition-colors sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center ${isUnread ? "bg-slate-100/90" : "bg-slate-100/40"}`}
                   >
-                    <div className="min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => markBrandRead(brand)}
+                      aria-label={isUnread ? `Mark ${brand.name} as read` : `${brand.name}, read`}
+                      className={`absolute inset-0 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 ${isUnread ? "cursor-pointer" : "cursor-default"}`}
+                    />
+                    <div className="pointer-events-none relative min-w-0">
                       <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
                         {isUnread ? <span className="size-2 shrink-0 rounded-full bg-rose-500 shadow-[0_0_0_3px_rgba(244,63,94,0.14)]" aria-label="Unread" /> : null}
-                        <h3 className={`min-w-0 truncate text-sm ${isUnread ? "font-semibold text-foreground" : "font-medium text-slate-600"}`}>{brand.name}</h3>
-                        <SignalLabel type={latest.type} />
-                        <time dateTime={latest.occurredAt} title={latest.occurredAt} className="text-xs text-muted-foreground">
-                          {relativeTime(latest.occurredAt, now)}
+                        <h3 className={`min-w-0 truncate text-sm ${isUnread ? "font-semibold text-foreground" : "font-medium text-slate-400"}`}>{brand.name}</h3>
+                        <SignalLabel type={latest.type} muted={!isUnread} />
+                        <time dateTime={latest.occurredAt} title={formatScheduledDateTime(latest.occurredAt)} className={`text-xs ${isUnread ? "text-muted-foreground" : "text-slate-400"}`}>
+                          {formatScheduledDateTime(latest.occurredAt)}
                         </time>
                       </div>
-                      <p className="mt-1 truncate text-sm text-muted-foreground">{latest.summary}</p>
+                      <p className={`mt-1 truncate text-sm ${isUnread ? "text-muted-foreground" : "text-slate-400"}`}>{latest.summary}</p>
                     </div>
-                    <div className="flex items-center justify-between gap-3 sm:justify-end">
-                      {isUnread ? (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 px-2 text-xs text-muted-foreground"
-                          onClick={() => markBrandRead(brand)}
-                          aria-label={`Mark ${brand.name} as read`}
-                        >
-                          Mark as read
-                        </Button>
-                      ) : (
-                        <span className="inline-flex h-8 items-center gap-1 px-2 text-xs text-muted-foreground">
-                          <Check className="size-3.5" /> Read
-                        </span>
-                      )}
+                    <div className="flex items-center justify-end">
                       <Link
-                        href={brandDetailHref(brand, latest, showingMock)}
-                        className="inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-md bg-violet-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2"
+                        href={brandDetailHref(brand, latest)}
+                        onClick={() => markBrandRead(brand)}
+                        className={`relative inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-md px-3 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 ${isUnread ? "bg-violet-600 text-white shadow-sm hover:bg-violet-700" : "bg-slate-200/70 text-slate-500 hover:bg-slate-200"}`}
                       >
                         Take Action Now <ArrowUpRight className="size-4" />
                       </Link>

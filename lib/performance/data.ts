@@ -1,3 +1,5 @@
+import { businessDateOnly } from "../time-zone.ts";
+import { easternDateTimeIso, easternDayBounds, parseTimelineMs } from "../scheduling-engine/calendar.ts";
 import type { FollowupRound, ExhibitionEncounter, RoundAssignment } from "../followup-history.ts";
 import { isCpVisible } from "../cp-visibility.ts";
 
@@ -42,8 +44,8 @@ export type SourceData = {
   unavailable: string[];
 };
 
-export function today() {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+export function today(now = new Date()) {
+  return businessDateOnly(now);
 }
 export function validDate(value: string | null): value is string {
   return !!value && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value)) && new Date(value + "T00:00:00Z").toISOString().slice(0, 10) === value;
@@ -60,11 +62,8 @@ export function queryRange(params: Pick<URLSearchParams, "get">): { range: Range
   if (validDate(start) && validDate(end) && start <= end) return { range: { start, end }, preset };
   return { range: presetRange(preset === "custom" ? 30 : Number(preset)), preset: preset === "custom" ? "30" : preset };
 }
-const time = (at: string | null | undefined) => at ? Date.parse(at) : NaN;
-export const bounds = (range: Range) => ({
-  start: Date.parse(range.start + "T00:00:00+08:00"),
-  end: Date.parse(range.end + "T23:59:59.999+08:00"),
-});
+const time = (at: string | null | undefined) => at ? (/^\d{4}-\d{2}-\d{2}$/.test(at) ? Date.parse(easternDateTimeIso(at, 0)) : parseTimelineMs(at)) : NaN;
+export const bounds = (range: Range) => easternDayBounds(range.start, range.end);
 function canonical(data: SourceData) {
   const byId = new Map(data.brands.map(brand => [identity(brand.id), brand]));
   return (id: string) => {
