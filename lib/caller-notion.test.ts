@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { notionReportPageId, parseReportTitle, readReportBookmark, registerCallerReport, reportCaption, reportsFromBookmarks, reportToday, validateReportTitle, validReportDate, type CallerNotionReport, type ReportBookmark } from "./caller-notion.ts";
+import { notionReportPageId, readReportBookmark, registerCallerReport, reportCaption, reportsFromBookmarks, reportToday, validReportDate, type CallerNotionReport, type ReportBookmark } from "./caller-notion.ts";
 
 const id = "0123456789abcdef0123456789abcdef";
 const input = { callerId: "caller-1", callerName: "Julio Rodriguez", date: "2026-10-06", url: `https://team.notion.site/Julio-${id}?source=copy_link` };
@@ -8,17 +8,9 @@ const report: CallerNotionReport = { ...input, pageId: id, title: "Julio Rodrigu
 function block(value: CallerNotionReport): ReportBookmark { return { id: value.updatedAt, type: "bookmark", bookmark: { url: value.url, caption: [{ plain_text: reportCaption(value) }] } }; }
 
 describe("Daily Notion matching", () => {
-  it("parses US month-day-year without ambiguity", () => assert.deepEqual(parseReportTitle(report.title), { name: "Julio Rodriguez", date: "2026-10-06" }));
   it("checks calendar validity, including leap years", () => {
     for (const date of ["2026-02-29", "2026-02-30", "2026-13-01", "2026-10-6", ""]) assert.equal(validReportDate(date), false);
     assert.equal(validReportDate("2028-02-29"), true);
-    assert.throws(() => parseReportTitle("Julio 02-30-2026"), /invalid/);
-    assert.throws(() => parseReportTitle("Julio 2026-10-06"), /format/);
-  });
-  it("requires the logged-in caller's name and selected day", () => {
-    validateReportTitle("  JULIO   Rodriguez 10-06-2026  ", input.callerName, input.date);
-    assert.throws(() => validateReportTitle(report.title, "Peter", input.date), /Caller name/);
-    assert.throws(() => validateReportTitle(report.title, input.callerName, "2026-10-07"), /Select that date/);
   });
   it("uses the call display timezone for Today at midnight and DST boundaries", () => {
     assert.equal(reportToday("America/New_York", new Date("2026-10-07T03:59:59Z")), "2026-10-06");
@@ -46,27 +38,27 @@ describe("Daily Notion matching", () => {
     const previousDay = { ...report, date: "2026-10-05" };
     assert.deepEqual(reportsFromBookmarks([block(newer), block(report), block(previousDay)], input.callerId), [newer, previousDay]);
   });
-  it("registers once and makes the same caller/date link usable for any brand", async () => {
+  it("registers the Notion URL under the selected date without reading the linked page", async () => {
     const stored: CallerNotionReport[] = [];
     const result = await registerCallerReport(input, {
-      readPage: async (pageId) => { assert.equal(pageId, id); return { title: report.title }; },
       save: async (value) => { assert.equal(value.callerId, input.callerId); stored.push(value); },
       now: () => new Date(report.updatedAt),
     });
     assert.equal(stored.length, 1);
     assert.equal(result.date, input.date);
+    assert.equal(result.title, "Daily report · 10-06-2026");
+    assert.equal(result.pageId, id);
     assert.deepEqual(stored[0], result);
     assert.equal(stored.find((item) => item.date === "2026-10-07"), undefined);
   });
-  it("does not write on wrong title, deleted page, denied access, or invalid URL", async () => {
+  it("rejects invalid selected dates and URLs without consulting Notion page content", async () => {
     let writes = 0;
-    for (const page of [{ title: "Peter 10-06-2026" }, { title: "Julio Rodriguez 10-07-2026" }, { title: report.title, archived: true }]) {
-      await assert.rejects(registerCallerReport(input, { readPage: async () => page, save: async () => { writes++; } }));
-    }
-    await assert.rejects(registerCallerReport(input, { readPage: async () => { throw new Error("Access denied"); }, save: async () => { writes++; } }), /Access denied/);
+    const store = { save: async () => { writes++; } };
+    await assert.rejects(registerCallerReport({ ...input, date: "2026-13-01" }, store));
+    await assert.rejects(registerCallerReport({ ...input, url: "https://example.com/notion-page" }, store));
     assert.equal(writes, 0);
   });
   it("does not claim success if persistence fails", async () => {
-    await assert.rejects(registerCallerReport(input, { readPage: async () => ({ title: report.title }), save: async () => { throw new Error("storage unavailable"); } }), /unavailable/);
+    await assert.rejects(registerCallerReport(input, { save: async () => { throw new Error("storage unavailable"); } }), /unavailable/);
   });
 });

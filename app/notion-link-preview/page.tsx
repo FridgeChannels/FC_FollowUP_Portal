@@ -10,7 +10,6 @@ export default function Preview() {
   const [brand, setBrand] = useState("fixture-brand-a");
   const [submitted, setSubmitted] = useState("");
   const today = reportToday("America/New_York");
-  const titleDate = `${today.slice(5, 7)}-${today.slice(8)}-${today.slice(0, 4)}`;
   useEffect(() => {
     const original = window.fetch;
     let reports: CallerNotionReport[] = [];
@@ -21,7 +20,6 @@ export default function Preview() {
           const body = JSON.parse(String(init.body));
           try {
             const report = await registerCallerReport({ ...body, callerId: "fixture-caller", callerName: "Julio Rodriguez" }, {
-              readPage: async (id) => ({ title: id.startsWith("f") ? "Someone Else 10-06-2026" : `Julio Rodriguez ${titleDate}` }),
               save: async (value) => { reports = [...reports.filter((item) => item.date !== value.date), value]; },
             });
             return Response.json({ report });
@@ -34,7 +32,7 @@ export default function Preview() {
     };
     queueMicrotask(() => setReady(true));
     return () => { window.fetch = original; };
-  }, [today, titleDate]);
+  }, [today]);
   const call = (id: string, taskId: string | undefined, date: string, result = "Connected"): Interaction => ({
     id, taskId, customerId: brand, channel: "Phone", type: "Phone", title: "Call", content: "", createdAt: "2026-10-20T12:00:00Z", direction: "Outbound", callResult: result,
     quo: { callId: `ACsim-${id}`, call: { createdAt: date, status: "completed", duration: 90, from: "+12025550101", to: "+12025550102" }, summary: { status: "completed", summary: ["Discussed the sample delivery."], nextSteps: ["Follow up next week."] }, transcript: { status: "completed", dialogue: [{ content: "Hello, thank you for calling.", identifier: "customer" }] } },

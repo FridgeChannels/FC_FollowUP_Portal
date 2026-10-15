@@ -8,7 +8,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { reportToday, type CallerNotionReport } from "@/lib/caller-notion";
 import { getDisplayTimeZone } from "@/lib/display-time";
 
-type ReportPayload = { reports?: CallerNotionReport[]; report?: CallerNotionReport; today?: string; timeZone?: string; callerName?: string; mock?: boolean; error?: string };
+type ReportPayload = { reports?: CallerNotionReport[]; report?: CallerNotionReport; today?: string; timeZone?: string; mock?: boolean; error?: string };
 
 export function TodaysNotion() {
   const id = useId();
@@ -16,7 +16,6 @@ export function TodaysNotion() {
   const [today, setToday] = useState(() => reportToday(getDisplayTimeZone()));
   const [date, setDate] = useState(today);
   const [zone, setZone] = useState(getDisplayTimeZone());
-  const [callerName, setCallerName] = useState("Caller Name");
   const [mockMode, setMockMode] = useState(false);
   const [url, setUrl] = useState("");
   const [editing, setEditing] = useState(false);
@@ -37,7 +36,6 @@ export function TodaysNotion() {
         setReports(payload.reports || []);
         if (payload.today) setToday(payload.today);
         if (payload.timeZone) setZone(payload.timeZone);
-        if (payload.callerName) setCallerName(payload.callerName);
         setMockMode(Boolean(payload.mock));
       })
       .catch((reason: unknown) => {
@@ -126,9 +124,9 @@ export function TodaysNotion() {
       <div className="flex flex-wrap gap-2">
         <Input id={`${id}-url`} type="url" required value={url} onChange={(event) => setUrl(event.target.value)} disabled={saving || loading} placeholder="https://www.notion.so/…" className="min-w-0 flex-1 basis-60" aria-describedby={`${id}-hint`} />
         {editing ? <Button type="button" variant="ghost" disabled={saving} onClick={() => { setEditing(false); setUrl(""); setError(""); }}>Cancel</Button> : null}
-        <Button type="submit" disabled={saving || loading || !url.trim() || !date}>{saving ? "Checking & saving…" : "Save link"}</Button>
+        <Button type="submit" disabled={saving || loading || !url.trim() || !date}>{saving ? "Saving…" : "Save link"}</Button>
       </div>
-      <p id={`${id}-hint`} className="text-xs leading-5 text-slate-500">Page title: {callerName} {date ? `${date.slice(5, 7)}-${date.slice(8)}-${date.slice(0, 4)}` : "MM-DD-YYYY"}. Dates follow {zone}. Select an earlier date to add or edit a past report.</p>
+      <p id={`${id}-hint`} className="text-xs leading-5 text-slate-500">The selected date matches this link to AM Phone records. The Notion page title is not checked. Dates follow {zone}; select an earlier date to add or edit a past report.</p>
     </form> : null}
     {error ? <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-rose-700"><p role="alert">{error}</p><Button size="sm" variant="ghost" disabled={saving || loading} onClick={() => { setLoading(true); setError(""); void load(); }}>Retry</Button></div> : null}
   </section>;

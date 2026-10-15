@@ -29,14 +29,6 @@ export function reportToday(timeZone: string, now = new Date()) {
   return `${get("year")}-${get("month")}-${get("day")}`;
 }
 
-export function parseReportTitle(title: string) {
-  const match = title.trim().match(/^(.+?)\s+(\d{2})-(\d{2})-(\d{4})$/);
-  if (!match) throw new CallerNotionError("Use the Notion title format: Caller Name MM-DD-YYYY.");
-  const date = `${match[4]}-${match[2]}-${match[3]}`;
-  if (!validReportDate(date)) throw new CallerNotionError("The date in the Notion title is invalid.");
-  return { name: match[1].trim(), date };
-}
-
 export function notionReportPageId(value: string) {
   let url: URL;
   try { url = new URL(value.trim()); } catch { throw new CallerNotionError("Paste a valid Notion page URL."); }
@@ -48,17 +40,6 @@ export function notionReportPageId(value: string) {
   const match = url.pathname.match(/([0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?$/i);
   if (!match) throw new CallerNotionError("Copy the full Notion page link, including its page ID.");
   return match[1].replace(/-/g, "").toLowerCase();
-}
-
-export function validateReportTitle(title: string, callerName: string, date: string) {
-  const parsed = parseReportTitle(title);
-  const normalize = (value: string) => value.normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
-  if (normalize(parsed.name) !== normalize(callerName)) {
-    throw new CallerNotionError(`The Notion title must use your Caller name: ${callerName}.`);
-  }
-  if (parsed.date !== date) {
-    throw new CallerNotionError(`This report is dated ${parsed.date}. Select that date, or correct the Notion title.`);
-  }
 }
 
 export type ReportBookmark = {
@@ -101,23 +82,20 @@ export function reportsFromBookmarks(blocks: ReportBookmark[], callerId: string)
   return [...reports.values()].sort((a, b) => b.date.localeCompare(a.date));
 }
 
-/** Validate first, then persist once; callers cannot supply a different identity. */
+/** Validate the selected date and URL, then persist without reading the linked page. */
 export async function registerCallerReport(
   input: { callerId: string; callerName: string; date: string; url: string },
   store: {
-    readPage: (id: string) => Promise<{ title: string; archived?: boolean }>;
     save: (report: CallerNotionReport) => Promise<CallerNotionReport | void>;
     now?: () => Date;
   },
 ) {
   if (!validReportDate(input.date)) throw new CallerNotionError("Select a valid report date.");
   const pageId = notionReportPageId(input.url);
-  const page = await store.readPage(pageId);
-  if (page.archived) throw new CallerNotionError("This Notion page is in the trash. Restore it before linking.");
-  validateReportTitle(page.title, input.callerName, input.date);
+  const dateLabel = `${input.date.slice(5, 7)}-${input.date.slice(8, 10)}-${input.date.slice(0, 4)}`;
   const report: CallerNotionReport = {
     callerId: input.callerId, callerName: input.callerName, date: input.date,
-    pageId, title: page.title, url: `https://www.notion.so/${pageId}`, updatedAt: (store.now?.() || new Date()).toISOString(),
+    pageId, title: `Daily report · ${dateLabel}`, url: `https://www.notion.so/${pageId}`, updatedAt: (store.now?.() || new Date()).toISOString(),
   };
   return (await store.save(report)) || report;
 }
