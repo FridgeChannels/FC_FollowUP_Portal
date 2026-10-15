@@ -4,7 +4,7 @@
 import { isCpVisible, cpDisplayText } from "@/lib/cp-visibility";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { portalNavigate } from "@/app/portal-navigate";
 import { enUS } from "date-fns/locale";
 import {
   ArrowLeft, CalendarClock, Check, CheckCircle2, MessageCircle, Phone, Search, Send, UserRound, XCircle,
@@ -190,7 +190,6 @@ function dedupeCallerTasksByBrand(tasks: UnifiedTask[]): UnifiedTask[] {
 
 export function TasksPage({ selectedId, selectedCallId, returnToDashboard = false }: { selectedId?: string; selectedCallId?: string; returnToDashboard?: boolean }) {
   const { state } = useWorkspace();
-  const router = useRouter();
   const manager = state.currentRole === "Admin";
   const [type, setType] = useState<TaskType | "All">(state.currentRole === "Caller" ? "Call" : "All");
   const [assignee, setAssignee] = useState("all");
@@ -441,7 +440,7 @@ export function TasksPage({ selectedId, selectedCallId, returnToDashboard = fals
         const customer = state.customers.find(c => c.id === task.customerId);
         const overdue = isDue(task, state.simulatedDate);
         const Icon = task.type === "Call" ? Phone : MessageCircle;
-        return <TableRow key={task.id} className={`cursor-pointer ${overdue ? "bg-amber-50/80 hover:bg-amber-50" : "hover:bg-violet-50/30"}`} onClick={() => router.push(`/tasks/${task.id}`)}>
+        return <TableRow key={task.id} className={`cursor-pointer ${overdue ? "bg-amber-50/80 hover:bg-amber-50" : "hover:bg-violet-50/30"}`} onClick={() => portalNavigate(`/tasks/${task.id}`)}>
           <TableCell className="pl-5"><div className="flex items-center gap-3"><span className={`grid size-9 shrink-0 place-items-center rounded-xl ${task.type === "Call" ? "bg-blue-100 text-blue-700" : "bg-violet-100 text-violet-700"}`}><Icon className="size-4"/></span><div className="text-sm font-semibold">{customer?.name || task.brandName || "Unknown brand"}</div></div></TableCell>
           <TableCell><div className="flex flex-wrap items-center gap-1.5">{overdue ? <Status value="Due"/> : <Status value={task.status}/>}<CallReviewBadge review={reviewFromNotion(task)}/></div></TableCell>
           <TableCell className="whitespace-nowrap text-xs text-slate-500">{dateOnly(task.dueAt)}</TableCell>
@@ -577,7 +576,6 @@ function TaskDetail({ task, selectedCallId, returnToDashboard = false }: { task:
   const { state, can, resolveInbox, assignBrand, reassignCall } = useWorkspace();
   const { user } = useSession();
   const role = user?.role || state.currentRole;
-  const router = useRouter();
   const [launch, setLaunch] = useState(false);
   const [sendMessage, setSendMessage] = useState(false);
   const [changeCP, setChangeCP] = useState(false);
@@ -805,7 +803,7 @@ function TaskDetail({ task, selectedCallId, returnToDashboard = false }: { task:
   }, [task.remote, liveTask.callReviewStatus, remote?.timeline]);
   if (task.remote && !detailHydrated) {
     return <div className="mx-auto max-w-[1540px]">
-      <button onClick={() => router.push(returnToDashboard ? "/dashboard" : "/tasks")} className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900"><ArrowLeft className="size-4"/>{returnToDashboard ? "Caller Performance" : role === "Caller" ? "Caller Task" : "Reply Tasks"}</button>
+      <button onClick={() => portalNavigate(returnToDashboard ? "/dashboard" : "/tasks")} className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900"><ArrowLeft className="size-4"/>{returnToDashboard ? "Caller Performance" : role === "Caller" ? "Caller Task" : "Reply Tasks"}</button>
       <main className="grid min-h-[55vh] place-items-center bg-white px-6 text-center">
         <div className="flex flex-col items-center gap-3 text-sm text-slate-500"><Spinner className="size-5"/><p>Loading the selected task and call record…</p></div>
       </main>
@@ -936,12 +934,12 @@ function TaskDetail({ task, selectedCallId, returnToDashboard = false }: { task:
   ) as Partial<Record<CPCode, string>>;
 
   return <div className="mx-auto max-w-[1540px]">
-    <button onClick={() => router.push(returnToDashboard ? "/dashboard" : "/tasks")} className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900"><ArrowLeft className="size-4"/>{returnToDashboard ? "Caller Performance" : role === "Caller" ? "Caller Task" : "Reply Tasks"}</button>
+    <button onClick={() => portalNavigate(returnToDashboard ? "/dashboard" : "/tasks")} className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-900"><ArrowLeft className="size-4"/>{returnToDashboard ? "Caller Performance" : role === "Caller" ? "Caller Task" : "Reply Tasks"}</button>
     {detailError ? <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900"><span>Latest task details could not load. Showing the task link while it reconnects.</span><Button size="sm" variant="outline" onClick={() => setDetailRequest((value) => value + 1)}>Try again</Button></div> : null}
     <main className="min-w-0 overflow-hidden rounded-2xl bg-white">
     <header className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 bg-white px-5 py-4 lg:px-7">
       <div><div className="flex flex-wrap items-center gap-2"><Badge variant="outline">{reviewedTask.type}</Badge>{isDue(reviewedTask, state.simulatedDate) ? <Status value="Due"/> : <Badge variant="secondary">{reviewedTask.status}</Badge>}<CallReviewBadge review={taskReview}/><span className="text-xs text-slate-400">{dateOnly(reviewedTask.dueAt)}</span></div><h2 className="mt-2 text-xl font-bold">{customer.name}</h2><p className="mt-1 text-xs text-slate-500">{contact.name} · {contact.role} · {cpDisplayText(customer.cp)} · {customer.status}{callerPhoneOnly && <> · Account Manager: {remote?.ownerName || state.users.find(user => user.id === task.assigneeId)?.name || "Unassigned"}</>}</p></div>
-      {callerPhoneOnly ? null : <Button variant="outline" size="sm" disabled={!customer.id} onClick={() => router.push(`/customers/${encodeURIComponent(customer.id)}`)}>Brand profile</Button>}
+      {callerPhoneOnly ? null : <Button variant="outline" size="sm" disabled={!customer.id} onClick={() => portalNavigate(`/customers/${encodeURIComponent(customer.id)}`)}>Brand profile</Button>}
     </header>
 
     <div className={callerPhoneOnly ? "grid" : "grid lg:grid-cols-[minmax(0,1fr)_290px]"}>
@@ -963,7 +961,7 @@ function TaskDetail({ task, selectedCallId, returnToDashboard = false }: { task:
               activeTaskId={liveTask.id}
               highlightedCallId={selectedCallId}
               headerContactName={contact.name}
-              onSelectTask={(taskId) => router.push(`/tasks/${encodeURIComponent(taskId)}${returnToDashboard ? "?from=dashboard" : ""}`)}
+              onSelectTask={(taskId) => portalNavigate(`/tasks/${encodeURIComponent(taskId)}${returnToDashboard ? "?from=dashboard" : ""}`)}
               onCallOpening={onCallOpening}
               callerReviewTaskId={liveTask.id}
               callerReviewHasConnectedCall={hasConnectedCall}

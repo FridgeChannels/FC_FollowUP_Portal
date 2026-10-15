@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
-import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
+import { portalExit, portalNavigate } from "@/app/portal-navigate";
 import {
   Bomb, ChevronDown, ClipboardCheck, LayoutDashboard, LogOut, RefreshCw,
   Users, Radio, ChartNoAxesCombined,
@@ -64,9 +64,12 @@ export default function OutreachWorkspace({ children }: { children?: ReactNode }
   return <SignalsProvider><WorkspaceShell>{children}</WorkspaceShell></SignalsProvider>;
 }
 
+function isModifiedClick(event: MouseEvent) {
+  return event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0;
+}
+
 function WorkspaceShell({ children }: { children?: ReactNode }) {
   const { data: signalsData } = useSignals();
-  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { state, hydrated, can, setRole } = useWorkspace();
@@ -87,9 +90,9 @@ function WorkspaceShell({ children }: { children?: ReactNode }) {
     if (sessionLoading) return;
     if (!user) {
       const returnTo = pathname === "/" ? "/login" : `/login?return_to=${encodeURIComponent(pathname)}`;
-      router.replace(returnTo);
+      portalExit(returnTo);
     }
-  }, [sessionLoading, user, pathname, router]);
+  }, [sessionLoading, user, pathname]);
 
   useEffect(() => {
     if (user && state.currentRole !== user.role) setRole(user.role);
@@ -143,33 +146,33 @@ function WorkspaceShell({ children }: { children?: ReactNode }) {
   useEffect(() => {
     if (sessionLoading || !user) return;
     if (pathname === "/") {
-      router.replace(roleHome[state.currentRole]);
+      portalNavigate(roleHome[state.currentRole], "replace");
       return;
     }
     if (pathname.startsWith("/settings")) {
-      router.replace(roleHome[state.currentRole]);
+      portalNavigate(roleHome[state.currentRole], "replace");
       return;
     }
     if (pathname.startsWith("/inbox") || pathname.startsWith("/call-tasks")) {
-      router.replace(state.currentRole === "AccountManager" ? "/customers?view=myWork" : pathname.replace(/^\/(inbox|call-tasks)/, "/tasks"));
+      portalNavigate(state.currentRole === "AccountManager" ? "/customers?view=myWork" : pathname.replace(/^\/(inbox|call-tasks)/, "/tasks"), "replace");
       return;
     }
     if (/^\/bombs(\/|$)/i.test(pathname)) {
-      router.replace(pathname.replace(/^\/bombs/i, "/omnireach"));
+      portalNavigate(pathname.replace(/^\/bombs/i, "/omnireach"), "replace");
       return;
     }
     const brandDetail = /^\/customers\/[^/]+/.test(pathname);
     if (screen === "Performance") {
-      if (user.role !== "Admin") router.replace(roleHome[state.currentRole]);
+      if (user.role !== "Admin") portalNavigate(roleHome[state.currentRole], "replace");
       return;
     }
     if (brandDetail) {
-      if (!can("customers")) router.replace(roleHome[state.currentRole]);
+      if (!can("customers")) portalNavigate(roleHome[state.currentRole], "replace");
       return;
     }
     const capability = screen === "Dashboard" ? "dashboard" : (screen === "Brands" || screen === "Signals") ? "customers" : screen === "ReplyTask" ? "tasks" : "bombs";
-    if (!can(capability)) router.replace(roleHome[state.currentRole]);
-  }, [sessionLoading, user, pathname, screen, state.currentRole, can, router]);
+    if (!can(capability)) portalNavigate(roleHome[state.currentRole], "replace");
+  }, [sessionLoading, user, pathname, screen, state.currentRole, can]);
 
   useEffect(() => {
     const context = (document as Document & { modelContext?: { registerTool: (tool: object, options?: { signal?: AbortSignal }) => void | Promise<void> } }).modelContext;
@@ -185,13 +188,13 @@ function WorkspaceShell({ children }: { children?: ReactNode }) {
         execute(input: unknown) {
           const path = (input as { path?: string }).path;
           if (!path) throw new Error("Path required");
-          router.push(path);
+          portalNavigate(path);
           return { path };
         },
       }, { signal: lifecycle.signal })).catch(() => undefined);
     } catch {}
     return () => lifecycle.abort();
-  }, [router]);
+  }, []);
 
   if (!hydrated || sessionLoading || !user) {
     return (
@@ -232,23 +235,32 @@ function WorkspaceShell({ children }: { children?: ReactNode }) {
               : item.screen === "Dashboard"
                 ? "data-[active=true]:bg-emerald-500"
                 : "data-[active=true]:bg-amber-500";
+    const label = item.screen === "ReplyTask" && user.role !== "AccountManager" ? "Caller Task" : item.label;
     return (
       <SidebarMenuItem key={item.path}>
         <SidebarMenuButton
           asChild
-          tooltip={item.screen === "ReplyTask" && user.role !== "AccountManager" ? "Caller Task" : item.label}
+          tooltip={label}
           isActive={screen === item.screen}
           className={`h-10 rounded-lg px-3 text-[13px] font-medium ${activeStyle} data-[active=true]:text-white`}
         >
-          <Link href={item.path} aria-label={item.screen === "ReplyTask" && user.role !== "AccountManager" ? "Caller Task" : item.label}>
+          <a
+            href={item.path}
+            aria-label={label}
+            onClick={(event) => {
+              if (isModifiedClick(event)) return;
+              event.preventDefault();
+              portalNavigate(item.path);
+            }}
+          >
             <item.icon />
-            <span>{item.screen === "ReplyTask" && user.role !== "AccountManager" ? "Caller Task" : item.label}</span>
+            <span>{label}</span>
             {count > 0 && (
               <span className={`ml-auto rounded-md px-1.5 py-0.5 text-[10px] group-data-[collapsible=icon]:hidden ${item.screen === "Brands" ? "bg-rose-500/15 text-rose-800" : "bg-amber-400/20 text-amber-800"}`}>
                 {count}
               </span>
             )}
-          </Link>
+          </a>
         </SidebarMenuButton>
       </SidebarMenuItem>
     );
@@ -264,7 +276,7 @@ function WorkspaceShell({ children }: { children?: ReactNode }) {
                 setSidebarOpen(true);
                 return;
               }
-              router.push(roleHome[state.currentRole]);
+              portalNavigate(roleHome[state.currentRole]);
             }}
             className="flex items-center gap-3 px-1 text-left"
           >
@@ -341,7 +353,7 @@ function WorkspaceShell({ children }: { children?: ReactNode }) {
               <DropdownMenuItem
                 onClick={async () => {
                   await signOut();
-                  router.replace("/login");
+                  portalExit("/login");
                 }}
               >
                 <LogOut className="size-4" />
@@ -391,12 +403,15 @@ export function WorkspaceRouteContent() {
   );
   const [mountedSampleBrandIds, setMountedSampleBrandIds] = useState<string[]>([]);
 
-  if (activeRoot && !mountedRoots.includes(activeRoot)) {
-    setMountedRoots((current) => [...current, activeRoot]);
-  }
-  if (sampleRoute && brandDetailId && !mountedSampleBrandIds.includes(brandDetailId)) {
-    setMountedSampleBrandIds((current) => [...current, brandDetailId]);
-  }
+  useEffect(() => {
+    if (!activeRoot) return;
+    setMountedRoots((current) => (current.includes(activeRoot) ? current : [...current, activeRoot]));
+  }, [activeRoot]);
+
+  useEffect(() => {
+    if (!sampleRoute || !brandDetailId) return;
+    setMountedSampleBrandIds((current) => (current.includes(brandDetailId) ? current : [...current, brandDetailId]));
+  }, [sampleRoute, brandDetailId]);
 
   return (
     <>
