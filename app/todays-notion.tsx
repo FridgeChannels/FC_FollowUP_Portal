@@ -4,7 +4,6 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Check, ExternalLink, FileText, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { reportToday, type CallerNotionReport } from "@/lib/caller-notion";
 import { getDisplayTimeZone } from "@/lib/display-time";
 
@@ -102,22 +101,29 @@ export function TodaysNotion() {
         <p className="break-words text-sm font-medium text-slate-700">{selected.title}</p>
         <a href={selected.url} target="_blank" rel="noopener noreferrer" className="mt-0.5 block break-all text-xs text-violet-700 underline-offset-2 hover:underline">{selected.url}</a>
       </div>
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button size="icon" variant="outline" className="size-8" asChild>
-              <a href={selected.url} target="_blank" rel="noopener noreferrer" aria-label="Open Notion report"><ExternalLink className="size-3.5" /></a>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Open</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button size="icon" variant="ghost" className="size-8" aria-label="Edit Notion report" onClick={() => { setEditing(true); setUrl(selected.url); setError(""); }}><Pencil className="size-3.5" /></Button>
-          </TooltipTrigger>
-          <TooltipContent>Edit</TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
+      <div className="flex items-center gap-1">
+        <a
+          href={selected.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Open Notion report"
+          title="Open"
+          className="inline-flex size-8 items-center justify-center rounded-md border bg-background shadow-xs hover:bg-accent"
+        >
+          <ExternalLink className="size-3.5" />
+        </a>
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          className="size-8"
+          aria-label="Edit Notion report"
+          title="Edit"
+          onClick={() => { setEditing(true); setUrl(selected.url); setError(""); }}
+        >
+          <Pencil className="size-3.5" />
+        </Button>
+      </div>
     </div> : null}
     {showForm ? <form className="mt-4 space-y-2" onSubmit={(event) => { event.preventDefault(); void save(); }}>
       <label htmlFor={`${id}-url`} className="text-xs font-medium text-slate-700">Notion daily report URL</label>
