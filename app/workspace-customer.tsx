@@ -1114,6 +1114,10 @@ export function BrandDetail({customerId}:{customerId:string}){
   const brandActivities=remote?.activities||[];
   const originMeeting=remote?.meetingNotes?.[0];
   const followUpMeeting=remote?.aiMeetingLinks?.[0];
+  const relationshipMeetingLinks=[
+    ...(remote?.meetingNotes||[]),
+    ...(remote?.aiMeetingLinks||[]).map(({id,title,url})=>({id,title,url,nfcCardUrl:null})),
+  ].filter((meeting,index,all)=>all.findIndex(item=>item.id===meeting.id||item.url===meeting.url)===index);
   const bombPlan=notionBacked?toBombPlan(c.id,remote?.tasks||[],remote?.activities||[]):undefined;
   const hasActiveOmniReach=notionBacked?brandHasActiveOmniReach(remote?.tasks||[]):!!(c.activeBombId||c.status==="Bomb Running");
   const canManageFollowUpStatus=isAdmin||isAssignedAccountManager;
@@ -1307,9 +1311,9 @@ export function BrandDetail({customerId}:{customerId:string}){
       <div className={detailsTab==="details"?"min-w-0":"hidden"}>
         <div className="min-w-0">
           <h3 className="text-base font-semibold tracking-tight">{c.name}</h3>
-          {(notionBacked?(!!remote?.meetingNotes.length||!!remote?.followupExhibition):!!c.source)&&<section className="mt-4">
+          {(notionBacked?(!!relationshipMeetingLinks.length||!!remote?.followupExhibition):!!c.source)&&<section className="mt-4">
             <p className="text-xs font-semibold text-slate-500">Relationship origin</p>
-            <div className="mt-2 flex flex-col items-start">{notionBacked&&remote?.meetingNotes.length?<BrandMeetingNoteLink notes={remote.meetingNotes} fallback="" customerId={c.id} sampleType={remote?.channelType||formatIcpGroupLabel(remote?.icpGroup)} showSample={false}/>:<p className="text-sm font-medium text-slate-700">{notionBacked?remote?.followupExhibition:c.source}</p>}</div>
+            <div className="mt-2 flex flex-col items-start">{notionBacked&&relationshipMeetingLinks.length?<BrandMeetingNoteLink notes={relationshipMeetingLinks} fallback="" customerId={c.id} sampleType={remote?.channelType||formatIcpGroupLabel(remote?.icpGroup)} showSample={false}/>:<p className="text-sm font-medium text-slate-700">{notionBacked?remote?.followupExhibition:c.source}</p>}</div>
           </section>}
           <section className="border-t border-slate-100 py-4">
             <p className="text-xs font-semibold text-slate-500">Brand profile</p>
