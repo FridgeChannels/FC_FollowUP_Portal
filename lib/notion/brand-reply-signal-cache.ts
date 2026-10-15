@@ -2,7 +2,19 @@ import type { BrandReplySignal } from "./brand-reply-signals";
 import type { BrandListItem } from "../brand-list";
 import type { NotionPage } from "./client";
 
-const BRAND_REPLY_SIGNAL_CACHE_MS = 30_000;
+/**
+ * Reply signals and qualification counts are derived from the Conversation DB,
+ * which is also written by systems outside this process (Gmail replies,
+ * MarkAPI delivery status). Only a TTL can notice those external writes, so
+ * keep this window short.
+ */
+const BRAND_REPLY_SIGNAL_CACHE_MS = 90_000;
+/**
+ * Reply-brand metadata costs a full paginated sweep of the Follow-up Client DB
+ * (~5.5s for 3 pages). It changes slowly and every portal write path already
+ * calls invalidateBrandReplySignalCache(), so it can live longer.
+ */
+const BRAND_REPLY_METADATA_CACHE_MS = 180_000;
 
 let generation = 0;
 let cached:
@@ -87,7 +99,7 @@ export async function getCachedBrandReplyMetadata(
   const promise = load().then((items) => {
     if (generation === loadGeneration) {
       metadataCached = {
-        expiresAt: Date.now() + BRAND_REPLY_SIGNAL_CACHE_MS,
+        expiresAt: Date.now() + BRAND_REPLY_METADATA_CACHE_MS,
         key,
         items: [...items],
       };

@@ -29,9 +29,11 @@ import { toast } from "sonner";
 import { useWorkspace } from "./workspace-store";
 import {
   cacheBrandItem,
+  cacheBrandListCount,
   cacheBrandListPage,
   clearBrandListPageCache,
   consumeBrandListPageRefreshRequest,
+  getCachedBrandListCount,
   getCachedBrandListPage,
 } from "@/lib/brand-list-cache";
 import {
@@ -501,7 +503,13 @@ type ExhibitionOption = { id: string; name: string };
 
 const BRAND_SEARCH_DEBOUNCE_MS = 800;
 const BRAND_LIST_PAGINATION_STORAGE_KEY = "followup.brand-list-pagination.v1";
-const BRAND_LIST_PAGE_CACHE_TTL_MS = 30_000;
+/**
+ * How long a cached Brands page — and its filter total — may render before a
+ * server check. Every portal write path clears these caches explicitly
+ * (clearBrandListPageCache / requestBrandListPageRefresh), so widening this
+ * window only delays changes made outside the portal.
+ */
+const BRAND_LIST_PAGE_CACHE_TTL_MS = 180_000;
 const BRAND_LIST_VISIBLE_SORTS = new Set([
   "ownerAssignedNewest",
   "lastInboundNewest",
@@ -1026,8 +1034,20 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
 
   useEffect(() => {
     if (!active || workView !== "all") return;
+    const countCacheKey = `${state.currentUserId}:${state.currentRole}:${brandsFilterKey}`;
+    const cachedCount = getCachedBrandListCount(countCacheKey);
+    const countCacheIsFresh =
+      Boolean(cachedCount) &&
+      Date.now() - (cachedCount?.cachedAt || 0) < BRAND_LIST_PAGE_CACHE_TTL_MS;
+    if (cachedCount) {
+      // Counting walks every list page server-side, so render the cached total
+      // immediately and only revalidate behind it.
+      setTotalCount(cachedCount.totalCount);
+      if (countCacheIsFresh) return;
+    } else {
+      setTotalCount(null);
+    }
     const controller = new AbortController();
-    setTotalCount(null);
     const params = new URLSearchParams(brandsFilterKey);
     params.set("count", "1");
     fetch(`/api/brands?${params.toString()}`, { signal: controller.signal, cache: "no-store" })
@@ -1040,10 +1060,14 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
         return count;
       })
       .then((count) => {
-        if (!controller.signal.aborted) setTotalCount(count);
+        if (controller.signal.aborted) return;
+        setTotalCount(count);
+        cacheBrandListCount({ key: countCacheKey, totalCount: count, cachedAt: Date.now() });
       })
       .catch(() => {
-        if (!controller.signal.aborted) setTotalCount(null);
+        if (controller.signal.aborted) return;
+        // Keep showing a cached total rather than blanking the pager.
+        if (!cachedCount) setTotalCount(null);
       });
     return () => controller.abort();
   }, [active, brandsFilterKey, listEpoch, state.currentRole, state.currentUserId, workView]);
