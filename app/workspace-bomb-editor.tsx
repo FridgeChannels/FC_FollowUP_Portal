@@ -254,7 +254,7 @@ function TemplateVariableField({
                     type="button"
                     key={item}
                     onClick={() => setCategory(item)}
-                    className={`shrink-0 rounded-md px-2 py-1.5 text-xs font-medium ${category === item ? "bg-violet-100 text-violet-800" : "text-slate-500 hover:bg-slate-100"}`}
+                    className={`shrink-0 rounded-md px-2 py-1.5 text-xs font-medium ${category === item ? "bg-blue-100 text-blue-800" : "text-slate-500 hover:bg-slate-100"}`}
                   >
                     {item}
                   </button>

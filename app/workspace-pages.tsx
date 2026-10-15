@@ -431,7 +431,7 @@ export function Dashboard() {
               <button
                 key={cp.code}
                 onClick={() => router.push(`/customers?cp=${cp.code}`)}
-                className="rounded-xl bg-slate-50/80 p-4 text-left hover:bg-violet-50"
+                className="rounded-xl bg-slate-50/80 p-4 text-left hover:bg-blue-50"
               >
                 <div className="flex items-center justify-between">
                   <CP value={cp.code} />
@@ -1121,7 +1121,7 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
       || filters.action === "assignments" && !!row.newAssignment
       || filters.action === "replies" && (WORK_REPLY_CHANNELS.some((channel) => !!row.channels[channel]) || !!row.replyDeadline)
       || filters.action === "callReview" && !!row.callReview
-      || isAdmin && filters.action === "pauseDue" && !!row.pauseDue)
+      || !isAdmin && filters.action === "pauseDue" && !!row.pauseDue)
     .filter((row) => !workSearch || row.brand.name.toLowerCase().includes(workSearch))
     .sort((a, b) => compareBrandListItems(a.brand, b.brand, "ownerAssignedNewest"));
   const workByBrandId = new Map((work?.brands || []).map((row) => [row.brand.id, row]));
@@ -1420,7 +1420,7 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
               <SelectItem value="assignments">New Assignments</SelectItem>
               <SelectItem value="replies">Need Reply</SelectItem>
               <SelectItem value="callReview">Call Review</SelectItem>
-              {isAdmin && <SelectItem value="pauseDue">Pause review due</SelectItem>}
+              {!isAdmin && <SelectItem value="pauseDue">Follow-up due</SelectItem>}
             </SelectContent>
           </Select>
         </div>
@@ -1525,14 +1525,14 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
                               {needsAttention ? (
                                 <span
                                   className="size-2 shrink-0 rounded-full bg-rose-500"
-                              aria-label={hasPauseDue ? "Paused FollowUp review due" : hasReplyDeadline ? "No reply by deadline" : hasNewAssignment ? "New assignment" : needsQualification ? "Call needs qualification" : "Reply needed"}
+                              aria-label={hasPauseDue ? "Paused FollowUp due" : hasReplyDeadline ? "No reply by deadline" : hasNewAssignment ? "New assignment" : needsQualification ? "Call needs qualification" : "Reply needed"}
                                 />
                               ) : null}
                               <span className="truncate">{c.name}</span>
                             </div>
                             {hasPauseDue ? (
                               <div className="mt-0.5 truncate text-xs font-medium text-amber-800">
-                                Paused FollowUp review due
+                                Paused FollowUp due
                               </div>
                             ) : hasNewAssignment ? (
                               <div className="mt-0.5 truncate text-xs font-medium text-blue-700">
@@ -1564,14 +1564,14 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
                             <UserPlus className="size-3.5 shrink-0" />New Assignment
                           </button>}
                           {pendingWork.pauseDue && <button type="button" className="inline-flex min-h-9 items-center gap-1 rounded-md bg-amber-50 px-2 text-xs font-semibold text-amber-800 hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500" onClick={() => openBrand(c.id)}>
-                            <CalendarClock className="size-3.5 shrink-0" />Pause review due
+                            <CalendarClock className="size-3.5 shrink-0" />Follow-up due
                           </button>}
                           {pendingWork.replyDeadline && <button type="button" className="inline-flex min-h-9 items-center gap-1 rounded-md bg-rose-50 px-2 text-xs font-semibold text-rose-800 hover:bg-rose-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500" onClick={() => openBrand(c.id, { acknowledgeReplyDeadline: true })}>
                             <CalendarClock className="size-3.5 shrink-0" />Need Reply · {dateOnly(pendingWork.replyDeadline.target.dueAt || "")}
                           </button>}
                           {WORK_REPLY_CHANNELS.map((channel) => {
                             const pending = pendingWork.channels[channel];
-                            return pending ? <button key={channel} type="button" className="inline-flex min-h-9 items-center gap-1 rounded-md bg-violet-50 px-2 text-xs font-semibold text-violet-800 hover:bg-violet-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500" onClick={() => openBrand(c.id, { replyId: pending.target.id })}>
+                            return pending ? <button key={channel} type="button" className="inline-flex min-h-9 items-center gap-1 rounded-md bg-blue-50 px-2 text-xs font-semibold text-blue-800 hover:bg-blue-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" onClick={() => openBrand(c.id, { replyId: pending.target.id })}>
                               <ChannelIcon channel={channel} className="size-3.5 shrink-0" alt="" />{channel} {pending.count}
                             </button> : null;
                           })}

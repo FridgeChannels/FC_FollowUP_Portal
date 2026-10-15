@@ -126,8 +126,8 @@ export async function PATCH(request: Request, { params }: Params) {
       return Response.json({ error: "Only the assigned Account Manager can pause or complete FollowUp" }, { status: 403 });
     }
     if (body.resumePausedFollowUp) {
-      if (!canAssignBrandOwner(viewer)) return Response.json({ error: "Only Admin can resume or reassign a paused FollowUp" }, { status: 403 });
-      if (brand.status !== "Paused" || body.status !== "In Progress" || !body.note?.trim()) return Response.json({ error: "A paused FollowUp requires an Admin note before it can be resumed" }, { status: 400 });
+      if (!canAssignBrandOwner(viewer) && !isAssignedAccountManager) return Response.json({ error: "Only Admin or the assigned Account Manager can resume a paused FollowUp" }, { status: 403 });
+      if (brand.status !== "Paused" || body.status !== "In Progress" || !body.note?.trim()) return Response.json({ error: "A paused FollowUp requires a note before it can be resumed" }, { status: 400 });
       const nextOwnerId = body.ownerId === undefined ? brand.ownerId : body.ownerId;
       if (!nextOwnerId) return Response.json({ error: "Assign an Account Manager before resuming FollowUp" }, { status: 400 });
     }
@@ -207,11 +207,15 @@ export async function PATCH(request: Request, { params }: Params) {
       channelType: body.channelType,
       amazonSampleProduct: body.amazonSampleProduct,
     };
-    if (body.ownerId !== undefined || body.status !== undefined || body.currentCpId !== undefined) {
-      // Keep the existing assignment marker and reminders for existing inboxes;
-      // the transaction additionally preserves their Round attribution.
+    const changesOwner = body.ownerId !== undefined && body.ownerId !== brand.ownerId;
+    if (changesOwner && (body.status !== undefined || body.currentCpId !== undefined)) {
+      throw new FollowupError("Assign the Owner separately from follow-up status and CP changes");
+    }
+    if (changesOwner) {
+      await updateFollowupClient(id, patch);
+    } else if (body.status !== undefined || body.currentCpId !== undefined) {
       const mutation = await mutateFollowup(page, "patch", {
-        ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)),
+        ...Object.fromEntries(Object.entries(patch).filter(([key, value]) => key !== "ownerId" && value !== undefined)),
         ...(body.resumePausedFollowUp ? { status: "Paused" } : {}),
         note: body.note, followUpAt: body.followUpAt,
         changedBy: viewer.name || viewer.email,

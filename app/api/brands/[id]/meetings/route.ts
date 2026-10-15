@@ -29,7 +29,6 @@ export async function POST(request: Request, { params }: Params) {
     if (!canWriteBrand(viewer, brand)) {
       return Response.json({ error: "You do not have access to this brand" }, { status: 403 });
     }
-
     const result = await createAiMeetingForFollowupClient({
       followupClientId: id,
       brandName: titleFromProperties(properties) || "Untitled Client",

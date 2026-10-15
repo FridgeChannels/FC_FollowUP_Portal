@@ -16,7 +16,7 @@ function GlassPaginationItem({ ...props }: React.ComponentProps<"li">) {
 }
 
 const ghostCircle = "grid size-9 place-items-center rounded-full border border-white/75 bg-white/35 text-slate-600 shadow-sm backdrop-blur-md transition-colors hover:border-violet-300 hover:bg-white/70 hover:text-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent aria-disabled:pointer-events-none aria-disabled:opacity-40";
-const activePill = "border-transparent bg-violet-600 text-white hover:border-transparent hover:bg-violet-700 hover:text-white";
+const activePill = "border-transparent bg-blue-700 text-white hover:border-transparent hover:bg-blue-800 hover:text-white";
 
 interface GlassPaginationLinkProps extends React.ComponentProps<"a"> {
   isActive?: boolean;

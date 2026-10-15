@@ -141,7 +141,7 @@ export const SignInPage: React.FC<SignInPageProps> = ({
               <button
                 type="submit"
                 disabled={pending}
-                className="animate-element animate-delay-500 w-full rounded-2xl bg-primary py-4 font-medium text-black transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                className="animate-element animate-delay-500 w-full rounded-2xl bg-blue-700 py-4 font-medium text-white transition-colors hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {pending ? "Signing in…" : "Sign in"}
               </button>

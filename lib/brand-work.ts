@@ -29,7 +29,7 @@ export type PendingWorkAssignment = {
   assignedAt: string;
 };
 
-/** A paused FollowUp whose review date has arrived; visible to Admin only. */
+/** A paused FollowUp whose next contact date has arrived; visible to its current AM only. */
 export type PendingWorkPause = {
   brandId: string;
   dueAt: string;

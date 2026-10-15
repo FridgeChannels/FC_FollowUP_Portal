@@ -19,7 +19,7 @@ function preview(page: NotionPage) {
 const key = (id: string) => id.replace(/-/g, "").toLowerCase();
 
 export async function listBrandWorkForViewer(scope: NeedsReplyBrandScope) {
-  const [conversationPages, taskPages, ownedMetadata] = await Promise.all([
+  const [conversationPages, taskPages, scopedMetadata] = await Promise.all([
     queryDatabasePages(getFollowupConversationDbId(), {
       and: [
         { property: "Reply Status", select: { equals: "Needs Reply" } },
@@ -35,6 +35,21 @@ export async function listBrandWorkForViewer(scope: NeedsReplyBrandScope) {
     }),
     listScopedClientBrandMetadata(scope),
   ]);
+
+  const now = Date.now();
+  const pauses: PendingWorkPause[] = scope.ownerPageId
+    ? scopedMetadata.flatMap(({ page, brand }) => {
+      if (brand.status !== "Paused" || !brand.ownerId || key(brand.ownerId) !== key(scope.ownerPageId!)) return [];
+      const notes = propertyText(page.properties?.Notes);
+      const reminder = latestFollowUpReminder(notes);
+      if (!reminder || Date.parse(reminder.dueAt) > now || hasResolvedFollowUpReminder(notes, reminder.dueAt)) return [];
+      return [{ brandId: brand.id, dueAt: reminder.dueAt, preview: reminder.note || "Paused FollowUp is ready to resume" }];
+    })
+    : [];
+  const duePauseIds = new Set(pauses.map((pause) => key(pause.brandId)));
+  // A pause suppresses old work signals until its current AM's reminder is due.
+  // Admin's portfolio-wide scope never receives paused brands as pending work.
+  const ownedMetadata = scopedMetadata.filter(({ brand }) => brand.status !== "Paused" || duePauseIds.has(key(brand.id)));
 
   const contactBrandCache = new Map<string, string | null>();
   const unresolvedContacts = [...new Set(conversationPages.flatMap((page) => {
@@ -115,17 +130,6 @@ export async function listBrandWorkForViewer(scope: NeedsReplyBrandScope) {
     );
     return completedByOutbound || completedByTask ? [] : [{ brandId: brand.id, assignedAt }];
   });
-  const pauses: PendingWorkPause[] = scope.ownerPageId === undefined
-    ? ownedMetadata.flatMap(({ page, brand }) => {
-      if (brand.status !== "Paused") return [];
-      const notes = propertyText(page.properties?.Notes);
-      const reminder = latestFollowUpReminder(notes);
-      if (!reminder || Date.parse(reminder.dueAt) > Date.now() || hasResolvedFollowUpReminder(notes, reminder.dueAt)) return [];
-      return [{ brandId: brand.id, dueAt: reminder.dueAt, preview: reminder.note || "Paused FollowUp is ready for review" }];
-    })
-    : [];
-
-  const now = Date.now();
   const deadlineCandidates = ownedMetadata.flatMap(({ page, brand }) =>
     brand.replyDeadline && brand.status !== "Paused" && brand.status !== "Completed" ? [{ page, brand }] : [],
   );

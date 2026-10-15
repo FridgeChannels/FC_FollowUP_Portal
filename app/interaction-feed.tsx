@@ -339,7 +339,9 @@ export function InteractionFeed({
   const currentIndex = (currentCp === "Nurture" || !isCpVisible(currentCp))
     ? visibleCps.length - 1
     : visibleCps.indexOf(displayCurrentCp as (typeof visibleCps)[number]);
-  const taskIdsForCp = showAllStageRecords ? new Set(tasks.map(task => task.id)) : phoneTaskIdsForCp(interactions, selectedCp, displayCurrentCp, tasks);
+  // Conversation history can include every CP while actionable Phone tasks
+  // remain scoped to the current CP.
+  const taskIdsForCp = !isCpVisible(currentCp) ? new Set(tasks.map(task => task.id)) : phoneTaskIdsForCp(interactions, selectedCp, displayCurrentCp, tasks);
   if (activeTaskId) taskIdsForCp.add(activeTaskId);
   const phoneTasks = tasks
     .filter((item) => item.channel === "Phone" && [...taskIdsForCp].some((id) => sameNotionId(id, item.id)))
@@ -405,7 +407,7 @@ export function InteractionFeed({
 
     <div className={`flex flex-wrap items-center justify-between gap-2 px-5 py-3 ${showCpSelector ? "border-t border-slate-200" : ""}`}>
       <div className="flex flex-wrap gap-1.5">
-        {showAllChannels && !callerPhoneOnly && <button type="button" aria-pressed={activeChannel === "All"} disabled={loading} onClick={() => setSelectedChannel("All")} className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${activeChannel === "All" ? "bg-violet-600 text-white" : "bg-slate-50 text-slate-600 hover:bg-slate-100"} ${loading ? "opacity-70" : ""}`}>
+        {showAllChannels && !callerPhoneOnly && <button type="button" aria-pressed={activeChannel === "All"} disabled={loading} onClick={() => setSelectedChannel("All")} className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${activeChannel === "All" ? "bg-blue-700 text-white" : "bg-slate-50 text-slate-600 hover:bg-slate-100"} ${loading ? "opacity-70" : ""}`}>
           All
           <span className={activeChannel === "All" ? "text-white/80" : "text-slate-400"}>{loading ? "…" : allChannelMessages.length}</span>
         </button>}
@@ -423,7 +425,7 @@ export function InteractionFeed({
             ? channelItems.some(item => resolveReview(item.taskId)?.status === "Awaiting Review")
             : channelItems.some(item => inboundNeedsComposer(state, item, interactions)));
           const selected = channel === activeChannel;
-          return <button key={channel} type="button" aria-pressed={selected} disabled={loading} onClick={() => setSelectedChannel(channel)} className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${selected ? "bg-violet-600 text-white" : "bg-slate-50 text-slate-600 hover:bg-slate-100"} ${loading ? "opacity-70" : ""}`}>
+          return <button key={channel} type="button" aria-pressed={selected} disabled={loading} onClick={() => setSelectedChannel(channel)} className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${selected ? "bg-blue-700 text-white" : "bg-slate-50 text-slate-600 hover:bg-slate-100"} ${loading ? "opacity-70" : ""}`}>
             <ChannelIcon channel={channel} className="size-4" alt=""/>
             {channel}
             <span className={`inline-flex items-center gap-1 ${selected ? "text-white/80" : "text-slate-400"}`}>
@@ -599,7 +601,7 @@ function ChannelTranscript({
 
   if (channel === "All") {
     return <section aria-label="All channel activity" className="w-full min-w-0 px-5 py-5">
-      {!messages.length ? <div className="py-5 text-center text-sm text-slate-400">No conversation recorded for this CP.</div> : <ActivityTimeline items={[...messages].sort((left, right) => compareInteractionSort(right, left))} onOpen={(item) => setSelectedThread({channel: item.channel!, key: threadKey(item), interactionId: item.id})} />}
+      {!messages.length ? <div className="py-5 text-center text-sm text-slate-400">No conversations recorded.</div> : <ActivityTimeline items={[...messages].sort((left, right) => compareInteractionSort(right, left))} onOpen={(item) => setSelectedThread({channel: item.channel!, key: threadKey(item), interactionId: item.id})} />}
     </section>;
   }
 
@@ -1096,7 +1098,7 @@ function ThreadMessages({
           <TooltipTrigger asChild>
             <Button
               size="icon"
-              className="size-11 shrink-0 !bg-violet-100 !text-black hover:!bg-violet-200"
+              className="size-11 shrink-0 !bg-blue-100 !text-black hover:!bg-blue-200"
               aria-label="Reply"
               disabled={!itemContact}
               aria-controls={`reply-composer-${item.id}`}

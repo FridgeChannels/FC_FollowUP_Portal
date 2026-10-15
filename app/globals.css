@@ -217,6 +217,22 @@ body :is(.rounded-xl, .rounded-lg, .rounded-md)[class*="border"] {
   backdrop-filter: blur(18px) saturate(125%);
 }
 
+/* Popup surfaces stay fully opaque and readable above the glass workspace. */
+body :is(
+  [data-slot="dialog-content"],
+  [data-slot="alert-dialog-content"],
+  [data-slot="sheet-content"],
+  [data-slot="drawer-content"],
+  [data-slot="popover-content"],
+  [data-slot="select-content"],
+  [data-slot="dropdown-menu-content"],
+  [data-slot="context-menu-content"]
+) {
+  background-color: #fff !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
 /* Preserve contrast for call-review actions on glass surfaces. */
 body [data-slot="button"].review-qualified-button {
   background-color: #059669;

@@ -734,7 +734,7 @@ export function SampleManagementPage({ customerId }: { customerId: string }) {
                           onClick={() => void selectSn(sn)}
                           className={`inline-flex items-center rounded-md border px-2.5 py-1.5 text-left text-xs transition ${
                             selected
-                              ? "border-violet-600 bg-violet-50 text-violet-900"
+                              ? "border-blue-600 bg-blue-50 text-blue-900"
                               : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900"
                           } ${snSwitching && !selected ? "opacity-60" : ""}`}
                         >

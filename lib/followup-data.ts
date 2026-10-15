@@ -44,7 +44,8 @@ async function seedFromPage(page: NotionPage) {
     currentCpId: brand.currentCpId, startedAt: brand.ownerAssignedAt || null };
 }
 export async function seedFollowupHistory(page: NotionPage) {
-  return rpc<FollowupHistory>("followup_mutate", { p_brand_id: page.id, p_action: "seed", p_payload: {}, p_seed: await seedFromPage(page) });
+  await rpc<FollowupHistory>("followup_mutate", { p_brand_id: page.id, p_action: "seed", p_payload: {}, p_seed: await seedFromPage(page) });
+  return followupHistory(page.id);
 }
 /** Pending state is durable; reads and retried writes repair failed Notion projections. */
 export async function projectFollowupState(brandId: string): Promise<boolean> {
@@ -85,7 +86,10 @@ export async function mutateFollowup(page: NotionPage, action: "start" | "resume
     if (!cp) throw new FollowupError("Unknown Current CP");
     next.currentCpId = cp.id;
   }
-  const result = await rpc<FollowupHistory>("followup_mutate", { p_brand_id: page.id, p_action: action, p_payload: next, p_seed: await seedFromPage(page) });
+  const rpcName = action === "start" ? "followup_start_round" : "followup_mutate";
+  const result = await rpc<FollowupHistory>(rpcName, action === "start"
+    ? { p_brand_id: page.id, p_payload: next, p_seed: await seedFromPage(page) }
+    : { p_brand_id: page.id, p_action: action, p_payload: next, p_seed: await seedFromPage(page) });
   if (action !== "encounter") {
     try { await projectFollowupState(page.id); }
     catch { return { ...result, projectionPending: true }; }

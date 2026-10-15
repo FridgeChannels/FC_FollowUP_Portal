@@ -154,7 +154,7 @@ export function SignalsPage() {
                       <Link
                         href={brandDetailHref(brand, latest)}
                         onClick={() => markBrandRead(brand)}
-                        className={`relative inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-md px-3 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 ${isUnread ? "bg-violet-600 text-white shadow-sm hover:bg-violet-700" : "bg-slate-200/70 text-slate-500 hover:bg-slate-200"}`}
+                        className={`relative inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-md px-3 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${isUnread ? "bg-blue-700 text-white shadow-sm hover:bg-blue-800" : "bg-slate-200/70 text-slate-500 hover:bg-slate-200"}`}
                       >
                         Take Action Now <ArrowUpRight className="size-4" />
                       </Link>

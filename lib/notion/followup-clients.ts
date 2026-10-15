@@ -1246,7 +1246,7 @@ async function resolveMeetingNotes(pageIds: string[]): Promise<BrandMeetingNote[
       nfcCardUrl: propertyText(page.properties?.["NFC Card URL"]) || null,
       sortAt: notionDate(page.properties?.["Meeting Time"]) || page.created_time || "",
     }))
-    .sort((a, b) => a.sortAt.localeCompare(b.sortAt) || a.title.localeCompare(b.title))
+    .sort((a, b) => b.sortAt.localeCompare(a.sortAt) || a.title.localeCompare(b.title))
     .map(({ id, title, url, nfcCardUrl }) => ({ id, title, url, nfcCardUrl }));
 }
 

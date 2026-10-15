@@ -499,7 +499,7 @@ export function PhoneTaskBoard({
   return <div>
     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-5 py-3">
       <div className="flex flex-wrap gap-1.5">
-        <button type="button" aria-pressed className="inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-2.5 py-1.5 text-xs font-semibold text-white">
+        <button type="button" aria-pressed className="inline-flex items-center gap-1.5 rounded-lg bg-blue-700 px-2.5 py-1.5 text-xs font-semibold text-white">
           <ChannelIcon channel="Phone" className="size-4" alt=""/>
           Phone
           <span className="text-white/80">{tasks.length}</span>

@@ -193,7 +193,7 @@ export function QualifiedCallsDashboard() {
             ))}
           </select>
           <Button
-            className="h-10 shrink-0 bg-violet-700 px-4 hover:bg-violet-800"
+            className="h-10 shrink-0 bg-blue-700 px-4 hover:bg-blue-800"
             onClick={() => selectedWeek && exportWeekAsPdf({ days, timeZone, label: weekLabel })}
           >
             <Download className="mr-2 size-4" />Export PDF

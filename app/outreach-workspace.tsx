@@ -226,9 +226,9 @@ function WorkspaceShell({ children }: { children?: ReactNode }) {
         : item.screen === "Brands"
           ? "data-[active=true]:bg-blue-500"
           : item.screen === "ReplyTask"
-            ? "data-[active=true]:bg-violet-500"
+            ? "data-[active=true]:bg-blue-500"
             : item.screen === "Performance"
-              ? "data-[active=true]:bg-violet-500/15"
+              ? "data-[active=true]:bg-blue-500/15"
               : item.screen === "Dashboard"
                 ? "data-[active=true]:bg-emerald-500"
                 : "data-[active=true]:bg-amber-500";
