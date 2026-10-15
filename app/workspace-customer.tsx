@@ -654,6 +654,10 @@ export function BrandDetail({customerId}:{customerId:string}){
   const [roundCursor,setRoundCursor]=useState<string|null>(null);
   const roundRequestId=useRef(0);
   const [focusedEmailInteractionId,setFocusedEmailInteractionId]=useState<string|null>(null);
+  const [signalEmailActivity,setSignalEmailActivity]=useState<BrandActivity|null>(null);
+  const emailSignalRequest=useRef<AbortController|null>(null);
+  const handledSignalRequest=useRef<string|null>(null);
+  useEffect(()=>()=>emailSignalRequest.current?.abort(),[customerId]);
   const [focusedWorkInteractionId,setFocusedWorkInteractionId]=useState<string|null>(null);
   const [activeSignalId,setActiveSignalId]=useState<string|null>(null);
   const [currentTimeMs,setCurrentTimeMs]=useState(()=>Date.now());
@@ -701,6 +705,8 @@ export function BrandDetail({customerId}:{customerId:string}){
     setRoundCursor(null);
     setAiSummaryOpen(false);
     setFocusedEmailInteractionId(null);
+    setSignalEmailActivity(null);
+    handledSignalRequest.current=null;
     setFocusedWorkInteractionId(null);
     setActiveSignalId(null);
     const next=getCachedBrand(customerId);
@@ -770,14 +776,18 @@ export function BrandDetail({customerId}:{customerId:string}){
     }).then(response=>{if(!response.ok)void refreshSignals();}).catch(()=>{void refreshSignals();});
   }
   useEffect(()=>{
-    if(!requestedSignalType)return;
+    if(!requestedSignalType||!requestedSignal)return;
+    const requestKey=`${customerId}:${requestedSignalId}`;
+    if(handledSignalRequest.current===requestKey)return;
+    if(requestedSignalType==="email"&&(!remote?.id||!brandReady||!activitiesReady))return;
+    handledSignalRequest.current=requestKey;
+    if(requestedSignalType==="email"){void openEmailSignal(requestedSignal);return;}
     const readId=requestedSignal?.signalReadId||requestedSignal?.id;
     if(readId) readSignalEvents([readId]);
-    setActiveSignalId(requestedSignal.id);
-    setDetailsTab("signalHistory");
+    setActiveSignalId(null);
     const target="brand-important-signals";
     requestAnimationFrame(()=>document.getElementById(target)?.scrollIntoView({block:"center",behavior:"smooth"}));
-  },[requestedSignalId,requestedSignalType,requestedSignal]);
+  },[customerId,requestedSignalId,requestedSignalType,requestedSignal,brandReady,activitiesReady,remote?.id]);
   const isAdmin=state.currentRole==="Admin";
   const manager=isAdmin||state.currentRole==="AccountManager";
   const mockCustomer:Customer|undefined=aiSummaryDemo?{
@@ -1099,17 +1109,50 @@ export function BrandDetail({customerId}:{customerId:string}){
   const bombPlan=notionBacked?toBombPlan(c.id,remote?.tasks||[],remote?.activities||[]):undefined;
   const hasActiveOmniReach=notionBacked?brandHasActiveOmniReach(remote?.tasks||[]):!!(c.activeBombId||c.status==="Bomb Running");
   const canManageFollowUpStatus=sessionUser?.role==="Admin"||sessionUser?.role==="AccountManager"&&!!remote?.ownerEmail&&remote.ownerEmail.trim().toLowerCase()===sessionUser.email.trim().toLowerCase();
-  const interactions=(notionBacked?toInteractions(c.id,remote?.activities||[],bombPlan?.activityInstanceIds,remote?.tasks||[],bombPlan?.bombInstances||[]):state.interactions.filter(i=>i.customerId===c.id).map(i=>({...i,cp:i.cp||c.cp}))).sort((a,b)=>compareInteractionSort(b,a));
+  const emailActivityItems=signalEmailActivity&&!remote?.activities.some(item=>item.id===signalEmailActivity.id)
+    ? [...(remote?.activities||[]),signalEmailActivity] : remote?.activities||[];
+  const interactions=(notionBacked?toInteractions(c.id,emailActivityItems,bombPlan?.activityInstanceIds,remote?.tasks||[],bombPlan?.bombInstances||[]):state.interactions.filter(i=>i.customerId===c.id).map(i=>({...i,cp:i.cp||c.cp}))).sort((a,b)=>compareInteractionSort(b,a));
   const requestedEmail=requestedSignal?.type==="email"?interactions.find(item=>emailSignalMatchesInteraction(requestedSignal,item)):undefined;
   const focusedEmail=(focusedEmailInteractionId?interactions.find(item=>item.id===focusedEmailInteractionId):undefined)||requestedEmail;
   const focusedWork=focusedWorkInteractionId?interactions.find(item=>item.id===focusedWorkInteractionId):undefined;
-  const openEmailSignal=(event:SignalEvent)=>{
-    const target=interactions.find(item=>emailSignalMatchesInteraction(event,item));
-    if(!target){setActiveSignalId(event.id);setDetailsTab("signalHistory");return;}
-    setFocusedEmailInteractionId(target.id);
-    setDetailsTab(null);
-    requestAnimationFrame(()=>document.getElementById("brand-conversations")?.scrollIntoView({block:"start",behavior:"smooth"}));
-  };
+  async function openEmailSignal(event:SignalEvent){
+    emailSignalRequest.current?.abort();
+    const controller=new AbortController();
+    emailSignalRequest.current=controller;
+    let target=interactions.find(item=>emailSignalMatchesInteraction(event,item));
+    const loadingToast=!target?toast.loading("Opening the email…"):undefined;
+    try{
+      if(!target){
+        const query=new URLSearchParams();
+        if(event.messageId)query.set("emailMessageId",event.messageId);
+        if(event.conversationId)query.set("emailConversationId",event.conversationId);
+        if(!query.size)throw new Error("This notification has no linked email message");
+        const response=await fetch(`/api/brands/${encodeURIComponent(customerId)}/work-target?${query}`,{signal:controller.signal,cache:"no-store"});
+        const payload=await response.json() as {activity?:BrandActivity;error?:string};
+        if(!response.ok||!payload.activity)throw new Error(payload.error||"Unable to open this email");
+        if(controller.signal.aborted)return;
+        const activity=payload.activity;
+        const interaction=toInteractions(customerId,[activity],bombPlan?.activityInstanceIds,remote?.tasks||[],bombPlan?.bombInstances||[])[0];
+        if(!interaction||!emailSignalMatchesInteraction(event,interaction))throw new Error("The email does not match this notification");
+        setSignalEmailActivity(activity);
+        target=interaction;
+      }
+      if(controller.signal.aborted)return;
+      setConversationRound(null);
+      setFocusedWorkInteractionId(null);
+      setAttentionTarget(null);
+      setActiveSignalId(null);
+      const emailGroup=brandSignals?.events.filter(item=>item.type==="email"&&(item.id===event.id||!!event.signalKey&&item.signalKey===event.signalKey))||[event];
+      readSignalEvents(emailGroup.map(item=>item.signalReadId||item.id));
+      setFocusedEmailInteractionId(target.id);
+      setDetailsTab(null);
+      requestAnimationFrame(()=>document.getElementById("brand-conversations")?.scrollIntoView({block:"start",behavior:"smooth"}));
+    }catch(error){
+      if(!controller.signal.aborted)toast.error(error instanceof Error?error.message:"Unable to open this email");
+    }finally{
+      if(loadingToast!==undefined)toast.dismiss(loadingToast);
+    }
+  }
   const partnershipContext=c.partnershipContext;
   const summary=notionBacked
     ? remote?.relationshipSummary || remote?.aiSummaries?.overall?.content || "No saved relationship summary yet."
@@ -1159,14 +1202,24 @@ export function BrandDetail({customerId}:{customerId:string}){
     if (!response.ok) throw new Error(payload.error || "Unable to mark reply as read");
     await Promise.all([refreshRemote(), fetchActivitiesPage(null, "replace")]);
   };
-  const needsReplyCount=interactions.filter(item=>item.direction==="Inbound"&&item.replyStatus==="Needs Reply").length;
+  const needsReplyItems=interactions.filter(item=>item.direction==="Inbound"&&item.replyStatus==="Needs Reply");
+  const needsReplyGroups=Array.from(needsReplyItems.reduce((groups,item)=>{
+    const channel=item.channel||"Email";
+    const group=groups.get(channel)||[];
+    group.push(item);
+    groups.set(channel,group);
+    return groups;
+  },new Map<Channel,Interaction[]>()));
+  const needsReplyCount=needsReplyItems.length;
   const callReviewCount=(remote?.tasks||[]).filter(task=>task.channel==="Phone"&&task.callReviewStatus==="Awaiting Review").length;
   const overdueCount=(remote?.activities||[]).filter(item=>item.direction==="Inbound"&&item.replyStatus==="Needs Reply"&&item.replyDueAt&&Date.parse(item.replyDueAt)<currentTimeMs).length;
   const focusAttention=(item?:Interaction,channel:Channel="Email")=>{
+    setConversationRound(null);
+    setFocusedEmailInteractionId(null);
+    setFocusedWorkInteractionId(item?.id||null);
     setAttentionTarget({cp:item?.cp||currentCp,channel:item?.channel||channel});
     document.getElementById("brand-conversations")?.scrollIntoView({block:"start",behavior:"smooth"});
   };
-  const firstNeedsReply=interactions.find(item=>item.direction==="Inbound"&&item.replyStatus==="Needs Reply");
   const history=remote?.followupHistory||emptyFollowupHistory();
   const latestRound=history.rounds[0];
   const hasHistory=hasFollowupHistory(history,remote?.meetingNotes.length||0,remote?.assignmentHistory?.length||0);
@@ -1223,7 +1276,7 @@ export function BrandDetail({customerId}:{customerId:string}){
         <Button type="button" size="sm" variant="outline" className="min-w-0 max-w-[22rem] shrink" disabled={!brandReady||!can("changeCP")||latestRound?.status==="Completed"||history.projectionPending} onClick={()=>setCP(true)} aria-label={isCpVisible(currentCpDetails.name)?`Current ${currentCpDetails.name}: ${currentCpDetails.fullName}. Change CP`:"Change CP"}>
           <span className="truncate">{isCpVisible(currentCpDetails.name)?`${currentCpDetails.name} · ${currentCpDetails.fullName}`:"Change CP"}</span><ChevronRight className="ml-1 size-3.5 shrink-0 rotate-90"/>
         </Button>
-        {(notionBacked||aiSummaryDemo)&&manager&&<TooltipProvider><Tooltip><TooltipTrigger asChild><span><Button type="button" variant="ghost" size="icon" className="size-9 shrink-0" aria-label="AI progress summary" disabled={!brandReady} onClick={()=>setAiSummaryOpen(true)}><Image src="/ai-summary-icon.svg" alt="" aria-hidden="true" width={16} height={16} className="size-4 object-contain"/></Button></span></TooltipTrigger><TooltipContent>AI progress summary</TooltipContent></Tooltip></TooltipProvider>}</div>
+        {(notionBacked||aiSummaryDemo)&&manager&&<TooltipProvider><Tooltip><TooltipTrigger asChild><span><Button type="button" variant="ghost" size="icon" className="size-9 shrink-0" aria-label="AI progress summary" disabled={!brandReady} onClick={()=>setAiSummaryOpen(true)}><Image src="/ai-summary-icon.svg" alt="" aria-hidden="true" width={24} height={24} className="size-6 max-w-none object-contain"/></Button></span></TooltipTrigger><TooltipContent>AI progress summary</TooltipContent></Tooltip></TooltipProvider>}</div>
       {hasActiveOmniReach&&<Badge className="bg-blue-100 text-blue-700">OmniReach running</Badge>}
       <div className="ml-auto flex items-center gap-1">
         {can("reply")&&<TooltipProvider><Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="size-9" aria-label="New message" disabled={!brandReady||(notionBacked&&!c.contacts.length)} onClick={()=>setReply(true)}><Send className="size-4"/></Button></TooltipTrigger><TooltipContent>New message</TooltipContent></Tooltip></TooltipProvider>}
@@ -1234,7 +1287,7 @@ export function BrandDetail({customerId}:{customerId:string}){
     </header>
     {(needsReplyCount>0||callReviewCount>0||overdueCount>0)&&<div role="status" className="flex flex-wrap items-center gap-2 border-b border-rose-200 bg-rose-50 px-4 py-2.5 text-xs font-semibold text-rose-800">
       <CircleAlert className="size-4"/>Needs attention
-      {needsReplyCount>0&&<button type="button" className="rounded-full bg-white px-2 py-1 hover:bg-rose-100" onClick={()=>focusAttention(firstNeedsReply)}>{needsReplyCount} replies needed</button>}
+      {needsReplyGroups.map(([channel,items])=><button key={channel} type="button" className="rounded-full bg-white px-2 py-1 hover:bg-rose-100" onClick={()=>focusAttention(items[0],channel)}>{channel} · {items.length} {items.length===1?"reply":"replies"} needed</button>)}
       {callReviewCount>0&&<button type="button" className="rounded-full bg-white px-2 py-1 hover:bg-rose-100" onClick={()=>focusAttention(undefined,"Phone")}>{callReviewCount} calls to review</button>}
     </div>}
     <div className="grid min-w-0 items-start lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-stretch">
@@ -1316,8 +1369,8 @@ export function BrandDetail({customerId}:{customerId:string}){
       </div>
       </section>}
     </aside>
-    <div className="order-1 flex min-w-0 flex-col overflow-hidden bg-white lg:min-h-0"><ImportantSignalsPanel events={brandSignals?.events || []} readIds={signalReadIds} onRead={readSignalEvents} onOpenSignal={event=>{if(event.type!=="email"){setActiveSignalId(event.id);setDetailsTab("signalHistory");}}} onOpenEmailSignal={openEmailSignal}/><section id="brand-conversations" aria-label="Brand communication" className="flex min-w-0 flex-col overflow-hidden lg:min-h-0 lg:flex-1"><div className="flex items-center border-b border-slate-100 px-5 py-3"><h2 className="flex items-center gap-2 font-semibold"><MessageSquareText className="size-4 text-violet-600"/>Conversations</h2></div>{conversationRound&&<div className="flex items-center justify-between gap-2 border-b border-violet-100 bg-violet-50 px-5 py-2"><div><p className="text-xs font-semibold text-violet-800">Round {conversationRound.number} · All CPs</p><p className="text-xs text-violet-600">Only conversations with a recorded Round association.</p></div><Button variant="ghost" size="sm" onClick={()=>{setConversationRound(null);setRoundCursor(null);}}>Show all Rounds</Button></div>}<div className="min-h-[50vh] max-h-[calc(100vh-290px)] min-w-0 overflow-y-auto lg:min-h-0 lg:max-h-none lg:flex-1">
-    <InteractionFeed key={`${c.id}-${conversationRound?.id||"all"}-${currentCp}-${attentionTarget?.cp||""}-${attentionTarget?.channel||""}-${focusedWork?.id||focusedEmail?.id||""}`} customerId={c.id} currentCp={currentCp} initialCp={focusedWork?.cp||focusedEmail?.cp||attentionTarget?.cp} initialChannel={focusedWork?.channel||(focusedEmail?"Email":attentionTarget?.channel)} focusedInteractionId={focusedWork?.id||focusedEmail?.id} showAllChannels showCpSelector={false} includeAllCps={!!conversationRound} cpGoals={notionBacked?toCpGoals(remoteCps):undefined} interactions={visibleInteractions} contacts={c.contacts} bombInstances={conversationRound?bombPlan?.bombInstances.filter(instance=>roundActivities.some(activity=>bombPlan.activityInstanceIds[activity.id]===instance.id)):bombPlan?.bombInstances} actions={bombPlan?.actions} loading={conversationRound?roundLoading:activityLoading} canReviewCalls={notionBacked&&can("reply")} tasks={conversationRound?(remote?.tasks||[]).filter(t=>t.roundId===conversationRound.id):remote?.tasks||[]} onMarkReplyRead={notionBacked&&can("reply")?markReplyRead:undefined} onRefreshQuo={notionBacked?refreshQuoForBrand:undefined} quoRefreshingCallId={quoRefreshingCallId} onPersistCallReview={notionBacked?async (taskId,status,reviewReason,reviewNote,resolution)=>{
+    <div className="order-1 flex min-w-0 flex-col overflow-hidden bg-white lg:min-h-0"><ImportantSignalsPanel key={c.id} events={brandSignals?.events || []} readIds={signalReadIds} onRead={readSignalEvents} initialSampleSignalId={requestedSignalType==="sample"?requestedSignalId||undefined:undefined} brandName={c.name} ownerName={remote?.ownerName} onOpenEmailSignal={openEmailSignal}/><section id="brand-conversations" aria-label="Brand communication" className="flex min-w-0 flex-col overflow-hidden lg:min-h-0 lg:flex-1"><div className="flex items-center border-b border-slate-100 px-5 py-3"><h2 className="flex items-center gap-2 font-semibold"><MessageSquareText className="size-4 text-violet-600"/>Conversations</h2></div>{conversationRound&&<div className="flex items-center justify-between gap-2 border-b border-violet-100 bg-violet-50 px-5 py-2"><div><p className="text-xs font-semibold text-violet-800">Round {conversationRound.number} · All CPs</p><p className="text-xs text-violet-600">Only conversations with a recorded Round association.</p></div><Button variant="ghost" size="sm" onClick={()=>{setConversationRound(null);setRoundCursor(null);}}>Show all Rounds</Button></div>}<div className="min-h-[50vh] max-h-[calc(100vh-290px)] min-w-0 overflow-y-auto lg:min-h-0 lg:max-h-none lg:flex-1">
+    <InteractionFeed key={`${c.id}-${conversationRound?.id||"all"}-${currentCp}-${attentionTarget?.cp||""}-${attentionTarget?.channel||""}-${focusedWork?.id||focusedEmail?.id||""}`} customerId={c.id} currentCp={currentCp} initialCp={focusedWork?.cp||focusedEmail?.cp||attentionTarget?.cp} initialChannel={focusedWork?.channel||(focusedEmail?"Email":attentionTarget?.channel)} focusedInteractionId={focusedWork?.id||focusedEmail?.id} showAllChannels showCpSelector={false} includeAllCps={!!conversationRound||!!focusedEmail} cpGoals={notionBacked?toCpGoals(remoteCps):undefined} interactions={visibleInteractions} contacts={c.contacts} bombInstances={conversationRound?bombPlan?.bombInstances.filter(instance=>roundActivities.some(activity=>bombPlan.activityInstanceIds[activity.id]===instance.id)):bombPlan?.bombInstances} actions={bombPlan?.actions} loading={conversationRound?roundLoading:activityLoading} canReviewCalls={notionBacked&&can("reply")} tasks={conversationRound?(remote?.tasks||[]).filter(t=>t.roundId===conversationRound.id):remote?.tasks||[]} onMarkReplyRead={notionBacked&&can("reply")?markReplyRead:undefined} onRefreshQuo={notionBacked?refreshQuoForBrand:undefined} quoRefreshingCallId={quoRefreshingCallId} onPersistCallReview={notionBacked?async (taskId,status,reviewReason,reviewNote,resolution)=>{
     const response=await fetch(`/api/tasks/${taskId}/call-review`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status,reviewReason,reviewNote,resolution})});
     const payload=await response.json() as {error?:string};
     if(!response.ok)throw new Error(payload.error||"Unable to save call review");

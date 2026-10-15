@@ -2,7 +2,8 @@ import { canWriteBrand } from "@/lib/brand-access";
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { relationIds, retrievePage } from "@/lib/notion/client";
 import { listFollowupContactIds } from "@/lib/notion/contacts";
-import { listConversationsByIds } from "@/lib/notion/conversations";
+import { findConversationsByMessageId, findEmailTrackingCandidates, listConversationsByIds } from "@/lib/notion/conversations";
+import { matchesEmailSignalReference } from "@/lib/signals/match";
 import { mapFollowupClientPage } from "@/lib/notion/followup-clients";
 import { retrieveFollowupTask } from "@/lib/notion/tasks";
 
@@ -21,9 +22,25 @@ export async function GET(request: Request, { params }: Params) {
     const url = new URL(request.url);
     const replyId = url.searchParams.get("replyId");
     const taskId = url.searchParams.get("taskId");
+    const emailMessageId = url.searchParams.get("emailMessageId")?.trim();
+    const emailConversationId = url.searchParams.get("emailConversationId")?.trim();
     let activity;
     let reviewTask;
-    if (replyId) {
+    if (emailMessageId || emailConversationId) {
+      let candidates = emailConversationId
+        ? await listConversationsByIds([emailConversationId])
+        : await findConversationsByMessageId(emailMessageId);
+      if (!candidates.length && !emailConversationId) candidates = await findEmailTrackingCandidates(id);
+      const exact = candidates.filter(item => matchesEmailSignalReference({ brandId: id, messageId: emailMessageId, conversationId: emailConversationId }, item));
+      const contacts = exact.some(item => !item.brandId)
+        ? await listFollowupContactIds(id, relationIds(page.properties?.["Follow-up Contacts"]))
+        : [];
+      const matches = exact.filter(item => item.brandId
+        ? key(item.brandId) === key(id)
+        : item.contactId && contacts.some(contactId => key(contactId) === key(item.contactId!)));
+      if (matches.length !== 1) return Response.json({ error: matches.length ? "Multiple emails match this notification" : "The opened email was not found for this brand" }, { status: matches.length ? 409 : 404 });
+      activity = matches[0];
+    } else if (replyId) {
       activity = (await listConversationsByIds([replyId]))[0];
       if (activity?.direction !== "Inbound" || activity.replyStatus !== "Needs Reply") activity = undefined;
     } else if (taskId) {

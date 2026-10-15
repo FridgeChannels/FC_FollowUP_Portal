@@ -84,22 +84,20 @@ export function SampleActivity({
 }
 
 export function ImportantSignalsPanel({
-  events, readIds, onOpenSignal, onRead, onOpenEmailSignal,
+  events, readIds, onRead, onOpenEmailSignal, initialSampleSignalId, brandName, ownerName,
 }: {
   events: SignalEvent[];
   readIds: string[];
-  onOpenSignal?: (event: SignalEvent) => void;
-  /** @deprecated Parents can pass onOpenSignal for coordinated detail panels. */
   onRead?: (ids: string[]) => void;
   onOpenEmailSignal?: (event: SignalEvent) => void;
+  initialSampleSignalId?: string;
+  brandName?: string;
+  ownerName?: string | null;
 }) {
-  const openSignal = (event: SignalEvent) => {
-    const readId = event.signalReadId || event.id;
-    onRead?.([readId]);
-    onOpenSignal?.(event);
-    if (event.type === "email") onOpenEmailSignal?.(event);
-  };
-  const notifications = buildSignalNotifications(events, readIds);
+  const [expandedSampleId, setExpandedSampleId] = useState(initialSampleSignalId);
+  useEffect(() => { setExpandedSampleId(initialSampleSignalId); }, [initialSampleSignalId]);
+  const notifications = buildSignalNotifications(events, readIds).filter(item =>
+    item.latest.type !== "sample" || item.unread || item.events.some(event => event.id === expandedSampleId));
 
   if (!notifications.length) return null;
   return <section id="brand-important-signals" aria-label="Brand signals" className="mx-5 mt-4 pb-1">
@@ -108,21 +106,30 @@ export function ImportantSignalsPanel({
       <span className="text-xs text-slate-500">{notifications.length} signal{notifications.length === 1 ? "" : "s"}</span>
     </div>
     <div>
-      {notifications.map(({ key, latest, title, timestamp, timeLabel, typeLabel, unread }) => {
-        const icon = latest.type === "email"
-          ? <MailOpen className="size-4 text-[#B45309]" aria-hidden="true" />
-          : latest.type === "sample"
-            ? <SmartphoneNfc className="size-4 text-[#7C3AED]" aria-hidden="true" />
-            : <ChannelIcon channel="LinkedIn" className="size-4" alt="" />;
+      {notifications.map(({ key, events: group, latest, title, timestamp, timeLabel, typeLabel, unread }) => {
+        const sampleOpen = latest.type === "sample" && group.some(event => event.id === expandedSampleId);
+        const source = latest.type === "linkedin" ? safeSourceUrl(latest.sourceUrl) : undefined;
+        const contents = <>
+          <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center">{latest.type === "email"
+            ? <MailOpen className="size-4 text-[#B45309]" aria-hidden="true" />
+            : latest.type === "sample"
+              ? <SmartphoneNfc className="size-4 text-[#7C3AED]" aria-hidden="true" />
+              : <ChannelIcon channel="LinkedIn" className="size-4" alt="" />}</span>
+          <div className="min-w-0 flex-1">
+            <p className="break-words text-sm font-medium text-slate-800">{title}</p>
+            <p className="mt-1 text-xs text-slate-500">{typeLabel} · <span>{timeLabel} <time dateTime={timestamp}>{date(timestamp)}</time></span> · <span className="text-violet-700">{latest.type === "email" ? "Open email" : latest.type === "linkedin" ? "View LinkedIn post" : sampleOpen ? "Close details" : "View details"}</span></p>
+          </div>
+          {unread ? <span className="mt-1.5 size-2 shrink-0 rounded-full bg-rose-500" role="img" aria-label="Unread" /> : null}
+        </>;
+        const controlClass = "flex w-full min-w-0 items-start gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400";
+        const markRead = () => onRead?.(group.map(event => event.signalReadId || event.id));
         return <article key={key} className="min-w-0 py-3">
-          <button type="button" className="flex w-full min-w-0 items-start gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400" onClick={() => openSignal(latest)}>
-            <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center">{icon}</span>
-            <div className="min-w-0 flex-1">
-              <p className="break-words text-sm font-medium text-slate-800">{title}</p>
-              <p className="mt-1 text-xs text-slate-500">{typeLabel} · <span>{timeLabel} <time dateTime={timestamp}>{date(timestamp)}</time></span> · <span className="text-violet-700">View details</span></p>
-            </div>
-            {unread ? <span className="mt-1.5 size-2 shrink-0 rounded-full bg-rose-500" role="img" aria-label="Unread" /> : null}
-          </button>
+          {source ? <a href={source} target="_blank" rel="noreferrer" className={controlClass} onClick={markRead}>{contents}</a>
+            : <button type="button" className={controlClass} disabled={latest.type === "linkedin"} aria-expanded={latest.type === "sample" ? sampleOpen : undefined} onClick={() => {
+              if (latest.type === "sample") { setExpandedSampleId(sampleOpen ? undefined : latest.id); markRead(); }
+              else if (latest.type === "email") { onOpenEmailSignal?.(latest); }
+            }}>{contents}</button>}
+          {sampleOpen ? <div className="ml-8 mt-3 rounded-lg bg-violet-50/60 p-3"><SampleTapDetails event={latest} brandName={brandName} ownerName={ownerName} /></div> : null}
         </article>;
       })}
     </div>

@@ -448,6 +448,19 @@ export function findConversationsByMessageId(messageId?: string | null) {
   return findConversationsByText("Message ID", messageId);
 }
 
+/** Legacy sender records retain the portal message identity inside the pixel. */
+export async function findEmailTrackingCandidates(brandId: string) {
+  const pages = await queryDatabasePages(getFollowupConversationDbId(), {
+    and: [
+      { property: "Follow-up Client", relation: { contains: brandId } },
+      { property: "Channel", select: { equals: "Email" } },
+      { property: "Direction", select: { equals: "Outbound" } },
+      { property: "Content", rich_text: { contains: "/api/track/open/eo1." } },
+    ],
+  });
+  return attachConversationCp(pages.map(page => mapConversation(page))).then(sortConversations);
+}
+
 export function findConversationsByThreadId(threadId?: string | null) {
   return findConversationsByText("Thread ID", threadId);
 }

@@ -137,14 +137,8 @@ export function SignalsPage() {
                 return (
                   <article
                     key={brand.id}
-                    className={`relative grid w-full gap-4 rounded-md px-4 py-4 transition-colors sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center ${isUnread ? "bg-slate-100/90" : "bg-slate-100/40"}`}
+                    className={`grid w-full gap-4 rounded-md px-4 py-4 transition-colors sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center ${isUnread ? "bg-slate-100/90" : "bg-slate-100/40"}`}
                   >
-                    <button
-                      type="button"
-                      onClick={() => markBrandRead(brand)}
-                      aria-label={isUnread ? `Mark ${brand.name} as read` : `${brand.name}, read`}
-                      className={`absolute inset-0 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 ${isUnread ? "cursor-pointer" : "cursor-default"}`}
-                    />
                     <div className="pointer-events-none relative min-w-0">
                       <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
                         {isUnread ? <span className="size-2 shrink-0 rounded-full bg-rose-500 shadow-[0_0_0_3px_rgba(244,63,94,0.14)]" aria-label="Unread" /> : null}
@@ -156,7 +150,7 @@ export function SignalsPage() {
                       </div>
                       <p className={`mt-1 truncate text-sm ${isUnread ? "text-muted-foreground" : "text-slate-400"}`}>{latest.summary}</p>
                     </div>
-                    <div className="flex items-center justify-end">
+                    <div className="relative z-10 flex items-center justify-end gap-2">
                       <Link
                         href={brandDetailHref(brand, latest)}
                         onClick={() => markBrandRead(brand)}
