@@ -24,7 +24,7 @@
     "test:inbound": "node --experimental-strip-types --test lib/notion/inbound-cold.test.ts",
     "test:notify": "node --experimental-strip-types --test lib/notify/notify.test.ts",
     "test:signals": "node --experimental-strip-types --test lib/signals/*.test.ts",
-    "test:followup": "node --experimental-strip-types --test lib/followup-history.test.ts lib/brand-access.test.ts lib/brand-assignment.test.ts lib/brand-ai-summary.test.ts lib/brand-list-cache.test.ts lib/interaction-cp.test.ts lib/notion/reply-inbox.test.ts lib/notion/conversation-thread.test.ts lib/ai-meeting-links.test.ts lib/template-variables.test.ts lib/notify/notify.test.ts",
+    "test:followup": "node --experimental-strip-types --test lib/followup-history.test.ts lib/brand-access.test.ts lib/brand-assignment.test.ts lib/brand-ai-summary.test.ts lib/brand-list-cache.test.ts lib/concurrency.test.ts lib/interaction-cp.test.ts lib/notion/reply-inbox.test.ts lib/notion/conversation-thread.test.ts lib/ai-meeting-links.test.ts lib/template-variables.test.ts lib/notify/notify.test.ts",
     "test:sample": "node --experimental-strip-types --test lib/sample/sample.test.ts",
     "notify:slack-test": "node scripts/notify-slack-test.mjs",
     "test:variables": "node --experimental-strip-types --test lib/template-variables.test.ts",

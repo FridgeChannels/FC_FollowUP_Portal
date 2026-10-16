@@ -1,4 +1,5 @@
 import { businessDateOnly } from "../time-zone";
+import { mapWithConcurrency } from "../concurrency";
 import {
   brandInitials,
   currentCpOption,
@@ -372,6 +373,32 @@ function matchesHandlingModeFilter(
   return !mode || brand.handlingMode === mode;
 }
 
+/**
+ * Reply-signal count at or below which brand metadata is fetched page-by-page
+ * instead of scanning the whole Follow-up Client DB. Notion rate limits by
+ * request count, not payload size, so past this the single scan wins again —
+ * measured on the portal's link to Notion:
+ *   14 ids  = 2.9s / 52KB   vs full scan 4.0s / 811KB
+ *   30 ids  = 4.4s          vs full scan 4.0s
+ */
+const REPLY_BRAND_DIRECT_FETCH_MAX = 25;
+/** Matches the Notion limiter's default concurrency. */
+const REPLY_BRAND_DIRECT_FETCH_CONCURRENCY = 3;
+
+/** Map raw Follow-up Client pages into `page + brand` pairs, dropping unmapped rows. */
+async function toReplyBrandMetadata(
+  pages: NotionPage[],
+  signalKeys: Set<string>,
+) {
+  const validPages = pages.filter((page) => signalKeys.has(pageKey(page.id)));
+  const mapped = await mapFollowupClientPages(validPages);
+  const byKey = new Map(mapped.map((brand) => [pageKey(brand.id), brand]));
+  return validPages.flatMap((page) => {
+    const brand = byKey.get(pageKey(page.id));
+    return brand ? [{ page, brand }] : [];
+  });
+}
+
 export async function listReplyBrandMetadata(
   entries: Array<[string, BrandReplySignal]>,
   input: {
@@ -386,6 +413,38 @@ export async function listReplyBrandMetadata(
     exhibitionId?: string | null;
   } = {},
 ) {
+  // Reply signals already carry the Follow-up Client page ids, so a small reply
+  // set can fetch exactly those pages instead of scanning the whole database
+  // only to intersect it afterwards.
+  const directIds = [...new Set(entries.map(([id]) => id))];
+  if (directIds.length <= REPLY_BRAND_DIRECT_FETCH_MAX) {
+    const signalKeys = new Set(entries.map(([id]) => pageKey(id)));
+    // This path returns unfiltered page metadata — every caller applies the
+    // list filters in memory afterwards — so the cache key only needs the ids.
+    // Keeping the filters out of the key lets one fetch serve every filter.
+    const directKey = JSON.stringify({
+      mode: "direct",
+      ids: [...signalKeys].sort(),
+    });
+    return getCachedBrandReplyMetadata(directKey, async () => {
+      const startedAt = Date.now();
+      const pages = await mapWithConcurrency(
+        directIds,
+        REPLY_BRAND_DIRECT_FETCH_CONCURRENCY,
+        (id) => retrievePage(id).catch(() => null),
+      );
+      // A page deleted or no longer shared with the integration used to be
+      // dropped silently by the database scan; keep that behaviour.
+      const found = pages.filter((page): page is NotionPage => page !== null);
+      console.info("[brands] reply-metadata direct", {
+        ids: directIds.length,
+        found: found.length,
+        durationMs: Date.now() - startedAt,
+      });
+      return toReplyBrandMetadata(found, signalKeys);
+    });
+  }
+
   const cp = input.cp?.trim() || "all";
   let currentCpPageId: string | undefined;
   if (cp !== "all") {
@@ -396,6 +455,7 @@ export async function listReplyBrandMetadata(
   const handlingMode = normalizeHandlingModeFilter(input.handlingMode);
   const exhibitionPageId = normalizeExhibitionIdFilter(input.exhibitionId);
   const metadataKey = JSON.stringify({
+    mode: "scan",
     ids: entries.map(([id]) => pageKey(id)).sort(),
     ownerPageId: input.ownerPageId,
     includeTest: input.includeTest,
@@ -422,13 +482,7 @@ export async function listReplyBrandMetadata(
       handlingMode,
       exhibitionPageId,
     });
-    const validPages = pages.filter((page) => signalKeys.has(pageKey(page.id)));
-    const mapped = await mapFollowupClientPages(validPages);
-    const byKey = new Map(mapped.map((brand) => [pageKey(brand.id), brand]));
-    return validPages.flatMap((page) => {
-      const brand = byKey.get(pageKey(page.id));
-      return brand ? [{ page, brand }] : [];
-    });
+    return toReplyBrandMetadata(pages, signalKeys);
   });
 }
 
