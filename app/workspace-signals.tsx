@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowUpRight, SmartphoneNfc } from "lucide-react";
+import { ArrowUpRight, FileText, SmartphoneNfc } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { SidebarTrigger } from "@/components/ui/sidebar";
@@ -25,6 +25,7 @@ import { usePageMetadata } from "./use-page-metadata";
 import { useSignals } from "./signals-store";
 import { formatScheduledDateTime } from "@/lib/display-time";
 import { buildSignalQueue } from "@/lib/signals/queue";
+import { MOCK_PILOT_INFO } from "@/lib/mock-pilot-info";
 
 const types = {
   sample: {
@@ -66,9 +67,16 @@ export function SignalsPage() {
     description: "Review customer signals and follow up in one workspace.",
   });
   const { data, error, refresh, settle } = useSignals();
-  const [type, setType] = useState<SignalType | "all">("all");
-  const queue = useMemo(() => buildSignalQueue(data?.brands || [], type), [data, type]);
+  const [type, setType] = useState<SignalType | "pilot_info" | "all">("all");
+  const queue = useMemo(() => type === "pilot_info" ? [] : buildSignalQueue(data?.brands || [], type), [data, type]);
   const summary = summarize(data?.brands || []);
+  const showPilotInfoMock = type === "all" || type === "pilot_info";
+  const pilotBrand = data?.brands.find((brand) =>
+    brand.id.replace(/-/g, "").toLowerCase() === MOCK_PILOT_INFO.brandId.replace(/-/g, "").toLowerCase() ||
+    brand.name.trim().toLowerCase() === MOCK_PILOT_INFO.brandName.toLowerCase(),
+  );
+  const pilotBrandId = pilotBrand?.id || MOCK_PILOT_INFO.brandId;
+  const pilotInfoHref = `/customers/${encodeURIComponent(pilotBrandId)}?returnTo=%2Fsignals&pilotInfo=1#brand-pilot-info`;
 
   const markBrandRead = (brand: SignalBrand) => {
     const newReadIds = brand.events
@@ -100,7 +108,7 @@ export function SignalsPage() {
           <SidebarTrigger className="md:hidden" />
           <h1 className="text-2xl font-bold tracking-[-.035em] text-slate-950 sm:text-[28px]">Signals</h1>
         </div>
-        <p className="mt-1 text-sm text-muted-foreground">{summary.unread} new signal{summary.unread === 1 ? "" : "s"}</p>
+        <p className="mt-1 text-sm text-muted-foreground">{summary.unread + Number(showPilotInfoMock)} new signal{summary.unread + Number(showPilotInfoMock) === 1 ? "" : "s"}</p>
       </header>
       <div className="my-5 flex flex-wrap items-center gap-2">
         <Select value={type} onValueChange={(value) => setType(value as typeof type)}>
@@ -112,6 +120,7 @@ export function SignalsPage() {
             {Object.entries(types).map(([key, signalType]) => (
               <SelectItem key={key} value={key}>{signalType.label}</SelectItem>
             ))}
+            <SelectItem value="pilot_info">Pilot Info</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -130,8 +139,22 @@ export function SignalsPage() {
           <div className="mb-3">
             <h2 className="text-sm font-semibold">Brand Queue</h2>
           </div>
-          {queue.length ? (
+          {queue.length || showPilotInfoMock ? (
             <div className="space-y-2">
+              {showPilotInfoMock ? <article className="grid w-full gap-4 rounded-md bg-emerald-50/70 px-4 py-4 ring-1 ring-emerald-100 transition-colors sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                <div className="min-w-0">
+                  <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                    <span className="size-2 shrink-0 rounded-full bg-rose-500 shadow-[0_0_0_3px_rgba(244,63,94,0.14)]" aria-label="Unread" />
+                    <h3 className="min-w-0 truncate text-sm font-semibold text-foreground">{pilotBrand?.name || MOCK_PILOT_INFO.brandName}</h3>
+                    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-800"><FileText className="size-3.5" />Pilot Info By Brand · {MOCK_PILOT_INFO.status}</span>
+                    <time dateTime={MOCK_PILOT_INFO.occurredAt} title={formatScheduledDateTime(MOCK_PILOT_INFO.occurredAt)} className="text-xs text-muted-foreground">{formatScheduledDateTime(MOCK_PILOT_INFO.occurredAt)}</time>
+                  </div>
+                  <p className="mt-1 text-sm text-slate-700"><span className="font-medium">Pilot info ready for review.</span> {MOCK_PILOT_INFO.summary}</p>
+                </div>
+                <div className="relative z-10 flex items-center justify-end gap-2">
+                  <Link href={pilotInfoHref} className="relative inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-md bg-emerald-800 px-3 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2">View Pilot Info <ArrowUpRight className="size-4" /></Link>
+                </div>
+              </article> : null}
               {queue.map(({ brand, latest }) => {
                 const isUnread = brand.unread;
                 return (

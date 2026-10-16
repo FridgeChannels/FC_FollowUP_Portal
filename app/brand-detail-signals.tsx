@@ -2,10 +2,13 @@
 
 import { formatScheduledDateTime } from "@/lib/display-time";
 import { useEffect, useState } from "react";
-import { ChevronDown, ExternalLink, MailOpen, SmartphoneNfc } from "lucide-react";
+import { Check, ChevronDown, ExternalLink, FileText, Loader2, MailOpen, SmartphoneNfc } from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 import type { SignalEvent } from "@/lib/signals/model";
 import { safeSourceUrl } from "@/lib/signals/model";
 import { buildSignalNotifications, signalNotificationTime } from "@/lib/signals/notifications";
+import type { PilotInfoByBrand } from "@/lib/mock-pilot-info";
 import type { MagnetBrandParam } from "@/lib/sample/magnet";
 import type { AmazonSampleProduct, ChannelType } from "@/lib/sample-product";
 import { ChannelIcon } from "./channel-icon";
@@ -84,7 +87,7 @@ export function SampleActivity({
 }
 
 export function ImportantSignalsPanel({
-  events, readIds, onRead, onOpenEmailSignal, initialSampleSignalId, brandName, ownerName,
+  events, readIds, onRead, onOpenEmailSignal, initialSampleSignalId, brandName, ownerName, pilotInfo, onOpenPilotInfo,
 }: {
   events: SignalEvent[];
   readIds: string[];
@@ -93,19 +96,32 @@ export function ImportantSignalsPanel({
   initialSampleSignalId?: string;
   brandName?: string;
   ownerName?: string | null;
+  pilotInfo?: PilotInfoByBrand;
+  onOpenPilotInfo?: () => void;
 }) {
   const [expandedSampleId, setExpandedSampleId] = useState(initialSampleSignalId);
-  useEffect(() => { setExpandedSampleId(initialSampleSignalId); }, [initialSampleSignalId]);
-  const notifications = buildSignalNotifications(events, readIds).filter(item =>
+  const [internalDeviceActions, setInternalDeviceActions] = useState<Set<string>>(() => new Set());
+  const [markingDeviceId, setMarkingDeviceId] = useState<string | null>(null);
+  const visibleEvents = events.filter((event) =>
+    event.type !== "sample" || !event.sampleDeviceId || !internalDeviceActions.has(event.sampleDeviceId),
+  );
+  const notifications = buildSignalNotifications(visibleEvents, readIds).filter(item =>
     item.latest.type !== "sample" || item.unread || item.events.some(event => event.id === expandedSampleId));
 
-  if (!notifications.length) return null;
+  if (!notifications.length && !pilotInfo) return null;
   return <section id="brand-important-signals" aria-label="Brand signals" className="mx-5 mt-4 pb-1">
     <div className="mb-1 flex items-center justify-between">
       <h2 className="text-sm font-semibold text-slate-900">Signals</h2>
-      <span className="text-xs text-slate-500">{notifications.length} signal{notifications.length === 1 ? "" : "s"}</span>
+      <span className="text-xs text-slate-500">{notifications.length + Number(Boolean(pilotInfo))} signal{notifications.length + Number(Boolean(pilotInfo)) === 1 ? "" : "s"}</span>
     </div>
     <div>
+      {pilotInfo ? <article className="min-w-0 py-3">
+        <button type="button" className="flex w-full min-w-0 items-start gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400" onClick={onOpenPilotInfo}>
+          <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center"><FileText className="size-4 text-emerald-700" aria-hidden="true" /></span>
+          <span className="min-w-0 flex-1"><span className="block break-words text-sm font-medium text-slate-800">Pilot info ready for review</span><span className="mt-1 block text-xs text-slate-500">Pilot Info By Brand · {pilotInfo.status} · {pilotInfo.summary} · <span className="text-violet-700">View details</span></span></span>
+          <span className="mt-1.5 size-2 shrink-0 rounded-full bg-rose-500" role="img" aria-label="Unread" />
+        </button>
+      </article> : null}
       {notifications.map(({ key, events: group, latest, title, timestamp, timeLabel, typeLabel, unread }) => {
         const sampleOpen = latest.type === "sample" && group.some(event => event.id === expandedSampleId);
         const source = latest.type === "linkedin" ? safeSourceUrl(latest.sourceUrl) : undefined;
@@ -129,7 +145,25 @@ export function ImportantSignalsPanel({
               if (latest.type === "sample") { setExpandedSampleId(sampleOpen ? undefined : latest.id); markRead(); }
               else if (latest.type === "email") { onOpenEmailSignal?.(latest); }
             }}>{contents}</button>}
-          {sampleOpen ? <div className="ml-8 mt-3 rounded-lg bg-violet-50/60 p-3"><SampleTapDetails event={latest} brandName={brandName} ownerName={ownerName} /></div> : null}
+          {sampleOpen ? <div className="ml-8 mt-3 rounded-lg bg-violet-50/60 p-3"><SampleTapDetails event={latest} brandName={brandName} ownerName={ownerName} />{latest.sampleDeviceId ? <div className="mt-3 border-t border-violet-100 pt-2.5"><Button type="button" variant="outline" size="sm" className="h-8 min-h-8 bg-white text-xs" disabled={markingDeviceId === latest.sampleDeviceId} onClick={async () => {
+            const deviceId = latest.sampleDeviceId!;
+            setMarkingDeviceId(deviceId);
+            try {
+              const response = await fetch("/api/sample/internal-devices", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ deviceId }),
+              });
+              const result = await response.json() as { error?: string };
+              if (!response.ok) throw new Error(result.error || "Unable to mark device");
+              setInternalDeviceActions((current) => new Set(current).add(deviceId));
+              toast.success("Device marked internal; its sample taps will no longer notify.");
+            } catch (cause) {
+              toast.error(cause instanceof Error ? cause.message : "Unable to mark device");
+            } finally {
+              setMarkingDeviceId(null);
+            }
+          }}>{markingDeviceId === latest.sampleDeviceId ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : <Check className="mr-1.5 size-3.5" />}Mark device as internal</Button><p className="mt-1.5 text-[11px] text-slate-500">This applies across all brands.</p></div> : null}</div> : null}
         </article>;
       })}
     </div>

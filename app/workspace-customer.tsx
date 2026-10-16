@@ -56,6 +56,8 @@ import { isForwardCpTransition } from "@/lib/cp-visibility";
 import type { BrandAiSummaryStore } from "@/lib/brand-ai-summary";
 import { FollowupHistoryPanel, RoundStatusBadge } from "./followup-history-panel";
 import { emptyFollowupHistory, hasFollowupHistory } from "@/lib/followup-history";
+import { MOCK_PILOT_INFO, mockPilotInfoForBrand } from "@/lib/mock-pilot-info";
+import { PilotInfoByBrand } from "./pilot-info-by-brand";
 
 const show=(r:{ok:boolean;message:string})=>r.ok?toast.success(r.message):toast.error(r.message);
 const hasCjk=(value?:string|null)=>/[\u4e00-\u9fff]/.test(value||"");
@@ -619,6 +621,8 @@ export function BrandDetail({customerId}:{customerId:string}){
   const router=useRouter();
   const searchParams=useSearchParams();
   const requestedSignalId=searchParams.get("signal");
+  const pilotInfoRequested=searchParams.get("pilotInfo")==="1";
+  const pilotInfoDemo=customerId===MOCK_PILOT_INFO.brandId&&pilotInfoRequested;
   const requestedWorkReply=searchParams.get("workReply");
   const requestedWorkTask=searchParams.get("workTask");
   const acknowledgeReplyDeadline=searchParams.get("acknowledgeReplyDeadline")==="1";
@@ -783,6 +787,8 @@ export function BrandDetail({customerId}:{customerId:string}){
     if(handledSignalRequest.current===requestKey)return;
     if(requestedSignalType==="email"&&(!remote?.id||!brandReady||!activitiesReady))return;
     handledSignalRequest.current=requestKey;
+    // Function declarations are hoisted; the effect runs after this render completes.
+    // eslint-disable-next-line react-hooks/immutability
     if(requestedSignalType==="email"){void openEmailSignal(requestedSignal);return;}
     const readId=requestedSignal?.signalReadId||requestedSignal?.id;
     if(readId) readSignalEvents([readId]);
@@ -790,17 +796,23 @@ export function BrandDetail({customerId}:{customerId:string}){
     const target="brand-important-signals";
     requestAnimationFrame(()=>document.getElementById(target)?.scrollIntoView({block:"center",behavior:"smooth"}));
   },[customerId,requestedSignalId,requestedSignalType,requestedSignal,brandReady,activitiesReady,remote?.id]);
+  useEffect(()=>{
+    if(!pilotInfoRequested)return;
+    setDetailsTab("details");
+    const timer=window.setTimeout(()=>document.getElementById("brand-pilot-info")?.scrollIntoView({behavior:"smooth",block:"center"}),80);
+    return()=>window.clearTimeout(timer);
+  },[customerId,pilotInfoRequested]);
   const isAdmin=state.currentRole==="Admin";
   const manager=isAdmin||state.currentRole==="AccountManager";
-  const mockCustomer:Customer|undefined=aiSummaryDemo?{
+  const mockCustomer:Customer|undefined=aiSummaryDemo||pilotInfoDemo?{
     id:customerId,
-    name:"Northstar Pantry · AI Summary Demo",
-    initials:"NP",
+    name:pilotInfoDemo?MOCK_PILOT_INFO.brandName:"Northstar Pantry · AI Summary Demo",
+    initials:pilotInfoDemo?"LE":"NP",
     cp:"CP2",
     status:"Waiting for Reply",
-    source:"AI summary demo",
+    source:pilotInfoDemo?"Pilot Info demo":"AI summary demo",
     ownerId:state.currentUserId,
-    contacts:[{
+    contacts:pilotInfoDemo?[]:[{
       id:"mock-ai-summary-contact",
       name:"Morgan Lee",
       role:"Owner",
@@ -814,6 +826,7 @@ export function BrandDetail({customerId}:{customerId:string}){
     updatedAt:"2026-10-09T00:00:00.000Z",
   }:undefined;
   const local=state.customers.find(x=>x.id===customerId)||mockCustomer;
+  const pilotInfo=mockPilotInfoForBrand(local?.id||customerId,local?.name);
   const applyRemote=(brand:BrandDetail|null,cps:CurrentCpOption[]=[])=>{
     if(!brand){setRemote(null);setRemoteCps([]);return;}
     cacheBrandItem(brand);
@@ -1018,7 +1031,7 @@ export function BrandDetail({customerId}:{customerId:string}){
   },[acknowledgeReplyDeadline,brandReady,canManageReplyDeadline,customerId,remote?.replyDeadline,remoteCps,router]);
   const contactsLoading=notionBacked&&!brandReady;
   const activityLoading=notionBacked&&(!brandReady||!activitiesReady||activitiesLoading);
-  const visible=!!c&&(aiSummaryDemo||(local?(manager||c.ownerId===state.currentUserId):!!remote));
+  const visible=!!c&&(aiSummaryDemo||pilotInfoDemo||(local?(manager||c.ownerId===state.currentUserId):!!remote));
   usePageMetadata(brandDetailMetadata(visible&&c?{name:c.name,cp:notionBacked&&remote?remote.currentCp:c.cp,status:c.status,source:c.source}:null));
   if(remoteLoading&&!c)return <div className="grid min-h-[60vh] place-items-center gap-2 text-sm text-slate-500"><Spinner className="size-5 text-slate-400"/>Loading brand…</div>;
   if(!visible||!c)return <div className="grid min-h-[60vh] place-items-center"><div className="text-center"><CircleAlert className="mx-auto mb-3 size-8 text-slate-300"/><h1 className="font-bold">Brand not found</h1><Button variant="link" onClick={returnToList}>{backLabel}</Button></div></div>;
@@ -1326,6 +1339,7 @@ export function BrandDetail({customerId}:{customerId:string}){
             {notionBacked&&<BrandProfileFields profiles={sampleProfiles} channelType={remote?.channelType||formatIcpGroupLabel(remote?.icpGroup)} amazon={remote?.amazonSampleProduct}/>}
             {notionBacked&&<a href={`/customers/${encodeURIComponent(c.id)}/sample`} className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-violet-700 hover:underline">Edit sample profile <ChevronRight className="size-3"/></a>}
           </section>
+          <PilotInfoByBrand brandId={c.id} brandName={c.name}/>
           <section className="border-t border-slate-100 py-4">
             <p className="text-xs font-semibold text-slate-500">Brand summary</p>
             {brandReady ? <>
@@ -1378,7 +1392,7 @@ export function BrandDetail({customerId}:{customerId:string}){
       </div>
       </section>}
     </aside>
-    <div className="order-1 flex min-w-0 flex-col overflow-hidden bg-white lg:min-h-0"><ImportantSignalsPanel key={c.id} events={brandSignals?.events || []} readIds={signalReadIds} onRead={readSignalEvents} initialSampleSignalId={requestedSignalType==="sample"?requestedSignalId||undefined:undefined} brandName={c.name} ownerName={remote?.ownerName} onOpenEmailSignal={openEmailSignal}/><section id="brand-conversations" aria-label="Brand communication" className="flex min-w-0 flex-col overflow-hidden lg:min-h-0 lg:flex-1"><div className="flex items-center border-b border-slate-100 px-5 py-3"><h2 className="flex items-center gap-2 font-semibold"><MessageSquareText className="size-4 text-violet-600"/>Conversations</h2></div>{conversationRound&&<div className="flex items-center justify-between gap-2 border-b border-violet-100 bg-violet-50 px-5 py-2"><div><p className="text-xs font-semibold text-violet-800">Round {conversationRound.number} · All CPs</p><p className="text-xs text-violet-600">Only conversations with a recorded Round association.</p></div><Button variant="ghost" size="sm" onClick={()=>{setConversationRound(null);setRoundCursor(null);}}>Show all Rounds</Button></div>}<div className="min-h-[50vh] max-h-[calc(100vh-290px)] min-w-0 overflow-y-auto lg:min-h-0 lg:max-h-none lg:flex-1">
+    <div className="order-1 flex min-w-0 flex-col overflow-hidden bg-white lg:min-h-0"><ImportantSignalsPanel key={`${c.id}:${requestedSignalType==="sample"?requestedSignalId||"":""}`} events={brandSignals?.events || []} readIds={signalReadIds} onRead={readSignalEvents} initialSampleSignalId={requestedSignalType==="sample"?requestedSignalId||undefined:undefined} brandName={c.name} ownerName={remote?.ownerName} onOpenEmailSignal={openEmailSignal} pilotInfo={pilotInfo||undefined} onOpenPilotInfo={()=>{setDetailsTab("details");window.setTimeout(()=>document.getElementById("brand-pilot-info")?.scrollIntoView({behavior:"smooth",block:"center"}),80);}}/><section id="brand-conversations" aria-label="Brand communication" className="flex min-w-0 flex-col overflow-hidden lg:min-h-0 lg:flex-1"><div className="flex items-center border-b border-slate-100 px-5 py-3"><h2 className="flex items-center gap-2 font-semibold"><MessageSquareText className="size-4 text-violet-600"/>Conversations</h2></div>{conversationRound&&<div className="flex items-center justify-between gap-2 border-b border-violet-100 bg-violet-50 px-5 py-2"><div><p className="text-xs font-semibold text-violet-800">Round {conversationRound.number} · All CPs</p><p className="text-xs text-violet-600">Only conversations with a recorded Round association.</p></div><Button variant="ghost" size="sm" onClick={()=>{setConversationRound(null);setRoundCursor(null);}}>Show all Rounds</Button></div>}<div className="min-h-[50vh] max-h-[calc(100vh-290px)] min-w-0 overflow-y-auto lg:min-h-0 lg:max-h-none lg:flex-1">
     <InteractionFeed key={`${c.id}-${conversationRound?.id||"all"}-${currentCp}-${attentionTarget?.cp||""}-${attentionTarget?.channel||""}-${focusedWork?.id||focusedEmail?.id||""}`} customerId={c.id} currentCp={currentCp} initialCp={focusedWork?.cp||focusedEmail?.cp||attentionTarget?.cp} initialChannel={focusedWork?.channel||(focusedEmail?"Email":attentionTarget?.channel)} focusedInteractionId={focusedWork?.id||focusedEmail?.id} showAllChannels showCpSelector={false} includeAllCps={true} cpGoals={notionBacked?toCpGoals(remoteCps):undefined} interactions={visibleInteractions} contacts={c.contacts} bombInstances={conversationRound?bombPlan?.bombInstances.filter(instance=>roundActivities.some(activity=>bombPlan.activityInstanceIds[activity.id]===instance.id)):bombPlan?.bombInstances} actions={bombPlan?.actions} loading={conversationRound?roundLoading:activityLoading} canReviewCalls={notionBacked&&can("reply")} tasks={conversationRound?(remote?.tasks||[]).filter(t=>t.roundId===conversationRound.id):brandTasks} onMarkReplyRead={notionBacked&&can("reply")?markReplyRead:undefined} onRefreshQuo={notionBacked?refreshQuoForBrand:undefined} quoRefreshingCallId={quoRefreshingCallId} onPersistCallReview={notionBacked?async (taskId,status,reviewReason,reviewNote,resolution)=>{
     const response=await fetch(`/api/tasks/${taskId}/call-review`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status,reviewReason,reviewNote,resolution})});
     const payload=await response.json() as {error?:string};

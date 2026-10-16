@@ -1,32 +1,18 @@
-import { canWriteBrand } from "@/lib/brand-access";
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
-import { retrievePage } from "@/lib/notion/client";
-import { mapFollowupClientPage } from "@/lib/notion/followup-clients";
 import { markInternalDevice, unmarkInternalDevice } from "@/lib/sample/internal-devices";
-import { markSampleNotificationsReadForDevice } from "@/lib/sample/notifications";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 
-type Params = { params: Promise<{ id: string }> };
-
-async function requireWriter(request: Request, brandId: string) {
+async function requireSignedIn(request: Request) {
   const viewer = await viewerFromRequest(request);
   if (!viewer.email) {
     return { error: Response.json({ error: "Sign in required" }, { status: 401 }) };
   }
-  const page = await retrievePage(brandId);
-  const brand = await mapFollowupClientPage(page);
-  if (!canWriteBrand(viewer, brand)) {
-    return {
-      error: Response.json({ error: "You do not have access to this brand" }, { status: 403 }),
-    };
-  }
-  return { viewer, brand };
+  return { viewer };
 }
 
-export async function POST(request: Request, { params }: Params) {
+export async function POST(request: Request) {
   try {
-    const { id } = await params;
-    const auth = await requireWriter(request, id);
+    const auth = await requireSignedIn(request);
     if ("error" in auth && auth.error) return auth.error;
     if (!isSupabaseConfigured()) {
       return Response.json({ error: "Supabase is not configured" }, { status: 503 });
@@ -45,13 +31,8 @@ export async function POST(request: Request, { params }: Params) {
     const device = await markInternalDevice({
       deviceId,
       label: body.label || auth.viewer?.email || null,
-      note: body.note || `Marked from brand ${id}`,
+      note: body.note || "Marked as an internal device",
     });
-    try {
-      await markSampleNotificationsReadForDevice(id, deviceId);
-    } catch (error) {
-      console.error("[sample/internal-devices] clear notifications failed", error);
-    }
     return Response.json({ ok: true, device });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
@@ -60,10 +41,9 @@ export async function POST(request: Request, { params }: Params) {
   }
 }
 
-export async function DELETE(request: Request, { params }: Params) {
+export async function DELETE(request: Request) {
   try {
-    const { id } = await params;
-    const auth = await requireWriter(request, id);
+    const auth = await requireSignedIn(request);
     if ("error" in auth && auth.error) return auth.error;
     if (!isSupabaseConfigured()) {
       return Response.json({ error: "Supabase is not configured" }, { status: 503 });
