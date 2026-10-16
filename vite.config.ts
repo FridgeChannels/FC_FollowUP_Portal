@@ -223,8 +223,13 @@ export default defineConfig(async ({ mode }) => {
 
   return {
     optimizeDeps: {
-      // AWS SDK browser chunks break Vite RSC dep optimization in this stack.
-      exclude: ["@aws-sdk/client-s3", "@aws-sdk/s3-request-presigner"],
+      // These modules are loaded from multiple RSC/client environments. Keeping
+      // them out of the shared optimizer avoids incompatible module wrappers.
+      exclude: [
+        "@aws-sdk/client-s3",
+        "@aws-sdk/s3-request-presigner",
+        "next/link",
+      ],
     },
     define: {
       "import.meta.env.SKIP_UNAVAILABLE_CHANNELS": JSON.stringify(
