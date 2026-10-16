@@ -102,23 +102,29 @@ export function ImportantSignalsPanel({
   const [expandedSampleId, setExpandedSampleId] = useState(initialSampleSignalId);
   const [internalDeviceActions, setInternalDeviceActions] = useState<Set<string>>(() => new Set());
   const [markingDeviceId, setMarkingDeviceId] = useState<string | null>(null);
+  const [pilotInfoDismissed, setPilotInfoDismissed] = useState(false);
+  const visiblePilotInfo = pilotInfoDismissed ? undefined : pilotInfo;
   const visibleEvents = events.filter((event) =>
     event.type !== "sample" || !event.sampleDeviceId || !internalDeviceActions.has(event.sampleDeviceId),
   );
   const notifications = buildSignalNotifications(visibleEvents, readIds).filter(item =>
     item.latest.type !== "sample" || item.unread || item.events.some(event => event.id === expandedSampleId));
 
-  if (!notifications.length && !pilotInfo) return null;
+  if (!notifications.length && !visiblePilotInfo) return null;
   return <section id="brand-important-signals" aria-label="Brand signals" className="mx-5 mt-4 pb-1">
     <div className="mb-1 flex items-center justify-between">
       <h2 className="text-sm font-semibold text-slate-900">Signals</h2>
-      <span className="text-xs text-slate-500">{notifications.length + Number(Boolean(pilotInfo))} signal{notifications.length + Number(Boolean(pilotInfo)) === 1 ? "" : "s"}</span>
+      <span className="text-xs text-slate-500">{notifications.length + Number(Boolean(visiblePilotInfo))} signal{notifications.length + Number(Boolean(visiblePilotInfo)) === 1 ? "" : "s"}</span>
     </div>
     <div>
-      {pilotInfo ? <article className="min-w-0 py-3">
-        <button type="button" className="flex w-full min-w-0 items-start gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400" onClick={onOpenPilotInfo}>
+      {visiblePilotInfo ? <article className="min-w-0 py-3">
+        <button type="button" className="flex w-full min-w-0 items-start gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400" onClick={() => {
+          setPilotInfoDismissed(true);
+          onOpenPilotInfo?.();
+          if (visiblePilotInfo.notionUrl) window.open(visiblePilotInfo.notionUrl, "_blank", "noopener,noreferrer");
+        }}>
           <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center"><FileText className="size-4 text-emerald-700" aria-hidden="true" /></span>
-          <span className="min-w-0 flex-1"><span className="block break-words text-sm font-medium text-slate-800">Pilot info ready for review</span><span className="mt-1 block text-xs text-slate-500">Pilot Info By Brand · {pilotInfo.status} · {pilotInfo.summary} · <span className="text-violet-700">View details</span></span></span>
+          <span className="min-w-0 flex-1"><span className="block break-words text-sm font-medium text-slate-800">Pilot info ready for review</span><span className="mt-1 block text-xs text-slate-500">Pilot Info By Brand · {visiblePilotInfo.status} · {visiblePilotInfo.summary} · <span className="text-violet-700">View details</span></span></span>
           <span className="mt-1.5 size-2 shrink-0 rounded-full bg-rose-500" role="img" aria-label="Unread" />
         </button>
       </article> : null}
