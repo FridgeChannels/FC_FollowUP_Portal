@@ -1,4 +1,5 @@
 import type { MediaAttachment } from "../media-attachments.ts";
+import { EmailCcError, normalizeEmailCc, normalizeEmailRecipient } from "../email-cc.ts";
 import { InboundReplyError } from "./inbound-errors.ts";
 import {
   resolveInboundContent,
@@ -17,6 +18,10 @@ export type InboundColdInput = {
   brandId?: string | null;
   /** Counterparty identity: email / phone / LinkedIn URL depending on channel. */
   sender?: string | null;
+  /** Email To header (comma- or semicolon-separated). */
+  recipient?: string | null;
+  /** Email Cc header (comma- or semicolon-separated). */
+  cc?: string | null;
   taskId?: string | null;
   /** @deprecated Removed — cold inbound resolves via FollowUpClientId + sender. */
   contactId?: string | null;
@@ -31,6 +36,8 @@ export type NormalizedInboundColdInput = {
   object: string;
   brandId: string;
   sender: string;
+  recipient: string | null;
+  cc: string | null;
   attachments: MediaAttachment[];
   extendedParameters: Record<string, unknown> | string | null;
 };
@@ -73,6 +80,24 @@ export function normalizeInboundColdInput(input: InboundColdInput): NormalizedIn
     throw new InboundReplyError("sender is required", 422);
   }
 
+  const hasRecipient = input.recipient != null && String(input.recipient).trim() !== "";
+  const hasCc = input.cc != null && String(input.cc).trim() !== "";
+  if (channel !== "Email" && (hasRecipient || hasCc)) {
+    throw new InboundReplyError("recipient and cc are only valid for Email", 400);
+  }
+
+  let recipient: string | null = null;
+  let cc: string | null = null;
+  if (channel === "Email") {
+    try {
+      recipient = normalizeEmailRecipient(input.recipient);
+      cc = normalizeEmailCc(input.cc);
+    } catch (error) {
+      const message = error instanceof EmailCcError ? error.message : "Invalid recipient/cc";
+      throw new InboundReplyError(message, 400);
+    }
+  }
+
   const extendedParameters =
     input.extendedParameters ?? input["Extended Parameters"] ?? null;
 
@@ -84,6 +109,8 @@ export function normalizeInboundColdInput(input: InboundColdInput): NormalizedIn
       object,
       brandId,
       sender,
+      recipient,
+      cc,
       attachments,
       extendedParameters,
     };
@@ -102,6 +129,8 @@ export function normalizeInboundColdInput(input: InboundColdInput): NormalizedIn
     object: "",
     brandId,
     sender,
+    recipient: null,
+    cc: null,
     attachments,
     extendedParameters,
   };

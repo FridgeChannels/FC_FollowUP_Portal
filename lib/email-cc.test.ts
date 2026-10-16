@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { EmailCcError, normalizeEmailCc } from "./email-cc.ts";
+import { EmailCcError, normalizeEmailCc, normalizeEmailRecipient } from "./email-cc.ts";
 
 describe("normalizeEmailCc", () => {
   it("returns null for empty input", () => {
@@ -31,5 +31,21 @@ describe("normalizeEmailCc", () => {
   it("rejects invalid addresses", () => {
     assert.throws(() => normalizeEmailCc("not-an-email"), EmailCcError);
     assert.throws(() => normalizeEmailCc("ok@x.com, bad"), EmailCcError);
+  });
+
+  it("accepts Name <email> forms", () => {
+    assert.equal(
+      normalizeEmailCc("Ella <ella@fridgechannels.com>"),
+      "ella@fridgechannels.com",
+    );
+  });
+});
+
+describe("normalizeEmailRecipient", () => {
+  it("normalizes To header addresses", () => {
+    assert.equal(
+      normalizeEmailRecipient("Jack Florens <jack@puregreen.com>"),
+      "jack@puregreen.com",
+    );
   });
 });

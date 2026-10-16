@@ -170,6 +170,12 @@ export async function ingestInboundCold(
     "Message ID": { rich_text: richText(messageId) },
     "Interaction At": { date: { start: occurredAt } },
   };
+  if (input.recipient) {
+    properties.Recipient = { rich_text: richText(input.recipient) };
+  }
+  if (input.cc) {
+    properties.CC = { rich_text: richText(input.cc) };
+  }
   const cp = await conversationCpRelation(target.currentCpId || target.currentCp);
   if (cp) properties.CP = cp;
   let replyDueAt: string | null = null;

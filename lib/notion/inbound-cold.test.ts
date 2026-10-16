@@ -39,6 +39,38 @@ describe("normalizeInboundColdInput", () => {
     });
     assert.equal(normalized.brandId, "");
     assert.equal(normalized.sender, "buyer@acme.com");
+    assert.equal(normalized.recipient, null);
+    assert.equal(normalized.cc, null);
+  });
+
+  it("normalizes Email recipient and cc headers", () => {
+    const normalized = normalizeInboundColdInput({
+      channel: "Email",
+      object: "Re: sample",
+      content: "Thanks",
+      sender: "carol@puregreen.com",
+      recipient: "Jack Florens <jack@puregreen.com>",
+      cc: "ella@fridgechannels.com, JACK@puregreen.com",
+    });
+    assert.equal(normalized.recipient, "jack@puregreen.com");
+    assert.equal(normalized.cc, "ella@fridgechannels.com;jack@puregreen.com");
+  });
+
+  it("rejects recipient/cc on non-Email", () => {
+    assert.throws(
+      () =>
+        normalizeInboundColdInput({
+          channel: "SMS",
+          content: "Hi",
+          brandId: "brand-1",
+          sender: "+14155550182",
+          cc: "a@b.com",
+        }),
+      (error: unknown) =>
+        error instanceof InboundReplyError
+        && error.status === 400
+        && /only valid for Email/.test(error.message),
+    );
   });
 
   it("requires object for Email", () => {

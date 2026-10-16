@@ -9,13 +9,16 @@
 
 ## Notion 前置
 
-在 **FC3.0-Follow-up-ConversationDB** 新增 Date 属性（可含时间）：
+在 **FC3.0-Follow-up-ConversationDB** 需具备：
 
 | 属性名 | 类型 | 说明 |
 | --- | --- | --- |
 | `Reply Due At` | Date | 最晚应人工回复时间。由 Portal 在写入 Needs Reply 时自动计算 |
+| `Recipient` | Text | 邮件 To；入站按头写入。未添加时带 `recipient` 的入库会失败 |
+| `CC` | Text | 邮件 Cc（已有） |
+| `Sender` | Text | 邮件 From（已有） |
 
-未添加该字段时，带 `Reply Due At` 的入库请求会失败。历史已存在的 Needs Reply 若无此字段，Brands 列表会回退显示 `Interaction At`。
+未添加 `Reply Due At` 时，带该字段的入库请求会失败。历史已存在的 Needs Reply 若无此字段，Brands 列表会回退显示 `Interaction At`。
 
 ```
 POST https://followup-portal.fridgechannels.com/api/inbound
@@ -50,6 +53,8 @@ Authorization: Bearer <REPLY_INGEST_TOKEN>
   "object": "Magnet inquiry",
   "content": "We saw your Magnet offer…",
   "sender": "buyer@acme.com",
+  "recipient": "jack@puregreen.com",
+  "cc": "ella@fridgechannels.com",
   "FollowUpClientId": "<Follow-up Client 页面 ID，可空>",
   "extendedParameters": {
     "gmailThreadId": "18c4abcd",
@@ -73,10 +78,14 @@ Authorization: Bearer <REPLY_INGEST_TOKEN>
 | `channel` | 是 | `Email` |
 | `object` | 是 | 邮件主题 → Conversation `Subject` |
 | `content` | 条件 | 正文。可空，但此时必须有 `attachments` |
-| `sender` | 是 | **对方发信人邮箱**（KeyPerson `Email`） |
+| `sender` | 是 | **对方发信人邮箱**（邮件 From → Conversation `Sender`） |
+| `recipient` | 否 | 邮件 **To** → Conversation `Recipient`（入参可用逗号/分号，入库为分号分隔）；非 Email 携带 → **400** |
+| `cc` | 否 | 邮件 **Cc** → Conversation `CC`（入参可用逗号/分号，入库为分号分隔）；非 Email 携带 → **400** |
 | `FollowUpClientId` | 否 | Follow-up Client 页面 ID。也接受别名 `brandId` |
 | `extendedParameters` | 否 | 写入 ConversationDB `Extended Parameters`（如 Gmail ids） |
 | `attachments` | 否 | Email 附件元数据数组，写入 ConversationDB `Attachments`。二进制须先落到本系统 S3；非法项整单 **400**。非 Email 携带 `attachments` → **400** |
+
+一封信只应调用一次：`sender` = From，`recipient` = To，`cc` = Cc。不要把 To/Cc 里的地址再各推一次。
 
 `attachments[]` 每项（与 [Reply 回写](./Follow-up｜Reply%20回写接口.md) Email 约定相同）：
 

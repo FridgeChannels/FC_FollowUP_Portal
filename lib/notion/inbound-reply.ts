@@ -37,6 +37,7 @@ import {
 } from "./inbound-attachments";
 import { allocateReplyDueAt, replyDueAtProperty, REPLY_DUE_PROPERTY } from "./reply-due";
 import { encodeAttachmentsProperty } from "../email-attachments";
+import { EmailCcError, normalizeEmailCc, normalizeEmailRecipient } from "../email-cc";
 
 export { InboundReplyError };
 
@@ -48,6 +49,10 @@ export type InboundReplyInput = {
   content?: string;
   occurredAt?: string;
   sender?: string | null;
+  /** Email To header (comma- or semicolon-separated). */
+  recipient?: string | null;
+  /** Email Cc header (comma- or semicolon-separated). */
+  cc?: string | null;
   subject?: string | null;
   threadId?: string | null;
   messageId?: string | null;
@@ -428,6 +433,22 @@ export async function ingestInboundReply(
   ).threadId;
   const taskId = outboundTask.id;
   const sender = input.sender?.trim() || target.inferredSender || "";
+  const hasRecipient = input.recipient != null && String(input.recipient).trim() !== "";
+  const hasCc = input.cc != null && String(input.cc).trim() !== "";
+  if (channel !== "Email" && (hasRecipient || hasCc)) {
+    throw new InboundReplyError("recipient and cc are only valid for Email", 400);
+  }
+  let recipient: string | null = null;
+  let cc: string | null = null;
+  if (channel === "Email") {
+    try {
+      recipient = normalizeEmailRecipient(input.recipient);
+      cc = normalizeEmailCc(input.cc);
+    } catch (error) {
+      const message = error instanceof EmailCcError ? error.message : "Invalid recipient/cc";
+      throw new InboundReplyError(message, 400);
+    }
+  }
   const subject =
     input.subject?.trim() ||
     (channel === "Email"
@@ -453,6 +474,12 @@ export async function ingestInboundReply(
     "Message ID": { rich_text: richText(messageId) },
     "Interaction At": { date: { start: occurredAt } },
   };
+  if (recipient) {
+    properties.Recipient = { rich_text: richText(recipient) };
+  }
+  if (cc) {
+    properties.CC = { rich_text: richText(cc) };
+  }
   const cp = await conversationCpRelation(
     outbound.cpId || outbound.cpAtInteraction || target.currentCpId || target.currentCp,
   );
@@ -506,6 +533,8 @@ export async function ingestInboundReply(
         subject: subject || null,
         content,
         sender: sender || null,
+        recipient: recipient || null,
+        cc: cc || null,
         notes: input.notes?.trim() || "渠道回复已入库，待人工处理。",
         callResult: callResult || null,
         sourceUrl: sourceUrl || null,

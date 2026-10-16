@@ -25,7 +25,9 @@ Authorization: Bearer <REPLY_INGEST_TOKEN>
   "threadId": "<系统线程 ID>",
   "content": "Yes, Mike has the Magnet.",
   "channel": "Email",
-  "sender": "",
+  "sender": "carol@puregreen.com",
+  "recipient": "jack@puregreen.com",
+  "cc": "ella@fridgechannels.com",
   "subject": "",
   "messageId": "",
   "occurredAt": "",
@@ -52,7 +54,9 @@ Authorization: Bearer <REPLY_INGEST_TOKEN>
 | `threadId` | 是 | 系统线程 ID，与 Outbound 相同。Inbound 复用，对话才能拼在一起 |
 | `content` | 条件 | 回复原文。可空，但此时必须有 `attachments`（Content 会写成附件 caption） |
 | `channel` | 建议 | 固定 `Email` |
-| `sender` | 否 | 空则补联系人邮箱 |
+| `sender` | 否 | 邮件 From → Conversation `Sender`；空则补联系人邮箱 |
+| `recipient` | 否 | 邮件 To → Conversation `Recipient`（入参可用逗号/分号，入库为分号分隔）；非 Email 携带 → **400** |
+| `cc` | 否 | 邮件 Cc → Conversation `CC`（入参可用逗号/分号，入库为分号分隔）；非 Email 携带 → **400** |
 | `subject` | 否 | 空则补 `Re:` + Outbound 主题 |
 | `messageId` | 否 | **回写留空**。服务端生成 `IN-Email-{timestamp}`，不影响对话展示 |
 | `occurredAt` | 否 | 真实收到时间。空则用服务器时间 |
