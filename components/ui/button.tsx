@@ -54,7 +54,6 @@ function Button({
     asChild?: boolean
   }) {
   const [pending, setPending] = React.useState(false)
-  const Comp = asChild ? Slot.Root : "button"
   const handleClick: React.MouseEventHandler<HTMLButtonElement> = (event) => {
     const result: unknown = onClick?.(event)
     if (type === "submit" || !result || typeof (result as PromiseLike<unknown>).then !== "function") return
@@ -65,8 +64,26 @@ function Button({
     )
   }
 
+  // Slot (asChild) requires exactly one React element child. A trailing
+  // `{null}` / `{false}` still makes `children` an array and throws:
+  // "Slot failed to slot onto its children".
+  if (asChild) {
+    return (
+      <Slot.Root
+        data-slot="button"
+        data-variant={variant}
+        data-size={size}
+        onClick={onClick}
+        className={cn(buttonVariants({ variant, size, className }))}
+        {...props}
+      >
+        {children}
+      </Slot.Root>
+    )
+  }
+
   return (
-    <Comp
+    <button
       data-slot="button"
       data-variant={variant}
       data-size={size}
@@ -78,8 +95,15 @@ function Button({
       {...props}
     >
       {children}
-      {pending && !asChild ? <><LoaderCircle className="size-4 animate-spin" aria-hidden="true"/><span className="sr-only" role="status">In progress</span></> : null}
-    </Comp>
+      {pending ? (
+        <>
+          <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+          <span className="sr-only" role="status">
+            In progress
+          </span>
+        </>
+      ) : null}
+    </button>
   )
 }
 
