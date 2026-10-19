@@ -1,11 +1,11 @@
-import { viewerFromRequest } from "@/lib/brand-viewer-request";
+import { requireInternalDeviceUser } from "@/lib/sample/internal-device-auth";
 import { listInternalDeviceCandidates } from "@/lib/sample/internal-devices";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 
 export async function GET(request: Request) {
   try {
-    const viewer = await viewerFromRequest(request);
-    if (!viewer.email) return Response.json({ error: "Sign in required" }, { status: 401 });
+    const auth = await requireInternalDeviceUser(request);
+    if ("error" in auth) return auth.error;
     if (!isSupabaseConfigured()) return Response.json({ error: "Supabase is not configured" }, { status: 503 });
     return Response.json({ candidates: await listInternalDeviceCandidates() });
   } catch (error) {

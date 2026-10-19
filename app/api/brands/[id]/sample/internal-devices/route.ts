@@ -1,37 +1,30 @@
-import { viewerFromRequest } from "@/lib/brand-viewer-request";
+import { requireInternalDeviceUser } from "@/lib/sample/internal-device-auth";
 import { markInternalDevice, unmarkInternalDevice } from "@/lib/sample/internal-devices";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 
-async function requireSignedIn(request: Request) {
-  const viewer = await viewerFromRequest(request);
-  if (!viewer.email) {
-    return { error: Response.json({ error: "Sign in required" }, { status: 401 }) };
-  }
-  return { viewer };
-}
-
 export async function POST(request: Request) {
   try {
-    const auth = await requireSignedIn(request);
-    if ("error" in auth && auth.error) return auth.error;
+    // Compatibility alias. Internal-device state is global, independent of this brand ID.
+    const auth = await requireInternalDeviceUser(request);
+    if ("error" in auth) return auth.error;
     if (!isSupabaseConfigured()) {
       return Response.json({ error: "Supabase is not configured" }, { status: 503 });
     }
 
     const body = (await request.json()) as {
-      deviceId?: string;
-      label?: string | null;
-      note?: string | null;
+      deviceId?: unknown;
+      label?: unknown;
+      note?: unknown;
     };
-    const deviceId = (body.deviceId || "").trim();
-    if (!deviceId) {
-      return Response.json({ error: "deviceId is required" }, { status: 400 });
+    const deviceId = typeof body.deviceId === "string" ? body.deviceId.trim() : "";
+    if (!deviceId || deviceId.length > 256) {
+      return Response.json({ error: "deviceId must be 1–256 characters" }, { status: 400 });
     }
 
     const device = await markInternalDevice({
       deviceId,
-      label: body.label || auth.viewer?.email || null,
-      note: body.note || "Marked as an internal device",
+      label: typeof body.label === "string" ? body.label : auth.viewer.email,
+      note: typeof body.note === "string" ? body.note : "Marked as an internal device",
     });
     return Response.json({ ok: true, device });
   } catch (error) {
@@ -43,8 +36,8 @@ export async function POST(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
-    const auth = await requireSignedIn(request);
-    if ("error" in auth && auth.error) return auth.error;
+    const auth = await requireInternalDeviceUser(request);
+    if ("error" in auth) return auth.error;
     if (!isSupabaseConfigured()) {
       return Response.json({ error: "Supabase is not configured" }, { status: 503 });
     }
@@ -55,8 +48,8 @@ export async function DELETE(request: Request) {
       ? null
       : ((await request.json().catch(() => ({}))) as { deviceId?: string });
     const deviceId = fromQuery || (body?.deviceId || "").trim();
-    if (!deviceId) {
-      return Response.json({ error: "deviceId is required" }, { status: 400 });
+    if (!deviceId || deviceId.length > 256) {
+      return Response.json({ error: "deviceId must be 1–256 characters" }, { status: 400 });
     }
 
     await unmarkInternalDevice(deviceId);

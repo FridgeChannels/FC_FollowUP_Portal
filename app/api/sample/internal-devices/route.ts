@@ -1,22 +1,31 @@
-import { viewerFromRequest } from "@/lib/brand-viewer-request";
+import { requireInternalDeviceUser } from "@/lib/sample/internal-device-auth";
 import {
+  getInternalDeviceIds,
   listInternalDeviceStats,
   markInternalDevice,
   unmarkInternalDevice,
 } from "@/lib/sample/internal-devices";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 
-async function requireSignedIn(request: Request) {
-  const viewer = await viewerFromRequest(request);
-  if (!viewer.email) return { response: Response.json({ error: "Sign in required" }, { status: 401 }) };
-  return { viewer };
-}
-
 export async function GET(request: Request) {
   try {
-    const auth = await requireSignedIn(request);
-    if ("response" in auth) return auth.response;
+    const auth = await requireInternalDeviceUser(request);
+    if ("error" in auth) return auth.error;
     if (!isSupabaseConfigured()) return Response.json({ error: "Supabase is not configured" }, { status: 503 });
+    const query = new URL(request.url).searchParams;
+    const requestedDeviceIds = query.getAll("deviceId").map((id) => id.trim());
+    if (requestedDeviceIds.length) {
+      if (requestedDeviceIds.length > 100 || requestedDeviceIds.some((id) => !id || id.length > 256)) {
+        return Response.json({ error: "Provide up to 100 device IDs, each 1–256 characters" }, { status: 400 });
+      }
+      const internalIds = await getInternalDeviceIds();
+      return Response.json({
+        statuses: [...new Set(requestedDeviceIds)].map((deviceId) => ({
+          deviceId,
+          isInternal: internalIds.has(deviceId),
+        })),
+      }, { headers: { "Cache-Control": "no-store" } });
+    }
     return Response.json({ devices: await listInternalDeviceStats() });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
@@ -27,16 +36,16 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const auth = await requireSignedIn(request);
-    if ("response" in auth) return auth.response;
+    const auth = await requireInternalDeviceUser(request);
+    if ("error" in auth) return auth.error;
     if (!isSupabaseConfigured()) return Response.json({ error: "Supabase is not configured" }, { status: 503 });
-    const body = await request.json() as { deviceId?: string; label?: string | null; note?: string | null };
-    const deviceId = (body.deviceId || "").trim();
+    const body = await request.json() as { deviceId?: unknown; label?: unknown; note?: unknown };
+    const deviceId = typeof body.deviceId === "string" ? body.deviceId.trim() : "";
     if (!deviceId || deviceId.length > 256) return Response.json({ error: "deviceId must be 1–256 characters" }, { status: 400 });
     const device = await markInternalDevice({
       deviceId,
-      label: body.label || auth.viewer.email,
-      note: body.note || "Marked as an internal device",
+      label: typeof body.label === "string" ? body.label : auth.viewer.email,
+      note: typeof body.note === "string" ? body.note : "Marked as an internal device",
     });
     return Response.json({ ok: true, device });
   } catch (error) {
@@ -48,11 +57,11 @@ export async function POST(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
-    const auth = await requireSignedIn(request);
-    if ("response" in auth) return auth.response;
+    const auth = await requireInternalDeviceUser(request);
+    if ("error" in auth) return auth.error;
     if (!isSupabaseConfigured()) return Response.json({ error: "Supabase is not configured" }, { status: 503 });
     const deviceId = (new URL(request.url).searchParams.get("deviceId") || "").trim();
-    if (!deviceId) return Response.json({ error: "deviceId is required" }, { status: 400 });
+    if (!deviceId || deviceId.length > 256) return Response.json({ error: "deviceId must be 1–256 characters" }, { status: 400 });
     await unmarkInternalDevice(deviceId);
     return Response.json({ ok: true, deviceId });
   } catch (error) {

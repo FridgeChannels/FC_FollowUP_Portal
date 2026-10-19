@@ -1,8 +1,6 @@
 import {
-  supabaseDelete,
-  supabasePatch,
+  supabaseRpc,
   supabaseSelect,
-  supabaseUpsert,
 } from "../supabase/client.ts";
 import { isSupabaseConfigured } from "../supabase/config.ts";
 
@@ -31,10 +29,7 @@ export const INTERNAL_DEVICE_INACTIVE_DAYS = 180;
 
 export async function listInternalDeviceStats() {
   const [devices, visits] = await Promise.all([
-    supabaseSelect<SampleInternalDevice>("sample_internal_devices", {
-      order: "updated_at.desc",
-      limit: 5000,
-    }),
+    listAllInternalDevices(),
     listAllSampleVisits(),
   ]);
   const stats = aggregateDeviceStats(visits);
@@ -51,15 +46,12 @@ export async function listInternalDeviceStats() {
       note: device.note,
       markedAt: device.created_at,
     } satisfies SampleDeviceStats;
-  });
+  }).sort((a, b) => (b.markedAt || "").localeCompare(a.markedAt || ""));
 }
 
 export async function listInternalDeviceCandidates() {
   const [devices, visits] = await Promise.all([
-    supabaseSelect<SampleInternalDevice>("sample_internal_devices", {
-      select: "device_id",
-      limit: 5000,
-    }),
+    listAllInternalDevices("device_id"),
     listAllSampleVisits(),
   ]);
   const allowlist = new Set(devices.map((device) => device.device_id));
@@ -83,12 +75,27 @@ export async function listInternalDeviceCandidates() {
 }
 
 type VisitStatRow = { device_id: string | null; occurred_at: string };
+async function listAllInternalDevices(select = "*") {
+  const devices: SampleInternalDevice[] = [];
+  for (let offset = 0; ; offset += 1000) {
+    const page = await supabaseSelect<SampleInternalDevice>("sample_internal_devices", {
+      select,
+      order: "device_id.asc",
+      offset,
+      limit: 1000,
+    });
+    devices.push(...page);
+    if (page.length < 1000) return devices;
+  }
+}
+
 async function listAllSampleVisits() {
   const visits: VisitStatRow[] = [];
   for (let offset = 0; ; offset += 1000) {
     const page = await supabaseSelect<VisitStatRow>("sample_tap_visits", {
       select: "device_id,occurred_at",
-      order: "occurred_at.asc",
+      filters: { device_id: "not.is.null" },
+      order: "id.asc",
       offset,
       limit: 1000,
     });
@@ -133,12 +140,8 @@ export async function getInternalDeviceIds(): Promise<Set<string>> {
     cache = { at: Date.now(), ids: new Set() };
     return cache.ids;
   }
-  const rows = await supabaseSelect<{ device_id: string }>("sample_internal_devices", {
-    select: "device_id",
-    limit: 5000,
-  });
   const ids = new Set(
-    rows
+    (await listAllInternalDevices("device_id"))
       .map((row) => (row.device_id || "").trim())
       .filter(Boolean),
   );
@@ -155,14 +158,6 @@ export function isInternalDeviceId(
   return internalIds.has(id);
 }
 
-async function setVisitsInternalFlag(deviceId: string, isInternal: boolean) {
-  await supabasePatch(
-    "sample_tap_visits",
-    { is_internal: isInternal },
-    { device_id: `eq.${deviceId}` },
-  );
-}
-
 /** Add device to allowlist and flip matching visit rows. */
 export async function markInternalDevice(input: {
   deviceId: string;
@@ -170,30 +165,30 @@ export async function markInternalDevice(input: {
   note?: string | null;
 }): Promise<SampleInternalDevice> {
   const deviceId = input.deviceId.trim();
-  if (!deviceId) throw new Error("deviceId is required");
-  const now = new Date().toISOString();
-  const rows = await supabaseUpsert<Record<string, unknown>>(
-    "sample_internal_devices",
-    [
-      {
-        device_id: deviceId,
-        label: input.label?.trim() || null,
-        note: input.note?.trim() || null,
-        updated_at: now,
-      },
-    ],
-    "device_id",
-  );
+  if (!deviceId || deviceId.length > 256) {
+    throw new Error("deviceId must be 1–256 characters");
+  }
+  const device = await supabaseRpc<SampleInternalDevice>("set_sample_internal_device", {
+    p_device_id: deviceId,
+    p_is_internal: true,
+    p_label: input.label?.trim() || null,
+    p_note: input.note?.trim() || null,
+  });
   clearInternalDeviceIdCache();
-  await setVisitsInternalFlag(deviceId, true);
-  return rows[0] as SampleInternalDevice;
+  return device;
 }
 
 /** Remove device from allowlist and clear matching visit flags. */
 export async function unmarkInternalDevice(deviceId: string): Promise<void> {
   const id = deviceId.trim();
-  if (!id) throw new Error("deviceId is required");
-  await supabaseDelete("sample_internal_devices", { device_id: `eq.${id}` });
+  if (!id || id.length > 256) {
+    throw new Error("deviceId must be 1–256 characters");
+  }
+  await supabaseRpc("set_sample_internal_device", {
+    p_device_id: id,
+    p_is_internal: false,
+    p_label: null,
+    p_note: null,
+  });
   clearInternalDeviceIdCache();
-  await setVisitsInternalFlag(id, false);
 }

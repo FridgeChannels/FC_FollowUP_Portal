@@ -100,14 +100,78 @@ export function ImportantSignalsPanel({
   onOpenPilotInfo?: () => void;
 }) {
   const [expandedSampleId, setExpandedSampleId] = useState(initialSampleSignalId);
-  const [internalDeviceActions, setInternalDeviceActions] = useState<Set<string>>(() => new Set());
   const [markingDeviceId, setMarkingDeviceId] = useState<string | null>(null);
+  const [internalDeviceStatuses, setInternalDeviceStatuses] = useState<Map<string, boolean>>(() => new Map());
+  const [internalDeviceStatusLoading, setInternalDeviceStatusLoading] = useState(false);
   const [pilotInfoDismissed, setPilotInfoDismissed] = useState(false);
   const visiblePilotInfo = pilotInfoDismissed ? undefined : pilotInfo;
-  const visibleEvents = events.filter((event) =>
-    event.type !== "sample" || !event.sampleDeviceId || !internalDeviceActions.has(event.sampleDeviceId),
-  );
-  const notifications = buildSignalNotifications(visibleEvents, readIds).filter(item =>
+  const sampleDeviceIds = [...new Set(events
+    .filter((event) => event.type === "sample")
+    .map((event) => event.sampleDeviceId?.trim())
+    .filter((deviceId): deviceId is string => Boolean(deviceId)))].sort();
+  const sampleDeviceIdsKey = JSON.stringify(sampleDeviceIds);
+
+  useEffect(() => {
+    let cancelled = false;
+    const ids = JSON.parse(sampleDeviceIdsKey) as string[];
+    if (!ids.length) {
+      setInternalDeviceStatusLoading(false);
+      return () => { cancelled = true; };
+    }
+    setInternalDeviceStatusLoading(true);
+    void (async () => {
+      try {
+        const statuses = new Map<string, boolean>();
+        for (let offset = 0; offset < ids.length; offset += 20) {
+          const query = new URLSearchParams();
+          ids.slice(offset, offset + 20).forEach((deviceId) => query.append("deviceId", deviceId));
+          const response = await fetch(`/api/sample/internal-devices?${query}`, { cache: "no-store" });
+          const payload = await response.json() as {
+            statuses?: Array<{ deviceId: string; isInternal: boolean }>;
+            error?: string;
+          };
+          if (!response.ok) throw new Error(payload.error || "Unable to load device allowlist status");
+          for (const status of payload.statuses || []) statuses.set(status.deviceId, status.isInternal);
+        }
+        if (!cancelled) setInternalDeviceStatuses((current) => new Map([...current, ...statuses]));
+      } catch (error) {
+        if (!cancelled) toast.error(error instanceof Error ? error.message : "Unable to load device allowlist status");
+      } finally {
+        if (!cancelled) setInternalDeviceStatusLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [sampleDeviceIdsKey]);
+
+  const toggleInternalDevice = async (deviceId: string, isInternal: boolean) => {
+    if (markingDeviceId) return;
+    const nextIsInternal = !isInternal;
+    setMarkingDeviceId(deviceId);
+    try {
+      const response = await fetch(
+        nextIsInternal
+          ? "/api/sample/internal-devices"
+          : `/api/sample/internal-devices?deviceId=${encodeURIComponent(deviceId)}`,
+        {
+          method: nextIsInternal ? "POST" : "DELETE",
+          ...(nextIsInternal ? {
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ deviceId }),
+          } : {}),
+        },
+      );
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error || "Unable to update internal-device status");
+      setInternalDeviceStatuses((current) => new Map(current).set(deviceId, nextIsInternal));
+      toast.success(nextIsInternal ? "Device marked internal across all brands." : "Device removed from the internal allowlist.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to update internal-device status");
+    } finally {
+      setMarkingDeviceId(null);
+    }
+  };
+
+  const notifications = buildSignalNotifications(events, readIds).filter(item =>
     item.latest.type !== "sample" || item.unread || item.events.some(event => event.id === expandedSampleId));
 
   if (!notifications.length && !visiblePilotInfo) return null;
@@ -143,33 +207,28 @@ export function ImportantSignalsPanel({
           </div>
           {unread ? <span className="mt-1.5 size-2 shrink-0 rounded-full bg-rose-500" role="img" aria-label="Unread" /> : null}
         </>;
-        const controlClass = "flex w-full min-w-0 items-start gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400";
+        const controlClass = "flex min-w-0 flex-1 items-start gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400";
         const markRead = () => onRead?.(group.map(event => event.signalReadId || event.id));
+        const sampleDeviceId = latest.type === "sample" ? latest.sampleDeviceId : undefined;
+        const isInternal = sampleDeviceId ? internalDeviceStatuses.get(sampleDeviceId) : undefined;
         return <article key={key} className="min-w-0 py-3">
-          {source ? <a href={source} target="_blank" rel="noreferrer" className={controlClass} onClick={markRead}>{contents}</a>
-            : <button type="button" className={controlClass} disabled={latest.type === "linkedin"} aria-expanded={latest.type === "sample" ? sampleOpen : undefined} onClick={() => {
+          <div className="flex min-w-0 items-start gap-2">
+            {source ? <a href={source} target="_blank" rel="noreferrer" className={controlClass} onClick={markRead}>{contents}</a>
+              : <button type="button" className={controlClass} disabled={latest.type === "linkedin"} aria-expanded={latest.type === "sample" ? sampleOpen : undefined} onClick={() => {
               if (latest.type === "sample") { setExpandedSampleId(sampleOpen ? undefined : latest.id); markRead(); }
               else if (latest.type === "email") { onOpenEmailSignal?.(latest); }
-            }}>{contents}</button>}
-          {sampleOpen ? <div className="ml-8 mt-3 rounded-lg bg-violet-50/60 p-3"><SampleTapDetails event={latest} brandName={brandName} ownerName={ownerName} />{latest.sampleDeviceId ? <div className="mt-3 border-t border-violet-100 pt-2.5"><Button type="button" variant="outline" size="sm" className="h-8 min-h-8 bg-white text-xs" disabled={markingDeviceId === latest.sampleDeviceId} onClick={async () => {
-            const deviceId = latest.sampleDeviceId!;
-            setMarkingDeviceId(deviceId);
-            try {
-              const response = await fetch("/api/sample/internal-devices", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ deviceId }),
-              });
-              const result = await response.json() as { error?: string };
-              if (!response.ok) throw new Error(result.error || "Unable to mark device");
-              setInternalDeviceActions((current) => new Set(current).add(deviceId));
-              toast.success("Device marked internal; its sample taps will no longer notify.");
-            } catch (cause) {
-              toast.error(cause instanceof Error ? cause.message : "Unable to mark device");
-            } finally {
-              setMarkingDeviceId(null);
-            }
-          }}>{markingDeviceId === latest.sampleDeviceId ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : <Check className="mr-1.5 size-3.5" />}Mark device as internal</Button><p className="mt-1.5 text-[11px] text-slate-500">This applies across all brands.</p></div> : null}</div> : null}
+              }}>{contents}</button>}
+            {sampleDeviceId ? <Button
+              type="button"
+              variant={isInternal ? "secondary" : "outline"}
+              size="sm"
+              className="min-h-11 shrink-0 self-start px-2.5 text-xs"
+              disabled={internalDeviceStatusLoading || isInternal === undefined || markingDeviceId !== null}
+              onClick={() => void toggleInternalDevice(sampleDeviceId, Boolean(isInternal))}
+              aria-label={`${isInternal ? "Remove" : "Mark"} this Sample device ${isInternal ? "from" : "as"} the internal allowlist`}
+            >{markingDeviceId === sampleDeviceId ? <Loader2 className="mr-1 size-3.5 animate-spin" /> : isInternal ? null : <Check className="mr-1 size-3.5" />}{isInternal ? "Unmark" : "Mark internal"}</Button> : null}
+          </div>
+          {sampleOpen ? <div className="ml-8 mt-3 rounded-lg bg-violet-50/60 p-3"><SampleTapDetails event={latest} brandName={brandName} ownerName={ownerName} /></div> : null}
         </article>;
       })}
     </div>
