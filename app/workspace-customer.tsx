@@ -1993,7 +1993,7 @@ function BrandContactList({
                           ? isPending(contact.id, field)
                           : false;
                       const friendAccounts =
-                        field === "linkedin" && value ? linkedinFriendAccounts(contact) : [];
+                        field === "linkedin" ? linkedinFriendAccounts(contact) : [];
                       const linkedinUrl =
                         field === "linkedin" && value ? linkedinHref(value) : undefined;
                       return (
