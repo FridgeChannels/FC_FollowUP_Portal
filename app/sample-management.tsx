@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Check, Copy, ExternalLink, Loader2, SmartphoneNfc } from "lucide-react";
 import Image from "next/image";
@@ -70,17 +70,6 @@ type SampleSummary = {
   totalClicks: number;
   uniqueVisitors: number;
   lastClickedAt: string | null;
-};
-type InternalDevice = {
-  deviceId: string;
-  tapCount: number;
-  firstTapAt: string | null;
-  lastTapAt: string | null;
-  isInternal: boolean;
-  isInactive: boolean;
-  label: string | null;
-  note: string | null;
-  markedAt: string | null;
 };
 type SampleMagnetSummary = {
   sn: string;
@@ -374,10 +363,6 @@ export function SampleManagementPage({ customerId }: { customerId: string }) {
   const [extractingColors, setExtractingColors] = useState(false);
   const [snSwitching, setSnSwitching] = useState(false);
   const [pendingSn, setPendingSn] = useState<string | null>(null);
-  const [internalDevices, setInternalDevices] = useState<InternalDevice[]>([]);
-  const [deviceCandidates, setDeviceCandidates] = useState<InternalDevice[]>([]);
-  const [devicesLoading, setDevicesLoading] = useState(true);
-  const [deviceActionId, setDeviceActionId] = useState<string | null>(null);
 
   const fetchSamplePayload = async (sn?: string | null) => {
     const query = sn ? `?sn=${encodeURIComponent(sn)}` : "";
@@ -462,60 +447,6 @@ export function SampleManagementPage({ customerId }: { customerId: string }) {
       active = false;
     };
   }, [customerId]);
-
-  const refreshInternalDevices = useCallback(async () => {
-    try {
-      const [devicesResponse, candidatesResponse] = await Promise.all([
-        fetch("/api/sample/internal-devices", { cache: "no-store" }),
-        fetch("/api/sample/internal-devices/candidates", { cache: "no-store" }),
-      ]);
-      const [devicesData, candidatesData] = await Promise.all([
-        devicesResponse.json() as Promise<{ error?: string; devices?: InternalDevice[] }>,
-        candidatesResponse.json() as Promise<{ error?: string; candidates?: InternalDevice[] }>,
-      ]);
-      if (!devicesResponse.ok) throw new Error(devicesData.error || "Unable to load internal devices");
-      if (!candidatesResponse.ok) throw new Error(candidatesData.error || "Unable to load device candidates");
-      setInternalDevices(devicesData.devices || []);
-      setDeviceCandidates(candidatesData.candidates || []);
-    } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : "Unable to load internal devices");
-    } finally {
-      setDevicesLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => { void refreshInternalDevices(); }, 0);
-    return () => window.clearTimeout(timer);
-  }, [refreshInternalDevices]);
-
-  const setDeviceInternal = async (deviceId: string, isInternal: boolean) => {
-    if (!deviceId || deviceActionId) return;
-    setDeviceActionId(deviceId);
-    try {
-      const response = await fetch(isInternal
-        ? `/api/sample/internal-devices?deviceId=${encodeURIComponent(deviceId)}`
-        : "/api/sample/internal-devices", {
-          method: isInternal ? "DELETE" : "POST",
-          ...(isInternal ? {} : {
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ deviceId }),
-          }),
-        });
-      const result = await response.json() as { error?: string };
-      if (!response.ok) throw new Error(result.error || "Unable to update internal device");
-      toast.success(isInternal ? "Device removed from internal list" : "Device marked as internal");
-      setDevicesLoading(true);
-      await Promise.all([
-        refreshInternalDevices(),
-        nfcCardSn ? fetchSamplePayload(nfcCardSn).then(setSample).catch(() => undefined) : Promise.resolve(),
-      ]);
-    } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : "Unable to update internal device");
-    } finally {
-      setDeviceActionId(null);
-    }
-  };
 
   const types: SampleType[] = ["DTC", "Amazon"];
   const activeType =
@@ -917,48 +848,20 @@ export function SampleManagementPage({ customerId }: { customerId: string }) {
               {sample.clicks?.some((click) => click.sampleType === activeType) ? (
                 <div className="mt-3 overflow-x-auto rounded-xl border border-slate-200">
                   <table className="w-full min-w-[680px] text-left text-xs">
-                    <thead className="bg-slate-50 text-slate-500"><tr><th className="px-3 py-2 font-medium">Time</th><th className="px-3 py-2 font-medium">Location</th><th className="px-3 py-2 font-medium">Device</th><th className="px-3 py-2 font-medium">Device ID</th><th className="px-3 py-2 font-medium">Action</th></tr></thead>
+                    <thead className="bg-slate-50 text-slate-500"><tr><th className="px-3 py-2 font-medium">Time</th><th className="px-3 py-2 font-medium">Location</th><th className="px-3 py-2 font-medium">Device</th><th className="px-3 py-2 font-medium">Device ID</th></tr></thead>
                     <tbody className="divide-y divide-slate-100">
                       {sample.clicks.filter((click) => click.sampleType === activeType).map((click) => (
-                        <tr key={click.id} className={click.isInternal ? "bg-violet-50/50" : ""}>
+                        <tr key={click.id}>
                           <td className="whitespace-nowrap px-3 py-2.5 text-slate-600">{formatScheduledDateTime(click.clickedAt)}</td>
                           <td className="px-3 py-2.5 text-slate-600">{click.location}</td>
                           <td className="px-3 py-2.5 text-slate-600">{click.device}</td>
                           <td className="max-w-40 truncate px-3 py-2.5 font-mono text-slate-500" title={click.deviceId || ""}>{click.deviceId || "Unknown"}</td>
-                          <td className="px-3 py-2.5">
-                            {click.deviceId ? <Button variant={click.isInternal ? "outline" : "secondary"} size="sm" className="h-8 min-h-8 px-2.5 text-[11px]" disabled={deviceActionId === click.deviceId} onClick={() => void setDeviceInternal(click.deviceId!, !!click.isInternal)}>
-                              {deviceActionId === click.deviceId ? <Loader2 className="mr-1 size-3 animate-spin" /> : null}{click.isInternal ? "Unmark" : "Mark internal"}
-                            </Button> : <span className="text-slate-400">No device ID</span>}
-                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
               ) : <p className="mt-3 text-sm text-slate-500">No tap records for this sample type.</p>}
-            </section>
-            <section className="mt-6 space-y-5 pb-8" aria-label="Internal devices">
-              <div>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div><h2 className="text-sm font-semibold text-slate-900">Internal devices</h2><p className="mt-1 text-xs text-slate-500">Marked devices stop generating sample notifications across all brands.</p></div>
-                  <Button variant="outline" size="sm" className="h-8 min-h-8" disabled={devicesLoading} onClick={() => { setDevicesLoading(true); void refreshInternalDevices(); }}>{devicesLoading ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : null}Refresh</Button>
-                </div>
-                {devicesLoading ? <p className="mt-3 text-sm text-slate-500">Loading devices…</p> : internalDevices.length ? <div className="mt-3 space-y-2">
-                  {internalDevices.map((device) => <article key={device.deviceId} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-violet-200 bg-violet-50/40 px-3 py-3">
-                    <div className="min-w-0 flex-1"><p className="break-all font-mono text-xs font-medium text-slate-800">{device.deviceId}</p><p className="mt-1 text-xs text-slate-500">{device.tapCount} taps · First {device.firstTapAt ? formatScheduledDateTime(device.firstTapAt) : "—"} · Last {device.lastTapAt ? formatScheduledDateTime(device.lastTapAt) : "—"}</p>{device.label || device.note ? <p className="mt-1 text-xs text-slate-500">{[device.label, device.note].filter(Boolean).join(" · ")}</p> : null}</div>
-                    <div className="flex items-center gap-2">{device.isInactive ? <span className="rounded-full bg-amber-100 px-2 py-1 text-[11px] font-medium text-amber-800" title="No taps in the last 180 days">Inactive</span> : <span className="rounded-full bg-emerald-100 px-2 py-1 text-[11px] font-medium text-emerald-800">Active</span>}<Button variant="outline" size="sm" className="h-8 min-h-8" disabled={deviceActionId === device.deviceId} onClick={() => void setDeviceInternal(device.deviceId, true)}>{deviceActionId === device.deviceId ? <Loader2 className="mr-1 size-3 animate-spin" /> : null}Unmark</Button></div>
-                  </article>)}
-                </div> : <p className="mt-3 text-sm text-slate-500">No devices are marked internal.</p>}
-              </div>
-              <div>
-                <div><h3 className="text-sm font-semibold text-slate-900">Tap-heavy candidates</h3><p className="mt-1 text-xs text-slate-500">Unmarked devices with at least 3 recorded taps.</p></div>
-                {devicesLoading ? <p className="mt-3 text-sm text-slate-500">Finding candidates…</p> : deviceCandidates.length ? <div className="mt-3 space-y-2">
-                  {deviceCandidates.map((device) => <article key={device.deviceId} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 py-3">
-                    <div className="min-w-0 flex-1"><p className="break-all font-mono text-xs font-medium text-slate-800">{device.deviceId}</p><p className="mt-1 text-xs text-slate-500">{device.tapCount} taps · First {device.firstTapAt ? formatScheduledDateTime(device.firstTapAt) : "—"} · Last {device.lastTapAt ? formatScheduledDateTime(device.lastTapAt) : "—"}</p></div>
-                    <Button size="sm" className="h-8 min-h-8" disabled={deviceActionId === device.deviceId} onClick={() => void setDeviceInternal(device.deviceId, false)}>{deviceActionId === device.deviceId ? <Loader2 className="mr-1 size-3 animate-spin" /> : null}Mark internal</Button>
-                  </article>)}
-                </div> : <p className="mt-3 text-sm text-slate-500">No unmarked devices have reached the tap threshold.</p>}
-              </div>
             </section>
             <div
               className={`relative ${snSwitching ? "pointer-events-none opacity-50" : ""}`}

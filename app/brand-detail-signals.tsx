@@ -2,9 +2,7 @@
 
 import { formatScheduledDateTime } from "@/lib/display-time";
 import { useEffect, useState } from "react";
-import { Check, ChevronDown, ExternalLink, FileText, Loader2, MailOpen, SmartphoneNfc } from "lucide-react";
-import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
+import { ChevronDown, ExternalLink, FileText, MailOpen, SmartphoneNfc } from "lucide-react";
 import type { SignalEvent } from "@/lib/signals/model";
 import { safeSourceUrl } from "@/lib/signals/model";
 import { buildSignalNotifications, signalNotificationTime } from "@/lib/signals/notifications";
@@ -100,76 +98,8 @@ export function ImportantSignalsPanel({
   onOpenPilotInfo?: () => void;
 }) {
   const [expandedSampleId, setExpandedSampleId] = useState(initialSampleSignalId);
-  const [markingDeviceId, setMarkingDeviceId] = useState<string | null>(null);
-  const [internalDeviceStatuses, setInternalDeviceStatuses] = useState<Map<string, boolean>>(() => new Map());
-  const [internalDeviceStatusLoading, setInternalDeviceStatusLoading] = useState(false);
   const [pilotInfoDismissed, setPilotInfoDismissed] = useState(false);
   const visiblePilotInfo = pilotInfoDismissed ? undefined : pilotInfo;
-  const sampleDeviceIds = [...new Set(events
-    .filter((event) => event.type === "sample")
-    .map((event) => event.sampleDeviceId?.trim())
-    .filter((deviceId): deviceId is string => Boolean(deviceId)))].sort();
-  const sampleDeviceIdsKey = JSON.stringify(sampleDeviceIds);
-
-  useEffect(() => {
-    let cancelled = false;
-    const ids = JSON.parse(sampleDeviceIdsKey) as string[];
-    if (!ids.length) {
-      setInternalDeviceStatusLoading(false);
-      return () => { cancelled = true; };
-    }
-    setInternalDeviceStatusLoading(true);
-    void (async () => {
-      try {
-        const statuses = new Map<string, boolean>();
-        for (let offset = 0; offset < ids.length; offset += 20) {
-          const query = new URLSearchParams();
-          ids.slice(offset, offset + 20).forEach((deviceId) => query.append("deviceId", deviceId));
-          const response = await fetch(`/api/sample/internal-devices?${query}`, { cache: "no-store" });
-          const payload = await response.json() as {
-            statuses?: Array<{ deviceId: string; isInternal: boolean }>;
-            error?: string;
-          };
-          if (!response.ok) throw new Error(payload.error || "Unable to load device allowlist status");
-          for (const status of payload.statuses || []) statuses.set(status.deviceId, status.isInternal);
-        }
-        if (!cancelled) setInternalDeviceStatuses((current) => new Map([...current, ...statuses]));
-      } catch (error) {
-        if (!cancelled) toast.error(error instanceof Error ? error.message : "Unable to load device allowlist status");
-      } finally {
-        if (!cancelled) setInternalDeviceStatusLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [sampleDeviceIdsKey]);
-
-  const toggleInternalDevice = async (deviceId: string, isInternal: boolean) => {
-    if (markingDeviceId) return;
-    const nextIsInternal = !isInternal;
-    setMarkingDeviceId(deviceId);
-    try {
-      const response = await fetch(
-        nextIsInternal
-          ? "/api/sample/internal-devices"
-          : `/api/sample/internal-devices?deviceId=${encodeURIComponent(deviceId)}`,
-        {
-          method: nextIsInternal ? "POST" : "DELETE",
-          ...(nextIsInternal ? {
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ deviceId }),
-          } : {}),
-        },
-      );
-      const result = await response.json() as { error?: string };
-      if (!response.ok) throw new Error(result.error || "Unable to update internal-device status");
-      setInternalDeviceStatuses((current) => new Map(current).set(deviceId, nextIsInternal));
-      toast.success(nextIsInternal ? "Device marked internal across all brands." : "Device removed from the internal allowlist.");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Unable to update internal-device status");
-    } finally {
-      setMarkingDeviceId(null);
-    }
-  };
 
   const notifications = buildSignalNotifications(events, readIds).filter(item =>
     item.latest.type !== "sample" || item.unread || item.events.some(event => event.id === expandedSampleId));
@@ -209,8 +139,6 @@ export function ImportantSignalsPanel({
         </>;
         const controlClass = "flex min-w-0 flex-1 items-start gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400";
         const markRead = () => onRead?.(group.map(event => event.signalReadId || event.id));
-        const sampleDeviceId = latest.type === "sample" ? latest.sampleDeviceId : undefined;
-        const isInternal = sampleDeviceId ? internalDeviceStatuses.get(sampleDeviceId) : undefined;
         return <article key={key} className="min-w-0 py-3">
           <div className="flex min-w-0 items-start gap-2">
             {source ? <a href={source} target="_blank" rel="noreferrer" className={controlClass} onClick={markRead}>{contents}</a>
@@ -218,15 +146,6 @@ export function ImportantSignalsPanel({
               if (latest.type === "sample") { setExpandedSampleId(sampleOpen ? undefined : latest.id); markRead(); }
               else if (latest.type === "email") { onOpenEmailSignal?.(latest); }
               }}>{contents}</button>}
-            {sampleDeviceId ? <Button
-              type="button"
-              variant={isInternal ? "secondary" : "outline"}
-              size="sm"
-              className="min-h-11 shrink-0 self-start px-2.5 text-xs"
-              disabled={internalDeviceStatusLoading || isInternal === undefined || markingDeviceId !== null}
-              onClick={() => void toggleInternalDevice(sampleDeviceId, Boolean(isInternal))}
-              aria-label={`${isInternal ? "Remove" : "Mark"} this Sample device ${isInternal ? "from" : "as"} the internal allowlist`}
-            >{markingDeviceId === sampleDeviceId ? <Loader2 className="mr-1 size-3.5 animate-spin" /> : isInternal ? null : <Check className="mr-1 size-3.5" />}{isInternal ? "Unmark" : "Mark internal"}</Button> : null}
           </div>
           {sampleOpen ? <div className="ml-8 mt-3 rounded-lg bg-violet-50/60 p-3"><SampleTapDetails event={latest} brandName={brandName} ownerName={ownerName} /></div> : null}
         </article>;
