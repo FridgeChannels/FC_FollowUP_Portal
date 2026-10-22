@@ -1,6 +1,8 @@
 import {
-  supabaseRpc,
+  supabaseDelete,
+  supabasePatch,
   supabaseSelect,
+  supabaseUpsert,
 } from "../supabase/client.ts";
 import { isSupabaseConfigured } from "../supabase/config.ts";
 
@@ -158,7 +160,19 @@ export function isInternalDeviceId(
   return internalIds.has(id);
 }
 
-/** Add device to allowlist and flip matching visit rows. */
+async function setVisitsInternalFlag(deviceId: string, isInternal: boolean) {
+  await supabasePatch(
+    "sample_tap_visits",
+    { is_internal: isInternal },
+    { device_id: `eq.${deviceId}` },
+  );
+}
+
+/**
+ * Add device to allowlist and flip matching visit rows.
+ * Uses table upsert (same path as the earlier Portal UI) so production works
+ * even when the optional `set_sample_internal_device` RPC has not been applied.
+ */
 export async function markInternalDevice(input: {
   deviceId: string;
   label?: string | null;
@@ -168,14 +182,21 @@ export async function markInternalDevice(input: {
   if (!deviceId || deviceId.length > 256) {
     throw new Error("deviceId must be 1–256 characters");
   }
-  const device = await supabaseRpc<SampleInternalDevice>("set_sample_internal_device", {
-    p_device_id: deviceId,
-    p_is_internal: true,
-    p_label: input.label?.trim() || null,
-    p_note: input.note?.trim() || null,
-  });
+  const rows = await supabaseUpsert<Record<string, unknown>>(
+    "sample_internal_devices",
+    [
+      {
+        device_id: deviceId,
+        label: input.label?.trim() || null,
+        note: input.note?.trim() || null,
+        updated_at: new Date().toISOString(),
+      },
+    ],
+    "device_id",
+  );
   clearInternalDeviceIdCache();
-  return device;
+  await setVisitsInternalFlag(deviceId, true);
+  return rows[0] as SampleInternalDevice;
 }
 
 /** Remove device from allowlist and clear matching visit flags. */
@@ -184,11 +205,7 @@ export async function unmarkInternalDevice(deviceId: string): Promise<void> {
   if (!id || id.length > 256) {
     throw new Error("deviceId must be 1–256 characters");
   }
-  await supabaseRpc("set_sample_internal_device", {
-    p_device_id: id,
-    p_is_internal: false,
-    p_label: null,
-    p_note: null,
-  });
+  await supabaseDelete("sample_internal_devices", { device_id: `eq.${id}` });
   clearInternalDeviceIdCache();
+  await setVisitsInternalFlag(id, false);
 }

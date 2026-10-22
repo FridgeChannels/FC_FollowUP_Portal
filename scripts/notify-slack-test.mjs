@@ -3,12 +3,17 @@
  * Send one real Slack notification using .env (does not use unit-test mocks).
  *
  *   node scripts/notify-slack-test.mjs
+ *   node scripts/notify-slack-test.mjs --sample
+ *
+ * --sample posts a Sample tap layout. When SLACK_SIGNING_SECRET is set, includes
+ * the Mark internal button (requires Interactivity Request URL on the Slack App).
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
+const wantSample = process.argv.includes("--sample");
 
 function loadDotEnv() {
   try {
@@ -46,63 +51,137 @@ const portalBase = (
 ).replace(/\/+$/, "");
 const brandId = "notify-test-brand";
 const portalUrl = `${portalBase}/customers/${encodeURIComponent(brandId)}`;
+const samplePortalUrl = `${portalUrl}/sample`;
+const signingSecret = (process.env.SLACK_SIGNING_SECRET || "").trim();
 
-const text = [
-  "Cold Inbound · Email",
-  "Notify Layout Test",
-  "",
-  "Owner: Ella",
-  "Contact: Jane Doe",
-  "From: buyer@acme.com",
-  "Status: Needs Reply",
-  "Due: (test)",
-  "Subject: Magnet inquiry",
-  "",
-  "Preview: Real Slack Block Kit smoke test",
-  "",
-  `Open brand: ${portalUrl}`,
-].join("\n");
-
-const payload = {
-  text,
-  blocks: [
+let payload;
+if (wantSample) {
+  const deviceId = "local-test-device-001";
+  const actions = [
     {
-      type: "header",
-      text: { type: "plain_text", text: "Cold Inbound · Email", emoji: true },
+      type: "button",
+      text: { type: "plain_text", text: "Open Sample in Portal", emoji: true },
+      url: samplePortalUrl,
+      action_id: "open_sample_portal",
     },
-    {
-      type: "section",
-      text: { type: "mrkdwn", text: "*Notify Layout Test*" },
-    },
-    {
-      type: "section",
-      fields: [
-        { type: "mrkdwn", text: "*Owner*\nElla" },
-        { type: "mrkdwn", text: "*Contact*\nJane Doe" },
-        { type: "mrkdwn", text: "*From*\nbuyer@acme.com" },
-        { type: "mrkdwn", text: "*Status*\nNeeds Reply" },
-      ],
-    },
-    {
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: "*Preview*\n> Real Slack Block Kit smoke test",
-      },
-    },
-    {
-      type: "actions",
-      elements: [
-        {
-          type: "button",
-          text: { type: "plain_text", text: "Open brand in Portal", emoji: true },
-          url: portalUrl,
-          action_id: "open_brand_portal",
+  ];
+  if (signingSecret) {
+    actions.push({
+      type: "button",
+      text: { type: "plain_text", text: "Mark internal", emoji: true },
+      action_id: "mark_internal_device",
+      value: JSON.stringify({ deviceId, brandId }),
+      confirm: {
+        title: { type: "plain_text", text: "Mark device as internal?" },
+        text: {
+          type: "mrkdwn",
+          text: `Future taps from device \`${deviceId}\` will be hidden and no longer notify Slack.`,
         },
-      ],
-    },
-  ],
-};
+        confirm: { type: "plain_text", text: "Mark internal" },
+        deny: { type: "plain_text", text: "Cancel" },
+      },
+    });
+  }
+  payload = {
+    text: [
+      "Sample tap · Sample",
+      "Notify Layout Test",
+      "",
+      "Owner: Ella",
+      "SN: 93H68D44ER",
+      "Location: Debug City, Test",
+      "Device: curl · local",
+      "",
+      "URL: https://tap.fridgechannels.com/p/93H68D44ER",
+      "",
+      `Open Sample: ${samplePortalUrl}`,
+    ].join("\n"),
+    blocks: [
+      {
+        type: "header",
+        text: { type: "plain_text", text: "Sample tap · Sample", emoji: true },
+      },
+      {
+        type: "section",
+        text: { type: "mrkdwn", text: "*Notify Layout Test*" },
+      },
+      {
+        type: "section",
+        fields: [
+          { type: "mrkdwn", text: "*Owner*\nElla" },
+          { type: "mrkdwn", text: "*SN*\n93H68D44ER" },
+          { type: "mrkdwn", text: "*Location*\nDebug City, Test" },
+          { type: "mrkdwn", text: "*Device*\ncurl · local" },
+        ],
+      },
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: "*URL*\nhttps://tap.fridgechannels.com/p/93H68D44ER",
+        },
+      },
+      { type: "actions", block_id: "sample_actions", elements: actions },
+    ],
+  };
+} else {
+  const text = [
+    "Cold Inbound · Email",
+    "Notify Layout Test",
+    "",
+    "Owner: Ella",
+    "Contact: Jane Doe",
+    "From: buyer@acme.com",
+    "Status: Needs Reply",
+    "Due: (test)",
+    "Subject: Magnet inquiry",
+    "",
+    "Preview: Real Slack Block Kit smoke test",
+    "",
+    `Open brand: ${portalUrl}`,
+  ].join("\n");
+
+  payload = {
+    text,
+    blocks: [
+      {
+        type: "header",
+        text: { type: "plain_text", text: "Cold Inbound · Email", emoji: true },
+      },
+      {
+        type: "section",
+        text: { type: "mrkdwn", text: "*Notify Layout Test*" },
+      },
+      {
+        type: "section",
+        fields: [
+          { type: "mrkdwn", text: "*Owner*\nElla" },
+          { type: "mrkdwn", text: "*Contact*\nJane Doe" },
+          { type: "mrkdwn", text: "*From*\nbuyer@acme.com" },
+          { type: "mrkdwn", text: "*Status*\nNeeds Reply" },
+        ],
+      },
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: "*Preview*\n> Real Slack Block Kit smoke test",
+        },
+      },
+      {
+        type: "actions",
+        elements: [
+          {
+            type: "button",
+            text: { type: "plain_text", text: "Open brand in Portal", emoji: true },
+            url: portalUrl,
+            action_id: "open_brand_portal",
+          },
+        ],
+      },
+    ],
+  };
+}
 
 const response = await fetch(webhookUrl, {
   method: "POST",
@@ -116,5 +195,15 @@ if (!response.ok) {
   process.exit(1);
 }
 
-console.log("Slack webhook OK — check your channel for the new layout + Open brand button.");
-console.log(`Portal link: ${portalUrl}`);
+if (wantSample) {
+  console.log("Slack sample webhook OK — check your channel for Sample tap + buttons.");
+  console.log(
+    signingSecret
+      ? "Mark internal button included (SLACK_SIGNING_SECRET set)."
+      : "Mark internal omitted — set SLACK_SIGNING_SECRET to include it.",
+  );
+  console.log(`Portal link: ${samplePortalUrl}`);
+} else {
+  console.log("Slack webhook OK — check your channel for the new layout + Open brand button.");
+  console.log(`Portal link: ${portalUrl}`);
+}

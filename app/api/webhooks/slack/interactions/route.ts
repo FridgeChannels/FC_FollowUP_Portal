@@ -83,15 +83,23 @@ export async function POST(request: Request) {
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
+    const detail =
+      error && typeof error === "object" && "body" in error && typeof (error as { body: unknown }).body === "string"
+        ? (error as { body: string }).body.slice(0, 300)
+        : "";
+    const status =
+      error && typeof error === "object" && "status" in error ? (error as { status: unknown }).status : null;
     console.error("[slack/interactions] internal device update failed", {
       kind: action.kind,
       deviceId: target.deviceId,
       message,
+      status,
+      detail,
     });
     await postToResponseUrl(payload.response_url, {
       response_type: "ephemeral",
       replace_original: false,
-      text: `${actionLabel} failed: ${message}`,
+      text: `${actionLabel} failed: ${message}${status ? ` (HTTP ${status})` : ""}${detail ? ` — ${detail}` : ""}`,
     });
     return new Response(null, { status: 200 });
   }

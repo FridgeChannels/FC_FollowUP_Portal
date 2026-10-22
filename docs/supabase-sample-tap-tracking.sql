@@ -75,3 +75,59 @@ ALTER TABLE public.sample_tap_visits ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.sample_sync_cursors ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.system_notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.sample_internal_devices ENABLE ROW LEVEL SECURITY;
+
+REVOKE ALL ON public.sample_internal_devices FROM anon, authenticated;
+GRANT ALL ON public.sample_internal_devices TO service_role;
+
+CREATE INDEX IF NOT EXISTS sample_tap_visits_device_id_idx
+  ON public.sample_tap_visits (device_id)
+  WHERE device_id IS NOT NULL;
+
+-- Transactional mark/unmark used by Portal API + Slack "Mark internal"
+CREATE OR REPLACE FUNCTION public.set_sample_internal_device(
+  p_device_id text,
+  p_is_internal boolean,
+  p_label text DEFAULT NULL,
+  p_note text DEFAULT NULL
+) RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = ''
+AS $$
+DECLARE
+  v_device public.sample_internal_devices%ROWTYPE;
+  v_device_id text := btrim(p_device_id);
+BEGIN
+  IF v_device_id IS NULL OR length(v_device_id) NOT BETWEEN 1 AND 256 THEN
+    RAISE EXCEPTION 'device_id must be 1–256 characters' USING ERRCODE = '22023';
+  END IF;
+
+  IF p_is_internal THEN
+    INSERT INTO public.sample_internal_devices (device_id, label, note, updated_at)
+    VALUES (v_device_id, NULLIF(btrim(p_label), ''), NULLIF(btrim(p_note), ''), now())
+    ON CONFLICT (device_id) DO UPDATE
+      SET label = EXCLUDED.label,
+          note = EXCLUDED.note,
+          updated_at = now()
+    RETURNING * INTO v_device;
+
+    UPDATE public.sample_tap_visits
+      SET is_internal = true
+      WHERE device_id = v_device_id AND is_internal IS DISTINCT FROM true;
+
+    RETURN to_jsonb(v_device);
+  END IF;
+
+  DELETE FROM public.sample_internal_devices WHERE device_id = v_device_id;
+  UPDATE public.sample_tap_visits
+    SET is_internal = false
+    WHERE device_id = v_device_id AND is_internal IS DISTINCT FROM false;
+
+  RETURN jsonb_build_object('device_id', v_device_id, 'is_internal', false);
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.set_sample_internal_device(text, boolean, text, text)
+  FROM public, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.set_sample_internal_device(text, boolean, text, text)
+  TO service_role;
