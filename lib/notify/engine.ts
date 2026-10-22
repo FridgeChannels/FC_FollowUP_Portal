@@ -2,6 +2,7 @@ import { formatScheduledDateTime } from "../display-time.ts";
 import {
   eventTypeEnabled,
   getNotifyContentMaxChars,
+  getSlackSigningSecret,
   getSlackWebhookUrl,
   isNotifyEnabled,
   isSlackNotifyEnabled,
@@ -37,6 +38,7 @@ function defaultProviders(): NotifyProvider[] {
         event.eventType === "sample.visited"
           ? portalSampleUrl(event.brandId)
           : portalBrandUrl(event.brandId),
+      markInternalEnabled: !!getSlackSigningSecret(),
     }),
   ];
 }

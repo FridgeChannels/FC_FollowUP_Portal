@@ -194,6 +194,7 @@ V1 **不做**本地重试队列；若后续需要，作为引擎内部增强，�
 | `NOTIFY_ENABLED` | 否 | `false` | 通知引擎总开关。`true` 才尝试投递 |
 | `NOTIFY_SLACK_ENABLED` | 否 | `true`（仅当总开关开且 URL 有值时实际生效） | Slack Provider 开关 |
 | `SLACK_WEBHOOK_URL` | 条件 | 空 | Slack Incoming Webhook 完整 URL。为空则 Slack Provider 视为未启用 |
+| `SLACK_SIGNING_SECRET` | 否 | 空 | Slack App Signing Secret。配置后 Sample tap 通知显示 “Mark internal” 按钮；需在 Slack App → Interactivity 中把 Request URL 设为 `{PORTAL_BASE_URL}/api/webhooks/slack/interactions` |
 | `NOTIFY_ON_REPLY` | 否 | `true` | 是否推送 `reply.received` |
 | `NOTIFY_ON_INBOUND` | 否 | `true` | 是否推送 `inbound.received` |
 | `NOTIFY_ON_PHONE` | 否 | `true` | Phone 渠道是否推送（Phone 通常无 Needs Reply） |

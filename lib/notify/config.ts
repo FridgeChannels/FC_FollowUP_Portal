@@ -4,6 +4,7 @@ type NotifyEnvName =
   | "NOTIFY_ENABLED"
   | "NOTIFY_SLACK_ENABLED"
   | "SLACK_WEBHOOK_URL"
+  | "SLACK_SIGNING_SECRET"
   | "NOTIFY_ON_REPLY"
   | "NOTIFY_ON_INBOUND"
   | "NOTIFY_ON_PHONE"
@@ -39,6 +40,11 @@ export function isSlackNotifyEnabled() {
 
 export function getSlackWebhookUrl() {
   return raw("SLACK_WEBHOOK_URL") || "";
+}
+
+/** Slack App signing secret; interactive buttons are only rendered when set. */
+export function getSlackSigningSecret() {
+  return raw("SLACK_SIGNING_SECRET") || "";
 }
 
 export function shouldNotifyReply() {

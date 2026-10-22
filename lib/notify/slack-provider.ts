@@ -9,6 +9,7 @@ export type SlackWebhookProviderOptions = {
   contentMaxChars?: number;
   formatDueAt?: (iso: string) => string;
   resolvePortalUrl?: (event: NotificationEvent) => string | null;
+  markInternalEnabled?: boolean;
   fetchImpl?: typeof fetch;
   supports?: (event: NotificationEvent) => boolean;
 };
@@ -33,6 +34,7 @@ export function createSlackWebhookProvider(
         contentMaxChars,
         formatDueAt: options.formatDueAt,
         resolvePortalUrl: options.resolvePortalUrl,
+        markInternalEnabled: options.markInternalEnabled,
       });
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), SLACK_TIMEOUT_MS);

@@ -42,6 +42,8 @@ export default defineConfig(async ({ mode }) => {
   const notifySlackEnabled =
     process.env.NOTIFY_SLACK_ENABLED || loadedEnv.NOTIFY_SLACK_ENABLED;
   const slackWebhookUrl = process.env.SLACK_WEBHOOK_URL || loadedEnv.SLACK_WEBHOOK_URL;
+  const slackSigningSecret =
+    process.env.SLACK_SIGNING_SECRET || loadedEnv.SLACK_SIGNING_SECRET;
   const notifyOnReply = process.env.NOTIFY_ON_REPLY || loadedEnv.NOTIFY_ON_REPLY;
   const notifyOnInbound = process.env.NOTIFY_ON_INBOUND || loadedEnv.NOTIFY_ON_INBOUND;
   const notifyOnPhone = process.env.NOTIFY_ON_PHONE || loadedEnv.NOTIFY_ON_PHONE;
@@ -136,6 +138,7 @@ export default defineConfig(async ({ mode }) => {
       ...(notifyEnabled ? { NOTIFY_ENABLED: notifyEnabled } : {}),
       ...(notifySlackEnabled ? { NOTIFY_SLACK_ENABLED: notifySlackEnabled } : {}),
       ...(slackWebhookUrl ? { SLACK_WEBHOOK_URL: slackWebhookUrl } : {}),
+      ...(slackSigningSecret ? { SLACK_SIGNING_SECRET: slackSigningSecret } : {}),
       ...(notifyOnReply ? { NOTIFY_ON_REPLY: notifyOnReply } : {}),
       ...(notifyOnInbound ? { NOTIFY_ON_INBOUND: notifyOnInbound } : {}),
       ...(notifyOnPhone ? { NOTIFY_ON_PHONE: notifyOnPhone } : {}),

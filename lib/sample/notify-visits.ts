@@ -86,6 +86,7 @@ export async function notifySampleVisits(input: {
       occurredAt: visit.occurred_at,
       portalUrl: deepLink,
       inboxStatus: null,
+      deviceId: visit.device_id,
     });
   }
 

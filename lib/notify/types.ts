@@ -28,6 +28,8 @@ export type NotificationEvent = {
   replyDueAt?: string | null;
   occurredAt?: string | null;
   portalUrl?: string | null;
+  /** PostHog `$device_id` for sample taps (enables the Slack "Mark internal" action). */
+  deviceId?: string | null;
 };
 
 export type NotifyProvider = {

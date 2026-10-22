@@ -1,11 +1,23 @@
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import { describe, it } from "node:test";
 import { emitNotification } from "./core.ts";
 import {
+  SLACK_MARK_INTERNAL_ACTION_ID,
+  SLACK_SAMPLE_ACTIONS_BLOCK_ID,
+  SLACK_UNMARK_INTERNAL_ACTION_ID,
+  decodeMarkInternalValue,
   formatSlackNotificationBlocks,
   formatSlackNotificationText,
   truncatePreview,
 } from "./format.ts";
+import {
+  findInternalDeviceAction,
+  internalDeviceStatusBlocks,
+  parseSlackInteractionBody,
+  slackUserLabel,
+} from "./slack-interactions.ts";
+import { verifySlackSignature } from "./slack-signature.ts";
 import { createSlackWebhookProvider } from "./slack-provider.ts";
 import type { NotificationEvent } from "./types.ts";
 
@@ -107,6 +119,104 @@ describe("formatSlackNotificationBlocks", () => {
       | undefined;
     assert.equal(actions?.elements?.[0]?.url, "https://portal.example/customers/brand-1");
     assert.equal(actions?.elements?.[0]?.text?.text, "Open brand in Portal");
+  });
+
+  const sampleEvent: NotificationEvent = {
+    eventType: "sample.visited",
+    channel: "Sample",
+    brandId: "brand-1",
+    brandName: "Acme",
+    subject: "93H68D44ER",
+    deviceId: "dev-123",
+    portalUrl: "https://portal.example/signals?brand=brand-1",
+  };
+
+  it("adds Mark internal button for sample taps when enabled", () => {
+    const blocks = formatSlackNotificationBlocks(sampleEvent, {
+      contentMaxChars: 300,
+      markInternalEnabled: true,
+    });
+    const actions = blocks.find((block) => block.type === "actions") as
+      | { block_id?: string; elements?: Array<{ action_id?: string; value?: string }> }
+      | undefined;
+    assert.equal(actions?.block_id, SLACK_SAMPLE_ACTIONS_BLOCK_ID);
+    const mark = actions?.elements?.find((element) => element.action_id === SLACK_MARK_INTERNAL_ACTION_ID);
+    assert.deepEqual(decodeMarkInternalValue(mark?.value), { deviceId: "dev-123", brandId: "brand-1" });
+  });
+
+  it("omits Mark internal without signing secret, device id, or for non-sample events", () => {
+    const hasMark = (event: NotificationEvent, enabled: boolean) =>
+      formatSlackNotificationBlocks(event, { contentMaxChars: 300, markInternalEnabled: enabled })
+        .some((block) => JSON.stringify(block).includes(SLACK_MARK_INTERNAL_ACTION_ID));
+    assert.equal(hasMark(sampleEvent, false), false);
+    assert.equal(hasMark({ ...sampleEvent, deviceId: null }, true), false);
+    assert.equal(hasMark({ ...baseEvent, deviceId: "dev-123" }, true), false);
+  });
+});
+
+describe("slack interactions", () => {
+  const secret = "test-signing-secret";
+  const sign = (body: string, timestamp: number, key = secret) => {
+    const headers = new Headers({
+      "x-slack-request-timestamp": String(timestamp),
+      "x-slack-signature": `v0=${createHmac("sha256", key).update(`v0:${timestamp}:${body}`).digest("hex")}`,
+    });
+    return headers;
+  };
+
+  it("verifies Slack signatures and rejects tampering or stale requests", () => {
+    const body = "payload=%7B%7D";
+    const now = 1_800_000_000;
+    assert.equal(verifySlackSignature({ body, headers: sign(body, now), signingSecret: secret, now }), true);
+    assert.equal(verifySlackSignature({ body: `${body}x`, headers: sign(body, now), signingSecret: secret, now }), false);
+    assert.equal(verifySlackSignature({ body, headers: sign(body, now, "other"), signingSecret: secret, now }), false);
+    assert.equal(verifySlackSignature({ body, headers: sign(body, now - 600), signingSecret: secret, now }), false);
+  });
+
+  it("parses the Mark internal action and rewrites the message", () => {
+    const blocks = formatSlackNotificationBlocks(
+      { eventType: "sample.visited", channel: "Sample", brandId: "brand-1", deviceId: "dev-123", portalUrl: "https://portal.example/x" },
+      { contentMaxChars: 300, markInternalEnabled: true },
+    );
+    const mark = (blocks.find((block) => block.type === "actions") as { elements: Array<{ action_id?: string; value?: string }> })
+      .elements.find((element) => element.action_id === SLACK_MARK_INTERNAL_ACTION_ID);
+    const body = new URLSearchParams({
+      payload: JSON.stringify({
+        type: "block_actions",
+        user: { id: "U1", username: "mark" },
+        actions: [{ action_id: SLACK_MARK_INTERNAL_ACTION_ID, value: mark?.value }],
+        message: { text: "Sample tap", blocks },
+      }),
+    }).toString();
+    const payload = parseSlackInteractionBody(body);
+    assert.ok(payload);
+    const action = findInternalDeviceAction(payload);
+    assert.deepEqual(action, { kind: "mark", value: { deviceId: "dev-123", brandId: "brand-1" } });
+    assert.equal(slackUserLabel(payload.user), "slack:mark");
+
+    const marked = internalDeviceStatusBlocks(payload.message?.blocks, { action: action!, userId: "U1", clearedUnread: 2 });
+    const markedJson = JSON.stringify(marked);
+    assert.doesNotMatch(markedJson, new RegExp(`"action_id":"${SLACK_MARK_INTERNAL_ACTION_ID}"`));
+    assert.match(markedJson, new RegExp(SLACK_UNMARK_INTERNAL_ACTION_ID));
+    assert.match(markedJson, /open_sample_portal/);
+    assert.match(markedJson, /marked internal by <@U1> · cleared 2 unread notifications/);
+
+    const undo = (marked.find((block) => block.type === "actions") as { elements: Array<{ action_id?: string; value?: string }> })
+      .elements.find((element) => element.action_id === SLACK_UNMARK_INTERNAL_ACTION_ID);
+    const undoAction = findInternalDeviceAction({
+      type: "block_actions",
+      actions: [{ action_id: SLACK_UNMARK_INTERNAL_ACTION_ID, value: undo?.value }],
+    });
+    assert.deepEqual(undoAction, { kind: "unmark", value: { deviceId: "dev-123", brandId: "brand-1" } });
+
+    const restored = internalDeviceStatusBlocks(marked, { action: undoAction!, userId: "U2" });
+    const restoredJson = JSON.stringify(restored);
+    assert.match(restoredJson, new RegExp(`"action_id":"${SLACK_MARK_INTERNAL_ACTION_ID}"`));
+    assert.doesNotMatch(restoredJson, new RegExp(SLACK_UNMARK_INTERNAL_ACTION_ID));
+    assert.doesNotMatch(restoredJson, /marked internal by/);
+    assert.match(restoredJson, /removed from internal list by <@U2>/);
+    assert.equal(restored.filter((block) => block.type === "actions").length, 1);
+    assert.equal(restored.filter((block) => block.type === "context").length, 1);
   });
 });
 

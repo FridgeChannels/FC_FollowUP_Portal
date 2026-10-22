@@ -26,6 +26,7 @@ declare namespace Cloudflare {
     NOTIFY_ENABLED?: string;
     NOTIFY_SLACK_ENABLED?: string;
     SLACK_WEBHOOK_URL?: string;
+    SLACK_SIGNING_SECRET?: string;
     NOTIFY_ON_REPLY?: string;
     NOTIFY_ON_INBOUND?: string;
     NOTIFY_ON_PHONE?: string;

@@ -33,7 +33,59 @@ export type SlackFormatOptions = {
   formatDueAt?: (iso: string) => string;
   /** Resolve brand deep-link when event.portalUrl is empty. */
   resolvePortalUrl?: (event: NotificationEvent) => string | null;
+  /** Requires Slack App interactivity pointed at /api/webhooks/slack/interactions. */
+  markInternalEnabled?: boolean;
 };
+
+export const SLACK_MARK_INTERNAL_ACTION_ID = "mark_internal_device";
+export const SLACK_UNMARK_INTERNAL_ACTION_ID = "unmark_internal_device";
+export const SLACK_SAMPLE_ACTIONS_BLOCK_ID = "sample_actions";
+export const SLACK_INTERNAL_STATUS_BLOCK_ID = "internal_device_status";
+
+export type SlackMarkInternalValue = { deviceId: string; brandId: string | null };
+
+export function encodeMarkInternalValue(value: SlackMarkInternalValue) {
+  return JSON.stringify(value);
+}
+
+export function markInternalButton(value: SlackMarkInternalValue) {
+  return {
+    type: "button",
+    text: { type: "plain_text", text: "Mark internal", emoji: true },
+    action_id: SLACK_MARK_INTERNAL_ACTION_ID,
+    value: encodeMarkInternalValue(value),
+    confirm: {
+      title: { type: "plain_text", text: "Mark device as internal?" },
+      text: {
+        type: "mrkdwn",
+        text: `Future taps from device \`${value.deviceId}\` will be hidden and no longer notify Slack.`,
+      },
+      confirm: { type: "plain_text", text: "Mark internal" },
+      deny: { type: "plain_text", text: "Cancel" },
+    },
+  };
+}
+
+export function undoInternalButton(value: SlackMarkInternalValue) {
+  return {
+    type: "button",
+    text: { type: "plain_text", text: "Undo", emoji: true },
+    action_id: SLACK_UNMARK_INTERNAL_ACTION_ID,
+    value: encodeMarkInternalValue(value),
+  };
+}
+
+export function decodeMarkInternalValue(raw: string | null | undefined): SlackMarkInternalValue | null {
+  try {
+    const parsed = JSON.parse(raw || "") as Partial<SlackMarkInternalValue>;
+    const deviceId = typeof parsed.deviceId === "string" ? parsed.deviceId.trim() : "";
+    if (!deviceId || deviceId.length > 256) return null;
+    const brandId = typeof parsed.brandId === "string" ? parsed.brandId.trim() || null : null;
+    return { deviceId, brandId };
+  } catch {
+    return null;
+  }
+}
 
 function portalUrlFor(
   event: NotificationEvent,
@@ -194,21 +246,28 @@ export function formatSlackNotificationBlocks(
     });
   }
 
+  const actions: SlackBlock[] = [];
   if (portalUrl) {
+    actions.push({
+      type: "button",
+      text: {
+        type: "plain_text",
+        text: isSample ? "Open Sample in Portal" : "Open brand in Portal",
+        emoji: true,
+      },
+      url: portalUrl,
+      action_id: isSample ? "open_sample_portal" : "open_brand_portal",
+    });
+  }
+  const deviceId = (event.deviceId || "").trim();
+  if (isSample && options.markInternalEnabled && deviceId && deviceId.length <= 256) {
+    actions.push(markInternalButton({ deviceId, brandId: event.brandId?.trim() || null }));
+  }
+  if (actions.length) {
     blocks.push({
       type: "actions",
-      elements: [
-        {
-          type: "button",
-          text: {
-            type: "plain_text",
-            text: isSample ? "Open Sample in Portal" : "Open brand in Portal",
-            emoji: true,
-          },
-          url: portalUrl,
-          action_id: isSample ? "open_sample_portal" : "open_brand_portal",
-        },
-      ],
+      ...(isSample ? { block_id: SLACK_SAMPLE_ACTIONS_BLOCK_ID } : {}),
+      elements: actions,
     });
   }
 
