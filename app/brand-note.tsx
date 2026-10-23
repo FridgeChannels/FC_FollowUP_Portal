@@ -39,6 +39,7 @@ export function BrandNote({
   const saveTimer = useRef<number | null>(null);
   const lastSavedRef = useRef(remote ? value || "" : note);
   const noteRef = useRef(note);
+  const customerIdRef = useRef(customerId);
   const onSaveRef = useRef(onSave);
   const savingRef = useRef(false);
 
@@ -50,23 +51,25 @@ export function BrandNote({
     onSaveRef.current = onSave;
   }, [onSave]);
 
-  // Only reset from props when the brand changes — avoid clobbering after a local save
-  // while the parent still holds a stale humanNotes value.
+  // Hydrate async remote values after the detail page finishes loading, but do
+  // not overwrite a draft or a save that is already in progress.
   useEffect(() => {
     if (!remote) return;
     const next = value || "";
+    const brandChanged = customerIdRef.current !== customerId;
+    if (!brandChanged && (saveTimer.current || savingRef.current || noteRef.current !== lastSavedRef.current)) return;
     if (saveTimer.current) {
       window.clearTimeout(saveTimer.current);
       saveTimer.current = null;
     }
+    customerIdRef.current = customerId;
     setPending(false);
     savingRef.current = false;
     setSaving(false);
     lastSavedRef.current = next;
+    noteRef.current = next;
     setNote(next);
-    // Intentionally depend on customerId, not value.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [remote, customerId]);
+  }, [remote, customerId, value]);
 
   const clearSaveTimer = () => {
     if (saveTimer.current) {
@@ -143,6 +146,7 @@ export function BrandNote({
   }, []);
 
   const updateNote = (next: string) => {
+    noteRef.current = next;
     setNote(next);
     if (remote) {
       scheduleRemoteSave(next);

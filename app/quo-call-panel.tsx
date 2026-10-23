@@ -111,40 +111,37 @@ export function QuoCallPanel({
   const nextSteps = data.summary?.nextSteps || [];
   const jobs = data.summary?.jobs || [];
   const eventTypes = new Set(data.eventTypes || []);
-  const defaultTab = data.summary || eventTypes.has("call.summary.completed")
-    ? "summary"
-    : recordings.length || voicemail
-      ? "recording"
-      : "transcript";
 
   return <section className={compact ? "rounded-xl bg-white p-4" : "mt-6 rounded-2xl bg-white p-4 shadow-sm sm:p-5"}>
     <div className="flex flex-wrap items-start justify-between gap-3 pb-3">
       <div className="flex min-w-0 items-start gap-3"><span className="grid size-9 shrink-0 place-items-center rounded-xl bg-blue-100 text-blue-700"><PhoneCall className="size-4"/></span><h3 className="pt-1 font-bold text-slate-950">Quo call details</h3></div>
       {onRefresh ? <Button size="sm" variant="outline" disabled={refreshing} onClick={onRefresh}><RefreshCw className={`mr-2 size-3.5 ${refreshing ? "animate-spin" : ""}`}/>Refresh Quo data</Button> : null}
     </div>
-    <Tabs defaultValue={defaultTab}>
-      <TabsList variant="line" className="grid h-11 w-full grid-cols-3 gap-0">
-        <TabsTrigger value="recording" className="min-w-0 px-1 text-xs sm:text-sm"><FileAudio className="size-3.5"/>Recording</TabsTrigger>
-        <TabsTrigger value="summary" className="min-w-0 px-1 text-xs sm:text-sm"><Bot className="size-3.5"/>Summary</TabsTrigger>
-        <TabsTrigger value="transcript" className="min-w-0 px-1 text-xs sm:text-sm"><UsersRound className="size-3.5"/>Transcript</TabsTrigger>
-      </TabsList>
-
-      <TabsContent value="recording" className="mt-5 space-y-4">
+    <div className="space-y-5">
+      <section aria-labelledby="quo-recording-heading" className="space-y-3">
+        <h4 id="quo-recording-heading" className="flex items-center gap-2 text-sm font-semibold text-slate-900"><FileAudio className="size-4 text-slate-500"/>Recording</h4>
         {recordings.length ? recordings.map((recording, index) => <Recording key={recording.id || recording.url || index} recording={recording}/>) : <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">{eventTypes.has("call.recording.completed") ? "Quo reported that recording processing completed, but no recording file was included." : "No recording available yet."}</p>}
         {voicemail ? <Voicemail voicemail={voicemail}/> : null}
-      </TabsContent>
+      </section>
 
-      <TabsContent value="summary" className="mt-5">
-        {data.summary || eventTypes.has("call.summary.completed") ? <div><div className="grid gap-4 lg:grid-cols-2"><div className="rounded-xl bg-violet-50 p-4"><div className="mb-2 font-semibold text-violet-950">Summary</div>{summary.length ? <ul className="space-y-2 text-sm leading-6 text-violet-950">{summary.map((item, index) => <li key={`${item}-${index}`} className="flex gap-2"><span>•</span><span>{item}</span></li>)}</ul> : <p className="text-sm text-violet-900/70">No summary returned.</p>}</div><div className="rounded-xl bg-emerald-50 p-4"><div className="mb-2 flex items-center gap-2 font-semibold text-emerald-950"><CalendarClock className="size-4"/>Next steps</div>{nextSteps.length ? <ul className="space-y-2 text-sm leading-6 text-emerald-950">{nextSteps.map((item, index) => <li key={`${item}-${index}`} className="flex gap-2"><span>•</span><span>{item}</span></li>)}</ul> : <p className="text-sm text-emerald-900/70">No next steps returned.</p>}</div></div>{jobs.length ? <div className="mt-4 space-y-3"><div className="flex items-center gap-2 text-sm font-semibold text-slate-900"><Clock3 className="size-4"/>Jobs</div>{jobs.map((job, index) => <Job key={`${job.name || "job"}-${index}`} job={job} index={index}/>)}</div> : null}</div> : <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">No AI summary available yet.</p>}
-      </TabsContent>
+      <Tabs defaultValue="transcript">
+        <TabsList variant="line" className="grid h-11 w-full grid-cols-2 gap-0">
+          <TabsTrigger value="transcript" className="min-w-0 px-1 text-xs sm:text-sm"><UsersRound className="size-3.5"/>Transcript</TabsTrigger>
+          <TabsTrigger value="summary" className="min-w-0 px-1 text-xs sm:text-sm"><Bot className="size-3.5"/>Summary</TabsTrigger>
+        </TabsList>
 
-      <TabsContent value="transcript" className="mt-5">
-        {data.transcript || eventTypes.has("call.transcript.completed")
-          ? dialogue.length
-            ? <div className="space-y-3 rounded-xl bg-slate-50 p-4">{dialogue.map((line, index) => <SpeakerLine key={`${line.start}-${line.end}-${index}`} line={line}/>)}</div>
-            : <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">Quo returned the transcript event without dialogue lines.</p>
-          : <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">No transcript available yet.</p>}
-      </TabsContent>
-    </Tabs>
+        <TabsContent value="transcript" className="mt-4">
+          {data.transcript || eventTypes.has("call.transcript.completed")
+            ? dialogue.length
+              ? <div className="space-y-3 rounded-xl bg-slate-50 p-4">{dialogue.map((line, index) => <SpeakerLine key={`${line.start}-${line.end}-${index}`} line={line}/>)}</div>
+              : <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">Quo returned the transcript event without dialogue lines.</p>
+            : <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">No transcript available yet.</p>}
+        </TabsContent>
+
+        <TabsContent value="summary" className="mt-4">
+          {data.summary || eventTypes.has("call.summary.completed") ? <div><div className="grid gap-4 lg:grid-cols-2"><div className="rounded-xl bg-violet-50 p-4"><div className="mb-2 font-semibold text-violet-950">Summary</div>{summary.length ? <ul className="space-y-2 text-sm leading-6 text-violet-950">{summary.map((item, index) => <li key={`${item}-${index}`} className="flex gap-2"><span>•</span><span>{item}</span></li>)}</ul> : <p className="text-sm text-violet-900/70">No summary returned.</p>}</div><div className="rounded-xl bg-emerald-50 p-4"><div className="mb-2 flex items-center gap-2 font-semibold text-emerald-950"><CalendarClock className="size-4"/>Next steps</div>{nextSteps.length ? <ul className="space-y-2 text-sm leading-6 text-emerald-950">{nextSteps.map((item, index) => <li key={`${item}-${index}`} className="flex gap-2"><span>•</span><span>{item}</span></li>)}</ul> : <p className="text-sm text-emerald-900/70">No next steps returned.</p>}</div></div>{jobs.length ? <div className="mt-4 space-y-3"><div className="flex items-center gap-2 text-sm font-semibold text-slate-900"><Clock3 className="size-4"/>Jobs</div>{jobs.map((job, index) => <Job key={`${job.name || "job"}-${index}`} job={job} index={index}/>)}</div> : null}</div> : <p className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">No AI summary available yet.</p>}
+        </TabsContent>
+      </Tabs>
+    </div>
   </section>;
 }
