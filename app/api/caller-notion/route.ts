@@ -1,9 +1,26 @@
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { CallerNotionError, reportToday, validReportDate } from "@/lib/caller-notion";
 import { getDisplayTimeZone } from "@/lib/display-time";
+import { getPortalBaseUrl } from "@/lib/notify/config";
 import { listCallerNotionReports, saveCallerNotionReport } from "@/lib/notion/caller-notion";
 import { runWithNotionLimit } from "@/lib/notion/rate-limit";
 import { MOCK_CALLER_NAME, mockCallerNotionEnabled, mockCallerNotionReports, saveMockCallerNotionReport } from "@/lib/mock-caller-notion";
+
+/** CSRF check that survives reverse proxies (APISIX/Docker) where request.url is internal. */
+function isAllowedRequestOrigin(request: Request, origin: string) {
+  const allowed = new Set<string>();
+  try {
+    allowed.add(new URL(getPortalBaseUrl()).origin);
+  } catch {
+    /* ignore bad PORTAL_BASE_URL */
+  }
+  allowed.add(new URL(request.url).origin);
+  const forwardedHost = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim()
+    || request.headers.get("host")?.trim();
+  const proto = (request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim() || "https").replace(/:$/, "");
+  if (forwardedHost) allowed.add(`${proto}://${forwardedHost}`);
+  return allowed.has(origin);
+}
 
 async function handle(request: Request) {
   try {
@@ -24,7 +41,7 @@ async function handle(request: Request) {
     }
     if (request.method === "POST") {
       const origin = request.headers.get("origin");
-      if (origin && origin !== new URL(request.url).origin) throw new CallerNotionError("Invalid request origin", 403);
+      if (origin && !isAllowedRequestOrigin(request, origin)) throw new CallerNotionError("Invalid request origin", 403);
       const body = await request.json().catch(() => null) as { date?: unknown; url?: unknown } | null;
       const date = body?.date ?? today;
       if (typeof date !== "string" || !validReportDate(date) || date > today) throw new CallerNotionError("Select today or a valid past date.");
