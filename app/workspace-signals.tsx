@@ -1,7 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import Link from "next/link";
+import { useMemo, useState, type MouseEvent } from "react";
 import { ArrowUpRight, FileText, SmartphoneNfc } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -26,6 +25,7 @@ import { useSignals } from "./signals-store";
 import { formatScheduledDateTime } from "@/lib/display-time";
 import { buildSignalQueue } from "@/lib/signals/queue";
 import { MOCK_PILOT_INFO } from "@/lib/mock-pilot-info";
+import { portalNavigate } from "@/app/portal-navigate";
 
 const types = {
   sample: {
@@ -61,6 +61,12 @@ function brandDetailHref(brand: SignalBrand, event: SignalEvent) {
   return `/customers/${encodeURIComponent(brand.id)}?returnTo=%2Fsignals&signal=${encodeURIComponent(event.id)}`;
 }
 
+function navigateFromLink(event: MouseEvent<HTMLAnchorElement>, href: string) {
+  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+  event.preventDefault();
+  portalNavigate(href);
+}
+
 export function SignalsPage() {
   usePageMetadata({
     title: "Signals",
@@ -88,6 +94,7 @@ export function SignalsPage() {
     settle(brand.id, snapshot);
     void fetch(`/api/signals/${encodeURIComponent(brand.id)}`, {
       method: "PATCH",
+      keepalive: true,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "read", eventIds: snapshot }),
     }).then((response) => {
@@ -152,7 +159,7 @@ export function SignalsPage() {
                   <p className="mt-1 text-sm text-slate-700"><span className="font-medium">Pilot info ready for review.</span> {MOCK_PILOT_INFO.summary}</p>
                 </div>
                 <div className="relative z-10 flex items-center justify-end gap-2">
-                  <Link href={pilotInfoHref} className="relative inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-md bg-emerald-800 px-3 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2">View Pilot Info <ArrowUpRight className="size-4" /></Link>
+                  <a href={pilotInfoHref} onClick={(event) => navigateFromLink(event, pilotInfoHref)} className="relative inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-md bg-emerald-800 px-3 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2">View Pilot Info <ArrowUpRight className="size-4" /></a>
                 </div>
               </article> : null}
               {queue.map(({ brand, latest }) => {
@@ -174,13 +181,16 @@ export function SignalsPage() {
                       <p className={`mt-1 truncate text-sm ${isUnread ? "text-muted-foreground" : "text-slate-400"}`}>{latest.summary}</p>
                     </div>
                     <div className="relative z-10 flex items-center justify-end gap-2">
-                      <Link
+                      <a
                         href={brandDetailHref(brand, latest)}
-                        onClick={() => markBrandRead(brand)}
+                        onClick={(event) => {
+                          navigateFromLink(event, brandDetailHref(brand, latest));
+                          markBrandRead(brand);
+                        }}
                         className={`relative inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-md px-3 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${isUnread ? "bg-blue-700 text-white shadow-sm hover:bg-blue-800" : "bg-slate-200/70 text-slate-500 hover:bg-slate-200"}`}
                       >
                         Take Action Now <ArrowUpRight className="size-4" />
-                      </Link>
+                      </a>
                     </div>
                   </article>
                 );
