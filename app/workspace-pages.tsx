@@ -1148,6 +1148,23 @@ export function BrandsPage({ active = true }: { active?: boolean }) {
       || !isAdmin && filters.action === "pauseDue" && !!row.pauseDue)
     .filter((row) => !workSearch || row.brand.name.toLowerCase().includes(workSearch))
     .sort((a, b) => compareBrandListItems(a.brand, b.brand, "ownerAssignedNewest"));
+  useEffect(() => {
+    if (
+      state.currentRole === "Caller" ||
+      workView !== "myWork" ||
+      workLoading ||
+      workError ||
+      !work ||
+      workRows.length > 0
+    ) return;
+
+    setFilters((previous) => {
+      if (previous.view === "all") return previous;
+      const next = { ...previous, view: "all" };
+      window.history.replaceState(window.history.state, "", brandListPath(next, { cursor, page: pageNumber }));
+      return next;
+    });
+  }, [state.currentRole, workView, workLoading, workError, work, workRows.length, cursor, pageNumber]);
   const workByBrandId = new Map((work?.brands || []).map((row) => [row.brand.id, row]));
   const filtered = workView === "all" ? brands : workRows.map((row) => row.brand);
   const currentListPath = brandListPath(filters, { cursor, page: pageNumber });

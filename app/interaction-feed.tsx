@@ -339,9 +339,11 @@ export function InteractionFeed({
   const currentIndex = (currentCp === "Nurture" || !isCpVisible(currentCp))
     ? visibleCps.length - 1
     : visibleCps.indexOf(displayCurrentCp as (typeof visibleCps)[number]);
-  // Conversation history can include every CP while actionable Phone tasks
-  // remain scoped to the current CP.
-  const taskIdsForCp = !isCpVisible(currentCp) ? new Set(tasks.map(task => task.id)) : phoneTaskIdsForCp(interactions, selectedCp, displayCurrentCp, tasks);
+  // Brand communication history includes every CP, and the Phone board should
+  // keep every Phone task visible there regardless of the selected CP.
+  const taskIdsForCp = showAllStageRecords
+    ? new Set(tasks.map(task => task.id))
+    : phoneTaskIdsForCp(interactions, selectedCp, displayCurrentCp, tasks);
   if (activeTaskId) taskIdsForCp.add(activeTaskId);
   const phoneTasks = tasks
     .filter((item) => item.channel === "Phone" && [...taskIdsForCp].some((id) => sameNotionId(id, item.id)))
@@ -391,7 +393,7 @@ export function InteractionFeed({
   const bombsForCp = planState.bombInstances
     .filter(item => item.customerId === customerId && (showAllStageRecords || item.cp === selectedCp))
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt) || b.id.localeCompare(a.id));
-  const usePhoneTaskBoard = activeChannel === "Phone" && (callerPhoneOnly || phoneTasks.length > 0 || cpInteractions.some((item) => item.quo));
+  const usePhoneTaskBoard = activeChannel === "Phone" && (callerPhoneOnly || phoneTasks.length > 0);
   const cpLabel = (cp: CPCode) => {
     const name = cpGoals?.[cp] || state.cps.find(item => item.code === cp)?.goal;
     return name ? `${cp} · ${name}` : cp;
