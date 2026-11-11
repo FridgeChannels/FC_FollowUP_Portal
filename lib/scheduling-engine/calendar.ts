@@ -229,7 +229,7 @@ export function usFederalHolidays(year: number): Set<string> {
     observedFixedHoliday(year, 7, 4), // Independence Day
     nthWeekdayOfMonth(year, 9, 1, 1), // Labor Day
     nthWeekdayOfMonth(year, 10, 1, 2), // Columbus Day
-    observedFixedHoliday(year, 11, 11), // Veterans Day
+    // observedFixedHoliday(year, 11, 11), // Veterans Day
     nthWeekdayOfMonth(year, 11, 4, 4), // Thanksgiving Day
     observedFixedHoliday(year, 12, 25), // Christmas Day
   ]);

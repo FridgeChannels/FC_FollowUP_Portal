@@ -341,7 +341,7 @@ export function summarizePendingOutboundTasks(
   for (const task of tasks) {
     if (task.status !== "Pending" || !task.channel || task.channel === "Phone") continue;
     channels.add(task.channel);
-    const at = task.createdAt || task.scheduledAt || null;
+    const at = task.scheduledAt || task.createdAt || null;
     if (at && (!nextAt || at < nextAt)) nextAt = at;
   }
   return { channels: [...channels].sort(), nextAt };
