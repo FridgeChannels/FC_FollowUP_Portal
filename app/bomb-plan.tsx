@@ -61,7 +61,7 @@ export function BombExecutionPlan({
   instanceId: string;
   contacts: Contact[];
   tone?: "default" | "success";
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, scheduledAt?: string, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string, options?: { quoteHistory?: boolean }) => Promise<void>;
+  onSend?: import("./brand-reply-box").SendMessageHandler;
 }) {
   const [expandedId, setExpandedId] = useState<string>();
   const instance = state.bombInstances.find(item => item.id === instanceId);

@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { easternDateTimeLocalToIso } from "@/lib/scheduling-engine/calendar";
 import { BUSINESS_TIME_ZONE } from "@/lib/time-zone";
 import { SendTimingToggle, type DeliveryMode } from "./send-timing-toggle";
+import { AfterEmailTiming } from "./after-email-timing";
 import { MessageMediaInputFrame, useMessageMedia } from "./message-media";
 import { EmailBodyEditor } from "./email-body-editor";
 import { emailBodyIsEmpty } from "@/lib/email-html";
@@ -20,8 +21,34 @@ import type { MediaAttachment } from "@/lib/media-attachments";
 import { channelAvailable } from "@/lib/channel-availability";
 import { EmailCcInput } from "./email-cc-input";
 import { EmailHtmlBody } from "./email-html-body";
+import {
+  AFTER_EMAIL_MIN_OFFSET_MINUTES,
+  normalizeAfterEmailOffsetMinutes,
+  scheduledAtAfterEmail,
+  type AfterEmailFollowUp,
+} from "@/lib/after-email-followup";
 
 const show = (result: { ok: boolean; message: string }) => result.ok ? toast.success(result.message) : toast.error(result.message);
+
+export type SendMessageOptions = {
+  quoteHistory?: boolean;
+  afterTaskId?: string;
+  offsetMinutes?: number;
+};
+
+export type SendMessageHandler = (
+  contactId: string,
+  channel: Channel,
+  content: string,
+  taskId?: string,
+  threadId?: string,
+  subject?: string,
+  deliveryMode?: DeliveryMode,
+  scheduledAt?: string,
+  attachments?: MediaAttachment[],
+  cc?: string,
+  options?: SendMessageOptions,
+) => Promise<void>;
 
 function activityTime(value?: string) {
   if (!value) return 0;
@@ -179,7 +206,7 @@ export function BrandReplyBox({
   interactions?: Interaction[];
   actions?: ScheduledAction[];
   taskId?: string;
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: DeliveryMode, scheduledAt?: string, attachments?: MediaAttachment[], cc?: string, options?: { quoteHistory?: boolean }) => Promise<void>;
+  onSend?: SendMessageHandler;
   open?: boolean;
   replyToThisMessage?: boolean;
   onClose?: () => void;
@@ -311,7 +338,7 @@ export function ThreadSendBox({
   contacts: Contact[];
   thread: Interaction[];
   interactions: Interaction[];
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: DeliveryMode, scheduledAt?: string, attachments?: MediaAttachment[], cc?: string, options?: { quoteHistory?: boolean }) => Promise<void>;
+  onSend?: SendMessageHandler;
 }) {
   const { state, can, sendHumanReply } = useWorkspace();
   const customer = state.customers.find((item) => item.id === customerId);
@@ -453,31 +480,43 @@ export function ChannelSendBox({
   contacts,
   interactions,
   onSend,
+  followUpAfterEmail,
+  onFollowUpConsumed,
 }: {
   customerId?: string;
   channel: Channel;
   contacts: Contact[];
   interactions: Interaction[];
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: DeliveryMode, scheduledAt?: string, attachments?: MediaAttachment[], cc?: string, options?: { quoteHistory?: boolean }) => Promise<void>;
+  onSend?: SendMessageHandler;
+  followUpAfterEmail?: AfterEmailFollowUp | null;
+  onFollowUpConsumed?: () => void;
 }) {
   const { state, can, sendHumanReply } = useWorkspace();
   const people = contacts.filter(item => channelAvailable(item, channel));
+  const followUpActive =
+    !!followUpAfterEmail &&
+    (channel === "SMS" || channel === "WhatsApp") &&
+    people.some((item) => item.id === followUpAfterEmail.contactId);
   const latest = [...interactions]
     .filter(item => item.contactId && people.some(person => person.id === item.contactId))
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
-  const [contactId, setContactId] = useState(latest?.contactId || people[0]?.id || "");
+  const [contactId, setContactId] = useState(
+    followUpActive ? followUpAfterEmail!.contactId : latest?.contactId || people[0]?.id || "",
+  );
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
   const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("queue");
   const [scheduledAt, setScheduledAt] = useState("");
+  const [offsetMinutes, setOffsetMinutes] = useState(AFTER_EMAIL_MIN_OFFSET_MINUTES);
   const media = useMessageMedia(channel);
   useEffect(() => {
-    setContactId(latest?.contactId || people[0]?.id || "");
+    setContactId(followUpActive ? followUpAfterEmail!.contactId : latest?.contactId || people[0]?.id || "");
     setContent("");
     setDeliveryMode("queue");
     setScheduledAt("");
+    setOffsetMinutes(AFTER_EMAIL_MIN_OFFSET_MINUTES);
     media.reset();
-  }, [channel, customerId]);
+  }, [channel, customerId, followUpAfterEmail?.emailTaskId, followUpAfterEmail?.contactId]);
   const contact = people.find(item => item.id === contactId) || people[0];
   const customer = state.customers.find(item => item.id === customerId);
   const channelHasPendingReply = interactions.some(item => item.channel === channel && inboundNeedsComposer(state, item, interactions));
@@ -497,11 +536,13 @@ export function ChannelSendBox({
     <div className="border-t border-slate-200 px-5 py-4">
       <div className="rounded-xl bg-slate-50 p-3">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
-          <Select value={contact?.id} onValueChange={setContactId}>
+          <Select value={contact?.id} onValueChange={setContactId} disabled={followUpActive || saving}>
             <SelectTrigger size="sm" className="w-44"><SelectValue placeholder="KeyPerson"/></SelectTrigger>
             <SelectContent>{people.map(item => <SelectItem key={item.id} value={item.id}>{item.name} · {item.role}</SelectItem>)}</SelectContent>
           </Select>
-          <span className="text-xs text-slate-400">Send {channel}</span>
+          <span className="text-xs text-slate-400">
+            {followUpActive ? `Follow up on ${channel}` : `Send ${channel}`}
+          </span>
         </div>
         <div className="space-y-2">
           <MessageMediaInputFrame channel={channel} media={media} disabled={saving}>
@@ -512,15 +553,49 @@ export function ChannelSendBox({
               placeholder={`Write ${channel === "Phone" ? "a call note" : `a ${channel} message`}…`}
             />
           </MessageMediaInputFrame>
-          <div className="flex items-center justify-end gap-2">
-            <div className="flex items-center gap-2">
-            <SendTimingToggle value={deliveryMode} onValueChange={setDeliveryMode} scheduledAt={scheduledAt} onScheduledAtChange={setScheduledAt} />
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+            {followUpActive && followUpAfterEmail ? (
+              <AfterEmailTiming
+                emailScheduledAt={followUpAfterEmail.emailScheduledAt}
+                offsetMinutes={offsetMinutes}
+                onOffsetMinutesChange={setOffsetMinutes}
+                disabled={saving}
+              />
+            ) : (
+              <SendTimingToggle value={deliveryMode} onValueChange={setDeliveryMode} scheduledAt={scheduledAt} onScheduledAtChange={setScheduledAt} />
+            )}
             <Button className="h-9 px-3" disabled={!contact || (!content.trim() && !media.readyAttachments.length) || saving || media.uploading} aria-busy={saving} onClick={() => {
             if (!contact) return;
             if (onSend) {
               setSaving(true);
-              void onSend(contact.id, channel, content, taskId, threadId, undefined, deliveryMode, scheduledAt ? easternDateTimeLocalToIso(scheduledAt) : undefined, media.readyAttachments)
-                .then(() => { toast.success("Message saved as pending"); setContent(""); media.reset(); })
+              let mode: DeliveryMode = deliveryMode;
+              let when: string | undefined = scheduledAt ? easternDateTimeLocalToIso(scheduledAt) : undefined;
+              let options: SendMessageOptions | undefined;
+              if (followUpActive && followUpAfterEmail) {
+                const offset = normalizeAfterEmailOffsetMinutes(offsetMinutes);
+                try {
+                  when = scheduledAtAfterEmail(followUpAfterEmail.emailScheduledAt, offset);
+                } catch (error) {
+                  toast.error(error instanceof Error ? error.message : "Invalid email scheduled time");
+                  setSaving(false);
+                  return;
+                }
+                if (Date.parse(when) <= Date.now()) {
+                  toast.error("Choose at least 15 minutes after the email scheduled time.");
+                  setSaving(false);
+                  return;
+                }
+                mode = "scheduled";
+                options = { afterTaskId: followUpAfterEmail.emailTaskId, offsetMinutes: offset };
+              }
+              void onSend(contact.id, channel, content, taskId, threadId, undefined, mode, when, media.readyAttachments, undefined, options)
+                .then(() => {
+                  toast.success("Message saved as pending");
+                  setContent("");
+                  media.reset();
+                  if (followUpActive) onFollowUpConsumed?.();
+                })
                 .catch(error => toast.error(error instanceof Error ? error.message : "Send failed"))
                 .finally(() => setSaving(false));
               return;

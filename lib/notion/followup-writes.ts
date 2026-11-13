@@ -39,7 +39,12 @@ import { listChannelCapacityConfig } from "./capacity";
 import { chooseConversationThreadId } from "./conversation-thread";
 import { listFollowupContactIds } from "./contacts";
 import { listFollowupConversations } from "./conversations";
-import { asExtendedParameters, parseExtendedParametersObject, withQuoteHistory } from "./extended-parameters";
+import {
+  asExtendedParameters,
+  parseExtendedParametersObject,
+  withAfterEmailFollowUp,
+  withQuoteHistory,
+} from "./extended-parameters";
 import {
   captionForAttachments,
   channelSupportsMedia,
@@ -545,6 +550,8 @@ export async function createOutboundConversation(input: {
   attachments?: MediaAttachment[];
   /** Email thread reply: false when the user deleted the quoted history in the composer. */
   quoteHistory?: boolean;
+  /** SMS/WhatsApp: send only after this email Task succeeds (insurance + Failed cancel). */
+  afterEmailFollowUp?: { afterTaskId: string; offsetMinutes: number } | null;
 }) {
   if (!CHANNELS.has(input.channel)) throw new Error("Invalid channel");
   const whatsappAttachments = channelSupportsMedia(input.channel)
@@ -621,10 +628,15 @@ export async function createOutboundConversation(input: {
   if (cp) properties.CP = cp;
   // WhatsApp media stays in Extended Parameters for the existing sender contract.
   // Email attachments use the dedicated Attachments property (JSON array).
-  const encodedExtended = encodeOutboundExtendedParameters(
-    withQuoteHistory(input.extendedParameters, input.channel === "Email" ? input.quoteHistory : undefined),
-    whatsappAttachments,
+  const withQuote = withQuoteHistory(
+    input.extendedParameters,
+    input.channel === "Email" ? input.quoteHistory : undefined,
   );
+  const withFollowUp =
+    input.channel === "SMS" || input.channel === "WhatsApp"
+      ? withAfterEmailFollowUp(withQuote, input.afterEmailFollowUp)
+      : withQuote;
+  const encodedExtended = encodeOutboundExtendedParameters(withFollowUp, whatsappAttachments);
   if (encodedExtended) {
     properties["Extended Parameters"] = { rich_text: richText(encodedExtended) };
   }
@@ -939,6 +951,7 @@ export async function createHumanOutbound(input: {
   scheduledAt?: string | null;
   attachments?: MediaAttachment[];
   quoteHistory?: boolean;
+  afterEmailFollowUp?: { afterTaskId: string; offsetMinutes: number } | null;
 }) {
   const isReply = !!(input.threadId?.trim() || input.existingTaskId);
   const deliveryMode: DeliveryMode = input.deliveryMode === "immediate" ? "immediate" : "scheduled";
@@ -1039,6 +1052,7 @@ export async function createHumanOutbound(input: {
       forceNewThread: !isReply && channel === "Email",
       attachments: input.attachments,
       quoteHistory: input.quoteHistory,
+      afterEmailFollowUp: input.afterEmailFollowUp,
     });
     // New task has no Conversations yet; conversation already links Follow-up Task on create.
     await updatePage(taskId, {

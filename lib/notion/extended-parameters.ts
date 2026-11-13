@@ -45,3 +45,27 @@ export function withQuoteHistory(inherited: string | null | undefined, quoteHist
   delete rest.quoteHistory;
   return asExtendedParameters(quoteHistory === false ? { ...rest, quoteHistory: false } : rest);
 }
+
+/**
+ * Marks an SMS/WhatsApp outbound as dependent on an email Task.
+ * Orchestrator skips until that task is Completed, and cancels if it Failed.
+ */
+export function withAfterEmailFollowUp(
+  inherited: string | null | undefined,
+  followUp: { afterTaskId: string; offsetMinutes: number } | null | undefined,
+) {
+  const base = parseExtendedParametersObject(inherited) || {};
+  const rest = { ...base };
+  delete rest.afterTaskId;
+  delete rest.offsetMinutes;
+  const afterTaskId = followUp?.afterTaskId?.trim();
+  if (!afterTaskId) {
+    return asExtendedParameters(rest) ?? (Object.keys(rest).length ? inherited ?? null : null);
+  }
+  const offsetMinutes = Number(followUp?.offsetMinutes);
+  return asExtendedParameters({
+    ...rest,
+    afterTaskId,
+    offsetMinutes: Number.isFinite(offsetMinutes) ? Math.max(0, Math.floor(offsetMinutes)) : 0,
+  });
+}

@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { ExtendedParametersError, asExtendedParameters, withQuoteHistory } from "./extended-parameters.ts";
+import {
+  ExtendedParametersError,
+  asExtendedParameters,
+  withAfterEmailFollowUp,
+  withQuoteHistory,
+} from "./extended-parameters.ts";
 
 describe("withQuoteHistory", () => {
   const inherited = '{"gmailThreadId":"t1","gmailMessageId":"m1"}';
@@ -18,6 +23,22 @@ describe("withQuoteHistory", () => {
   it("drops a quote choice inherited from an earlier message", () => {
     assert.equal(withQuoteHistory('{"gmailThreadId":"t1","quoteHistory":false}', undefined), '{"gmailThreadId":"t1"}');
     assert.equal(withQuoteHistory('{"quoteHistory":false}', undefined), null);
+  });
+});
+
+describe("withAfterEmailFollowUp", () => {
+  it("records afterTaskId and offsetMinutes", () => {
+    assert.equal(
+      withAfterEmailFollowUp('{"gmailThreadId":"t1"}', { afterTaskId: "email-1", offsetMinutes: 15 }),
+      '{"gmailThreadId":"t1","afterTaskId":"email-1","offsetMinutes":15}',
+    );
+  });
+
+  it("clears a previous afterTaskId when follow-up is omitted", () => {
+    assert.equal(
+      withAfterEmailFollowUp('{"afterTaskId":"old","offsetMinutes":30,"x":1}', null),
+      '{"x":1}',
+    );
   });
 });
 

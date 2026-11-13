@@ -2,6 +2,7 @@ import { canWriteBrand } from "@/lib/brand-access";
 import { viewerFromRequest } from "@/lib/brand-viewer-request";
 import { channelReachable, unavailableChannelMessage } from "@/lib/channel-availability";
 import { EmailCcError, normalizeEmailCc } from "@/lib/email-cc";
+import { normalizeAfterEmailOffsetMinutes } from "@/lib/after-email-followup";
 import { prepareEmailContent } from "@/lib/email-html";
 import { firstRelationId, propertyText, relationIds, retrievePage } from "@/lib/notion/client";
 import { listFollowupContactIds, mapFollowupContact } from "@/lib/notion/contacts";
@@ -45,6 +46,8 @@ export async function POST(request: Request, { params }: Params) {
       scheduledAt?: string;
       attachments?: unknown;
       quoteHistory?: boolean;
+      afterTaskId?: string;
+      offsetMinutes?: number;
     };
     const contactId = body.contactId?.trim() || "";
     if (!contactId) {
@@ -128,6 +131,17 @@ export async function POST(request: Request, { params }: Params) {
       return Response.json({ error: "Message content is required" }, { status: 400 });
     }
 
+    const afterTaskId = body.afterTaskId?.trim() || "";
+    if (afterTaskId && channel !== "SMS" && channel !== "WhatsApp") {
+      return Response.json({ error: "afterTaskId is only valid for SMS and WhatsApp" }, { status: 400 });
+    }
+    if (afterTaskId && !body.scheduledAt?.trim()) {
+      return Response.json({ error: "scheduledAt is required when following up after an email" }, { status: 400 });
+    }
+    const afterEmailFollowUp = afterTaskId
+      ? { afterTaskId, offsetMinutes: normalizeAfterEmailOffsetMinutes(body.offsetMinutes) }
+      : undefined;
+
     const deliveryMode = asDeliveryMode(body.deliveryMode);
     const created = await createHumanOutbound({
       brandId: id,
@@ -152,6 +166,7 @@ export async function POST(request: Request, { params }: Params) {
       scheduledAt: body.scheduledAt,
       attachments,
       quoteHistory: body.quoteHistory === false ? false : undefined,
+      afterEmailFollowUp,
     });
 
     await markFollowupClientEngaged(id, {

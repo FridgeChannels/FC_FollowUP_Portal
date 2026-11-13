@@ -44,6 +44,12 @@ import { formatPhoneScriptSections, parsePhoneScriptSections, PHONE_SCRIPT_SECTI
 import { brandHasActiveOmniReach } from "@/lib/notion/reply-inbox";
 import { buildInteractionCpFallbacks, resolveInteractionDisplayCp } from "@/lib/interaction-cp";
 import { channelAvailable } from "@/lib/channel-availability";
+import {
+  type AfterEmailFollowUp,
+  type AfterEmailFollowUpPrompt,
+} from "@/lib/after-email-followup";
+import { AfterEmailFollowUpDialog } from "./after-email-follow-up-dialog";
+import type { SendMessageOptions } from "./brand-reply-box";
 import { CHANNEL_TYPES, resolveChannelType, type ChannelType } from "@/lib/sample-product";
 import { cn } from "@/lib/utils";
 import { useSignals } from "./signals-store";
@@ -643,6 +649,9 @@ export function BrandDetail({customerId}:{customerId:string}){
     router.replace(backPath);
   };
   const [launch,setLaunch]=useState(false); const [reply,setReply]=useState(false); const [cp,setCP]=useState(false); const [contact,setContact]=useState(false); const [ownerDraft,setOwnerDraft]=useState<string>(); const [aiSummaryOpen,setAiSummaryOpen]=useState(false);
+  const [afterEmailPrompt,setAfterEmailPrompt]=useState<AfterEmailFollowUpPrompt|null>(null);
+  const [followUpAfterEmail,setFollowUpAfterEmail]=useState<AfterEmailFollowUp|null>(null);
+  const [followUpChannel,setFollowUpChannel]=useState<"SMS"|"WhatsApp"|null>(null);
   const [detailsTab,setDetailsTab]=useState<BrandDetailsTab|null>(requestedFollowupHistory?"followupHistory":requestedSignalId||requestedNewAssignment?"details":requestedSignalHistory?"signalHistory":"details");
   const [sampleProfiles,setSampleProfiles]=useState<Array<{sn:string;profile:MagnetBrandParam|null}>>([]);
   const [attentionTarget,setAttentionTarget]=useState<{cp:CPCode;channel:Channel}|null>(null);
@@ -1192,7 +1201,7 @@ export function BrandDetail({customerId}:{customerId:string}){
     scheduledAt?: string,
     attachments?: MediaAttachment[],
     cc?: string,
-    options?: { quoteHistory?: boolean },
+    options?: SendMessageOptions,
   ) => {
     const response = await fetch(`/api/brands/${c.id}/messages`, {
       method: "POST",
@@ -1209,11 +1218,33 @@ export function BrandDetail({customerId}:{customerId:string}){
         scheduledAt,
         attachments,
         quoteHistory: channel === "Email" && options?.quoteHistory === false ? false : undefined,
+        afterTaskId: options?.afterTaskId,
+        offsetMinutes: options?.offsetMinutes,
       }),
     });
-    const payload = (await response.json()) as { error?: string };
+    const payload = (await response.json()) as {
+      error?: string;
+      taskId?: string;
+      scheduledAt?: string;
+    };
     if (!response.ok) throw new Error(payload.error || "Send failed");
     await Promise.all([refreshRemote(), fetchActivitiesPage(null, "replace")]);
+    if (channel === "Email" && payload.taskId && payload.scheduledAt) {
+      const person = c.contacts.find((item) => item.id === contactId);
+      const channels = (["SMS", "WhatsApp"] as const).filter((item) => person && channelAvailable(person, item));
+      if (channels.length) {
+        setAfterEmailPrompt({
+          contactId,
+          emailTaskId: payload.taskId,
+          emailScheduledAt: payload.scheduledAt,
+          channels: [...channels],
+        });
+      }
+    }
+    if (options?.afterTaskId) {
+      setFollowUpAfterEmail(null);
+      setFollowUpChannel(null);
+    }
   };
   const markReplyRead = async (activityId: string, details: { note: string; reminderAt?: string }) => {
     if (!notionBacked) return;
@@ -1395,7 +1426,7 @@ export function BrandDetail({customerId}:{customerId:string}){
       </section>}
     </aside>
     <div className="order-1 flex min-w-0 flex-col overflow-hidden bg-white lg:min-h-0"><ImportantSignalsPanel key={`${c.id}:${requestedSignalType==="sample"?requestedSignalId||"":""}`} events={brandSignals?.events || []} readIds={signalReadIds} onRead={readSignalEvents} initialSampleSignalId={requestedSignalType==="sample"?requestedSignalId||undefined:undefined} brandName={c.name} ownerName={remote?.ownerName} onOpenEmailSignal={openEmailSignal} pilotInfo={pilotInfo||undefined} onOpenPilotInfo={()=>{setDetailsTab("details");window.setTimeout(()=>document.getElementById("brand-pilot-info")?.scrollIntoView({behavior:"smooth",block:"center"}),80);}}/><section id="brand-conversations" aria-label="Brand communication" className="flex min-w-0 flex-col overflow-hidden lg:min-h-0 lg:flex-1"><div className="flex items-center border-b border-slate-100 px-5 py-3"><h2 className="flex items-center gap-2 font-semibold"><MessageSquareText className="size-4 text-violet-600"/>Conversations</h2></div>{conversationRound&&<div className="flex items-center justify-between gap-2 border-b border-violet-100 bg-violet-50 px-5 py-2"><div><p className="text-xs font-semibold text-violet-800">Round {conversationRound.number} · All CPs</p><p className="text-xs text-violet-600">Only conversations with a recorded Round association.</p></div><Button variant="ghost" size="sm" onClick={()=>{setConversationRound(null);setRoundCursor(null);}}>Show all Rounds</Button></div>}<div className="min-h-[50vh] max-h-[calc(100vh-290px)] min-w-0 overflow-y-auto lg:min-h-0 lg:max-h-none lg:flex-1">
-    <InteractionFeed key={`${c.id}-${conversationRound?.id||"all"}-${currentCp}-${attentionTarget?.cp||""}-${attentionTarget?.channel||""}-${focusedWork?.id||focusedEmail?.id||""}`} customerId={c.id} currentCp={currentCp} initialCp={focusedWork?.cp||focusedEmail?.cp||attentionTarget?.cp} initialChannel={focusedWork?.channel||(focusedEmail?"Email":attentionTarget?.channel)} focusedInteractionId={focusedWork?.id||focusedEmail?.id} showAllChannels showCpSelector={false} includeAllCps={true} cpGoals={notionBacked?toCpGoals(remoteCps):undefined} interactions={visibleInteractions} contacts={c.contacts} bombInstances={conversationRound?bombPlan?.bombInstances.filter(instance=>roundActivities.some(activity=>bombPlan.activityInstanceIds[activity.id]===instance.id)):bombPlan?.bombInstances} actions={bombPlan?.actions} loading={conversationRound?roundLoading:activityLoading} canReviewCalls={notionBacked&&can("reply")} tasks={conversationRound?(remote?.tasks||[]).filter(t=>t.roundId===conversationRound.id):brandTasks} onMarkReplyRead={notionBacked&&can("reply")?markReplyRead:undefined} onRefreshQuo={notionBacked?refreshQuoForBrand:undefined} quoRefreshingCallId={quoRefreshingCallId} onPersistCallReview={notionBacked?async (taskId,status,reviewReason,reviewNote,resolution)=>{
+    <InteractionFeed key={`${c.id}-${conversationRound?.id||"all"}-${currentCp}-${attentionTarget?.cp||""}-${attentionTarget?.channel||""}-${focusedWork?.id||focusedEmail?.id||""}-${followUpChannel||""}-${followUpAfterEmail?.emailTaskId||""}`} customerId={c.id} currentCp={currentCp} initialCp={focusedWork?.cp||focusedEmail?.cp||attentionTarget?.cp} initialChannel={followUpChannel||focusedWork?.channel||(focusedEmail?"Email":attentionTarget?.channel)} focusedInteractionId={focusedWork?.id||focusedEmail?.id} showAllChannels showCpSelector={false} includeAllCps={true} cpGoals={notionBacked?toCpGoals(remoteCps):undefined} interactions={visibleInteractions} contacts={c.contacts} bombInstances={conversationRound?bombPlan?.bombInstances.filter(instance=>roundActivities.some(activity=>bombPlan.activityInstanceIds[activity.id]===instance.id)):bombPlan?.bombInstances} actions={bombPlan?.actions} loading={conversationRound?roundLoading:activityLoading} canReviewCalls={notionBacked&&can("reply")} tasks={conversationRound?(remote?.tasks||[]).filter(t=>t.roundId===conversationRound.id):brandTasks} followUpAfterEmail={followUpAfterEmail} followUpChannel={followUpChannel} onFollowUpConsumed={()=>{setFollowUpAfterEmail(null);setFollowUpChannel(null);}} onMarkReplyRead={notionBacked&&can("reply")?markReplyRead:undefined} onRefreshQuo={notionBacked?refreshQuoForBrand:undefined} quoRefreshingCallId={quoRefreshingCallId} onPersistCallReview={notionBacked?async (taskId,status,reviewReason,reviewNote,resolution)=>{
     const response=await fetch(`/api/tasks/${taskId}/call-review`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status,reviewReason,reviewNote,resolution})});
     const payload=await response.json() as {error?:string};
     if(!response.ok)throw new Error(payload.error||"Unable to save call review");
@@ -1408,6 +1439,21 @@ export function BrandDetail({customerId}:{customerId:string}){
   <Dialog open={resumePausedFollowUp} onOpenChange={setResumePausedFollowUp}><DialogContent><DialogHeader><DialogTitle>Resume FollowUp</DialogTitle><DialogDescription>Record why follow-up is resuming. This keeps the current Round, CP, and assigned Owner.</DialogDescription></DialogHeader><Textarea value={followUpNote} onChange={event=>setFollowUpNote(event.target.value)} placeholder="Reason for resuming"/><DialogFooter><Button variant="outline" onClick={()=>setResumePausedFollowUp(false)}>Cancel</Button><Button disabled={saving||!followUpNote.trim()} onClick={()=>void resumePausedBrand().then(saved=>{if(saved)setResumePausedFollowUp(false);})}>Resume FollowUp</Button></DialogFooter></DialogContent></Dialog>
   <Dialog open={newRoundOpen} onOpenChange={setNewRoundOpen}><DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle>{latestRound?"Start new follow-up Round":"Start follow-up"}</DialogTitle><DialogDescription>Start a new cooperation cycle. The new Round begins at NONE. Brand profile, relationship context, previous conversations and tasks are retained.</DialogDescription></DialogHeader>{can("assignOwner")&&<div className="space-y-2"><label className="text-sm font-medium">Account Manager</label><Select value={newRoundOwner} onValueChange={setNewRoundOwner}><SelectTrigger aria-label="New Round Account Manager"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="unassigned">Unassigned</SelectItem>{ownerChoices.map(owner=><SelectItem key={owner.id} value={owner.id}>{owner.name}</SelectItem>)}</SelectContent></Select></div>}{history.encounters.some(e=>!e.round_id)&&<div className="space-y-2"><label className="text-sm font-medium">Origin Encounter</label><Select value={newRoundOrigin} onValueChange={setNewRoundOrigin}><SelectTrigger aria-label="New Round origin Encounter"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="none">No specific Encounter</SelectItem>{history.encounters.filter(e=>!e.round_id).map(e=><SelectItem key={e.id} value={e.id}>{e.exhibition_name} · {dateOnly(e.meeting_at)}</SelectItem>)}</SelectContent></Select></div>}<DialogFooter><Button variant="outline" onClick={()=>setNewRoundOpen(false)}>Cancel</Button><Button disabled={saving} onClick={()=>void runRoundAction("start")}>{saving?"Starting…":"Start Round"}</Button></DialogFooter></DialogContent></Dialog>
   <BrandAiSummaryDialog open={aiSummaryOpen} onOpenChange={setAiSummaryOpen} brandId={c.id} brand={remote} demo={aiSummaryDemo} onSummariesChange={summaries=>setRemote(previous=>previous?{...previous,aiSummaries:summaries}:previous)}/>
+  <AfterEmailFollowUpDialog
+    prompt={afterEmailPrompt}
+    onOpenChange={(open)=>{ if(!open) setAfterEmailPrompt(null); }}
+    onChoose={(channel)=>{
+      if(!afterEmailPrompt) return;
+      setFollowUpAfterEmail({
+        contactId: afterEmailPrompt.contactId,
+        emailTaskId: afterEmailPrompt.emailTaskId,
+        emailScheduledAt: afterEmailPrompt.emailScheduledAt,
+      });
+      setFollowUpChannel(channel);
+      setAfterEmailPrompt(null);
+      document.getElementById("brand-conversations")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }}
+  />
   <LaunchBombDialog customerId={c.id} open={launch} onOpenChange={setLaunch} contacts={notionBacked?c.contacts:undefined} currentCp={notionBacked&&remote?remote.currentCp:undefined} companyName={c.name} productDescription={notionBacked?remote?.productDescription:undefined} matchedCategory={notionBacked?remote?.matchedCategory:undefined} followupExhibition={notionBacked?remote?.followupExhibition:undefined} previewOnly={notionBacked} hasActiveOmniReach={hasActiveOmniReach} onLaunched={notionBacked?()=>{void refreshBrandAndActivities()}:undefined}/><ReplyDialog customerId={c.id} open={reply} onOpenChange={setReply} contacts={notionBacked?c.contacts:undefined} onSend={notionBacked?async (contactId,channel,content,object,deliveryMode,scheduledAt,attachments,cc)=>{
     await sendBrandMessage(contactId, channel, content, undefined, undefined, object, deliveryMode, scheduledAt, attachments, cc);
   }:undefined}/><ChangeCPDialog customerId={c.id} open={cp} onOpenChange={setCP} currentCp={notionBacked&&remote?remote.currentCp:undefined} cps={notionBacked?remoteCps:undefined} onSave={notionBacked?async (currentCpId,evidence,note)=>{await patchBrand({currentCpId,evidence,note});}:undefined}/><ContactDialog customerId={c.id} open={contact} onOpenChange={setContact} notionBacked={notionBacked} onCreated={notionBacked?async ()=>{await refreshRemote();}:undefined}/><Dialog open={followUpAction!==null} onOpenChange={open=>{if(!open){setFollowUpAction(null);setFollowUpNote("");setFollowUpAt("");}}}><DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle>{followUpAction==="Paused"?"Pause FollowUp":"Complete FollowUp"}</DialogTitle><DialogDescription>Record the customer’s explicit reply and the reason for this outcome. This note is required.</DialogDescription></DialogHeader><Textarea value={followUpNote} onChange={event=>setFollowUpNote(event.target.value)} placeholder={followUpAction==="Paused"?"For example: The customer asked us to reconnect after their budget review in January.":"For example: The customer confirmed they do not wish to continue."} className="min-h-32" autoFocus/>{followUpAction==="Paused"&&<div className="space-y-2"><label htmlFor="next-follow-up-at" className="text-sm font-medium text-slate-700">Next contact date <span className="font-normal text-slate-500">(optional)</span></label><Input id="next-follow-up-at" type="datetime-local" value={followUpAt} onChange={event=>setFollowUpAt(event.target.value)}/><p className="text-xs text-slate-500">After this date, the Brand appears in the current Account Manager’s Needs Action when the list is refreshed. The Account Manager stays assigned.</p></div>}<DialogFooter><Button variant="outline" onClick={()=>{setFollowUpAction(null);setFollowUpNote("");setFollowUpAt("");}}>Cancel</Button><Button disabled={saving||!followUpNote.trim()||!followUpAction} onClick={()=>{if(!followUpAction)return;void (async ()=>{const saved=await updateFollowUpStatus(followUpAction,followUpNote.trim(),followUpAt);if(saved){setFollowUpAction(null);setFollowUpNote("");setFollowUpAt("");}})();}}>{followUpAction==="Paused"?"Pause FollowUp":"Complete FollowUp"}</Button></DialogFooter></DialogContent></Dialog></div></div>;

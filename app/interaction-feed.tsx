@@ -12,7 +12,8 @@ import { callerSubmittedPhoneCallIds, callReviewsFromTasks, type CallReviewResol
 import { getDisplayTimeZone } from "@/lib/display-time";
 import { BombInstance, Channel, Contact, CPCode, Interaction, ScheduledAction, compareInteractionSort, interactionSortAt, interactionSortMs } from "@/lib/outreach-domain";
 import { BombExecutionPlan, formatEasternDateTime } from "./bomb-plan";
-import { BrandReplyBox, ThreadSendBox, inboundNeedsComposer } from "./brand-reply-box";
+import { BrandReplyBox, ChannelSendBox, ThreadSendBox, inboundNeedsComposer } from "./brand-reply-box";
+import type { AfterEmailFollowUp } from "@/lib/after-email-followup";
 import { ChannelIcon } from "./channel-icon";
 import { PhoneTaskBoard, UnqualifiedReviewDialog, type QuoDialOpening } from "./phone-task-board";
 import { QuoCallPanel } from "./quo-call-panel";
@@ -243,6 +244,9 @@ export function InteractionFeed({
   submittingCallerReview = false,
   scriptsLoading = false,
   onMarkReplyRead,
+  followUpAfterEmail,
+  followUpChannel,
+  onFollowUpConsumed,
 }: {
   interactions: Interaction[];
   contacts: Contact[];
@@ -252,7 +256,10 @@ export function InteractionFeed({
   maxHeight?: string;
   bombInstances?: BombInstance[];
   actions?: ScheduledAction[];
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, scheduledAt?: string, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string, options?: { quoteHistory?: boolean }) => Promise<void>;
+  onSend?: import("./brand-reply-box").SendMessageHandler;
+  followUpAfterEmail?: AfterEmailFollowUp | null;
+  followUpChannel?: "SMS" | "WhatsApp" | null;
+  onFollowUpConsumed?: () => void;
   onCancelBomb?: (instance: BombInstance) => Promise<void>;
   onCancelPending?: (taskId: string) => Promise<void>;
   initialChannel?: Channel;
@@ -328,6 +335,11 @@ export function InteractionFeed({
   const showAllStageRecords = includeAllCps || !isCpVisible(currentCp);
   const [selectedChannel, setSelectedChannel] = useState<Channel | "All">(callerPhoneOnly ? "Phone" : initialChannel || (showAllChannels ? "All" : "Email"));
   const [bombOpen, setBombOpen] = useState(false);
+  useEffect(() => {
+    if (followUpChannel === "SMS" || followUpChannel === "WhatsApp") {
+      setSelectedChannel(followUpChannel);
+    }
+  }, [followUpChannel, followUpAfterEmail?.emailTaskId]);
   const [cancellingBombId, setCancellingBombId] = useState<string | null>(null);
   const visibleCps = VISIBLE_CP_CODES;
   const selectedInitialCp = initialCp || currentCp;
@@ -477,12 +489,14 @@ export function InteractionFeed({
       />
     ) : (
     <ChannelTranscript
-      key={`${selectedCp}-${activeChannel}`}
+      key={`${selectedCp}-${activeChannel}-${followUpAfterEmail?.emailTaskId || ""}`}
       messages={channelMessages}
       contacts={contacts}
       channel={activeChannel}
+      customerId={customerId}
       onSend={onSend}
-     
+      followUpAfterEmail={followUpAfterEmail}
+      onFollowUpConsumed={onFollowUpConsumed}
       onCancelPending={onCancelPending}
       onRefreshQuo={onRefreshQuo}
       quoRefreshingCallId={quoRefreshingCallId}
@@ -538,7 +552,10 @@ function ChannelTranscript({
   messages,
   contacts,
   channel,
+  customerId,
   onSend,
+  followUpAfterEmail,
+  onFollowUpConsumed,
   onCancelPending,
   onRefreshQuo,
   quoRefreshingCallId,
@@ -552,7 +569,10 @@ function ChannelTranscript({
   messages: Interaction[];
   contacts: Contact[];
   channel: Channel | "All";
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, scheduledAt?: string, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string, options?: { quoteHistory?: boolean }) => Promise<void>;
+  customerId?: string;
+  onSend?: import("./brand-reply-box").SendMessageHandler;
+  followUpAfterEmail?: AfterEmailFollowUp | null;
+  onFollowUpConsumed?: () => void;
   onCancelPending?: (taskId: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
@@ -608,10 +628,33 @@ function ChannelTranscript({
   }
 
   if (channel !== "Phone") {
+    const brandId = customerId || messages[0]?.customerId;
+    const compose =
+      brandId && (channel === "SMS" || channel === "WhatsApp") ? (
+        <ChannelSendBox
+          customerId={brandId}
+          channel={channel}
+          contacts={contacts}
+          interactions={messages}
+          onSend={onSend}
+          followUpAfterEmail={followUpAfterEmail || null}
+          onFollowUpConsumed={onFollowUpConsumed}
+        />
+      ) : null;
     if (!threads.length) {
-      return <div className="px-5 py-10 text-center text-sm text-slate-400">No {channel} conversation recorded for this CP.</div>;
+      return (
+        <div>
+          <div className="px-5 py-10 text-center text-sm text-slate-400">No {channel} conversation recorded for this CP.</div>
+          {compose}
+        </div>
+      );
     }
-    return <ConversationInbox threads={threads} contacts={contacts} channel={channel} onOpen={(thread) => setSelectedThread({ channel, key: threadKey(thread[0]!) })} />;
+    return (
+      <div>
+        <ConversationInbox threads={threads} contacts={contacts} channel={channel} onOpen={(thread) => setSelectedThread({ channel, key: threadKey(thread[0]!) })} />
+        {compose}
+      </div>
+    );
   }
 
   return <div className="w-full min-w-0">
@@ -823,7 +866,7 @@ function ConversationDetail({
   channel: Channel;
   replyPool: Interaction[];
   onBack: () => void;
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, scheduledAt?: string, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string, options?: { quoteHistory?: boolean }) => Promise<void>;
+  onSend?: import("./brand-reply-box").SendMessageHandler;
   onCancelPending?: (taskId: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
@@ -883,7 +926,7 @@ function ContactThreads({
   group: { contact?: Contact; messages: Interaction[] };
   replyPool: Interaction[];
   channel: Channel;
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, scheduledAt?: string, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string, options?: { quoteHistory?: boolean }) => Promise<void>;
+  onSend?: import("./brand-reply-box").SendMessageHandler;
   onCancelPending?: (taskId: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
@@ -944,7 +987,7 @@ function ThreadMessages({
   contacts?: Contact[];
   channel?: Channel;
   endpoint?: string;
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, scheduledAt?: string, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string, options?: { quoteHistory?: boolean }) => Promise<void>;
+  onSend?: import("./brand-reply-box").SendMessageHandler;
   onCancelPending?: (taskId: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
