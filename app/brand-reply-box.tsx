@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Send, X } from "lucide-react";
+import { MoreHorizontal, Send, X } from "lucide-react";
 import { toast } from "sonner";
-import { Channel, Contact, Interaction, ScheduledAction, WorkspaceState } from "@/lib/outreach-domain";
+import { Channel, Contact, Interaction, ScheduledAction, WorkspaceState, interactionSortAt, interactionSortMs } from "@/lib/outreach-domain";
 import { useWorkspace } from "./workspace-store";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { easternDateTimeLocalToIso } from "@/lib/scheduling-engine/calendar";
+import { BUSINESS_TIME_ZONE } from "@/lib/time-zone";
 import { SendTimingToggle, type DeliveryMode } from "./send-timing-toggle";
 import { MessageMediaInputFrame, useMessageMedia } from "./message-media";
 import { EmailBodyEditor } from "./email-body-editor";
@@ -18,6 +19,7 @@ import { emailBodyIsEmpty } from "@/lib/email-html";
 import type { MediaAttachment } from "@/lib/media-attachments";
 import { channelAvailable } from "@/lib/channel-availability";
 import { EmailCcInput } from "./email-cc-input";
+import { EmailHtmlBody } from "./email-html-body";
 
 const show = (result: { ok: boolean; message: string }) => result.ok ? toast.success(result.message) : toast.error(result.message);
 
@@ -74,6 +76,89 @@ export function inboundNeedsComposer(_state: WorkspaceState, inbound: Interactio
   );
 }
 
+/** Message the sender will quote: the newest email that actually reached Gmail (received, or sent). */
+function latestQuotableEmail(items: Interaction[]) {
+  return items
+    .filter(item =>
+      item.channel === "Email" &&
+      (item.direction === "Inbound" || (item.direction === "Outbound" && item.taskStatus === "Completed")),
+    )
+    .sort((left, right) => interactionSortMs(left) - interactionSortMs(right))
+    .at(-1);
+}
+
+const quoteDateFormat = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric", timeZone: BUSINESS_TIME_ZONE });
+const quoteTimeFormat = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: BUSINESS_TIME_ZONE });
+
+function quoteAttribution(message: Interaction, contacts: Contact[]) {
+  const at = interactionSortAt(message);
+  const date = at ? new Date(at) : null;
+  const when = date && !Number.isNaN(date.getTime()) ? `On ${quoteDateFormat.format(date)} at ${quoteTimeFormat.format(date)}` : "On";
+  const address = message.sender?.trim();
+  const name = message.direction === "Inbound" ? contacts.find(item => item.id === message.contactId)?.name : undefined;
+  const who = address ? `${name ? `${name} ` : ""}<${address}>` : name || "";
+  return `${when} ${who} wrote:`.replace(/\s+/g, " ");
+}
+
+/** Gmail's collapsed "•••" quoted history; removing it sends the reply without the quote. */
+function QuotedHistory({
+  message,
+  contacts,
+  removed,
+  onRemovedChange,
+  disabled,
+}: {
+  message: Interaction;
+  contacts: Contact[];
+  removed: boolean;
+  onRemovedChange: (removed: boolean) => void;
+  disabled?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  if (removed) {
+    return (
+      <div className="text-xs text-slate-400">
+        Quoted text removed ·{" "}
+        <button type="button" className="underline underline-offset-2 hover:text-slate-600" disabled={disabled} onClick={() => onRemovedChange(false)}>Undo</button>
+      </div>
+    );
+  }
+  return (
+    <div className="min-w-0 space-y-2">
+      <button
+        type="button"
+        className="inline-flex h-3.5 items-center rounded-full bg-slate-200 px-1.5 text-slate-600 hover:bg-slate-300"
+        aria-expanded={expanded}
+        aria-label={expanded ? "Hide quoted text" : "Show quoted text"}
+        title={expanded ? "Hide quoted text" : "Show trimmed content"}
+        onClick={() => setExpanded(value => !value)}
+      >
+        <MoreHorizontal className="size-4" />
+      </button>
+      {expanded ? (
+        <div className="relative min-w-0 rounded-md border border-input bg-white px-3 py-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            className="absolute right-1 top-1"
+            aria-label="Remove quoted text"
+            title="Remove quoted text"
+            disabled={disabled}
+            onClick={() => onRemovedChange(true)}
+          >
+            <X />
+          </Button>
+          <div className="email-html pr-7">{quoteAttribution(message, contacts)}</div>
+          <blockquote className="mt-1 ml-[0.8ex] max-h-72 overflow-y-auto border-l border-[#ccc] pl-[1ex]">
+            <EmailHtmlBody html={message.content} />
+          </blockquote>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function BrandReplyBox({
   customerId,
   interaction,
@@ -94,7 +179,7 @@ export function BrandReplyBox({
   interactions?: Interaction[];
   actions?: ScheduledAction[];
   taskId?: string;
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: DeliveryMode, scheduledAt?: string, attachments?: MediaAttachment[], cc?: string) => Promise<void>;
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: DeliveryMode, scheduledAt?: string, attachments?: MediaAttachment[], cc?: string, options?: { quoteHistory?: boolean }) => Promise<void>;
   open?: boolean;
   replyToThisMessage?: boolean;
   onClose?: () => void;
@@ -107,6 +192,7 @@ export function BrandReplyBox({
     interaction.channel === "Email" && interaction.title !== "Email" ? interaction.title : "",
   );
   const [cc, setCc] = useState("");
+  const [quoteRemoved, setQuoteRemoved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("queue");
   const [scheduledAt, setScheduledAt] = useState("");
@@ -142,6 +228,9 @@ export function BrandReplyBox({
   const hasBody = (channel === "Email" ? !emailBodyIsEmpty(content) : !!content.trim()) || media.readyAttachments.length > 0;
   const busy = saving;
   const canSend = hasBody && !(channel === "Email" && !subject.trim()) && !busy && !media.uploading;
+  const quoted = channel === "Email"
+    ? latestQuotableEmail([interaction, ...(interactions || state.interactions).filter(item => item.id !== interaction.id && sameConversation(item, interaction))])
+    : undefined;
   return (
     <div ref={composerRef} data-reply-composer={interaction.id} className="mt-3 min-w-0 space-y-2 py-3">
       <div className="flex items-center justify-between gap-2 text-xs font-medium text-slate-600">
@@ -158,14 +247,17 @@ export function BrandReplyBox({
             <Textarea value={content} onChange={event => setContent(event.target.value)} className="min-h-20 resize-none" placeholder="Write a reply…" disabled={busy} />
           )}
         </MessageMediaInputFrame>
+        {quoted && notionBacked ? (
+          <QuotedHistory message={quoted} contacts={people} removed={quoteRemoved} onRemovedChange={setQuoteRemoved} disabled={busy} />
+        ) : null}
         <div className="flex items-center justify-end gap-2">
           <div className="flex items-center gap-2">
           <SendTimingToggle value={deliveryMode} onValueChange={setDeliveryMode} scheduledAt={scheduledAt} onScheduledAtChange={setScheduledAt} />
           <Button className="h-9 px-3" disabled={!canSend} aria-busy={saving} onClick={() => {
           if (onSend) {
             setSaving(true);
-            void onSend(contact.id, channel, content, replyTaskId, interaction.threadId, subject, deliveryMode, scheduledAt ? easternDateTimeLocalToIso(scheduledAt) : undefined, media.readyAttachments, channel === "Email" ? cc : undefined)
-              .then(() => { toast.success("Message saved as pending"); setContent(""); setSubject(""); setCc(""); media.reset(); })
+            void onSend(contact.id, channel, content, replyTaskId, interaction.threadId, subject, deliveryMode, scheduledAt ? easternDateTimeLocalToIso(scheduledAt) : undefined, media.readyAttachments, channel === "Email" ? cc : undefined, quoteRemoved ? { quoteHistory: false } : undefined)
+              .then(() => { toast.success("Message saved as pending"); setContent(""); setSubject(""); setCc(""); setQuoteRemoved(false); media.reset(); })
               .catch(error => toast.error(error instanceof Error ? error.message : "Send failed"))
               .finally(() => setSaving(false));
             return;
@@ -219,7 +311,7 @@ export function ThreadSendBox({
   contacts: Contact[];
   thread: Interaction[];
   interactions: Interaction[];
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: DeliveryMode, scheduledAt?: string, attachments?: MediaAttachment[], cc?: string) => Promise<void>;
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: DeliveryMode, scheduledAt?: string, attachments?: MediaAttachment[], cc?: string, options?: { quoteHistory?: boolean }) => Promise<void>;
 }) {
   const { state, can, sendHumanReply } = useWorkspace();
   const customer = state.customers.find((item) => item.id === customerId);
@@ -233,6 +325,7 @@ export function ThreadSendBox({
   const [content, setContent] = useState("");
   const [subject, setSubject] = useState(prefilledSubject);
   const [cc, setCc] = useState("");
+  const [quoteRemoved, setQuoteRemoved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>("queue");
   const [scheduledAt, setScheduledAt] = useState("");
@@ -247,6 +340,7 @@ export function ThreadSendBox({
     setContent("");
     setSubject(channel === "Email" ? threadEmailSubject(thread) : "");
     setCc("");
+    setQuoteRemoved(false);
     setDeliveryMode("queue");
     setScheduledAt("");
     media.reset();
@@ -265,6 +359,7 @@ export function ThreadSendBox({
   const hasBody = (channel === "Email" ? !emailBodyIsEmpty(content) : !!content.trim()) || media.readyAttachments.length > 0;
   const busy = saving;
   const canSend = !!contact && hasBody && !(channel === "Email" && !subject.trim()) && !busy && !media.uploading;
+  const quoted = channel === "Email" && threadId ? latestQuotableEmail(thread) : undefined;
 
   return (
     <div className="border-t border-slate-200 px-5 py-4">
@@ -294,6 +389,9 @@ export function ThreadSendBox({
               <Textarea value={content} onChange={(event) => setContent(event.target.value)} className="min-h-20 resize-none" placeholder={`Write a ${channel} message…`} disabled={busy} />
             )}
           </MessageMediaInputFrame>
+          {quoted && notionBacked ? (
+            <QuotedHistory message={quoted} contacts={contacts} removed={quoteRemoved} onRemovedChange={setQuoteRemoved} disabled={busy} />
+          ) : null}
           <div className="flex items-center justify-end gap-2">
             <div className="flex items-center gap-2">
               <SendTimingToggle value={deliveryMode} onValueChange={setDeliveryMode} scheduledAt={scheduledAt} onScheduledAtChange={setScheduledAt} />
@@ -318,11 +416,13 @@ export function ThreadSendBox({
                       scheduledAt ? easternDateTimeLocalToIso(scheduledAt) : undefined,
                       media.readyAttachments,
                       channel === "Email" ? cc : undefined,
+                      quoteRemoved ? { quoteHistory: false } : undefined,
                     )
                       .then(() => {
                         toast.success("Message saved as pending");
                         setContent("");
                         setCc("");
+                        setQuoteRemoved(false);
                         media.reset();
                       })
                       .catch((error) => toast.error(error instanceof Error ? error.message : "Send failed"))
@@ -358,7 +458,7 @@ export function ChannelSendBox({
   channel: Channel;
   contacts: Contact[];
   interactions: Interaction[];
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: DeliveryMode, scheduledAt?: string, attachments?: MediaAttachment[], cc?: string) => Promise<void>;
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: DeliveryMode, scheduledAt?: string, attachments?: MediaAttachment[], cc?: string, options?: { quoteHistory?: boolean }) => Promise<void>;
 }) {
   const { state, can, sendHumanReply } = useWorkspace();
   const people = contacts.filter(item => channelAvailable(item, channel));

@@ -30,3 +30,18 @@ export function asExtendedParameters(value?: unknown) {
   if (encoded === "{}") return null;
   return encoded;
 }
+
+/**
+ * Extended Parameters are inherited from earlier messages in the thread, so a previous
+ * "no quote" choice must be cleared before this message records its own.
+ */
+export function withQuoteHistory(inherited: string | null | undefined, quoteHistory: boolean | undefined) {
+  const base = parseExtendedParametersObject(inherited);
+  if (!base) {
+    return quoteHistory === false ? asExtendedParameters({ quoteHistory: false }) : inherited ?? null;
+  }
+  if (!("quoteHistory" in base) && quoteHistory !== false) return inherited ?? null;
+  const rest = { ...base };
+  delete rest.quoteHistory;
+  return asExtendedParameters(quoteHistory === false ? { ...rest, quoteHistory: false } : rest);
+}

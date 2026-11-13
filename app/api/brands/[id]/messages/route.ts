@@ -44,6 +44,7 @@ export async function POST(request: Request, { params }: Params) {
       deliveryMode?: string;
       scheduledAt?: string;
       attachments?: unknown;
+      quoteHistory?: boolean;
     };
     const contactId = body.contactId?.trim() || "";
     if (!contactId) {
@@ -150,6 +151,7 @@ export async function POST(request: Request, { params }: Params) {
       deliveryMode,
       scheduledAt: body.scheduledAt,
       attachments,
+      quoteHistory: body.quoteHistory === false ? false : undefined,
     });
 
     await markFollowupClientEngaged(id, {
@@ -167,10 +169,11 @@ export async function POST(request: Request, { params }: Params) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
+    console.error("[brands/messages] POST failed", error);
     const status =
       message.includes("404")
         ? 404
-        : /LinkedIn|quota|capacity|reply|open LinkedIn|Daily Max|active sender|paused|No available send slot|needs review|Channel Daily Max|Unsupported channel|unavailable/i.test(message)
+        : /LinkedIn|quota|capacity|reply|open LinkedIn|Daily Max|active sender|paused|No available send slot|needs review|Channel Daily Max|Unsupported channel|unavailable|Invalid scheduled|Owner is required/i.test(message)
           ? 400
           : 500;
     return Response.json({ error: message }, { status });

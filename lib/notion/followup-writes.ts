@@ -27,6 +27,7 @@ import { notionScheduledAtProperty } from "./scheduled-at";
 import { invalidateBrandReplySignalCache } from "./brand-reply-signal-cache";
 import { getPortalBaseUrl } from "../notify/config";
 import { getEmailTrackSecret } from "../signals/email-config";
+import { looksLikeEmailHtml, toGmailBlockHtml } from "../email-html";
 import {
   buildOpenTrackingToken,
   makeEmailTrackable,
@@ -38,7 +39,7 @@ import { listChannelCapacityConfig } from "./capacity";
 import { chooseConversationThreadId } from "./conversation-thread";
 import { listFollowupContactIds } from "./contacts";
 import { listFollowupConversations } from "./conversations";
-import { asExtendedParameters, parseExtendedParametersObject } from "./extended-parameters";
+import { asExtendedParameters, parseExtendedParametersObject, withQuoteHistory } from "./extended-parameters";
 import {
   captionForAttachments,
   channelSupportsMedia,
@@ -542,6 +543,8 @@ export async function createOutboundConversation(input: {
   /** When true, always allocate a fresh Thread (cold inbound). Default reuses last interaction. */
   forceNewThread?: boolean;
   attachments?: MediaAttachment[];
+  /** Email thread reply: false when the user deleted the quoted history in the composer. */
+  quoteHistory?: boolean;
 }) {
   if (!CHANNELS.has(input.channel)) throw new Error("Invalid channel");
   const whatsappAttachments = channelSupportsMedia(input.channel)
@@ -573,6 +576,7 @@ export async function createOutboundConversation(input: {
   // mail raises an `email.opened` Signals event. Every human/automated email
   // flows through here, so this is the one place the pixel needs to land.
   if (input.channel === "Email" && (input.direction || "Outbound") === "Outbound") {
+    if (looksLikeEmailHtml(content)) content = toGmailBlockHtml(content);
     const tracked = await stampEmailOpenTracking({
       brandId: input.brandId,
       contactId: input.contactId,
@@ -618,7 +622,7 @@ export async function createOutboundConversation(input: {
   // WhatsApp media stays in Extended Parameters for the existing sender contract.
   // Email attachments use the dedicated Attachments property (JSON array).
   const encodedExtended = encodeOutboundExtendedParameters(
-    input.extendedParameters,
+    withQuoteHistory(input.extendedParameters, input.channel === "Email" ? input.quoteHistory : undefined),
     whatsappAttachments,
   );
   if (encodedExtended) {
@@ -934,6 +938,7 @@ export async function createHumanOutbound(input: {
   deliveryMode?: DeliveryMode;
   scheduledAt?: string | null;
   attachments?: MediaAttachment[];
+  quoteHistory?: boolean;
 }) {
   const isReply = !!(input.threadId?.trim() || input.existingTaskId);
   const deliveryMode: DeliveryMode = input.deliveryMode === "immediate" ? "immediate" : "scheduled";
@@ -1033,6 +1038,7 @@ export async function createHumanOutbound(input: {
         : "人工消息，尚未实际发送。",
       forceNewThread: !isReply && channel === "Email",
       attachments: input.attachments,
+      quoteHistory: input.quoteHistory,
     });
     // New task has no Conversations yet; conversation already links Follow-up Task on create.
     await updatePage(taskId, {

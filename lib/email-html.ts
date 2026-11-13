@@ -41,8 +41,10 @@ const DROP_WITH_CONTENT = new Set([
 
 const ALLOWED_ATTRS: Record<string, Set<string>> = {
   a: new Set(["href"]),
-  img: new Set(["src", "alt"]),
+  img: new Set(["src", "alt", "width"]),
 };
+
+export const MAX_IMAGE_WIDTH = 1200;
 
 const HTML_TAG_RE = /<(p|div|br\s*\/?|img|strong|em|b|i|u|ul|ol|li|a|h[1-3]|blockquote)\b/i;
 const BASE64_MEDIA_RE = /data:(image|video|application)\/[a-z0-9.+-]+;base64,/i;
@@ -71,14 +73,108 @@ export function escapeHtmlText(value: string) {
     .replace(/"/g, "&quot;");
 }
 
+const ENTITY_RE = /&(?:#x([0-9a-f]+)|#(\d+)|([a-z][a-z0-9]{1,31}));/gi;
+
+const BASIC_ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: "\u00a0",
+};
+
+const NAMED_ENTITIES: Record<string, string> = {
+  ...BASIC_ENTITIES,
+  ensp: "\u2002",
+  emsp: "\u2003",
+  thinsp: "\u2009",
+  ndash: "\u2013",
+  mdash: "\u2014",
+  lsquo: "\u2018",
+  rsquo: "\u2019",
+  sbquo: "\u201a",
+  ldquo: "\u201c",
+  rdquo: "\u201d",
+  bdquo: "\u201e",
+  laquo: "\u00ab",
+  raquo: "\u00bb",
+  hellip: "\u2026",
+  bull: "\u2022",
+  middot: "\u00b7",
+  copy: "\u00a9",
+  reg: "\u00ae",
+  trade: "\u2122",
+  deg: "\u00b0",
+  plusmn: "\u00b1",
+  times: "\u00d7",
+  divide: "\u00f7",
+  euro: "\u20ac",
+  pound: "\u00a3",
+  yen: "\u00a5",
+  cent: "\u00a2",
+  sect: "\u00a7",
+  para: "\u00b6",
+  iexcl: "\u00a1",
+  iquest: "\u00bf",
+  rarr: "\u2192",
+  larr: "\u2190",
+  check: "\u2713",
+  agrave: "\u00e0",
+  aacute: "\u00e1",
+  acirc: "\u00e2",
+  auml: "\u00e4",
+  ccedil: "\u00e7",
+  egrave: "\u00e8",
+  eacute: "\u00e9",
+  ecirc: "\u00ea",
+  euml: "\u00eb",
+  iacute: "\u00ed",
+  iuml: "\u00ef",
+  ntilde: "\u00f1",
+  oacute: "\u00f3",
+  ocirc: "\u00f4",
+  ouml: "\u00f6",
+  uacute: "\u00fa",
+  uuml: "\u00fc",
+  szlig: "\u00df",
+  Agrave: "\u00c0",
+  Aacute: "\u00c1",
+  Auml: "\u00c4",
+  Ccedil: "\u00c7",
+  Eacute: "\u00c9",
+  Egrave: "\u00c8",
+  Ntilde: "\u00d1",
+  Ouml: "\u00d6",
+  Uuml: "\u00dc",
+};
+
+function decodeEntity(entity: string, hex?: string, dec?: string, name?: string) {
+  if (name) return NAMED_ENTITIES[name] ?? BASIC_ENTITIES[name.toLowerCase()] ?? entity;
+  const code = hex ? parseInt(hex, 16) : Number(dec);
+  return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : entity;
+}
+
+/**
+ * Re-encodes raw HTML text. Entities we can't decode stay as written so the mail client renders them
+ * the same way the browser did, instead of showing a literal "&mdash;".
+ * Runs of spaces collapse in HTML, so keep the editor's spacing the way Gmail does: "a&nbsp; b".
+ */
+function escapeTextNode(raw: string) {
+  let out = "";
+  let last = 0;
+  for (const match of raw.matchAll(ENTITY_RE)) {
+    const [entity, hex, dec, name] = match;
+    const decoded = decodeEntity(entity, hex, dec, name);
+    out += escapeHtmlText(raw.slice(last, match.index)) + (decoded === entity ? entity : escapeHtmlText(decoded));
+    last = match.index + entity.length;
+  }
+  out += escapeHtmlText(raw.slice(last));
+  return out.replace(/ {2,}/g, (run) => "&nbsp;".repeat(run.length - 1) + " ").replace(/\u00a0/g, "&nbsp;");
+}
+
 function decodeEntities(value: string) {
-  return value
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;|&apos;/gi, "'")
-    .replace(/&amp;/gi, "&");
+  return value.replace(ENTITY_RE, (entity, hex, dec, name) => decodeEntity(entity, hex, dec, name));
 }
 
 function skipUntil(html: string, start: number, needle: string) {
@@ -177,7 +273,14 @@ function renderOpenTag(name: string, attrs: AttrMap, allowImageUrl: (url: string
     kept.push(`src="${escapeHtmlText(src)}"`);
     const alt = (attrs.alt || "").trim();
     if (alt) kept.push(`alt="${escapeHtmlText(alt)}"`);
-    kept.push('style="max-width:100%;height:auto"');
+    const width = Number.parseInt(attrs.width || "", 10);
+    if (Number.isFinite(width) && width > 0) {
+      const px = Math.min(width, MAX_IMAGE_WIDTH);
+      kept.push(`width="${px}"`);
+      kept.push(`style="width:${px}px;max-width:100%;height:auto"`);
+    } else {
+      kept.push('style="max-width:100%;height:auto"');
+    }
   } else if (name === "a") {
     const href = (attrs.href || "").trim();
     if (href && isSafeHref(href)) {
@@ -206,7 +309,7 @@ export function sanitizeEmailHtml(html: string, allowImageUrl: (url: string) => 
     if (ch !== "<") {
       const next = source.indexOf("<", i);
       const text = source.slice(i, next < 0 ? source.length : next);
-      if (!dropping) out += escapeHtmlText(text);
+      if (!dropping) out += escapeTextNode(text);
       i = next < 0 ? source.length : next;
       continue;
     }
@@ -277,6 +380,23 @@ export function emailBodyIsEmpty(value: string) {
   return !/<img\b/i.test(value || "");
 }
 
+/**
+ * Rewrite editor paragraphs into Gmail's own line structure: one `<div>` per line and
+ * `<div><br></div>` for a blank line. Mail clients give an empty `<p></p>` zero height
+ * (so blank lines vanish) and `<p>` margins vary per client, while divs render the same
+ * everywhere. A line ending in `<br>` gets a second one because the editor shows that
+ * trailing break as its own line but browsers swallow a single trailing `<br>`.
+ */
+export function toGmailBlockHtml(html: string) {
+  return (html || "").replace(/<p(\s[^>]*)?>([\s\S]*?)<\/p>/gi, (_match, attrs: string | undefined, inner: string) => {
+    const bare = inner.trim();
+    let body = inner;
+    if (!bare) body = "<br />";
+    else if (/<br\s*\/?>$/i.test(bare)) body = `${bare}<br />`;
+    return `<div${attrs || ""}>${body}</div>`;
+  });
+}
+
 export function prepareEmailContent(
   value: string,
   allowImageUrl: (url: string) => boolean,
@@ -289,7 +409,7 @@ export function prepareEmailContent(
   if (!looksLikeEmailHtml(raw)) return { kind: "plain", content: raw };
   const html = sanitizeEmailHtml(raw, allowImageUrl);
   if (!html || emailBodyIsEmpty(html)) return { kind: "empty", content: "" };
-  return { kind: "html", content: html };
+  return { kind: "html", content: toGmailBlockHtml(html) };
 }
 
 export function extractEmailImageSrcs(html: string) {

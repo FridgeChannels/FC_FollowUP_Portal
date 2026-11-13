@@ -1,6 +1,25 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { ExtendedParametersError, asExtendedParameters } from "./extended-parameters.ts";
+import { ExtendedParametersError, asExtendedParameters, withQuoteHistory } from "./extended-parameters.ts";
+
+describe("withQuoteHistory", () => {
+  const inherited = '{"gmailThreadId":"t1","gmailMessageId":"m1"}';
+
+  it("leaves inherited parameters alone when the quote is kept", () => {
+    assert.equal(withQuoteHistory(inherited, undefined), inherited);
+    assert.equal(withQuoteHistory(null, undefined), null);
+  });
+
+  it("records a removed quote alongside the thread ids", () => {
+    assert.equal(withQuoteHistory(inherited, false), '{"gmailThreadId":"t1","gmailMessageId":"m1","quoteHistory":false}');
+    assert.equal(withQuoteHistory(null, false), '{"quoteHistory":false}');
+  });
+
+  it("drops a quote choice inherited from an earlier message", () => {
+    assert.equal(withQuoteHistory('{"gmailThreadId":"t1","quoteHistory":false}', undefined), '{"gmailThreadId":"t1"}');
+    assert.equal(withQuoteHistory('{"quoteHistory":false}', undefined), null);
+  });
+});
 
 describe("asExtendedParameters", () => {
   it("accepts an object and stores compact JSON", () => {

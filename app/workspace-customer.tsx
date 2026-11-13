@@ -1192,6 +1192,7 @@ export function BrandDetail({customerId}:{customerId:string}){
     scheduledAt?: string,
     attachments?: MediaAttachment[],
     cc?: string,
+    options?: { quoteHistory?: boolean },
   ) => {
     const response = await fetch(`/api/brands/${c.id}/messages`, {
       method: "POST",
@@ -1207,6 +1208,7 @@ export function BrandDetail({customerId}:{customerId:string}){
         deliveryMode,
         scheduledAt,
         attachments,
+        quoteHistory: channel === "Email" && options?.quoteHistory === false ? false : undefined,
       }),
     });
     const payload = (await response.json()) as { error?: string };

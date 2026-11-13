@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { EditorContent, useEditor, type Editor } from "@tiptap/react";
+import { EditorContent, useEditor, useEditorState, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Image from "@tiptap/extension-image";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { containsInlineBase64 } from "@/lib/email-html";
+import { containsInlineBase64, MAX_IMAGE_WIDTH } from "@/lib/email-html";
 import { cn } from "@/lib/utils";
 import { uploadMediaFile } from "./message-media";
 
@@ -49,12 +49,42 @@ function getSelectedLinkUrl(editor: Editor) {
   return isAllowedLinkUrl(selectedText) ? selectedText : undefined;
 }
 
+/** Same presets as Gmail's image menu; "best fit" is the usual 600px email column. */
+const IMAGE_WIDTH_SMALL = 240;
+const IMAGE_WIDTH_BEST_FIT = 600;
+
+type ImageSizePreset = "small" | "bestFit" | "original";
+
+function readImageWidth(src: string) {
+  return new Promise<number | null>((resolve) => {
+    const img = new window.Image();
+    img.onload = () => resolve(img.naturalWidth || null);
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+}
+
+function presetImageWidth(preset: ImageSizePreset, naturalWidth: number | null) {
+  const natural = naturalWidth ? Math.min(naturalWidth, MAX_IMAGE_WIDTH) : null;
+  if (preset === "original") return natural ?? IMAGE_WIDTH_BEST_FIT;
+  const target = preset === "small" ? IMAGE_WIDTH_SMALL : IMAGE_WIDTH_BEST_FIT;
+  return natural ? Math.min(natural, target) : target;
+}
+
 async function uploadAndInsert(editor: Editor, files: File[]) {
   const images = files.filter((file) => file.type.startsWith("image/"));
   if (!images.length) return false;
   for (const file of images) {
-    const uploaded = await uploadMediaFile(file, "image", { purpose: "email" });
-    editor.chain().focus().setImage({ src: uploaded.url, alt: file.name }).run();
+    const localUrl = URL.createObjectURL(file);
+    const [uploaded, naturalWidth] = await Promise.all([
+      uploadMediaFile(file, "image", { purpose: "email" }),
+      readImageWidth(localUrl),
+    ]).finally(() => URL.revokeObjectURL(localUrl));
+    editor
+      .chain()
+      .focus()
+      .setImage({ src: uploaded.url, alt: file.name, width: presetImageWidth("bestFit", naturalWidth) })
+      .run();
   }
   return true;
 }
@@ -122,8 +152,7 @@ export function EmailBodyEditor({
     content: value || "",
     editorProps: {
       attributes: {
-        class:
-          "min-h-28 px-3 py-2 pb-10 text-sm leading-6 text-slate-800 outline-none [&_a]:cursor-pointer [&_a]:text-blue-600 [&_a]:underline [&_a]:underline-offset-2 [&_img]:max-h-40 [&_img]:max-w-full [&_img]:rounded-md",
+        class: "email-html min-h-28 px-3 py-2 pb-10 outline-none",
       },
       handlePaste(_view, event) {
         const files = event.clipboardData?.files;
@@ -155,9 +184,27 @@ export function EmailBodyEditor({
     },
   });
 
+  const imageSelected = useEditorState({
+    editor,
+    selector: ({ editor: current }) => !!current?.isActive("image"),
+  });
+
   useEffect(() => {
     editorRef.current = editor;
   }, [editor]);
+
+  const resizeSelectedImage = async (preset: ImageSizePreset) => {
+    if (!editor) return;
+    const { from } = editor.state.selection;
+    const src = editor.getAttributes("image").src;
+    const naturalWidth = typeof src === "string" ? await readImageWidth(src) : null;
+    editor
+      .chain()
+      .focus()
+      .setNodeSelection(from)
+      .updateAttributes("image", { width: presetImageWidth(preset, naturalWidth), height: null })
+      .run();
+  };
 
   useEffect(() => {
     if (!editor) return;
@@ -288,6 +335,27 @@ export function EmailBodyEditor({
         >
           <ImagePlus />
         </ToolbarButton>
+        {imageSelected ? (
+          <div className="ml-1 flex items-center gap-0.5 border-l border-slate-200 pl-1">
+            {([
+              ["small", "Small"],
+              ["bestFit", "Best fit"],
+              ["original", "Original size"],
+            ] as const).map(([preset, label]) => (
+              <Button
+                key={preset}
+                type="button"
+                variant="ghost"
+                size="xs"
+                disabled={disabled}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => void resizeSelectedImage(preset)}
+              >
+                {label}
+              </Button>
+            ))}
+          </div>
+        ) : null}
       </div>
       <div className="min-h-28 max-h-60 overflow-y-auto overscroll-contain">
         <EditorContent editor={editor} />

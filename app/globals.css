@@ -344,6 +344,23 @@ body textarea.phone-script-section:focus-visible {
 .ui-surface { background: var(--card); border-color: var(--border); }
 .ui-eyebrow { color: #5146e5; }
 .ui-focus-ring:focus-visible { outline: 2px solid #818cf8; outline-offset: 2px; }
+
+/* Email body: Gmail compose/reader defaults, shared by the editor and the sent-mail preview. */
+.email-html { font-family: Arial, Helvetica, sans-serif; font-size: small; line-height: normal; color: #222; overflow-wrap: break-word; }
+.email-html p, .email-html div { margin: 0; }
+.email-html ul, .email-html ol { margin: 1em 0; padding-left: 40px; }
+.email-html ul { list-style: disc; }
+.email-html ol { list-style: decimal; }
+.email-html li > p, .email-html li > div { margin: 0; }
+.email-html h1 { font-size: 2em; font-weight: bold; margin: 0.67em 0; }
+.email-html h2 { font-size: 1.5em; font-weight: bold; margin: 0.83em 0; }
+.email-html h3 { font-size: 1.17em; font-weight: bold; margin: 1em 0; }
+.email-html blockquote { margin: 0 0 0 0.8ex; padding-left: 1ex; border-left: 1px solid #ccc; }
+.email-html a { color: #1155cc; text-decoration: underline; cursor: pointer; }
+.email-html img { display: inline-block; max-width: 100%; height: auto; }
+.email-html strong, .email-html b { font-weight: bold; }
+.email-html p.is-editor-empty:first-child::before { content: attr(data-placeholder); float: left; height: 0; color: #9ca3af; pointer-events: none; }
+.email-html img.ProseMirror-selectednode { outline: 2px solid #1a73e8; }
 .ui-cp-0 { border-color: #cbd5e1; background: #f8fafc; color: #475569; }
 .ui-cp-1 { border-color: #ddd6fe; background: #f5f3ff; color: #6d28d9; }
 .ui-cp-2 { border-color: #bfdbfe; background: #eff6ff; color: #1d4ed8; }

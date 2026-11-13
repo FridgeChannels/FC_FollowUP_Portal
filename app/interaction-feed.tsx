@@ -252,7 +252,7 @@ export function InteractionFeed({
   maxHeight?: string;
   bombInstances?: BombInstance[];
   actions?: ScheduledAction[];
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, scheduledAt?: string, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string) => Promise<void>;
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, scheduledAt?: string, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string, options?: { quoteHistory?: boolean }) => Promise<void>;
   onCancelBomb?: (instance: BombInstance) => Promise<void>;
   onCancelPending?: (taskId: string) => Promise<void>;
   initialChannel?: Channel;
@@ -552,7 +552,7 @@ function ChannelTranscript({
   messages: Interaction[];
   contacts: Contact[];
   channel: Channel | "All";
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, scheduledAt?: string, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string) => Promise<void>;
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, scheduledAt?: string, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string, options?: { quoteHistory?: boolean }) => Promise<void>;
   onCancelPending?: (taskId: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
@@ -823,7 +823,7 @@ function ConversationDetail({
   channel: Channel;
   replyPool: Interaction[];
   onBack: () => void;
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, scheduledAt?: string, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string) => Promise<void>;
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, scheduledAt?: string, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string, options?: { quoteHistory?: boolean }) => Promise<void>;
   onCancelPending?: (taskId: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
@@ -883,7 +883,7 @@ function ContactThreads({
   group: { contact?: Contact; messages: Interaction[] };
   replyPool: Interaction[];
   channel: Channel;
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, scheduledAt?: string, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string) => Promise<void>;
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, scheduledAt?: string, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string, options?: { quoteHistory?: boolean }) => Promise<void>;
   onCancelPending?: (taskId: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
@@ -944,7 +944,7 @@ function ThreadMessages({
   contacts?: Contact[];
   channel?: Channel;
   endpoint?: string;
-  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, scheduledAt?: string, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string) => Promise<void>;
+  onSend?: (contactId: string, channel: Channel, content: string, taskId?: string, threadId?: string, subject?: string, deliveryMode?: import("./send-timing-toggle").DeliveryMode, scheduledAt?: string, attachments?: import("@/lib/media-attachments").MediaAttachment[], cc?: string, options?: { quoteHistory?: boolean }) => Promise<void>;
   onCancelPending?: (taskId: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
