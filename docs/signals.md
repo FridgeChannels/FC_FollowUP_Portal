@@ -26,6 +26,8 @@ Two deliberate limits. The portal renders sent email in its own Timeline, so `GE
 
 For `linkedin.updated`, `body` must contain `relevant: true`, a valid `sourceUrl`, and `publishedAt`. `occurredAt` represents the signal update time; notification `created_at` represents the monitoring time. Supply only new relevant changes from a licensed API, authorized export, or another sustainable permitted provider, on the upstream provider's weekly schedule. Events without evidence, relevance or a valid publication date are rejected by the display adapter. The workspace groups newly received LinkedIn changes into one toast.
 
+Operational ingest + Notion brand binding: [`Signals｜LinkedIn 入库与 Notion 绑定.md`](./Signals｜LinkedIn%20入库与%20Notion%20绑定.md) (`POST /api/webhooks/linkedin-signals`).
+
 The current source labels indicate whether the store has received usable events. They do not independently verify provider health. Actual provider setup and health checks remain with the existing integration owners.
 
 ## Read-only preview

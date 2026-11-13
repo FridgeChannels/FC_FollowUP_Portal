@@ -214,10 +214,9 @@ export function BrandReplyBox({
   const { state, can, sendHumanReply } = useWorkspace();
   const customer = state.customers.find(item => item.id === customerId);
   const people = contacts || customer?.contacts || [];
+  const replyPool = interactions || state.interactions;
   const [content, setContent] = useState("");
-  const [subject, setSubject] = useState(() =>
-    interaction.channel === "Email" && interaction.title !== "Email" ? interaction.title : "",
-  );
+  const [subject, setSubject] = useState(() => replyEmailSubject(interaction, replyPool));
   const [cc, setCc] = useState("");
   const [quoteRemoved, setQuoteRemoved] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -228,6 +227,12 @@ export function BrandReplyBox({
   const media = useMessageMedia(channel);
   const notionBacked = !!onSend;
   const composerRef = useRef<HTMLDivElement>(null);
+  // Composer stays mounted while closed; re-prefill subject each time Reply opens
+  // (send success previously cleared subject and left it empty on reopen).
+  useEffect(() => {
+    if (!open) return;
+    setSubject(replyEmailSubject(interaction, interactions || state.interactions));
+  }, [open, interaction.id, interaction.title, interaction.channel]);
   useEffect(() => {
     if (!open || !replyToThisMessage) return;
     const composer = composerRef.current;
@@ -284,7 +289,14 @@ export function BrandReplyBox({
           if (onSend) {
             setSaving(true);
             void onSend(contact.id, channel, content, replyTaskId, interaction.threadId, subject, deliveryMode, scheduledAt ? easternDateTimeLocalToIso(scheduledAt) : undefined, media.readyAttachments, channel === "Email" ? cc : undefined, quoteRemoved ? { quoteHistory: false } : undefined)
-              .then(() => { toast.success("Message saved as pending"); setContent(""); setSubject(""); setCc(""); setQuoteRemoved(false); media.reset(); })
+              .then(() => {
+                toast.success("Message saved as pending");
+                setContent("");
+                setSubject(replyEmailSubject(interaction, interactions || state.interactions));
+                setCc("");
+                setQuoteRemoved(false);
+                media.reset();
+              })
               .catch(error => toast.error(error instanceof Error ? error.message : "Send failed"))
               .finally(() => setSaving(false));
             return;
@@ -301,15 +313,32 @@ export function BrandReplyBox({
   );
 }
 
+function emailTitleSubject(title?: string | null) {
+  const subject = title?.trim();
+  if (!subject || subject === "Email" || subject === "Conversation") return "";
+  return subject;
+}
+
 function threadEmailSubject(thread: Interaction[]) {
   for (let index = thread.length - 1; index >= 0; index -= 1) {
     const item = thread[index]!;
     if (item.channel !== "Email") continue;
-    const subject = item.title?.trim();
-    if (!subject || subject === "Email" || subject === "Conversation") continue;
-    return subject;
+    const subject = emailTitleSubject(item.title);
+    if (subject) return subject;
   }
   return "";
+}
+
+/** Prefer this message's subject; otherwise newest valid subject in the same conversation. */
+function replyEmailSubject(interaction: Interaction, pool: Interaction[] = []) {
+  if (interaction.channel !== "Email") return "";
+  const direct = emailTitleSubject(interaction.title);
+  if (direct) return direct;
+  const related = [
+    interaction,
+    ...pool.filter((item) => item.id !== interaction.id && sameConversation(item, interaction)),
+  ];
+  return threadEmailSubject(related);
 }
 
 function threadSendContext(thread: Interaction[]) {

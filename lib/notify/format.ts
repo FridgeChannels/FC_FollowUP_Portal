@@ -96,6 +96,19 @@ function portalUrlFor(
   return resolvePortalUrl?.(event)?.trim() || null;
 }
 
+/** Instant for the notification clock: event time, else send time. */
+function notificationInstantIso(event: NotificationEvent) {
+  const occurred = (event.occurredAt || "").trim();
+  return occurred || new Date().toISOString();
+}
+
+function formatNotificationTime(
+  event: NotificationEvent,
+  formatAt: (iso: string) => string,
+) {
+  return formatAt(notificationInstantIso(event));
+}
+
 function pushIfPresent(lines: string[], label: string, value: string | null | undefined) {
   const trimmed = (value || "").trim();
   if (!trimmed) return;
@@ -106,6 +119,7 @@ function formatSampleSlackText(
   event: NotificationEvent,
   options: SlackFormatOptions,
 ) {
+  const formatAt = options.formatDueAt || ((iso: string) => iso);
   const preview = truncatePreview(event.contentPreview, options.contentMaxChars);
   const portalUrl = portalUrlFor(event, options.resolvePortalUrl);
   const lines = [
@@ -118,6 +132,7 @@ function formatSampleSlackText(
   pushIfPresent(lines, "SN", event.subject);
   pushIfPresent(lines, "Location", event.sender);
   pushIfPresent(lines, "Device", event.contactName);
+  pushIfPresent(lines, "Time (ET)", formatNotificationTime(event, formatAt));
   if (preview) lines.push("", `URL: ${preview}`);
   if (portalUrl) lines.push("", `Open Sample: ${portalUrl}`);
   return lines.join("\n");
@@ -132,7 +147,7 @@ export function formatSlackNotificationText(
     return formatSampleSlackText(event, options);
   }
 
-  const formatDue = options.formatDueAt || ((iso: string) => iso);
+  const formatAt = options.formatDueAt || ((iso: string) => iso);
   const preview = truncatePreview(event.contentPreview, options.contentMaxChars);
   const portalUrl = portalUrlFor(event, options.resolvePortalUrl);
   const lines = [
@@ -144,7 +159,8 @@ export function formatSlackNotificationText(
     `From: ${display(event.sender)}`,
   ];
   if (event.inboxStatus) lines.push(`Status: ${event.inboxStatus}`);
-  if (event.replyDueAt) lines.push(`Due: ${formatDue(event.replyDueAt)}`);
+  if (event.replyDueAt) lines.push(`Due: ${formatAt(event.replyDueAt)}`);
+  lines.push(`Time (ET): ${formatNotificationTime(event, formatAt)}`);
   if (event.subject?.trim()) lines.push(`Subject: ${event.subject.trim()}`);
   lines.push("", `Preview: ${preview || PLACEHOLDER}`);
   if (portalUrl) {
@@ -155,7 +171,10 @@ export function formatSlackNotificationText(
 
 type SlackBlock = Record<string, unknown>;
 
-function sampleFieldBlocks(event: NotificationEvent) {
+function sampleFieldBlocks(
+  event: NotificationEvent,
+  formatAt: (iso: string) => string,
+) {
   const fields: Array<{ type: string; text: string }> = [];
   const add = (label: string, value: string | null | undefined) => {
     const trimmed = (value || "").trim();
@@ -166,6 +185,7 @@ function sampleFieldBlocks(event: NotificationEvent) {
   add("SN", event.subject);
   add("Location", event.sender);
   add("Device", event.contactName);
+  add("Time (ET)", formatNotificationTime(event, formatAt));
   return fields;
 }
 
@@ -174,11 +194,12 @@ export function formatSlackNotificationBlocks(
   event: NotificationEvent,
   options: SlackFormatOptions,
 ): SlackBlock[] {
-  const formatDue = options.formatDueAt || ((iso: string) => iso);
+  const formatAt = options.formatDueAt || ((iso: string) => iso);
   const preview = truncatePreview(event.contentPreview, options.contentMaxChars);
   const portalUrl = portalUrlFor(event, options.resolvePortalUrl);
   const title = `${eventLabel(event.eventType)} · ${display(event.channel)}`.slice(0, 150);
   const isSample = event.eventType === "sample.visited";
+  const timeEt = formatNotificationTime(event, formatAt);
 
   const blocks: SlackBlock[] = [
     {
@@ -195,7 +216,7 @@ export function formatSlackNotificationBlocks(
   ];
 
   if (isSample) {
-    const fields = sampleFieldBlocks(event);
+    const fields = sampleFieldBlocks(event, formatAt);
     if (fields.length) blocks.push({ type: "section", fields });
     if (preview) {
       blocks.push({
@@ -220,22 +241,22 @@ export function formatSlackNotificationBlocks(
       ],
     });
 
-    if (event.replyDueAt || event.subject?.trim()) {
-      const extra: Array<{ type: string; text: string }> = [];
-      if (event.replyDueAt) {
-        extra.push({
-          type: "mrkdwn",
-          text: fieldMrkdwn("Due", formatDue(event.replyDueAt)),
-        });
-      }
-      if (event.subject?.trim()) {
-        extra.push({
-          type: "mrkdwn",
-          text: fieldMrkdwn("Subject", event.subject.trim()),
-        });
-      }
-      blocks.push({ type: "section", fields: extra });
+    const extra: Array<{ type: string; text: string }> = [
+      { type: "mrkdwn", text: fieldMrkdwn("Time (ET)", timeEt) },
+    ];
+    if (event.replyDueAt) {
+      extra.push({
+        type: "mrkdwn",
+        text: fieldMrkdwn("Due", formatAt(event.replyDueAt)),
+      });
     }
+    if (event.subject?.trim()) {
+      extra.push({
+        type: "mrkdwn",
+        text: fieldMrkdwn("Subject", event.subject.trim()),
+      });
+    }
+    blocks.push({ type: "section", fields: extra });
 
     blocks.push({
       type: "section",

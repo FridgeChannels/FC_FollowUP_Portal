@@ -54,12 +54,15 @@ describe("formatSlackNotificationText", () => {
     assert.match(text, /followupHistory=1/);
   });
   it("uses one field per line and includes portal link", () => {
-    const text = formatSlackNotificationText(baseEvent, {
-      contentMaxChars: 300,
-      formatDueAt: (iso) => `formatted:${iso}`,
-      resolvePortalUrl: (event) =>
-        `https://portal.example/customers/${event.brandId}`,
-    });
+    const text = formatSlackNotificationText(
+      { ...baseEvent, occurredAt: "2026-09-19T15:30:00.000Z" },
+      {
+        contentMaxChars: 300,
+        formatDueAt: (iso) => `formatted:${iso}`,
+        resolvePortalUrl: (event) =>
+          `https://portal.example/customers/${event.brandId}`,
+      },
+    );
     assert.match(text, /^Reply · Email/m);
     assert.match(text, /^Acme$/m);
     assert.match(text, /^Owner: Ella$/m);
@@ -67,6 +70,7 @@ describe("formatSlackNotificationText", () => {
     assert.match(text, /^From: buyer@acme\.com$/m);
     assert.match(text, /^Status: Needs Reply$/m);
     assert.match(text, /^Due: formatted:2026-09-19T19:00:00\.000Z$/m);
+    assert.match(text, /^Time \(ET\): formatted:2026-09-19T15:30:00\.000Z$/m);
     assert.match(text, /Open brand: https:\/\/portal\.example\/customers\/brand-1/);
     assert.doesNotMatch(text, /conversationId:/);
   });
@@ -95,14 +99,19 @@ describe("formatSlackNotificationText", () => {
         contactName: "Mobile Safari · iOS",
         contentPreview: "https://tap.fridgechannels.com/p/93H68D44ER",
         portalUrl: "https://portal.example/customers/brand-1/sample",
+        occurredAt: "2026-09-19T15:30:00.000Z",
       },
-      { contentMaxChars: 300 },
+      {
+        contentMaxChars: 300,
+        formatDueAt: (iso) => `formatted:${iso}`,
+      },
     );
     assert.match(text, /^Sample tap · Amazon/m);
     assert.match(text, /^Owner: Ella$/m);
     assert.match(text, /^SN: 93H68D44ER$/m);
     assert.match(text, /^Location: Tokyo, Japan$/m);
     assert.match(text, /^Device: Mobile Safari · iOS$/m);
+    assert.match(text, /^Time \(ET\): formatted:2026-09-19T15:30:00\.000Z$/m);
     assert.match(text, /^URL: https:\/\/tap\.fridgechannels\.com\/p\/93H68D44ER$/m);
     assert.doesNotMatch(text, /Contact:|From:|Status:|Subject:/);
   });
@@ -119,6 +128,19 @@ describe("formatSlackNotificationBlocks", () => {
       | undefined;
     assert.equal(actions?.elements?.[0]?.url, "https://portal.example/customers/brand-1");
     assert.equal(actions?.elements?.[0]?.text?.text, "Open brand in Portal");
+  });
+
+  it("includes Eastern Time (ET) from occurredAt", () => {
+    const blocks = formatSlackNotificationBlocks(
+      { ...baseEvent, occurredAt: "2026-09-19T15:30:00.000Z" },
+      {
+        contentMaxChars: 300,
+        formatDueAt: (iso) => `formatted:${iso}`,
+      },
+    );
+    const json = JSON.stringify(blocks);
+    assert.match(json, /Time \(ET\)/);
+    assert.match(json, /formatted:2026-09-19T15:30:00\.000Z/);
   });
 
   const sampleEvent: NotificationEvent = {
