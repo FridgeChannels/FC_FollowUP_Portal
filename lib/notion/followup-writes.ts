@@ -41,6 +41,7 @@ import { listFollowupContactIds } from "./contacts";
 import { listFollowupConversations } from "./conversations";
 import {
   asExtendedParameters,
+  omitOutboundMediaFields,
   parseExtendedParametersObject,
   withAfterEmailFollowUp,
   withQuoteHistory,
@@ -480,20 +481,18 @@ function encodeOutboundExtendedParameters(
   inherited?: string | null,
   attachments: MediaAttachment[] = [],
 ) {
-  const base = parseExtendedParametersObject(inherited) || {};
+  const base = omitOutboundMediaFields(parseExtendedParametersObject(inherited) || {});
   const media = mediaFieldsFromAttachments(attachments);
   if (media) {
-    const rest = { ...base };
-    delete rest.attachments;
-    delete rest.mediaUrl;
-    delete rest.mediaType;
-    return asExtendedParameters({ ...rest, ...media });
+    return asExtendedParameters({ ...base, ...media });
   }
-  if (!inherited?.trim()) return null;
+  // Text-only: never keep mediaUrl/mediaType from an earlier thread message
+  // (e.g. inbound WA photo), or the new bubble would show that image.
+  if (!Object.keys(base).length) return null;
   try {
-    return asExtendedParameters(inherited) || inherited.trim();
+    return asExtendedParameters(base);
   } catch {
-    return inherited.trim();
+    return null;
   }
 }
 

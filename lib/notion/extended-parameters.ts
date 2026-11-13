@@ -46,6 +46,15 @@ export function withQuoteHistory(inherited: string | null | undefined, quoteHist
   return asExtendedParameters(quoteHistory === false ? { ...rest, quoteHistory: false } : rest);
 }
 
+/** Drop prior-message media so a text-only outbound does not re-send/show old images. */
+export function omitOutboundMediaFields(base: Record<string, unknown>) {
+  const rest = { ...base };
+  delete rest.attachments;
+  delete rest.mediaUrl;
+  delete rest.mediaType;
+  return rest;
+}
+
 /**
  * Marks an SMS/WhatsApp outbound as dependent on an email Task.
  * Orchestrator skips until that task is Completed, and cancels if it Failed.

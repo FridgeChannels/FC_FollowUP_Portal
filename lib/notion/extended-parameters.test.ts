@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   ExtendedParametersError,
   asExtendedParameters,
+  omitOutboundMediaFields,
   withAfterEmailFollowUp,
   withQuoteHistory,
 } from "./extended-parameters.ts";
@@ -38,6 +39,21 @@ describe("withAfterEmailFollowUp", () => {
     assert.equal(
       withAfterEmailFollowUp('{"afterTaskId":"old","offsetMinutes":30,"x":1}', null),
       '{"x":1}',
+    );
+  });
+});
+
+describe("omitOutboundMediaFields", () => {
+  it("strips mediaUrl/mediaType/attachments and keeps other keys", () => {
+    assert.deepEqual(
+      omitOutboundMediaFields({
+        afterTaskId: "email-1",
+        mediaUrl: "https://example.com/a.jpg",
+        mediaType: "image",
+        attachments: [{ url: "x" }],
+        x: 1,
+      }),
+      { afterTaskId: "email-1", x: 1 },
     );
   });
 });
