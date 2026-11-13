@@ -338,6 +338,10 @@ export function InteractionFeed({
   useEffect(() => {
     if (followUpChannel === "SMS" || followUpChannel === "WhatsApp") {
       setSelectedChannel(followUpChannel);
+      // Defer scroll until the WhatsApp/SMS composer mounts at the top of the tab.
+      requestAnimationFrame(() => {
+        document.getElementById("after-email-follow-up-compose")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
     }
   }, [followUpChannel, followUpAfterEmail?.emailTaskId]);
   const [cancellingBombId, setCancellingBombId] = useState<string | null>(null);
@@ -587,17 +591,28 @@ function ChannelTranscript({
   const focused=messages.find(item=>item.id===focusedInteractionId);
   const focusedKey=focused?threadKey(focused):null;
   useEffect(()=>{
+    if (followUpAfterEmail) {
+      setSelectedThread(null);
+      return;
+    }
     if(!focusedInteractionId||!focused?.channel||!focusedKey)return;
     const timer=setTimeout(()=>setSelectedThread({channel:focused.channel!,key:focusedKey,interactionId:focused.id}),0);
     return ()=>clearTimeout(timer);
-  },[focusedInteractionId,focused?.id,focused?.channel,focusedKey]);
+  },[focusedInteractionId,focused?.id,focused?.channel,focusedKey,followUpAfterEmail?.emailTaskId]);
   const contactGroups = groupByContact(messages, contacts);
   const threads = groupByThread(messages);
   const activeThread = selectedThread && (channel === "All" || selectedThread.channel === channel)
     ? groupByThread(messages.filter((item) => item.channel === selectedThread.channel)).find((thread) => threadKey(thread[0]!) === selectedThread.key)
     : undefined;
 
-  if (activeThread && selectedThread) {
+  if (
+    activeThread &&
+    selectedThread &&
+    !(
+      followUpAfterEmail &&
+      (selectedThread.channel === "SMS" || selectedThread.channel === "WhatsApp")
+    )
+  ) {
       const contact = contacts.find((item) => item.id === activeThread[0]?.contactId);
       return (
         <ConversationDetail
@@ -609,6 +624,8 @@ function ChannelTranscript({
           replyPool={messages}
           onBack={() => setSelectedThread(null)}
           onSend={onSend}
+          followUpAfterEmail={followUpAfterEmail}
+          onFollowUpConsumed={onFollowUpConsumed}
           onCancelPending={onCancelPending}
           onRefreshQuo={onRefreshQuo}
           quoRefreshingCallId={quoRefreshingCallId}
@@ -629,18 +646,42 @@ function ChannelTranscript({
 
   if (channel !== "Phone") {
     const brandId = customerId || messages[0]?.customerId;
+    const followUpHere =
+      !!followUpAfterEmail &&
+      (channel === "SMS" || channel === "WhatsApp") &&
+      contacts.some((item) => item.id === followUpAfterEmail.contactId);
     const compose =
       brandId && (channel === "SMS" || channel === "WhatsApp") ? (
-        <ChannelSendBox
-          customerId={brandId}
-          channel={channel}
-          contacts={contacts}
-          interactions={messages}
-          onSend={onSend}
-          followUpAfterEmail={followUpAfterEmail || null}
-          onFollowUpConsumed={onFollowUpConsumed}
-        />
+        <div id="after-email-follow-up-compose">
+          {followUpHere ? (
+            <div className="border-b border-violet-200 bg-violet-100 px-5 py-2.5 text-sm font-medium text-violet-900" lang="en">
+              ↓ Write your {channel} follow-up in the box below, then send.
+            </div>
+          ) : null}
+          <ChannelSendBox
+            customerId={brandId}
+            channel={channel}
+            contacts={contacts}
+            interactions={messages}
+            onSend={onSend}
+            followUpAfterEmail={followUpAfterEmail || null}
+            onFollowUpConsumed={onFollowUpConsumed}
+          />
+        </div>
       ) : null;
+    // Follow-up: keep the composer on top and do not open a thread (thread detail has no WA/SMS send box historically).
+    if (followUpHere) {
+      return (
+        <div>
+          {compose}
+          {threads.length ? (
+            <ConversationInbox threads={threads} contacts={contacts} channel={channel} onOpen={(thread) => setSelectedThread({ channel, key: threadKey(thread[0]!) })} />
+          ) : (
+            <div className="px-5 py-6 text-center text-sm text-slate-400">No prior {channel} conversation.</div>
+          )}
+        </div>
+      );
+    }
     if (!threads.length) {
       return (
         <div>
@@ -850,6 +891,8 @@ function ConversationDetail({
   replyPool,
   onBack,
   onSend,
+  followUpAfterEmail,
+  onFollowUpConsumed,
   onCancelPending,
   onRefreshQuo,
   quoRefreshingCallId,
@@ -867,6 +910,8 @@ function ConversationDetail({
   replyPool: Interaction[];
   onBack: () => void;
   onSend?: import("./brand-reply-box").SendMessageHandler;
+  followUpAfterEmail?: AfterEmailFollowUp | null;
+  onFollowUpConsumed?: () => void;
   onCancelPending?: (taskId: string) => Promise<void>;
   onRefreshQuo?: (callId: string) => void;
   quoRefreshingCallId?: string | null;
@@ -903,6 +948,16 @@ function ConversationDetail({
           thread={thread}
           interactions={replyPool}
           onSend={onSend}
+        />
+      ) : channel === "SMS" || channel === "WhatsApp" ? (
+        <ChannelSendBox
+          customerId={thread[0]!.customerId}
+          channel={channel}
+          contacts={contacts}
+          interactions={replyPool}
+          onSend={onSend}
+          followUpAfterEmail={followUpAfterEmail || null}
+          onFollowUpConsumed={onFollowUpConsumed}
         />
       ) : null}
     </section>

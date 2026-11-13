@@ -20,8 +20,13 @@ export function AfterEmailTiming({
 }) {
   const offset = normalizeAfterEmailOffsetMinutes(offsetMinutes);
   let preview = "";
+  let bumped = false;
   try {
-    preview = formatAfterEmailEtLabel(scheduledAtAfterEmail(emailScheduledAt, offset));
+    const base = Date.parse(emailScheduledAt);
+    const earliest = base + offset * 60_000;
+    const when = scheduledAtAfterEmail(emailScheduledAt, offset);
+    preview = formatAfterEmailEtLabel(when);
+    bumped = Number.isFinite(base) && Date.parse(when) > earliest + 500;
   } catch {
     preview = "—";
   }
@@ -42,7 +47,9 @@ export function AfterEmailTiming({
         />
       </label>
       <p className="text-[11px] text-slate-500" title="America/New_York">
-        Scheduled for {preview} ET (email + {offset} min)
+        {bumped
+          ? `Scheduled for ${preview} ET (email + ${offset} min already passed — next available slot)`
+          : `Scheduled for ${preview} ET (email + ${offset} min)`}
       </p>
     </div>
   );

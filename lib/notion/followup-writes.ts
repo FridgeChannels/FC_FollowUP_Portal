@@ -119,6 +119,8 @@ async function resolveHumanScheduledAt(input: {
   contactFollowupMode?: string | null;
   channel: ScheduleChannel;
   scheduledAt?: string | null;
+  /** After-email SMS/WA: if email+offset already passed, bump instead of rejecting. */
+  bumpPastScheduledAt?: boolean;
 }) {
   if (input.deliveryMode === "immediate") {
     return scheduledAtNow();
@@ -126,7 +128,12 @@ async function resolveHumanScheduledAt(input: {
   if (input.scheduledAt?.trim()) {
     const requested = Date.parse(input.scheduledAt.trim());
     if (!Number.isFinite(requested)) throw new Error("Invalid scheduled send date");
-    if (requested <= Date.now()) throw new Error("Scheduled send date must be in the future");
+    if (requested <= Date.now()) {
+      if (input.bumpPastScheduledAt) {
+        return new Date(Date.now() + 60_000).toISOString();
+      }
+      throw new Error("Scheduled send date must be in the future");
+    }
     return new Date(requested).toISOString();
   }
 
@@ -976,6 +983,7 @@ export async function createHumanOutbound(input: {
     contactFollowupMode: input.contactFollowupMode,
     channel,
     scheduledAt: input.scheduledAt,
+    bumpPastScheduledAt: !!input.afterEmailFollowUp?.afterTaskId,
   });
 
   let linkedIn = null as Awaited<ReturnType<typeof prepareLinkedInOutbound>> | null;

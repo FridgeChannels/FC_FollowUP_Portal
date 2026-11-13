@@ -1,6 +1,9 @@
 /** Minimum delay after the email's Scheduled At before SMS/WhatsApp may send. */
 export const AFTER_EMAIL_MIN_OFFSET_MINUTES = 15;
 
+/** When email+offset is already past (common after Send now), schedule at least this far ahead. */
+export const AFTER_EMAIL_MIN_FUTURE_MS = 60_000;
+
 export type AfterEmailFollowUp = {
   contactId: string;
   emailTaskId: string;
@@ -17,12 +20,23 @@ export function normalizeAfterEmailOffsetMinutes(value: number | null | undefine
   return Math.max(AFTER_EMAIL_MIN_OFFSET_MINUTES, Math.floor(n));
 }
 
-/** UTC ISO for `emailScheduledAt + offsetMinutes`. */
-export function scheduledAtAfterEmail(emailScheduledAt: string, offsetMinutes: number) {
+/**
+ * UTC ISO for the follow-up send time: max(emailScheduledAt + offset, now + 1m).
+ * Send now emails use Scheduled At ≈ now; if the operator takes longer than the offset
+ * to compose SMS/WhatsApp, email+offset is already past — bump so create still succeeds
+ * while the orchestrator afterTaskId gate keeps order.
+ */
+export function scheduledAtAfterEmail(
+  emailScheduledAt: string,
+  offsetMinutes: number,
+  nowMs = Date.now(),
+) {
   const base = Date.parse(emailScheduledAt);
   if (!Number.isFinite(base)) throw new Error("Invalid email scheduled time");
   const offset = normalizeAfterEmailOffsetMinutes(offsetMinutes);
-  return new Date(base + offset * 60_000).toISOString();
+  const earliest = base + offset * 60_000;
+  const minFuture = nowMs + AFTER_EMAIL_MIN_FUTURE_MS;
+  return new Date(Math.max(earliest, minFuture)).toISOString();
 }
 
 export function formatAfterEmailEtLabel(iso: string) {

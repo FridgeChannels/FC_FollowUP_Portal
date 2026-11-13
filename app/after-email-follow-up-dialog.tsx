@@ -32,8 +32,8 @@ export function AfterEmailFollowUpDialog({
         <DialogHeader>
           <DialogTitle>Follow up on another channel?</DialogTitle>
           <DialogDescription>
-            Your email is queued for {when} ET. You can send an SMS or WhatsApp at least 15 minutes
-            after that time.
+            Your email is queued for {when} ET. Pick a channel — next you&apos;ll write the follow-up
+            message (sends at least 15 minutes after the email).
           </DialogDescription>
         </DialogHeader>
         <DialogFooter className="flex-col gap-2 sm:flex-col sm:space-x-0">

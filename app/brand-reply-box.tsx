@@ -509,6 +509,7 @@ export function ChannelSendBox({
   const [scheduledAt, setScheduledAt] = useState("");
   const [offsetMinutes, setOffsetMinutes] = useState(AFTER_EMAIL_MIN_OFFSET_MINUTES);
   const media = useMessageMedia(channel);
+  const followUpTextareaRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     setContactId(followUpActive ? followUpAfterEmail!.contactId : latest?.contactId || people[0]?.id || "");
     setContent("");
@@ -517,12 +518,23 @@ export function ChannelSendBox({
     setOffsetMinutes(AFTER_EMAIL_MIN_OFFSET_MINUTES);
     media.reset();
   }, [channel, customerId, followUpAfterEmail?.emailTaskId, followUpAfterEmail?.contactId]);
+  useEffect(() => {
+    if (!followUpActive) return;
+    const node = followUpTextareaRef.current;
+    if (!node) return;
+    const timer = window.setTimeout(() => {
+      document.getElementById("after-email-follow-up-compose")?.scrollIntoView({ behavior: "smooth", block: "center" });
+      node.focus();
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [followUpActive, followUpAfterEmail?.emailTaskId, channel]);
   const contact = people.find(item => item.id === contactId) || people[0];
   const customer = state.customers.find(item => item.id === customerId);
   const channelHasPendingReply = interactions.some(item => item.channel === channel && inboundNeedsComposer(state, item, interactions));
   if (!can("reply") || !customerId) return null;
   if (!onSend && customer?.status === "Closed") return null;
-  if (channelHasPendingReply) return null;
+  // After-email follow-up must still show the composer even if this channel has an inbound needing reply.
+  if (channelHasPendingReply && !followUpActive) return null;
   if (!people.length) {
     return <div className="border-t border-slate-200 px-5 py-4 text-sm text-slate-400">No contact has a valid {channel} endpoint.</div>;
   }
@@ -533,24 +545,25 @@ export function ChannelSendBox({
   const taskId = latestOutbound?.taskId || pool.at(-1)?.taskId;
 
   return (
-    <div className="border-t border-slate-200 px-5 py-4">
-      <div className="rounded-xl bg-slate-50 p-3">
+    <div className={`px-5 py-4 ${followUpActive ? "border-t-2 border-violet-300 bg-violet-50/60" : "border-t border-slate-200"}`}>
+      <div className={`rounded-xl p-3 ${followUpActive ? "border-2 border-violet-400 bg-white shadow-sm ring-2 ring-violet-200" : "bg-slate-50"}`}>
         <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
           <Select value={contact?.id} onValueChange={setContactId} disabled={followUpActive || saving}>
             <SelectTrigger size="sm" className="w-44"><SelectValue placeholder="KeyPerson"/></SelectTrigger>
             <SelectContent>{people.map(item => <SelectItem key={item.id} value={item.id}>{item.name} · {item.role}</SelectItem>)}</SelectContent>
           </Select>
-          <span className="text-xs text-slate-400">
-            {followUpActive ? `Follow up on ${channel}` : `Send ${channel}`}
+          <span className={`text-xs font-medium ${followUpActive ? "text-violet-700" : "text-slate-400"}`}>
+            {followUpActive ? `Write your ${channel} follow-up` : `Send ${channel}`}
           </span>
         </div>
         <div className="space-y-2">
           <MessageMediaInputFrame channel={channel} media={media} disabled={saving}>
             <Textarea
+              ref={followUpTextareaRef}
               value={content}
               onChange={event => setContent(event.target.value)}
-              className="min-h-20 resize-none"
-              placeholder={`Write ${channel === "Phone" ? "a call note" : `a ${channel} message`}…`}
+              className={`min-h-20 resize-none ${followUpActive ? "border-violet-200 bg-white focus-visible:ring-violet-300" : ""}`}
+              placeholder={followUpActive ? `Type the ${channel} follow-up message here…` : `Write ${channel === "Phone" ? "a call note" : `a ${channel} message`}…`}
             />
           </MessageMediaInputFrame>
           <div className="flex flex-wrap items-center justify-end gap-2">
@@ -575,14 +588,10 @@ export function ChannelSendBox({
               if (followUpActive && followUpAfterEmail) {
                 const offset = normalizeAfterEmailOffsetMinutes(offsetMinutes);
                 try {
+                  // Clamps to now+1m when email+offset is already past (Send now + slow compose).
                   when = scheduledAtAfterEmail(followUpAfterEmail.emailScheduledAt, offset);
                 } catch (error) {
                   toast.error(error instanceof Error ? error.message : "Invalid email scheduled time");
-                  setSaving(false);
-                  return;
-                }
-                if (Date.parse(when) <= Date.now()) {
-                  toast.error("Choose at least 15 minutes after the email scheduled time.");
                   setSaving(false);
                   return;
                 }
