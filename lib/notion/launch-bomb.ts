@@ -56,6 +56,8 @@ export type LaunchStepCopy = {
   callGoal?: string;
   script?: string;
   attachments?: import("../media-attachments").MediaAttachment[];
+  /** When true, this template step is omitted from the OmniReach launch. */
+  skip?: boolean;
 };
 
 export type LaunchPlanStep = {
@@ -186,6 +188,7 @@ export async function launchFollowupBomb(input: {
     .map((item) => {
       const channel = asChannel(item.channel);
       if (!channel) return null;
+      if (input.copies?.[item.id]?.skip) return null;
       if (!channelReachable(contact, channel)) return null;
       return { channel, templateId: item.id, reachable: true as const };
     })
@@ -233,7 +236,10 @@ export async function launchFollowupBomb(input: {
         contacts: [{
           contactId: contact.id,
           followUpStatus: asContactStatus(contact.followupStatus),
-          followUpMode: asFollowUpMode(contact.followupMode),
+          // OmniReach is an explicit user launch; do not block when Contact Mode is Manual.
+          followUpMode: contact.followupMode === "Manual"
+            ? undefined
+            : asFollowUpMode(contact.followupMode),
           channels: selectedChannels,
         }],
       }],

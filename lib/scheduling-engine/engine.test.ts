@@ -216,6 +216,22 @@ test("联系人已转 Manual 时，自动创建进入复核", () => {
   assert.equal(plan.scheduled.length, 0);
 });
 
+test("未传 followUpMode 时 Automated 可排班（OmniReach 显式 Launch 豁免路径）", () => {
+  const plan = previewSchedule(input({
+    method: "Automated",
+    clients: [client({
+      clientId: "c1",
+      contacts: [{
+        contactId: "ct-1",
+        followUpStatus: "In Progress",
+        channels: [channel("Email")],
+      }],
+    })],
+  }));
+  assert.equal(plan.needsReview.length, 0);
+  assert.ok(plan.scheduled.length > 0);
+});
+
 test("Preferred Start Date 落在周末时，从下一个工作日起排，且为 09:00 ET", () => {
   const plan = previewSchedule(input({
     start: "2026-09-12",

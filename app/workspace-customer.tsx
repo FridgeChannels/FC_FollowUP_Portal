@@ -2172,6 +2172,8 @@ type LaunchStepCopy = {
   callGoal?: string;
   script?: string;
   attachments?: MediaAttachment[];
+  /** Omit this channel from the current OmniReach launch only. */
+  skip?: boolean;
 };
 
 type LaunchBombOption = {id:string;name:string;version?:number;goal:string;cp?:string;cpIds?:string[];scenarioId?:string|null;targetRole?:string|null;status?:string;priority?:string|null;steps:Array<{id:string;channel:Channel;subject?:string;content:string;callGoal?:string;script?:string;attachments?:MediaAttachment[]}>};
@@ -2410,6 +2412,7 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
   const incomplete=selected?.steps.some((s)=>{
     if(person&&!channelAvailable(person,s.channel))return false;
     const copy=copies[s.id];
+    if(copy?.skip)return false;
     if(!copy)return true;
     if(s.channel==="Email"){
       const hasBody=!!copy.content?.trim()||(copy.attachments?.length||0)>0;
@@ -2419,7 +2422,7 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
     return !copy.content?.trim();
   });
   const anyStepUploading=Object.values(stepUploading).some(Boolean);
-  const hasReachableStep=!!selected&&!!person&&selected.steps.some((s)=>channelAvailable(person,s.channel));
+  const hasReachableStep=!!selected&&!!person&&selected.steps.some((s)=>channelAvailable(person,s.channel)&&!copies[s.id]?.skip);
   const launched=!!launchedInstanceId||previewReady||!!launchPlan;
   const launchedInstance=launchedInstanceId?state.bombInstances.find(item=>item.id===launchedInstanceId):undefined;
   const resultPlanState=launchPlan?.state || state;
@@ -2468,20 +2471,32 @@ export function LaunchBombDialog({customerId,open,onOpenChange,contacts,currentC
         <div className="rounded-xl bg-slate-50 p-4 text-sm"><b>{selected.goal}</b><p className="mt-1 text-xs text-slate-500">Edits apply only to this launch.</p>{unavailable.length>0&&<div className="mt-2 text-xs text-amber-700">No contact info for: {[...new Set(unavailable)].join(", ")}. These channels are disabled and will not create send tasks.</div>}</div>
         {selected.steps.map((s,index)=>{
           const copy=copies[s.id]||{};
-          const disabled=!!person&&!channelAvailable(person,s.channel);
-          return <div key={s.id} className={`rounded-xl bg-slate-50 p-4 ${disabled?"pointer-events-none opacity-50":""}`} aria-disabled={disabled||undefined}>
-            <div className="mb-3 flex items-center justify-between gap-2"><div className="flex items-center gap-2"><span className={`grid size-7 place-items-center rounded-md bg-slate-50 text-xs font-bold ${disabled?"text-slate-400":"text-violet-600"}`}>{index+1}</span><ChannelOption channel={s.channel}/></div>{disabled?<span className="text-xs font-medium text-slate-400">Unavailable · no contact info</span>:null}</div>
-            <LaunchStepEditor
-              key={`${s.id}:${target}:${bombId}`}
-              channel={s.channel}
-              copy={copy}
-              contacts={targets}
-              disabled={disabled}
-              onChange={(patch)=>updateCopy(s.id,patch)}
-              onUploadingChange={(uploading)=>setStepUploading((prev)=>(
-                prev[s.id]===uploading?prev:{...prev,[s.id]:uploading}
-              ))}
-            />
+          const unreachable=!!person&&!channelAvailable(person,s.channel);
+          const skipped=!!copy.skip;
+          const disabled=unreachable||skipped;
+          return <div key={s.id} className={`rounded-xl bg-slate-50 p-4 ${disabled?"opacity-50":""}`} aria-disabled={disabled||undefined}>
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className={`grid size-7 place-items-center rounded-md bg-slate-50 text-xs font-bold ${disabled?"text-slate-400":"text-violet-600"}`}>{index+1}</span>
+                <ChannelOption channel={s.channel}/>
+              </div>
+              {unreachable
+                ? <span className="text-xs font-medium text-slate-400">Unavailable · no contact info</span>
+                : <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={()=>updateCopy(s.id,{skip:!skipped})}>{skipped?"Include channel":"Skip channel"}</Button>}
+            </div>
+            <div className={skipped?"pointer-events-none":undefined}>
+              <LaunchStepEditor
+                key={`${s.id}:${target}:${bombId}`}
+                channel={s.channel}
+                copy={copy}
+                contacts={targets}
+                disabled={disabled}
+                onChange={(patch)=>updateCopy(s.id,patch)}
+                onUploadingChange={(uploading)=>setStepUploading((prev)=>(
+                  prev[s.id]===uploading?prev:{...prev,[s.id]:uploading}
+                ))}
+              />
+            </div>
           </div>;
         })}
         </>}
